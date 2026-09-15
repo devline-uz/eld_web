@@ -1,0 +1,123 @@
+// owner: web-vehicles-drivers — 11.5 Calibrate odometer (web/tz.md §11.5). Audited write —
+// server refusals surface verbatim. `vehicles` FULL only.
+import { useMemo, useState } from 'react';
+import { Modal } from '@/shared/ui/Modal';
+import { Button } from '@/shared/ui/Button';
+import { useToast } from '@/shared/ui/Toast';
+import { useCalibrateOdometer, totalVehicleMiles, type VehicleRow } from '@/shared/api/vehicles';
+import { ApiError } from '@/shared/api/errors';
+import { formatOdometer } from '@/shared/format/numbers';
+
+export function CalibrateOdometerModal({ vehicle, onClose }: { vehicle: VehicleRow; onClose: () => void }) {
+  const { toast } = useToast();
+  const [dashOdometer, setDashOdometer] = useState<string>('');
+  const [confirmedLargeDelta, setConfirmedLargeDelta] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
+  const mutation = useCalibrateOdometer(vehicle.id);
+
+  const dashValue = Number(dashOdometer);
+  const valid = dashOdometer.trim() !== '' && Number.isFinite(dashValue) && dashValue >= 0;
+  const newOffset = valid && vehicle.deviceOdometerMi != null ? dashValue - vehicle.deviceOdometerMi : null;
+  const delta = useMemo(() => (valid ? Math.abs(dashValue - totalVehicleMiles(vehicle)) : 0), [valid, dashValue, vehicle]);
+  const needsExtraConfirm = delta > 5000;
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Calibrate odometer"
+      subtitle={`Unit ${vehicle.unitNumber} · ${[vehicle.make, vehicle.model].filter(Boolean).join(' ')}`}
+      size="sm"
+      footer={
+        <>
+          <Button variant="secondary" size="lg" onClick={onClose} disabled={mutation.isPending}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            size="lg"
+            disabled={!valid || (needsExtraConfirm && !confirmedLargeDelta)}
+            loading={mutation.isPending}
+            onClick={() =>
+              mutation.mutate(
+                { odometerMi: dashValue },
+                {
+                  onSuccess: () => {
+                    toast({ kind: 'success', title: 'Odometer calibrated', description: 'Written to the audit log.' });
+                    onClose();
+                  },
+                  onError: (error) => {
+                    // Surface the server refusal verbatim — never retry around it.
+                    setServerError(error instanceof ApiError ? error.userMessage : 'Something went wrong.');
+                  },
+                },
+              )
+            }
+          >
+            Save calibration
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        <dl className="flex flex-col gap-2 text-body">
+          <div className="flex justify-between">
+            <dt className="text-text-muted">ELD reading</dt>
+            <dd className="tabular-nums text-text">
+              {vehicle.deviceOdometerMi != null ? `${formatOdometer(vehicle.deviceOdometerMi)} mi` : '—'}
+            </dd>
+          </div>
+          <div className="flex justify-between">
+            <dt className="text-text-muted">Current offset</dt>
+            <dd className="tabular-nums text-text">
+              {vehicle.odometerOffsetMi >= 0 ? '+' : ''}
+              {formatOdometer(vehicle.odometerOffsetMi)} mi
+            </dd>
+          </div>
+          <div className="flex justify-between">
+            <dt className="text-text-muted">Calculated odometer</dt>
+            <dd className="tabular-nums text-text">{formatOdometer(totalVehicleMiles(vehicle))} mi</dd>
+          </div>
+        </dl>
+        <label className="flex flex-col gap-1">
+          <span className="text-label text-text">
+            Dashboard odometer <span className="text-danger">*</span>
+          </span>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              value={dashOdometer}
+              onChange={(e) => {
+                setDashOdometer(e.target.value);
+                setServerError(null);
+              }}
+              className="h-input flex-1 rounded-md border border-border bg-bg-surface px-3 text-body text-text"
+            />
+            <span className="text-body text-text-muted">mi</span>
+          </div>
+        </label>
+        {newOffset != null && (
+          <p className="tabular-nums text-body text-text-secondary">
+            New offset: {newOffset >= 0 ? '+' : ''}
+            {formatOdometer(newOffset)} mi
+          </p>
+        )}
+        {needsExtraConfirm && (
+          <label className="flex items-center gap-2 rounded-md bg-warning-soft p-3 text-body text-warning">
+            <input
+              type="checkbox"
+              checked={confirmedLargeDelta}
+              onChange={(e) => setConfirmedLargeDelta(e.target.checked)}
+            />
+            This is more than 5,000 mi from the current reading — I confirm this value is correct.
+          </label>
+        )}
+        <p className="text-caption text-text-muted">
+          The ELD reports a relative odometer. The offset keeps recorded distance aligned with the
+          dash reading. This action is written to the audit log.
+        </p>
+        {serverError && <p className="text-body text-danger">{serverError}</p>}
+      </div>
+    </Modal>
+  );
+}

@@ -1,0 +1,61 @@
+// web/tz.md §14.2 — the exact English strings. A form never invents its own wording.
+export const VALIDATION_MESSAGES = {
+  required: 'This field is required.',
+  email: 'Enter a valid email address.',
+  inspectorEmail: 'Only fmcsa.dot.gov addresses are accepted.',
+  password: 'Use at least 8 characters.',
+  vin: 'A VIN is 17 characters and cannot contain I, O or Q.',
+  unitNumberTaken: 'A unit with this number already exists.',
+  unitNumber: 'Enter a unit number.',
+  username:
+    'Usernames may contain lowercase letters, numbers, dots, dashes and underscores.',
+  cdlNumber: 'Enter the driver licence number.',
+  odometer: 'Enter the odometer in miles.',
+  outputFileComment: 'Maximum 60 characters.',
+  annotation: 'An annotation must be at least 4 characters (FMCSA requirement).',
+  editReason: 'Explain why the record is being changed.',
+  messageBody: 'Messages are limited to 2,000 characters.',
+  ticketSubject: 'Enter a subject between 3 and 140 characters.',
+  ticketDescription: 'Enter a description.',
+  deviceSerial: 'Enter a serial number.',
+  alertRuleName: 'Enter a rule name.',
+  eldIdentifier: 'The ELD identifier is exactly 4 characters.',
+  transferRange: 'A transfer covers at most 8 days.',
+  logRange: 'Select a range of 62 days or fewer.',
+  csvFile: 'Upload a CSV file up to 5 MB.',
+  images: 'Up to 5 images, 5 MB each.',
+  phone: 'Enter a valid phone number.',
+} as const;
+
+export const LIMITS = {
+  passwordMin: 8,
+  vinLength: 17,
+  unitNumberMax: 20,
+  usernameMin: 3,
+  usernameMax: 30,
+  cdlNumberMax: 20,
+  odometerMax: 3_000_000,
+  outputFileCommentMax: 60,
+  annotationMin: 4,
+  annotationMax: 60,
+  editReasonMin: 4,
+  editReasonMax: 500,
+  messageBodyMax: 2_000,
+  ticketSubjectMin: 3,
+  ticketSubjectMax: 140,
+  /** CreateSupportTicketDto — `category` ≤ 100, `body` ≤ 5000. */
+  ticketCategoryMax: 100,
+  ticketBodyMax: 5_000,
+  /** CreateDeviceDto — `serial` ≤ 60, `firmware` ≤ 20. */
+  deviceSerialMax: 60,
+  deviceFirmwareMax: 20,
+  /** CreateAlertRuleDto — `name` ≤ 200. */
+  alertRuleNameMax: 200,
+  eldIdentifierLength: 4,
+  transferRangeDays: 8,
+  logRangeDays: 62,
+  fileBytesMax: 5 * 1024 * 1024,
+  imagesMax: 5,
+  /** ListQueryDto — `limit` is capped at 200 (§6.1). */
+  pageLimitMax: 200,
+} as const;

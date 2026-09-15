@@ -1,0 +1,112 @@
+// web/tz.md §11.19 — template copy, permission segment toggles, checkboxes, and the request body.
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { http } from 'msw';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { server } from '@/mocks/server';
+import { ok, fail, url } from '@/mocks/envelope';
+import { endpoints } from '@/shared/api/endpoints';
+import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/client';
+import { ToastProvider } from '@/shared/ui/Toast';
+import { NO_PERMISSIONS } from '@/shared/auth/permissions';
+import { CreateRoleModal } from './CreateRoleModal';
+
+const TEMPLATES = [
+  {
+    id: 'rol_fm',
+    key: 'FLEET_MANAGER',
+    name: 'Fleet manager',
+    isSystem: true,
+    permissions: { ...NO_PERMISSIONS, vehicles: 'FULL', drivers: 'FULL', carrierSettings: 'READ' },
+  },
+] as never;
+
+function renderModal() {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <ToastProvider>
+        <CreateRoleModal templates={TEMPLATES} onClose={() => {}} />
+      </ToastProvider>
+    </QueryClientProvider>,
+  );
+}
+
+beforeAll(() => server.listen({ onUnhandledRequest: 'bypass' }));
+afterEach(() => {
+  server.resetHandlers();
+  resetAuthBridge();
+});
+afterAll(() => server.close());
+
+beforeEach(() => {
+  setAuthBridge({ getAccessToken: () => 'test-token' });
+  setAccessToken('test-token');
+});
+
+describe('CreateRoleModal — 11.19', () => {
+  it('copies permission levels from a template', async () => {
+    const user = userEvent.setup();
+    renderModal();
+    await user.selectOptions(screen.getByDisplayValue('— Start from scratch —'), 'rol_fm');
+    // Vehicles is FULL on the template — its segment control shows Full selected.
+    const vehiclesRow = screen.getByText('Vehicles').closest('div')!;
+    expect(within(vehiclesRow).getByRole('button', { name: 'Full' })).toHaveClass('bg-bg-inverse');
+  });
+
+  it('creates a role with the segment levels and checkboxes as `reportsTransfer`', async () => {
+    const user = userEvent.setup();
+    let body: unknown = null;
+    server.use(
+      http.post(url(endpoints.roles.create), async ({ request }) => {
+        body = await request.json();
+        return ok({ id: 'rol_9' }, 201);
+      }),
+    );
+
+    renderModal();
+    await user.type(screen.getByPlaceholderText('Compliance auditor'), 'Compliance auditor');
+    await user.click(screen.getByRole('button', { name: 'Create role' }));
+
+    await waitFor(() => expect(body).not.toBeNull());
+    const payload = body as { key: string; name: string; permissions: Record<string, string> };
+    expect(payload.name).toBe('Compliance auditor');
+    expect(payload.permissions.reports).toBe('FULL'); // default segment level, checkbox on
+    expect(payload.permissions.users).toBe('NONE');
+    expect(await screen.findByText('Role created')).toBeInTheDocument();
+  });
+
+  it('submits with the template as the permission base when one is selected', async () => {
+    const user = userEvent.setup();
+    let body: unknown = null;
+    server.use(
+      http.post(url(endpoints.roles.create), async ({ request }) => {
+        body = await request.json();
+        return ok({ id: 'rol_10' }, 201);
+      }),
+    );
+
+    renderModal();
+    await user.selectOptions(screen.getByDisplayValue('— Start from scratch —'), 'rol_fm');
+    await user.type(screen.getByPlaceholderText('Compliance auditor'), 'FM copy');
+    await user.click(screen.getByRole('button', { name: 'Create role' }));
+
+    await waitFor(() => expect(body).not.toBeNull());
+    const payload = body as { permissions: Record<string, string> };
+    // `vehicles`/`drivers` are overwritten by the segment control, but a template key the
+    // segments don't touch (e.g. `carrierSettings`) must come from the template, not NO_PERMISSIONS.
+    expect(payload.permissions.carrierSettings).toBe('READ');
+  });
+
+  it('maps a 409 conflict onto the role name field', async () => {
+    const user = userEvent.setup();
+    server.use(http.post(url(endpoints.roles.create), () => fail(409, 'CONFLICT', 'A role with this name already exists.')));
+
+    renderModal();
+    await user.type(screen.getByPlaceholderText('Compliance auditor'), 'Dispatcher');
+    await user.click(screen.getByRole('button', { name: 'Create role' }));
+
+    expect(await screen.findByText('A role with this name already exists.')).toBeInTheDocument();
+  });
+});

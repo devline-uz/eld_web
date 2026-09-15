@@ -1,0 +1,745 @@
+// owner: web-dvir-safety — W-09 DVIR & Maintenance (web/tz.md §10).
+// Design: web/roles and screens/admin panel/DVIRs, open defects, preventive maintenance.jpg
+// Route `/dvir` · Perm `dvir` READ · absent for DISPATCHER (router.tsx already blocks it).
+import { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import type { ColumnDef } from '@tanstack/react-table';
+import { Download, Filter, Plus, Search, Wrench, AlertTriangle, ClipboardList, ShieldOff } from 'lucide-react';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import { Can } from '@/shared/auth/Can';
+import { usePermission } from '@/shared/auth/usePermission';
+import { useDynamicSubtitle } from '@/app/layouts/Topbar';
+import { Button } from '@/shared/ui/Button';
+import { Card, SectionHeader } from '@/shared/ui/Card';
+import { Badge, SeverityBadge } from '@/shared/ui/Badge';
+import { Avatar } from '@/shared/ui/Avatar';
+import { DataTable } from '@/shared/ui/DataTable';
+import { Pagination } from '@/shared/ui/Pagination';
+import { KpiCard, KpiRowSkeleton } from '@/shared/ui/KpiCard';
+import { ProgressBar } from '@/shared/ui/ProgressBar';
+import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
+import { EMPTY_STATE_COPY, searchEmptyState } from '@/shared/ui/copy';
+import { formatLocal } from '@/shared/format/datetime';
+import { useNowTick } from '@/shared/format/useRelativeTime';
+import { formatOdometer } from '@/shared/format/numbers';
+import { orDash, orNone, orUnassigned } from '@/shared/format/empty';
+import {
+  useDvirsList,
+  useDefectsList,
+  useWorkOrdersList,
+  useSchedulesList,
+  type DvirTableRow,
+  type DefectTableRow,
+  type WorkOrderTableRow,
+  type ScheduleTableRow,
+} from '@/shared/api/dvir';
+import { useVehiclesPicker } from '@/shared/api/vehicles';
+import { DvirDrawer } from './components/DvirDrawer';
+import { CreateWorkOrderModal } from './components/CreateWorkOrderModal';
+import { ResolveDefectModal } from './components/ResolveDefectModal';
+import { DvirFiltersDrawer, DvirFilterChips } from './components/DvirFiltersDrawer';
+import { parseDvirFilters, writeDvirFilters, matchesDvirFilters, EMPTY_DVIR_FILTERS, countActiveDvirFilters } from './lib/filters';
+
+type Tab = 'dvirs' | 'defects' | 'workOrders' | 'schedules';
+
+function toNum(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+const DVIR_TYPE_LABEL: Record<string, string> = {
+  PRE_TRIP: 'Pre-trip',
+  POST_TRIP: 'Post-trip',
+  INTERMEDIATE: 'Intermediate',
+};
+
+function DvirStatusBadge({ row }: { row: DvirTableRow }) {
+  if (row.vehicleCondition === 'SATISFACTORY') return <Badge tone="success">No defects</Badge>;
+  if (row.repairStatus === 'REPAIRED') return <Badge tone="info">Defects fixed</Badge>;
+  return <Badge tone="danger">Not fixed</Badge>;
+}
+
+export default function DvirPage() {
+  const { can } = usePermission();
+  const [params, setParams] = useSearchParams();
+  const canMaintenanceRead = can('maintenance', 'READ');
+  const canDvirFull = can('dvir', 'FULL');
+
+  const tab = (params.get('tab') as Tab) ?? 'dvirs';
+  const [search, setSearch] = useState('');
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [filtersRevision, setFiltersRevision] = useState(0);
+  const filters = useMemo(() => parseDvirFilters(params), [params]);
+  function applyFilters(next: typeof filters) {
+    setParams(writeDvirFilters(params, next), { replace: true });
+  }
+
+  useDynamicSubtitle('Driver vehicle inspection reports, defects and service schedule');
+
+  function setTab(next: Tab) {
+    const nextParams = new URLSearchParams(params);
+    if (next === 'dvirs') nextParams.delete('tab');
+    else nextParams.set('tab', next);
+    setParams(nextParams, { replace: true });
+  }
+
+  const dvirs = useDvirsList({ limit: 500 });
+  const defects = useDefectsList({ limit: 500 });
+  const overdue = useSchedulesList({ dueOnly: true, limit: 500 });
+  const vehicles = useVehiclesPicker();
+  const workOrders = useWorkOrdersList({ limit: 500 });
+  const schedules = useSchedulesList({ limit: 500 });
+
+  const needle = search.trim().toLowerCase();
+  const matchesSearch = (unit: string | undefined, ...text: (string | null | undefined)[]) =>
+    !needle || (unit ?? '').toLowerCase().includes(needle) || text.some((t) => (t ?? '').toLowerCase().includes(needle));
+
+  const openDefects = useMemo(
+    () => defects.rows.filter((d) => d.status === 'OPEN' && matchesSearch(d.vehicle?.unitNumber, d.category, d.description)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [defects.rows, needle],
+  );
+  const criticalOpen = useMemo(() => openDefects.filter((d) => d.severity === 'CRITICAL'), [openDefects]);
+  const oldestOverdueDays = useMemo(() => {
+    const days = overdue.rows.map((s) => Math.abs(s.due.daysRemaining ?? 0)).filter((d) => d > 0);
+    return days.length ? Math.max(...days) : 0;
+  }, [overdue.rows]);
+  const nowTick = useNowTick();
+  const dvirsToday = useMemo(() => {
+    const todayKey = new Date(nowTick).toDateString();
+    return dvirs.rows.filter((d) => new Date(d.submittedAt).toDateString() === todayKey);
+  }, [dvirs.rows, nowTick]);
+  const noDefectToday = useMemo(
+    () => dvirsToday.filter((d) => d.vehicleCondition === 'SATISFACTORY').length,
+    [dvirsToday],
+  );
+  const outOfServiceVehicles = useMemo(
+    () => (vehicles.data?.items ?? []).filter((v) => v.status === 'OUT_OF_SERVICE'),
+    [vehicles.data],
+  );
+
+  const isKpiLoading = dvirs.isLoading || defects.isLoading || overdue.isLoading || vehicles.isLoading;
+
+  const [drawerDvirId, setDrawerDvirId] = useState<string | null>(null);
+  const [resolveDefect, setResolveDefect] = useState<DefectTableRow | null>(null);
+  const [workOrderVehicleId, setWorkOrderVehicleId] = useState<string | null>(null);
+  const [createWoOpen, setCreateWoOpen] = useState(false);
+
+  const recentDvirs = useMemo(() => {
+    const cutoff = nowTick - 48 * 60 * 60 * 1000;
+    return dvirs.rows
+      .filter(
+        (d) =>
+          new Date(d.submittedAt).getTime() >= cutoff &&
+          matchesSearch(d.vehicle?.unitNumber, ...d.defects.map((x) => x.category)) &&
+          matchesDvirFilters(d, filters),
+      )
+      .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime())
+      .slice(0, 10);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dvirs.rows, needle, nowTick, filters]);
+
+  const upcomingSchedules = useMemo(
+    () =>
+      schedules.rows
+        .filter((s) => s.due.state !== 'OK')
+        .sort((a, b) => (a.due.milesRemaining ?? a.due.daysRemaining ?? 0) - (b.due.milesRemaining ?? b.due.daysRemaining ?? 0))
+        .slice(0, 6),
+    [schedules.rows],
+  );
+
+  async function handleExport() {
+    const blob = new Blob([JSON.stringify(defects.rows, null, 2)], { type: 'application/json' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'dvir-export.json';
+    link.click();
+    URL.revokeObjectURL(link.href);
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-page-title text-text">DVIR &amp; Maintenance</h1>
+          <p className="text-page-sub text-text-muted">Driver vehicle inspection reports, defects and service schedule</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="flex h-input items-center gap-2 rounded-md border border-border bg-bg-surface px-3">
+            <Search size={16} strokeWidth={1.75} className="text-text-muted" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search unit, defect…"
+              className="w-56 bg-transparent text-body outline-none"
+            />
+          </div>
+          <Button
+            variant="secondary"
+            iconLeft={<Filter size={16} strokeWidth={1.75} />}
+            onClick={() => {
+              setFiltersRevision((r) => r + 1);
+              setFiltersOpen(true);
+            }}
+          >
+            Filters{countActiveDvirFilters(filters) > 0 ? ` · ${countActiveDvirFilters(filters)}` : ''}
+          </Button>
+          <Button variant="secondary" iconLeft={<Download size={16} strokeWidth={1.75} />} onClick={handleExport}>
+            Export
+          </Button>
+          <Can perm="maintenance" level="FULL">
+            <Button variant="primary" iconLeft={<Plus size={16} strokeWidth={1.75} />} onClick={() => setCreateWoOpen(true)}>
+              New work order
+            </Button>
+          </Can>
+        </div>
+      </div>
+
+      {isKpiLoading ? (
+        <KpiRowSkeleton />
+      ) : (
+        <div className="grid grid-cols-4 gap-card-gap">
+          <KpiCard
+            label="Open defects"
+            value={openDefects.length}
+            chip={criticalOpen.length > 0 ? { text: `${criticalOpen.length} critical`, tone: 'danger' } : undefined}
+            icon={AlertTriangle}
+            iconTone="danger"
+          />
+          <KpiCard
+            label="Overdue services"
+            value={overdue.rows.filter((s) => s.due.state === 'OVERDUE').length}
+            chip={oldestOverdueDays > 0 ? { text: `oldest ${oldestOverdueDays} d`, tone: 'warning' } : undefined}
+            icon={Wrench}
+            iconTone="warning"
+          />
+          <KpiCard
+            label="DVIRs today"
+            value={dvirsToday.length}
+            chip={dvirsToday.length > 0 ? { text: `${noDefectToday} no-defect`, tone: 'success' } : undefined}
+            icon={ClipboardList}
+            iconTone="success"
+          />
+          <KpiCard
+            label="Vehicles out of service"
+            value={outOfServiceVehicles.length}
+            chip={
+              outOfServiceVehicles.length > 0
+                ? { text: `Unit ${outOfServiceVehicles[0]?.unitNumber ?? ''}`, tone: 'danger' }
+                : undefined
+            }
+            icon={ShieldOff}
+            iconTone="danger"
+          />
+        </div>
+      )}
+
+      <div className="flex h-9 w-fit overflow-hidden rounded-md border border-border">
+        {(
+          [
+            ['dvirs', `DVIRs ${dvirs.page?.total ?? dvirs.rows.length}`],
+            ['defects', `Open defects ${openDefects.length}`],
+            ...(canMaintenanceRead
+              ? ([
+                  ['workOrders', `Work orders ${workOrders.page?.total ?? workOrders.rows.length}`],
+                  ['schedules', `Schedules ${schedules.page?.total ?? schedules.rows.length}`],
+                ] as [Tab, string][])
+              : []),
+          ] as [Tab, string][]
+        ).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            aria-pressed={tab === value}
+            onClick={() => setTab(value)}
+            className={
+              tab === value
+                ? 'bg-bg-inverse px-3 text-body-strong text-text-inverse'
+                : 'bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'
+            }
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'dvirs' && (
+        <DvirFilterChips
+          filters={filters}
+          onRemove={(patch) => applyFilters({ ...filters, ...patch })}
+          onClearAll={() => applyFilters(EMPTY_DVIR_FILTERS)}
+        />
+      )}
+
+      {tab === 'dvirs' && (
+        <div className="grid grid-cols-[1fr_348px] gap-card-gap">
+          <Card padded={false}>
+            <div className="p-card pb-0">
+              <SectionHeader title="Recent DVIRs" subtitle="Last 48 hours" />
+            </div>
+            <div className="p-card">
+              {dvirs.isLoading ? (
+                <LoadingState />
+              ) : dvirs.isError ? (
+                <ErrorState onRetry={() => dvirs.refetch()} />
+              ) : recentDvirs.length === 0 ? (
+                search || countActiveDvirFilters(filters) > 0 ? (
+                  <EmptyState
+                    {...searchEmptyState(search || 'these filters')}
+                    actions={[
+                      {
+                        label: search ? 'Clear search' : 'Clear filters',
+                        onClick: () => (search ? setSearch('') : applyFilters(EMPTY_DVIR_FILTERS)),
+                      },
+                    ]}
+                  />
+                ) : (
+                  <EmptyState {...EMPTY_STATE_COPY.dvir} actions={undefined} />
+                )
+              ) : (
+                <DataTable
+                  caption="Recent DVIRs"
+                  data={recentDvirs}
+                  getRowId={(r) => r.id}
+                  onRowClick={(row) => setDrawerDvirId(row.id)}
+                  columns={
+                    [
+                      {
+                        id: 'dateTime',
+                        header: 'DATE & TIME',
+                        cell: ({ row }) => (
+                          <span className="tabular-nums text-text">{formatLocal(row.original.submittedAt, 'dateTime')}</span>
+                        ),
+                      },
+                      {
+                        id: 'unit',
+                        header: 'UNIT',
+                        cell: ({ row }) => <span className="text-text">{row.original.vehicle?.unitNumber ?? '—'}</span>,
+                      },
+                      {
+                        id: 'driver',
+                        header: 'DRIVER',
+                        cell: ({ row }) => {
+                          const driver = row.original.driver;
+                          if (!driver) return <span className="text-text-muted">{orUnassigned(null)}</span>;
+                          const name = `${driver.firstName} ${driver.lastName}`;
+                          return (
+                            <span className="flex items-center gap-2">
+                              <Avatar name={name} size="sm" />
+                              <span className="text-text">{name}</span>
+                            </span>
+                          );
+                        },
+                      },
+                      {
+                        id: 'type',
+                        header: 'TYPE',
+                        cell: ({ row }) => <span className="text-text">{DVIR_TYPE_LABEL[row.original.type] ?? row.original.type}</span>,
+                      },
+                      {
+                        id: 'defects',
+                        header: 'DEFECTS',
+                        cell: ({ row }) => {
+                          const cats = row.original.defects.map((d) => d.category).join(', ');
+                          return <span className={cats ? 'text-text' : 'text-text-muted'}>{orNone(cats || null)}</span>;
+                        },
+                      },
+                      {
+                        id: 'status',
+                        header: 'STATUS',
+                        cell: ({ row }) => <DvirStatusBadge row={row.original} />,
+                      },
+                    ] as ColumnDef<DvirTableRow, unknown>[]
+                  }
+                />
+              )}
+            </div>
+          </Card>
+
+          <Card padded={false}>
+            <div className="p-card pb-0">
+              <SectionHeader title="Upcoming maintenance" subtitle="Next 30 days" />
+            </div>
+            <div className="flex flex-col gap-3 p-card">
+              {schedules.isLoading ? (
+                <LoadingState rows={3} />
+              ) : upcomingSchedules.length === 0 ? (
+                <p className="text-body text-text-muted">No services due in the next 30 days.</p>
+              ) : (
+                upcomingSchedules.map((s) => {
+                  const ratio =
+                    s.intervalMi && s.due.milesRemaining != null
+                      ? Math.max(0, s.due.milesRemaining) / s.intervalMi
+                      : s.intervalDays && s.due.daysRemaining != null
+                        ? Math.max(0, s.due.daysRemaining) / s.intervalDays
+                        : 0;
+                  const tone = s.due.state === 'OVERDUE' ? 'danger' : s.due.state === 'DUE_SOON' ? 'warning' : 'success';
+                  const dueLabel =
+                    s.due.milesRemaining != null
+                      ? `Due in ${formatOdometer(Math.abs(s.due.milesRemaining))} mi`
+                      : s.due.daysRemaining != null
+                        ? `Due in ${Math.abs(s.due.daysRemaining)} d`
+                        : 'Due';
+                  return (
+                    <div key={s.id} className="flex flex-col gap-1.5 rounded-md border border-border p-3">
+                      <span className="text-body-strong text-text">
+                        🔧 Unit {s.vehicle?.unitNumber ?? '—'} · {s.name}
+                      </span>
+                      <span className="tabular-nums text-caption text-text-muted">
+                        {dueLabel} · {orDash(s.nextDueAt ?? s.nextDueMi, () => (s.nextDueAt ? formatLocal(s.nextDueAt, 'monthDay') : `${s.nextDueMi} mi`))}
+                      </span>
+                      <ProgressBar ratio={ratio} tone={tone} thick label={`Unit ${s.vehicle?.unitNumber ?? '—'} ${s.name} — ${dueLabel}`} />
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </Card>
+
+          <Card padded={false} className="col-span-2">
+            <div className="flex items-start justify-between p-card pb-0">
+              <SectionHeader title="Open defects" subtitle={`${openDefects.length} total · ${criticalOpen.length} critical`} />
+              <Can perm="maintenance" level="FULL">
+                <Button variant="secondary" iconLeft={<Plus size={16} strokeWidth={1.75} />} onClick={() => setCreateWoOpen(true)}>
+                  Create work order
+                </Button>
+              </Can>
+            </div>
+            <div className="p-card">
+              <OpenDefectsTable
+                rows={openDefects}
+                isLoading={defects.isLoading}
+                isError={defects.isError}
+                onRetry={() => defects.refetch()}
+                onRowClick={canDvirFull ? setResolveDefect : undefined}
+              />
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {tab === 'defects' && (
+        <Card padded={false}>
+          <div className="p-card pb-0">
+            <SectionHeader title="Open defects" subtitle={`${openDefects.length} total · ${criticalOpen.length} critical`} />
+          </div>
+          <div className="p-card">
+            <OpenDefectsTable
+              rows={openDefects}
+              isLoading={defects.isLoading}
+              isError={defects.isError}
+              onRetry={() => defects.refetch()}
+              onRowClick={canDvirFull ? setResolveDefect : undefined}
+            />
+          </div>
+        </Card>
+      )}
+
+      <Can perm="maintenance" level="READ">
+        {tab === 'workOrders' && <WorkOrdersTab rows={workOrders.rows} isLoading={workOrders.isLoading} isError={workOrders.isError} onRetry={() => workOrders.refetch()} />}
+        {tab === 'schedules' && (
+          <SchedulesTab
+            rows={schedules.rows}
+            isLoading={schedules.isLoading}
+            isError={schedules.isError}
+            onRetry={() => schedules.refetch()}
+          />
+        )}
+      </Can>
+
+      {drawerDvirId && (
+        <DvirDrawer
+          dvirId={drawerDvirId}
+          onClose={() => setDrawerDvirId(null)}
+          onCreateWorkOrder={(vehicleId) => {
+            setDrawerDvirId(null);
+            setWorkOrderVehicleId(vehicleId);
+          }}
+        />
+      )}
+      {resolveDefect && <ResolveDefectModal defect={resolveDefect} onClose={() => setResolveDefect(null)} />}
+      {(createWoOpen || workOrderVehicleId) && (
+        <CreateWorkOrderModal
+          vehicleId={workOrderVehicleId ?? undefined}
+          onClose={() => {
+            setCreateWoOpen(false);
+            setWorkOrderVehicleId(null);
+          }}
+        />
+      )}
+      <DvirFiltersDrawer
+        key={filtersRevision}
+        open={filtersOpen}
+        onClose={() => setFiltersOpen(false)}
+        filters={filters}
+        onApply={applyFilters}
+      />
+    </div>
+  );
+}
+
+/** Client-side pagination — every list here is already fetched at `limit: 500` for the joins
+ * and KPI counts, so paging the already-loaded array avoids a second round trip per page. */
+function usePagedRows<T>(rows: T[]) {
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
+  const totalPages = Math.max(1, Math.ceil(rows.length / limit));
+  const pageRows = useMemo(() => rows.slice((page - 1) * limit, page * limit), [rows, page, limit]);
+  return { page, limit, totalPages, pageRows, setPage, setLimit };
+}
+
+function OpenDefectsTable({
+  rows,
+  isLoading,
+  isError,
+  onRetry,
+  onRowClick,
+}: {
+  rows: DefectTableRow[];
+  isLoading: boolean;
+  isError: boolean;
+  onRetry: () => void;
+  onRowClick?: (defect: DefectTableRow) => void;
+}) {
+  const { page, limit, totalPages, pageRows, setPage, setLimit } = usePagedRows(rows);
+  if (isLoading) return <LoadingState />;
+  if (isError) return <ErrorState onRetry={onRetry} />;
+  if (rows.length === 0) return <EmptyState {...EMPTY_STATE_COPY.openDefects} />;
+  return (
+    <>
+    <DataTable
+      caption="Open defects"
+      data={pageRows}
+      getRowId={(r) => r.id}
+      onRowClick={onRowClick}
+      columns={
+        [
+          { id: 'unit', header: 'UNIT', cell: ({ row }) => <span className="text-text">{row.original.vehicle?.unitNumber ?? '—'}</span> },
+          {
+            id: 'reported',
+            header: 'REPORTED',
+            cell: ({ row }) => <span className="tabular-nums text-text-muted">{formatLocal(row.original.createdAt, 'dateTime')}</span>,
+          },
+          { id: 'component', header: 'COMPONENT', cell: ({ row }) => <span className="text-text">{row.original.category}</span> },
+          {
+            id: 'severity',
+            header: 'SEVERITY',
+            cell: ({ row }) => <SeverityBadge severity={row.original.severity} />,
+          },
+          { id: 'description', header: 'DESCRIPTION', cell: ({ row }) => <span className="text-text-secondary">{row.original.description}</span> },
+          {
+            id: 'assignedTo',
+            header: 'ASSIGNED TO',
+            // ⛔ GAP B-36 — `Defect` has no assignee/shop field; fall back to the linked work
+            // order's vendor if one exists, else `Unassigned` (web/backend-gaps.md).
+            cell: () => <span className="text-text-muted">{orUnassigned(null)}</span>,
+          },
+          {
+            id: 'status',
+            header: 'STATUS',
+            cell: ({ row }) =>
+              row.original.outOfService ? (
+                <Badge tone="danger" dot>
+                  Out of service
+                </Badge>
+              ) : row.original.status === 'IN_PROGRESS' ? (
+                <Badge tone="info">In progress</Badge>
+              ) : (
+                <Badge outline>Open</Badge>
+              ),
+          },
+        ] as ColumnDef<DefectTableRow, unknown>[]
+      }
+    />
+    <Pagination page={page} limit={limit} total={rows.length} totalPages={totalPages} itemLabel="defects" onPageChange={setPage} onLimitChange={setLimit} />
+    </>
+  );
+}
+
+function WorkOrdersTab({
+  rows,
+  isLoading,
+  isError,
+  onRetry,
+}: {
+  rows: WorkOrderTableRow[];
+  isLoading: boolean;
+  isError: boolean;
+  onRetry: () => void;
+}) {
+  const { can } = usePermission();
+  const canFull = can('maintenance', 'FULL');
+  const { page, limit, totalPages, pageRows, setPage, setLimit } = usePagedRows(rows);
+  return (
+    <Card padded={false}>
+      <div className="p-card pb-0">
+        <SectionHeader title="Work orders" subtitle={`${rows.length} total`} />
+      </div>
+      <div className="p-card">
+        {isLoading ? (
+          <LoadingState />
+        ) : isError ? (
+          <ErrorState onRetry={onRetry} />
+        ) : rows.length === 0 ? (
+          <EmptyState title="No work orders yet" description="Create a work order from an open defect to track repair costs." />
+        ) : (
+          <>
+          <DataTable
+            caption="Work orders"
+            data={pageRows}
+            getRowId={(r) => r.id}
+            rowActions={
+              canFull
+                ? () => (
+                    <>
+                      <DropdownMenu.Item className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                        Close
+                      </DropdownMenu.Item>
+                      <DropdownMenu.Item className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                        Cancel
+                      </DropdownMenu.Item>
+                      <DropdownMenu.Item className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                        Edit
+                      </DropdownMenu.Item>
+                    </>
+                  )
+                : undefined
+            }
+            columns={
+              [
+                { id: 'number', header: 'NUMBER', cell: ({ row }) => <span className="tabular-nums font-semibold text-text">{row.original.number}</span> },
+                { id: 'unit', header: 'UNIT', cell: ({ row }) => <span className="text-text">{row.original.vehicle?.unitNumber ?? '—'}</span> },
+                { id: 'title', header: 'TITLE', cell: ({ row }) => <span className="text-text">{row.original.title}</span> },
+                { id: 'priority', header: 'PRIORITY', cell: ({ row }) => <Badge tone={row.original.priority === 'URGENT' || row.original.priority === 'HIGH' ? 'danger' : 'neutral'}>{row.original.priority}</Badge> },
+                {
+                  id: 'status',
+                  header: 'STATUS',
+                  cell: ({ row }) => (
+                    <Badge tone={row.original.status === 'DONE' ? 'success' : row.original.status === 'CANCELLED' ? 'neutral' : row.original.status === 'IN_PROGRESS' ? 'info' : 'warning'}>
+                      {row.original.status}
+                    </Badge>
+                  ),
+                },
+                { id: 'vendor', header: 'VENDOR', cell: ({ row }) => <span className="text-text">{orDash(row.original.vendor, (v) => v)}</span> },
+                {
+                  id: 'cost',
+                  header: 'COST',
+                  meta: { numeric: true },
+                  cell: ({ row }) => <span className="tabular-nums text-text">{orDash(toNum(row.original.costUsd), (v) => `$${v.toFixed(2)}`)}</span>,
+                },
+                {
+                  id: 'due',
+                  header: 'DUE',
+                  cell: ({ row }) => <span className="tabular-nums text-text-muted">{row.original.dueAt ? formatLocal(row.original.dueAt, 'shortDate') : '—'}</span>,
+                },
+              ] as ColumnDef<WorkOrderTableRow, unknown>[]
+            }
+          />
+          <Pagination page={page} limit={limit} total={rows.length} totalPages={totalPages} itemLabel="work orders" onPageChange={setPage} onLimitChange={setLimit} />
+          </>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+function SchedulesTab({
+  rows,
+  isLoading,
+  isError,
+  onRetry,
+}: {
+  rows: ScheduleTableRow[];
+  isLoading: boolean;
+  isError: boolean;
+  onRetry: () => void;
+}) {
+  const { can } = usePermission();
+  const canFull = can('maintenance', 'FULL');
+  const { page, limit, totalPages, pageRows, setPage, setLimit } = usePagedRows(rows);
+  return (
+    <Card padded={false}>
+      <div className="p-card pb-0">
+        <SectionHeader title="Schedules" subtitle={`${rows.length} total`} />
+      </div>
+      <div className="p-card">
+        {isLoading ? (
+          <LoadingState />
+        ) : isError ? (
+          <ErrorState onRetry={onRetry} />
+        ) : rows.length === 0 ? (
+          <EmptyState title="No maintenance schedules" description="Create a schedule to track preventive service by mileage or date." />
+        ) : (
+          <>
+          <DataTable
+            caption="Maintenance schedules"
+            data={pageRows}
+            getRowId={(r) => r.id}
+            rowActions={
+              canFull
+                ? () => (
+                    <>
+                      <DropdownMenu.Item className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                        Complete
+                      </DropdownMenu.Item>
+                      <DropdownMenu.Item className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                        Edit
+                      </DropdownMenu.Item>
+                      <DropdownMenu.Item className="cursor-pointer rounded-md px-2 py-1.5 text-body text-danger outline-none hover:bg-danger-soft">
+                        Delete
+                      </DropdownMenu.Item>
+                    </>
+                  )
+                : undefined
+            }
+            columns={
+              [
+                { id: 'unit', header: 'UNIT', cell: ({ row }) => <span className="text-text">{row.original.vehicle?.unitNumber ?? '—'}</span> },
+                { id: 'name', header: 'NAME', cell: ({ row }) => <span className="text-text">{row.original.name}</span> },
+                {
+                  id: 'interval',
+                  header: 'INTERVAL',
+                  cell: ({ row }) => (
+                    <span className="tabular-nums text-text">
+                      {row.original.intervalMi
+                        ? `Every ${formatOdometer(row.original.intervalMi)} mi`
+                        : row.original.intervalDays
+                          ? `Every ${row.original.intervalDays} days`
+                          : '—'}
+                    </span>
+                  ),
+                },
+                {
+                  id: 'lastService',
+                  header: 'LAST SERVICE',
+                  cell: ({ row }) => <span className="tabular-nums text-text-muted">{row.original.lastServiceAt ? formatLocal(row.original.lastServiceAt, 'shortDate') : '—'}</span>,
+                },
+                {
+                  id: 'nextDue',
+                  header: 'NEXT DUE',
+                  cell: ({ row }) => (
+                    <span className="tabular-nums text-text">
+                      {row.original.nextDueAt ? formatLocal(row.original.nextDueAt, 'shortDate') : row.original.nextDueMi ? `${formatOdometer(row.original.nextDueMi)} mi` : '—'}
+                    </span>
+                  ),
+                },
+                {
+                  id: 'status',
+                  header: 'STATUS',
+                  cell: ({ row }) => (
+                    <Badge tone={row.original.due.state === 'OVERDUE' ? 'danger' : row.original.due.state === 'DUE_SOON' ? 'warning' : 'success'}>
+                      {row.original.due.state === 'OVERDUE' ? 'Overdue' : row.original.due.state === 'DUE_SOON' ? 'Due soon' : 'OK'}
+                    </Badge>
+                  ),
+                },
+              ] as ColumnDef<ScheduleTableRow, unknown>[]
+            }
+          />
+          <Pagination page={page} limit={limit} total={rows.length} totalPages={totalPages} itemLabel="schedules" onPageChange={setPage} onLimitChange={setLimit} />
+          </>
+        )}
+      </div>
+    </Card>
+  );
+}

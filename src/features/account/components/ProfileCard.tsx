@@ -1,0 +1,247 @@
+// owner: web-auth-rbac — W-26 `Profile` card. `PATCH /me/profile` accepts firstName, lastName
+// and phone only (UpdateMyProfileDto), so `Job title` is read-only and the photo has no
+// Upload/Remove until B-51 (web/decisions.md WD-049). `Work email` is managed by the admin.
+import { zodResolver } from '@hookform/resolvers/zod';
+import type { UseQueryResult } from '@tanstack/react-query';
+import { Mail, Phone } from 'lucide-react';
+import { useId, useState, type ReactNode } from 'react';
+import { useForm } from 'react-hook-form';
+import { z } from 'zod';
+import { isApiError, toUserMessage } from '@/shared/api/errors';
+import { fields, profileSchema } from '@/shared/forms';
+import { Avatar } from '@/shared/ui/Avatar';
+import { Button } from '@/shared/ui/Button';
+import { Card, SectionHeader } from '@/shared/ui/Card';
+import { TOAST_COPY } from '@/shared/ui/copy';
+import { cn } from '@/shared/ui/cn';
+import { ErrorState, LoadingState } from '@/shared/ui/states';
+import { useToast } from '@/shared/ui/Toast';
+import { useUpdateProfile, type MyProfile } from '../api';
+
+const schema = profileSchema.extend({ phone: z.union([z.literal(''), fields.phone()]) });
+type ProfileValues = z.infer<typeof schema>;
+const EDITABLE = ['firstName', 'lastName', 'phone'] as const;
+
+const INPUT =
+  'h-input w-full rounded-md border bg-bg-surface px-3 text-body text-text disabled:bg-bg-subtle read-only:bg-bg-subtle read-only:text-text-secondary';
+
+function Field({
+  id,
+  label,
+  required,
+  error,
+  hint,
+  children,
+}: {
+  id: string;
+  label: string;
+  required?: boolean;
+  error?: string;
+  hint?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor={id} className="text-label text-text-secondary">
+        {label}
+        {required ? <span className="text-danger"> *</span> : null}
+      </label>
+      {children}
+      {error ? (
+        <p id={`${id}-error`} className="text-caption text-danger">
+          {error}
+        </p>
+      ) : hint ? (
+        <p id={`${id}-hint`} className="text-caption text-text-muted">
+          {hint}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function ProfileForm({ profile }: { profile: MyProfile }) {
+  const uid = useId();
+  const { toast } = useToast();
+  const update = useUpdateProfile();
+  const [banner, setBanner] = useState<string | null>(null);
+  const defaults: ProfileValues = {
+    firstName: profile.firstName,
+    lastName: profile.lastName,
+    phone: profile.phone ?? '',
+  };
+  const {
+    register,
+    handleSubmit,
+    reset,
+    setError,
+    formState: { errors, isDirty, isSubmitting },
+  } = useForm<ProfileValues>({
+    resolver: zodResolver(schema),
+    mode: 'onBlur',
+    reValidateMode: 'onChange',
+    defaultValues: defaults,
+  });
+
+  const onSubmit = handleSubmit(async (values) => {
+    setBanner(null);
+    try {
+      const saved = await update.mutateAsync({
+        firstName: values.firstName.trim(),
+        lastName: values.lastName.trim(),
+        phone: values.phone,
+      });
+      reset({ firstName: saved.firstName, lastName: saved.lastName, phone: saved.phone ?? '' });
+      toast({ kind: 'success', ...TOAST_COPY.settingsSaved });
+    } catch (error) {
+      const fieldErrors = isApiError(error) ? error.fieldErrors : {};
+      const mapped = EDITABLE.filter((key) => fieldErrors[key]);
+      mapped.forEach((key) => setError(key, { message: fieldErrors[key] }));
+      if (mapped.length === 0) setBanner(toUserMessage(error));
+    }
+  });
+
+  const describe = (key: string, hasError: boolean, hasHint = false) =>
+    hasError ? `${uid}-${key}-error` : hasHint ? `${uid}-${key}-hint` : undefined;
+
+  return (
+    <form onSubmit={onSubmit} noValidate className="flex flex-col gap-4">
+      {banner ? (
+        <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-caption text-danger">
+          {banner}
+        </p>
+      ) : null}
+
+      <div className="flex items-center gap-4">
+        <Avatar
+          name={`${profile.firstName} ${profile.lastName}`}
+          src={profile.avatarUrl ?? undefined}
+          size="xl"
+        />
+        <div>
+          <p className="text-body-strong text-text">Profile photo</p>
+          <p className="text-caption text-text-muted">
+            PNG or JPG, at least 256 × 256 px. Appears on your signature block.
+          </p>
+        </div>
+      </div>
+
+      <fieldset disabled={isSubmitting} className="contents">
+        <div className="grid grid-cols-3 gap-4">
+          <Field id={`${uid}-firstName`} label="First name" required error={errors.firstName?.message}>
+            <input
+              id={`${uid}-firstName`}
+              autoComplete="given-name"
+              aria-invalid={errors.firstName ? true : undefined}
+              aria-describedby={describe('firstName', Boolean(errors.firstName))}
+              className={cn(INPUT, errors.firstName ? 'border-danger' : 'border-border')}
+              {...register('firstName')}
+            />
+          </Field>
+          <Field id={`${uid}-lastName`} label="Last name" required error={errors.lastName?.message}>
+            <input
+              id={`${uid}-lastName`}
+              autoComplete="family-name"
+              aria-invalid={errors.lastName ? true : undefined}
+              aria-describedby={describe('lastName', Boolean(errors.lastName))}
+              className={cn(INPUT, errors.lastName ? 'border-danger' : 'border-border')}
+              {...register('lastName')}
+            />
+          </Field>
+          <Field id={`${uid}-jobTitle`} label="Job title">
+            <input
+              id={`${uid}-jobTitle`}
+              readOnly
+              value={profile.jobTitle ?? ''}
+              className={cn(INPUT, 'border-border')}
+            />
+          </Field>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <Field id={`${uid}-email`} label="Work email" hint="Managed by your administrator">
+            <div className="relative">
+              <Mail
+                size={16}
+                strokeWidth={1.75}
+                aria-hidden="true"
+                className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-text-muted"
+              />
+              <input
+                id={`${uid}-email`}
+                type="email"
+                disabled
+                value={profile.email}
+                aria-describedby={`${uid}-email-hint`}
+                className={cn(INPUT, 'border-border pl-9 text-text-secondary')}
+              />
+            </div>
+          </Field>
+          <Field id={`${uid}-phone`} label="Mobile number" error={errors.phone?.message}>
+            <div className="relative">
+              <Phone
+                size={16}
+                strokeWidth={1.75}
+                aria-hidden="true"
+                className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-text-muted"
+              />
+              <input
+                id={`${uid}-phone`}
+                type="tel"
+                autoComplete="tel"
+                aria-invalid={errors.phone ? true : undefined}
+                aria-describedby={describe('phone', Boolean(errors.phone))}
+                className={cn(INPUT, 'tabular pl-9', errors.phone ? 'border-danger' : 'border-border')}
+                {...register('phone')}
+              />
+            </div>
+          </Field>
+        </div>
+      </fieldset>
+
+      {isDirty ? (
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" size="lg" disabled={isSubmitting} onClick={() => reset(defaults)}>
+            Cancel
+          </Button>
+          <Button type="submit" variant="primary" size="lg" loading={isSubmitting}>
+            Save changes
+          </Button>
+        </div>
+      ) : null}
+    </form>
+  );
+}
+
+export function ProfileCard({ query }: { query: UseQueryResult<MyProfile, Error> }) {
+  return (
+    <section
+      id="profile"
+      tabIndex={-1}
+      aria-labelledby="account-profile-title"
+      className="scroll-mt-page focus-visible:ring-2 focus-visible:ring-primary"
+    >
+      <Card padded={false}>
+        <div className="border-b border-border px-card py-4">
+          <SectionHeader
+            title={<span id="account-profile-title">Profile</span>}
+            subtitle="Shown to your team and on records you sign"
+          />
+        </div>
+        <div className="p-card">
+          {query.isPending ? (
+            <LoadingState rows={3} />
+          ) : query.isError ? (
+            <ErrorState
+              title="Could not load your profile"
+              description="Try again in a moment."
+              onRetry={() => void query.refetch()}
+            />
+          ) : (
+            <ProfileForm profile={query.data} />
+          )}
+        </div>
+      </Card>
+    </section>
+  );
+}

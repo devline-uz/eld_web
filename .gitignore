@@ -1,0 +1,11 @@
+node_modules
+dist
+coverage
+stats.html
+playwright-report
+test-results
+.env
+.env.local
+.env.*.local
+*.log
+tests/e2e/.auth
