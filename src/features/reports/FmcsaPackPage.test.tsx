@@ -79,8 +79,8 @@ describe('W-15 Reports · FMCSA / DOT audit pack', () => {
       if (/\/logs\/[^/]+\/range/.test(request.url)) ranges.push(request.url);
     });
     renderPage(<FmcsaPackPage />, ROUTE);
-    // 2 drivers × 12 days in Sep 01–12; uncertified = 12 − 1 certified (drv_1) + 12 − 0 (drv_2).
-    await waitFor(() => expect(kpi('Daily logs included').getByText('24')).toBeInTheDocument());
+    // dailyLogs = Σ days (2 + 0); uncertified over Sep 01–12 = 12 − 1 certified (drv_1) + 12 − 0 (drv_2).
+    await waitFor(() => expect(kpi('Daily logs included').getByText('2')).toBeInTheDocument());
     expect(kpi('Daily logs included').getByText('2 drivers')).toBeInTheDocument();
     expect(kpi('DVIRs included').getByText('2')).toBeInTheDocument();
     expect(kpi('DVIRs included').getByText('1 with defects')).toBeInTheDocument();

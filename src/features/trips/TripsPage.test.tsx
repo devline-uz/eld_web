@@ -9,6 +9,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
 import { ok, url } from '@/mocks/envelope';
 import { endpoints } from '@/shared/api/endpoints';
+import { tripsActiveSliceQuery } from '@/shared/api/trips';
 import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/client';
 import { ToastProvider } from '@/shared/ui/Toast';
 import * as RealtimeProviderModule from '@/shared/realtime/RealtimeProvider';
@@ -143,9 +144,14 @@ const TRIP = {
   ],
 };
 
+/** Answers like the real `GET /trips`: one page, narrowed by the `status` param (WD-073). */
 function usePopulatedTrips() {
   server.use(
-    http.get(url(endpoints.trips.list), () => ok({ items: [TRIP], page: 1, limit: 500, total: 1, totalPages: 1 })),
+    http.get(url(endpoints.trips.list), ({ request }) => {
+      const status = new URL(request.url).searchParams.get('status');
+      const items = !status || status === TRIP.status ? [TRIP] : [];
+      return ok({ items, page: 1, limit: 25, total: items.length, totalPages: 1 });
+    }),
     http.get(url(endpoints.drivers.list), () => ok({ items: [DRIVER], page: 1, limit: 500, total: 1, totalPages: 1 })),
     http.get(url(endpoints.vehicles.list), () => ok({ items: [VEHICLE], page: 1, limit: 500, total: 1, totalPages: 1 })),
     http.get(url(endpoints.trips.unassignedLoads), () => ok({ items: [] })),
@@ -238,10 +244,9 @@ describe('W-11 Dispatch & Trips', () => {
     // The cache is patched via `setQueryData` — the row's fields update and no extra
     // `GET /trips` round trip happens, per §10 W-11 ("patches the row … invalidates the KPI cards").
     await screen.findByText('TR-4821');
-    const cached = queryClient.getQueryData<{ items: Array<{ id: string; status: string; etaAt: string }> }>([
-      'trips',
-      { limit: 500 },
-    ]);
+    const cached = queryClient.getQueryData<{ items: Array<{ id: string; status: string; etaAt: string }> }>(
+      tripsActiveSliceQuery('IN_PROGRESS').queryKey,
+    );
     expect(cached?.items.find((t) => t.id === 'trp_1')?.status).toBe('ASSIGNED');
     expect(cached?.items.find((t) => t.id === 'trp_1')?.etaAt).toBe('2099-06-15T13:37:00.000Z');
     expect(listCalls).toBe(callsBeforeEvent);

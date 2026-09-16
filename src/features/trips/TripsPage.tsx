@@ -1,6 +1,6 @@
 // owner: web-dispatch-messaging — W-11 Dispatch & Trips (web/tz.md §10 W-11) + 11.10 Create trip.
 // Design: web/roles and screens/admin panel/Active trips, route timeline, unassigned loads.jpg
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { ColumnDef } from '@tanstack/react-table';
 import { Search, Plus, Filter, Users, MapPin } from 'lucide-react';
@@ -10,19 +10,21 @@ import { useDynamicSubtitle } from '@/app/layouts/Topbar';
 import { useRoom } from '@/shared/realtime/useRoom';
 import { useQueryClient } from '@tanstack/react-query';
 import {
-  useTripsList,
+  useTripsBoard,
   useUnassignedLoads,
   useAutoAssignTrips,
   type TripTableRow,
   type TripRow,
 } from '@/shared/api/trips';
-import { qk } from '@/shared/api/queryKeys';
+import { qkRoot } from '@/shared/api/queryKeys';
+import { useDebouncedValue } from '@/shared/hooks/useDebouncedValue';
 import type { OffsetPage } from '@/shared/api/types';
 import { Button } from '@/shared/ui/Button';
 import { Badge } from '@/shared/ui/Badge';
 import { Card, SectionHeader } from '@/shared/ui/Card';
 import { KpiCard, KpiRowSkeleton } from '@/shared/ui/KpiCard';
 import { DataTable } from '@/shared/ui/DataTable';
+import { Pagination } from '@/shared/ui/Pagination';
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
 import { EMPTY_STATE_COPY, searchEmptyState } from '@/shared/ui/copy';
 import { useToast } from '@/shared/ui/Toast';
@@ -37,8 +39,6 @@ import { parseTripFilters, writeTripFilters, matchesTripFilters, EMPTY_TRIP_FILT
 
 type Segment = 'ACTIVE' | 'SCHEDULED' | 'COMPLETED' | 'UNASSIGNED';
 
-const ACTIVE_STATUSES: TripRow['status'][] = ['ASSIGNED', 'IN_PROGRESS'];
-
 export default function TripsPage() {
   const { can } = usePermission();
   const { toast } = useToast();
@@ -46,8 +46,11 @@ export default function TripsPage() {
   const canFull = can('trips', 'FULL');
   useDynamicSubtitle(null);
 
-  const [segment, setSegment] = useState<Segment>('ACTIVE');
+  const [segment, setSegmentState] = useState<Segment>('ACTIVE');
   const [search, setSearch] = useState('');
+  const debouncedSearch = useDebouncedValue(search, 300);
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(25);
   const [selectedTripId, setSelectedTripId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [assignLoad, setAssignLoad] = useState<TripRow | null>(null);
@@ -55,98 +58,82 @@ export default function TripsPage() {
   const [filtersRevision, setFiltersRevision] = useState(0);
   const [params, setParams] = useSearchParams();
 
-  const trips = useTripsList();
+  const filters = useMemo(() => parseTripFilters(params), [params]);
+  const activeFilterCount = countActiveTripFilters(filters);
+  function applyFilters(next: typeof filters) {
+    setPage(1);
+    setParams(writeTripFilters(params, next), { replace: true });
+  }
+  function setSegment(next: Segment) {
+    setPage(1);
+    setSegmentState(next);
+  }
+
+  // WD-073 — Active is two bounded server slices (exact in-memory search/filter); Scheduled and
+  // Completed are one server page each (`q`/`status` real params); the 11.23 groups the API has
+  // no params for (B-59) switch a history segment to the bounded newest-first window.
+  const filterRows = useCallback((rows: TripTableRow[]) => rows.filter((t) => matchesTripFilters(t, filters)), [filters]);
+  const trips = useTripsBoard({
+    segment,
+    page,
+    limit,
+    search: debouncedSearch,
+    useWindow: activeFilterCount > 0,
+    filter: filterRows,
+  });
   const unassigned = useUnassignedLoads();
   const autoAssign = useAutoAssignTrips();
 
-  const filters = useMemo(() => parseTripFilters(params), [params]);
-  function applyFilters(next: typeof filters) {
-    setParams(writeTripFilters(params, next), { replace: true });
-  }
-
-  const driverOptions = useMemo(() => {
-    const byId = new Map<string, string>();
-    for (const t of trips.rows) if (t.driver) byId.set(t.driver.id, `${t.driver.firstName} ${t.driver.lastName}`);
-    return Array.from(byId, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
-  }, [trips.rows]);
-  const vehicleOptions = useMemo(() => {
-    const byId = new Map<string, string>();
-    for (const t of trips.rows) if (t.vehicle) byId.set(t.vehicle.id, t.vehicle.unitNumber);
-    return Array.from(byId, ([id, unitNumber]) => ({ id, unitNumber })).sort((a, b) => a.unitNumber.localeCompare(b.unitNumber));
-  }, [trips.rows]);
+  const driverOptions = useMemo(
+    () =>
+      (trips.driversLookup.data?.items ?? [])
+        .map((d) => ({ id: d.id, name: `${d.firstName} ${d.lastName}` }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    [trips.driversLookup.data],
+  );
+  const vehicleOptions = useMemo(
+    () =>
+      (trips.vehiclesLookup.data?.items ?? [])
+        .map((v) => ({ id: v.id, unitNumber: v.unitNumber }))
+        .sort((a, b) => a.unitNumber.localeCompare(b.unitNumber)),
+    [trips.vehiclesLookup.data],
+  );
   const terminalOptions = useMemo(
-    () => Array.from(new Set(trips.rows.map((t) => t.driver?.homeTerminalName).filter((v): v is string => Boolean(v)))).sort(),
-    [trips.rows],
+    () => Array.from(new Set((trips.driversLookup.data?.items ?? []).map((d) => d.homeTerminalName).filter(Boolean))).sort(),
+    [trips.driversLookup.data],
   );
   const driverNameById = useMemo(() => new Map(driverOptions.map((d) => [d.id, d.name])), [driverOptions]);
   const vehicleUnitById = useMemo(() => new Map(vehicleOptions.map((v) => [v.id, v.unitNumber])), [vehicleOptions]);
 
   useRoom('fleet', {
     'trip.status_changed': (payload) => {
-      queryClient.setQueryData<OffsetPage<TripRow> | undefined>(qk.trips({ limit: 500 }), (prev) => {
-        if (!prev) return prev;
+      // Patch every cached `/trips` page that holds the row (§16.3 — never invalidate the list).
+      queryClient.setQueriesData<OffsetPage<TripRow> | { items: TripRow[] } | TripRow | undefined>({ queryKey: qkRoot.trips }, (prev) => {
+        if (!prev || !('items' in prev) || !Array.isArray(prev.items)) return prev;
         return {
           ...prev,
           items: prev.items.map((t) => (t.id === payload.tripId ? { ...t, status: payload.status as TripRow['status'], etaAt: payload.eta } : t)),
         };
       });
-      // §10 W-11 "invalidates the KPI cards" — here the KPIs are a `useMemo` over this exact
-      // query's `rows`, so the `setQueryData` patch above already recomputes them on the next
-      // render; there is no separate KPI query to invalidate, and no reason to refetch the list.
+      // §10 W-11 "invalidates the KPI cards" — the KPIs derive from these same cached pages, so
+      // the patch above recomputes them on the next render; nothing to refetch.
     },
   });
 
-  const counts = useMemo(() => {
-    const active = trips.rows.filter((t) => ACTIVE_STATUSES.includes(t.status));
-    const scheduled = trips.rows.filter((t) => t.status === 'PLANNED');
-    const completed = trips.rows.filter((t) => t.status === 'DELIVERED');
-    const delivered = completed.length;
-    const onTimeDelivered = completed.filter((t) => t.onTime !== false).length;
-    const late = active.filter((t) => t.displayStatus === 'Late');
-    return {
-      active,
-      scheduled,
-      completed,
-      onTimePct: delivered > 0 ? Math.round((onTimeDelivered / delivered) * 100) : 0,
-      lateCount: late.length,
-      unassignedCount: unassigned.data?.items.length ?? 0,
-    };
-  }, [trips.rows, unassigned.data]);
+  const counts = {
+    active: trips.counts.active,
+    scheduled: trips.counts.scheduled,
+    completed: trips.counts.completed,
+    onTimePct: trips.kpis.onTimePct,
+    lateCount: trips.kpis.lateCount,
+    unassignedCount: unassigned.data?.items.length ?? 0,
+  };
 
-  const segmentRows = useMemo(() => {
-    switch (segment) {
-      case 'ACTIVE':
-        return counts.active;
-      case 'SCHEDULED':
-        return counts.scheduled;
-      case 'COMPLETED':
-        return counts.completed;
-      case 'UNASSIGNED':
-        return [];
-    }
-  }, [segment, counts]);
-
-  const filteredRows = useMemo(() => {
-    let rows = segmentRows;
-    if (search.trim()) {
-      const needle = search.trim().toLowerCase();
-      rows = rows.filter((t) => {
-        const driverName = t.driver ? `${t.driver.firstName} ${t.driver.lastName}` : '';
-        return (
-          t.number.toLowerCase().includes(needle) ||
-          driverName.toLowerCase().includes(needle) ||
-          (t.pickup?.name ?? '').toLowerCase().includes(needle) ||
-          (t.delivery?.name ?? '').toLowerCase().includes(needle)
-        );
-      });
-    }
-    rows = rows.filter((t) => matchesTripFilters(t, filters));
-    return rows;
-  }, [segmentRows, search, filters]);
+  const filteredRows = trips.rows;
 
   const selectedTrip = useMemo(
-    () => trips.rows.find((t) => t.id === selectedTripId) ?? filteredRows[0] ?? null,
-    [trips.rows, selectedTripId, filteredRows],
+    () => trips.activeRows.find((t) => t.id === selectedTripId) ?? filteredRows.find((t) => t.id === selectedTripId) ?? filteredRows[0] ?? null,
+    [trips.activeRows, selectedTripId, filteredRows],
   );
 
   async function handleAutoAssign() {
@@ -263,7 +250,7 @@ export default function TripsPage() {
     },
   ];
 
-  const isLoading = trips.isLoading || unassigned.isLoading;
+  const isLoading = trips.isKpiLoading || unassigned.isLoading;
 
   return (
     <div className="flex flex-col gap-4">
@@ -271,7 +258,7 @@ export default function TripsPage() {
         <div>
           <h1 className="text-page-title text-text">Dispatch &amp; Trips</h1>
           <p className="text-page-sub text-text-muted">
-            {counts.active.length} active trips · {counts.unassignedCount} unassigned loads · on-time {counts.onTimePct}%
+            {counts.active} active trips · {counts.unassignedCount} unassigned loads · on-time {counts.onTimePct}%
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -279,7 +266,10 @@ export default function TripsPage() {
             <Search size={16} strokeWidth={1.75} className="text-text-muted" />
             <input
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
               placeholder="Search trip, driver, city…"
               className="w-56 bg-transparent text-body outline-none"
             />
@@ -293,7 +283,7 @@ export default function TripsPage() {
               setFiltersOpen(true);
             }}
           >
-            Filters{countActiveTripFilters(filters) > 0 ? ` · ${countActiveTripFilters(filters)}` : ''}
+            Filters{activeFilterCount > 0 ? ` · ${activeFilterCount}` : ''}
           </Button>
           <Can perm="trips" level="FULL">
             <Button variant="primary" iconLeft={<Plus size={16} strokeWidth={1.75} />} onClick={() => setCreateOpen(true)}>
@@ -307,8 +297,8 @@ export default function TripsPage() {
         <KpiRowSkeleton />
       ) : (
         <div className="grid grid-cols-4 gap-card-gap">
-          <KpiCard label="On-time delivery" value={`${counts.onTimePct}%`} icon={MapPin} iconTone="success" chip={{ text: '↑ 3% vs last wk', tone: 'success' }} />
-          <KpiCard label="Active trips" value={counts.active.length} icon={MapPin} iconTone="info" chip={{ text: '6 arriving today', tone: 'info' }} />
+          <KpiCard label="On-time delivery" value={`${counts.onTimePct}%`} icon={MapPin} iconTone="success" hint={`last ${trips.kpis.onTimeWindow} deliveries`} />
+          <KpiCard label="Active trips" value={counts.active} icon={MapPin} iconTone="info" chip={{ text: '6 arriving today', tone: 'info' }} />
           <KpiCard label="Running late" value={counts.lateCount} icon={MapPin} iconTone="warning" hint="avg 48 min" />
           <KpiCard label="Unassigned loads" value={counts.unassignedCount} icon={Users} iconTone="warning" hint="needs driver" />
         </div>
@@ -317,9 +307,9 @@ export default function TripsPage() {
       <div className="flex h-9 w-fit overflow-hidden rounded-md border border-border">
         {(
           [
-            ['ACTIVE', `Active ${counts.active.length}`],
-            ['SCHEDULED', `Scheduled ${counts.scheduled.length}`],
-            ['COMPLETED', `Completed ${counts.completed.length}`],
+            ['ACTIVE', `Active ${counts.active}`],
+            ['SCHEDULED', `Scheduled ${counts.scheduled}`],
+            ['COMPLETED', `Completed ${counts.completed}`],
             ['UNASSIGNED', `Unassigned ${counts.unassignedCount}`],
           ] as [Segment, string][]
         ).map(([value, label]) => (
@@ -373,14 +363,14 @@ export default function TripsPage() {
         <div className="grid grid-cols-[1fr_348px] gap-card-gap">
           <Card padded={false}>
             <div className="flex items-center justify-between p-card pb-0">
-              <SectionHeader title="Active trips" subtitle={`${segmentRows.length} trips in progress`} />
+              <SectionHeader title="Active trips" subtitle={`${trips.total} trips in progress`} />
             </div>
             {trips.isLoading ? (
               <LoadingState className="p-4" />
             ) : trips.isError ? (
               <ErrorState onRetry={() => trips.refetch()} />
             ) : filteredRows.length === 0 ? (
-              search || countActiveTripFilters(filters) > 0 ? (
+              search || activeFilterCount > 0 ? (
                 <EmptyState
                   {...searchEmptyState(search || 'these filters')}
                   actions={[
@@ -394,13 +384,27 @@ export default function TripsPage() {
                 <EmptyState {...EMPTY_STATE_COPY.trips} actions={canFull ? [{ label: 'Create trip', onClick: () => setCreateOpen(true) }] : undefined} />
               )
             ) : (
-              <DataTable
-                data={filteredRows}
-                columns={columns}
-                caption="Active trips"
-                getRowId={(r) => r.id}
-                onRowClick={(row) => setSelectedTripId(row.id)}
-              />
+              <>
+                <DataTable
+                  data={filteredRows}
+                  columns={columns}
+                  caption="Active trips"
+                  getRowId={(r) => r.id}
+                  onRowClick={(row) => setSelectedTripId(row.id)}
+                />
+                <Pagination
+                  page={Math.min(page, trips.totalPages)}
+                  limit={limit}
+                  total={trips.total}
+                  totalPages={trips.totalPages}
+                  itemLabel="trips"
+                  onPageChange={setPage}
+                  onLimitChange={(l) => {
+                    setLimit(l);
+                    setPage(1);
+                  }}
+                />
+              </>
             )}
           </Card>
 

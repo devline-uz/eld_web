@@ -3,26 +3,32 @@
 //
 //   accessToken  → memory only (tokenStore.ts); refreshToken → localStorage `obk.rt`.
 //   permissions  → GET /auth/me and nothing else. The JWT is never decoded.
-//   boot         → refresh → me → app, behind a full-page skeleton (§6.8).
+//   boot         → with a session snapshot (sessionStorage `obk.session`, WD-072) the app renders
+//                  at once and `refresh → me` reconciles in the background; without one it is
+//                  refresh → me → app behind a full-page skeleton (§6.8).
 //   idle         → 30 min, then a 60 s warning modal, then a full sign-out (§17).
 import {
   createContext,
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { setAccessToken as setClientAccessToken, setAuthBridge } from '@/shared/api/client';
+import {
+  refreshAccessToken as clientRefreshAccessToken,
+  setAccessToken as setClientAccessToken,
+  setAuthBridge,
+} from '@/shared/api/client';
 import {
   fetchMe,
   loginWithGoogleIdToken,
   loginWithPassword,
   logoutSession,
-  refreshTokens,
   type MeResponse,
 } from './authApi';
 import {
@@ -45,9 +51,11 @@ import {
   getAccessToken,
   getAccessTokenExpiry,
   getRefreshToken,
+  readSessionSnapshot,
   setAccessToken,
   setRefreshToken,
   storeTokenPair,
+  writeSessionSnapshot,
   type TokenPair,
 } from './tokenStore';
 
@@ -111,15 +119,40 @@ function toAuthUser(me: MeResponse, profile: Record<string, unknown> | null): Au
   };
 }
 
+/**
+ * WD-072 — the boot state comes from the snapshot when there is one *and* a refresh token to
+ * back it. Either missing → the classic `loading` boot. The snapshot is display state only:
+ * the background `refresh → /auth/me` is what actually authorises the session.
+ */
+function initialSession(): {
+  status: 'loading' | 'authenticated' | 'unauthenticated';
+  user: AuthUser | null;
+  permissions: PermissionMap;
+} {
+  if (!getRefreshToken()) return { status: 'unauthenticated', user: null, permissions: NO_PERMISSIONS };
+  const snapshot = readSessionSnapshot();
+  if (!snapshot) return { status: 'loading', user: null, permissions: NO_PERMISSIONS };
+  const me = snapshot.me as unknown as MeResponse;
+  return {
+    status: 'authenticated',
+    user: toAuthUser(me, null),
+    permissions: toPermissionMap(me.permissions),
+  };
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
-  const [status, setStatus] = useState<'loading' | 'authenticated' | 'unauthenticated'>('loading');
-  const [user, setUser] = useState<AuthUser | null>(null);
-  const [permissions, setPermissions] = useState<PermissionMap>(NO_PERMISSIONS);
+  const [boot] = useState(initialSession);
+  const [status, setStatus] = useState<'loading' | 'authenticated' | 'unauthenticated'>(
+    boot.status,
+  );
+  const [user, setUser] = useState<AuthUser | null>(boot.user);
+  const [permissions, setPermissions] = useState<PermissionMap>(boot.permissions);
   const [idleWarning, setIdleWarning] = useState(false);
   const [sessionEndedReason, setSessionEndedReason] = useState<'expired' | 'idle' | null>(null);
+  /** Bumped whenever a new access token lands, so the proactive-refresh timer re-arms. */
+  const [tokenEpoch, setTokenEpoch] = useState(0);
 
-  const refreshInFlight = useRef<Promise<string | null> | null>(null);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /** GET /auth/me — the only permission source. `/me/profile` only decorates the display. */
@@ -131,13 +164,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setPermissions((prev) => (samePermissions(prev, next) ? prev : next));
     setUser(toAuthUser(me, null));
     setStatus('authenticated');
+    writeSessionSnapshot({ me, accessTokenExpiresAt: getAccessTokenExpiry() });
     return me;
   }, []);
 
   const resetSession = useCallback(
     (reason: 'expired' | 'idle' | null = null) => {
       setSessionEndedReason(reason);
-      clearTokens();
+      clearTokens(); // access token, `obk.rt` and the `obk.session` snapshot
       setClientAccessToken(null);
       setUser(null);
       setPermissions(NO_PERMISSIONS);
@@ -152,31 +186,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   /**
    * §6.2 — `shared/api/client.ts` runs on a default bridge until `shared/auth` installs the real
    * one: without this the client would send no Authorization header and would hard-redirect on
-   * its own. Registered in a layout effect so the very first query already carries a token.
+   * its own. A *layout* effect, not a passive one: with a session snapshot `children` render on
+   * the very first pass and their queries fire from passive effects, which React runs only after
+   * every layout effect — including this one — has committed (WD-072). The proactive-refresh
+   * timer is owned here, so the client gets no `expiresAt` and never arms a competing timer.
    */
+  useLayoutEffect(() => {
+    setAuthBridge({
+      getAccessToken,
+      getRefreshToken,
+      // Every rotated pair — boot, proactive, or a 401 replay — lands in the same two places.
+      onTokens: ({ accessToken, refreshToken }) => {
+        setAccessToken(accessToken);
+        if (refreshToken) setRefreshToken(refreshToken);
+        setClientAccessToken(accessToken);
+      },
+      // §6.2 rule 3 — refresh failed: full sign-out, RequireAuth lands on /sign-in (WD-015).
+      onSignOut: () => resetSession('expired'),
+    });
+  }, [resetSession]);
+
   const installBridge = useCallback((accessToken: string | null) => {
-    setClientAccessToken(accessToken, accessToken ? getAccessTokenExpiry() : undefined);
+    setClientAccessToken(accessToken);
   }, []);
 
-  /** §6.2 rule 2 — a single in-flight refresh that every caller awaits. */
+  /**
+   * §6.2 rule 2 — THE single in-flight refresh, shared with `shared/api/client.ts`. The backend
+   * rotates refresh tokens and treats a second use as theft (`REFRESH_TOKEN_REUSED` revokes every
+   * session), so the boot refresh, the proactive timer and a data request parked in `send()` must
+   * all await the same `POST /auth/refresh`. Resolves `null` when the session is over.
+   */
   const runRefresh = useCallback((): Promise<string | null> => {
-    if (refreshInFlight.current) return refreshInFlight.current;
-    const stored = getRefreshToken();
-    if (!stored) return Promise.resolve(null);
-
-    const promise = refreshTokens(stored)
-      .then((pair: TokenPair) => {
-        storeTokenPair(pair);
-        installBridge(pair.accessToken);
-        return pair.accessToken;
+    if (!getRefreshToken()) return Promise.resolve(null);
+    return clientRefreshAccessToken()
+      .then((token) => {
+        setTokenEpoch((n) => n + 1);
+        return token;
       })
-      .catch(() => null)
-      .finally(() => {
-        refreshInFlight.current = null;
-      });
-    refreshInFlight.current = promise;
-    return promise;
-  }, [installBridge]);
+      .catch(() => null);
+  }, []);
 
   const signOut = useCallback(
     (reason: 'expired' | 'idle' | null = null) => {
@@ -188,7 +236,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [resetSession],
   );
 
-  /* --- boot: refresh → me, behind the full-page skeleton (§6.8) ---------------------------- */
+  /* --- boot: refresh → me (§6.8) ---------------------------------------------------------- */
+  // Without a snapshot this runs behind the full-page skeleton. With one (WD-072) the app is
+  // already rendering and this is a background reconcile: the refresh hands the parked data
+  // requests their token, then /auth/me replaces the snapshot's role and permissions.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -215,37 +266,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [loadSession, resetSession, runRefresh]);
 
   /* --- proactive refresh, 60 s before expiry (§6.8) ---------------------------------------- */
+  // Re-armed by `tokenEpoch`: every token that lands (boot, sign-in, 401 replay, this timer)
+  // moves the expiry, so the timer is recomputed from the fresh one. While the boot refresh is
+  // still in flight after a snapshot boot there is no token yet — the timer waits for the epoch.
   useEffect(() => {
-    if (status !== 'authenticated') return;
-    const schedule = () => {
-      if (refreshTimer.current) clearTimeout(refreshTimer.current);
-      const delay = Math.max(getAccessTokenExpiry() - Date.now() - REFRESH_LEAD_MS, 5_000);
-      refreshTimer.current = setTimeout(() => {
-        void runRefresh().then((token) => {
-          if (!token) resetSession('expired');
-          else schedule();
-        });
-      }, delay);
-    };
-    schedule();
+    if (status !== 'authenticated' || !getAccessToken()) return;
+    const delay = Math.max(getAccessTokenExpiry() - Date.now() - REFRESH_LEAD_MS, 5_000);
+    refreshTimer.current = setTimeout(() => {
+      void runRefresh().then((token) => {
+        if (!token) resetSession('expired');
+      });
+    }, delay);
     return () => {
       if (refreshTimer.current) clearTimeout(refreshTimer.current);
     };
-  }, [status, runRefresh, resetSession]);
+  }, [status, tokenEpoch, runRefresh, resetSession]);
 
-  /* --- the seam shared/api/client.ts and shared/realtime plug into ------------------------- */
+  /* --- the seam shared/auth/authEvents.ts and shared/realtime plug into -------------------- */
   useEffect(() => {
-    setAuthBridge({
-      getAccessToken,
-      getRefreshToken,
-      // A rotated pair from the client's own 401 refresh must land in the same two places.
-      onTokens: ({ accessToken, refreshToken }) => {
-        setAccessToken(accessToken);
-        if (refreshToken) setRefreshToken(refreshToken);
-      },
-      // §6.2 rule 3 — refresh failed: full sign-out, RequireAuth lands on /sign-in (WD-015).
-      onSignOut: () => resetSession('expired'),
-    });
     registerTokenRefresher(runRefresh);
     registerSessionExpiredListener(() => resetSession());
     return () => {
@@ -278,6 +316,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (pair: TokenPair): Promise<SignInOutcome> => {
       storeTokenPair(pair);
       installBridge(pair.accessToken);
+      setTokenEpoch((n) => n + 1);
       setSessionEndedReason(null);
       await loadSession(pair.accessToken);
       return { status: 'authenticated' };

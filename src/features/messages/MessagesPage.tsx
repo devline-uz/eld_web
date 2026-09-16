@@ -21,7 +21,7 @@ import { formatHosHours } from '@/shared/format/hos';
 import { formatSpeed } from '@/shared/format/numbers';
 import { useDriversList, useDriverHos } from '@/shared/api/drivers';
 import { useLiveFleet } from '@/shared/api/liveFleet';
-import { useTripsList } from '@/shared/api/trips';
+import { useActiveTrips } from '@/shared/api/trips';
 import {
   useConversationsList,
   useMessages,
@@ -84,7 +84,7 @@ export default function MessagesPage() {
   const messagesQuery = useMessages(selected?.id);
   const sendMessage = useSendMessage(selected?.id ?? '');
   const liveFleet = useLiveFleet();
-  const trips = useTripsList();
+  const trips = useActiveTrips();
   const driverHos = useDriverHos(selected?.driver?.id);
 
   useRoom(selected ? `conversation:${selected.id}` : null, {

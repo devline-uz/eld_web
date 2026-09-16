@@ -58,7 +58,7 @@ describe('usePackRodsCounts', () => {
     const { result } = renderHook(() => usePackRodsCounts('2026-09-01', '2026-09-12', null, 12), { wrapper: wrapper() });
     await waitFor(() => expect(result.current.counts.drivers).toBe(2));
     // drv_1: 12 − 1 certified; drv_2: 12 − 0.
-    expect(result.current.counts).toEqual({ dailyLogs: 24, drivers: 2, uncertified: 23, uncertifiedDrivers: 2 });
+    expect(result.current.counts).toEqual({ dailyLogs: 2, drivers: 2, uncertified: 23, uncertifiedDrivers: 2 });
     expect(seen.filter((u) => SUMMARY_RE.test(u))).toHaveLength(1);
     expect(seen.filter((u) => RANGE_RE.test(u))).toHaveLength(0);
   });

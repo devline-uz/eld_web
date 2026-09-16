@@ -19,27 +19,29 @@ import { AuthLayout } from './layouts/AuthLayout';
 import { SettingsLayout } from './layouts/SettingsLayout';
 import type { RouteHandle } from './layouts/Topbar';
 import { SETTINGS_NAV, firstPermittedSettingsRoute } from './navigation';
+import { ROUTE_LOADERS } from './routePrefetch';
 
-/* ---- lazy features (one chunk per feature) ------------------------------------------- */
+/* ---- lazy features (one chunk per feature; sidebar-reachable ones share `ROUTE_LOADERS` so a
+   hover can warm the same chunk — WD-073) ------------------------------------------------ */
 const SignInPage = lazy(() => import('@/features/auth/SignInPage'));
 const ForbiddenPage = lazy(() => import('@/features/auth/ForbiddenPage'));
 const NotFoundPage = lazy(() => import('@/features/auth/NotFoundPage'));
-const DashboardPage = lazy(() => import('@/features/dashboard/DashboardPage'));
-const LiveFleetPage = lazy(() => import('@/features/live-fleet/LiveFleetPage'));
-const VehiclesPage = lazy(() => import('@/features/vehicles/VehiclesPage'));
+const DashboardPage = lazy(ROUTE_LOADERS['/']);
+const LiveFleetPage = lazy(ROUTE_LOADERS['/live-fleet']);
+const VehiclesPage = lazy(ROUTE_LOADERS['/vehicles']);
 const UnitProfilePage = lazy(() => import('@/features/vehicles/UnitProfilePage'));
 const UnitHistoriesPage = lazy(() => import('@/features/vehicles/UnitHistoriesPage'));
-const DriversPage = lazy(() => import('@/features/drivers/DriversPage'));
+const DriversPage = lazy(ROUTE_LOADERS['/drivers']);
 const DriverProfilePage = lazy(() => import('@/features/drivers/DriverProfilePage'));
-const TripsPage = lazy(() => import('@/features/trips/TripsPage'));
-const HosLogsPage = lazy(() => import('@/features/hos-logs/HosLogsPage'));
-const DvirPage = lazy(() => import('@/features/dvir/DvirPage'));
-const SafetyPage = lazy(() => import('@/features/safety/SafetyPage'));
-const IftaReportPage = lazy(() => import('@/features/reports/IftaReportPage'));
+const TripsPage = lazy(ROUTE_LOADERS['/trips']);
+const HosLogsPage = lazy(ROUTE_LOADERS['/hos-logs']);
+const DvirPage = lazy(ROUTE_LOADERS['/dvir']);
+const SafetyPage = lazy(ROUTE_LOADERS['/safety']);
+const IftaReportPage = lazy(ROUTE_LOADERS['/reports']);
 const ActivityReportPage = lazy(() => import('@/features/reports/ActivityReportPage'));
 const DvirReportPage = lazy(() => import('@/features/reports/DvirReportPage'));
 const FmcsaPackPage = lazy(() => import('@/features/reports/FmcsaPackPage'));
-const MessagesPage = lazy(() => import('@/features/messages/MessagesPage'));
+const MessagesPage = lazy(ROUTE_LOADERS['/messages']);
 const CompanyProfilePage = lazy(() => import('@/features/settings/CompanyProfilePage'));
 const UsersPage = lazy(() => import('@/features/settings/UsersPage'));
 const RolesPage = lazy(() => import('@/features/settings/RolesPage'));
@@ -47,7 +49,7 @@ const DevicesPage = lazy(() => import('@/features/settings/DevicesPage'));
 const AlertRulesPage = lazy(() => import('@/features/settings/AlertRulesPage'));
 const IntegrationsPage = lazy(() => import('@/features/settings/IntegrationsPage'));
 const AuditLogPage = lazy(() => import('@/features/settings/AuditLogPage'));
-const SupportPage = lazy(() => import('@/features/support/SupportPage'));
+const SupportPage = lazy(ROUTE_LOADERS['/support']);
 const FeedbackPage = lazy(() => import('@/features/support/FeedbackPage'));
 const AccountPage = lazy(() => import('@/features/account/AccountPage'));
 

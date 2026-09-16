@@ -23,6 +23,13 @@ const hide = (state: DocumentVisibilityState) =>
 afterEach(() => vi.restoreAllMocks());
 
 describe('§6.4 cache policies', () => {
+  it('holds reference data 10 min, lists 60 s, live 10 s (WD-073)', () => {
+    expect(STALE.reference).toBe(10 * 60_000);
+    expect(STALE.list).toBe(60_000);
+    expect(STALE.live).toBe(10_000);
+    expect(defaultQueryClientOptions?.queries?.gcTime).toBeGreaterThanOrEqual(STALE.reference);
+  });
+
   it('matches the table row for row', () => {
     expect(cachePolicy('reference').staleTime).toBe(STALE.reference);
     expect(cachePolicy('list').staleTime).toBe(STALE.list);

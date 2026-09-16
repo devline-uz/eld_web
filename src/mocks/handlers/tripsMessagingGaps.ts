@@ -6,7 +6,7 @@
 // first-match-wins rule as `vehiclesDriversGaps.ts`, web/bugs.md WB-018).
 import { http } from 'msw';
 import { endpoints } from '@/shared/api/endpoints';
-import { ok, url } from '../envelope';
+import { ok, url, serverPage } from '../envelope';
 import type { TripRow } from '@/shared/api/trips';
 import type { ConversationRow, MessageRow } from '@/shared/api/messaging';
 
@@ -276,9 +276,7 @@ const MESSAGES: Record<string, MessageRow[]> = {
 };
 
 export const tripsMessagingGapHandlers = [
-  http.get(url(endpoints.trips.list), () =>
-    ok({ items: TRIPS, page: 1, limit: 500, total: TRIPS.length, totalPages: 1 }),
-  ),
+  http.get(url(endpoints.trips.list), ({ request }) => ok(serverPage(TRIPS, request, ['number', 'shippingDocument']))),
   http.get(url(endpoints.trips.unassignedLoads), () => ok({ items: UNASSIGNED_LOADS })),
   http.post(url(endpoints.trips.create), () =>
     ok({ ...TRIPS[0], id: 'trp_new', number: 'TR-4834' }, 201),

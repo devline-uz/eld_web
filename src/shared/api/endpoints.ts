@@ -24,6 +24,8 @@ export const endpoints = {
 
   // --- carrier and account (W-17, W-26) ------------------------------------------------------
   carrier: { root: '/carrier' },
+  /** Perf plan item 3 — W-01 Fleet Dashboard's single aggregate call (WD-074). */
+  dashboard: { summary: '/dashboard/summary' },
   me: {
     profile: '/me/profile',
     sessions: '/me/sessions',

@@ -130,6 +130,75 @@ describe('rule 2 · single-flight refresh on 401 TOKEN_EXPIRED', () => {
   });
 });
 
+describe('no access token yet, refresh token in hand → wait for the refresh (WD-073)', () => {
+  it('parks parallel requests on one in-flight refresh and sends them with the new token', async () => {
+    let token: string | null = null;
+    let refreshes = 0;
+    const authHeaders: Array<string | null> = [];
+    setAuthBridge({
+      getAccessToken: () => token,
+      getRefreshToken: () => 'refresh-1',
+      onTokens: ({ accessToken }) => {
+        token = accessToken;
+      },
+    });
+    server.use(
+      http.post(url(endpoints.auth.refresh), async () => {
+        refreshes += 1;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return ok({ accessToken: 'fresh', refreshToken: 'refresh-2' });
+      }),
+      http.get(VEHICLES, ({ request }) => {
+        authHeaders.push(request.headers.get('authorization'));
+        return ok({ items: [], page: 1, limit: 25, total: 0, totalPages: 0 });
+      }),
+    );
+
+    await Promise.all([
+      client.get(endpoints.vehicles.list),
+      client.get(endpoints.vehicles.list),
+      client.get(endpoints.vehicles.list),
+    ]);
+
+    // Never an unauthenticated attempt, never a second refresh.
+    expect(authHeaders).toEqual(['Bearer fresh', 'Bearer fresh', 'Bearer fresh']);
+    expect(refreshes).toBe(1);
+  });
+
+  it('a request parked on a failed refresh rejects and signs out — no unauthenticated fallback', async () => {
+    const onSignOut = vi.fn();
+    let vehicleCalls = 0;
+    setAuthBridge({ getAccessToken: () => null, getRefreshToken: () => 'stale', onSignOut });
+    server.use(
+      http.post(url(endpoints.auth.refresh), () =>
+        fail(401, 'REFRESH_TOKEN_REUSED', 'Already rotated.'),
+      ),
+      http.get(VEHICLES, () => {
+        vehicleCalls += 1;
+        return ok({ items: [], page: 1, limit: 25, total: 0, totalPages: 0 });
+      }),
+    );
+
+    await expect(client.get(endpoints.vehicles.list)).rejects.toBeInstanceOf(ApiError);
+    expect(onSignOut).toHaveBeenCalledWith('expired');
+    expect(vehicleCalls).toBe(0);
+  });
+
+  it('anonymous calls and callers without a refresh token are untouched', async () => {
+    let refreshes = 0;
+    setAuthBridge({ getAccessToken: () => null, getRefreshToken: () => null });
+    server.use(
+      http.post(url(endpoints.auth.refresh), () => {
+        refreshes += 1;
+        return ok({ accessToken: 'fresh' });
+      }),
+      http.get(VEHICLES, () => ok({ items: [], page: 1, limit: 25, total: 0, totalPages: 0 })),
+    );
+    await client.get(endpoints.vehicles.list);
+    expect(refreshes).toBe(0);
+  });
+});
+
 describe('rule 3 · a failed refresh signs out', () => {
   it('calls signOut with `expired` when the refresh itself 401s', async () => {
     const onSignOut = vi.fn();
@@ -584,7 +653,7 @@ describe('limit is capped at 200 and larger reads page (WB-030)', () => {
     expect(page.page).toBe(2);
   });
 
-  it('stops on an empty page even if the server over-reports totalPages', async () => {
+  it('never walks past the pages `limit` can hold, even if the server over-reports totalPages', async () => {
     let calls = 0;
     server.use(
       http.get(VEHICLES, () => {
@@ -593,7 +662,29 @@ describe('limit is capped at 200 and larger reads page (WB-030)', () => {
       }),
     );
     const page = await client.list<{ id: string }>(endpoints.vehicles.list, { limit: 500 });
-    expect(calls).toBe(2);
+    // ceil(500 / 200) = 3 pages at most — the remaining two go out together (WD-073), never nine.
+    expect(calls).toBe(3);
     expect(page.items).toEqual([{ id: 'only' }]);
+  });
+
+  it('fetches the remaining pages in parallel, not one RTT each (WD-073)', async () => {
+    const inFlight: number[] = [];
+    let open = 0;
+    server.use(
+      http.get(VEHICLES, async ({ request }) => {
+        const page = Number(new URL(request.url).searchParams.get('page') ?? 1);
+        open += 1;
+        inFlight.push(open);
+        await new Promise((r) => setTimeout(r, 20));
+        open -= 1;
+        const items = Array.from({ length: 200 }, (_, i) => ({ id: `row-${(page - 1) * 200 + i}` }));
+        return ok({ items, page, limit: 200, total: 600, totalPages: 3 });
+      }),
+    );
+    const page = await client.list<{ id: string }>(endpoints.vehicles.list, { limit: 600 });
+    expect(page.items).toHaveLength(600);
+    expect(page.items[599]?.id).toBe('row-599');
+    // First page alone, then pages 2 and 3 overlapped.
+    expect(Math.max(...inFlight)).toBe(2);
   });
 });

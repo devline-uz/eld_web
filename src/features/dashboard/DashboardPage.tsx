@@ -1,6 +1,6 @@
 // owner: web-dashboard-fleet — W-01 Fleet Dashboard (web/tz.md §10 W-01).
 // Design: web/roles and screens/admin panel/Fleet overview — KPIs, live map, duty mix, violation feed.jpg
-import { lazy, Suspense, useMemo, useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Clock, MapPin, Truck, Users } from 'lucide-react';
 import type { ColumnDef } from '@tanstack/react-table';
@@ -11,7 +11,8 @@ import { qk } from '@/shared/api/queryKeys';
 import { typedCachePolicy } from '@/shared/api/queryPolicy';
 import type { OffsetPage } from '@/shared/api/types';
 import { ApiError } from '@/shared/api/errors';
-import { useLiveFleet, hasPosition, type LiveFleetUnit } from '@/shared/api/liveFleet';
+import { hasPosition, type LiveFleetUnit } from '@/shared/api/liveFleet';
+import { useDashboardSummary } from '@/shared/api/dashboardSummary';
 import { usePermission } from '@/shared/auth/usePermission';
 import { useDynamicSubtitle } from '@/app/layouts/Topbar';
 import { useRoom } from '@/shared/realtime/useRoom';
@@ -25,69 +26,15 @@ import { Pagination } from '@/shared/ui/Pagination';
 import { EMPTY_STATE_COPY } from '@/shared/ui/copy';
 import { EmptyState, ErrorState } from '@/shared/ui/states';
 import { KpiCard, KpiRowSkeleton } from '@/shared/ui/KpiCard';
-import { SeverityBadge, type Severity } from '@/shared/ui/Badge';
+import { SeverityBadge } from '@/shared/ui/Badge';
 import { formatCarrier, timezoneAbbreviation } from '@/shared/format/datetime';
 import { formatDuration } from '@/shared/format/duration';
 import { formatNumber } from '@/shared/format/numbers';
 import { formatTimeWithAge } from '@/shared/format/relative';
+import type { DashboardViolation } from '@/shared/api/dashboardSummary';
 
 const DutyDonut = lazy(() => import('./components/DutyDonut'));
 
-interface CarrierResponse {
-  id: string;
-  name: string;
-  timezone?: string;
-}
-
-interface Violation {
-  id: string;
-  severity: Severity;
-  driverId: string | null;
-  driverName: string | null;
-  vehicleId: string | null;
-  unitNumber: string | null;
-  event: string;
-  locationLabel: string | null;
-  occurredAt: string;
-  date?: string;
-}
-
-const DUTY_ON_STATUSES: LiveFleetUnit['dutyStatus'][] = ['DRIVING', 'ON_DUTY', 'SLEEPER'];
-
-function useCarrier() {
-  return useQuery({
-    queryKey: qk.carrier,
-    queryFn: () => client.get<CarrierResponse>(endpoints.carrier.root),
-    ...typedCachePolicy<CarrierResponse>('reference'),
-  });
-}
-
-function useActiveVehicleCount() {
-  return useQuery({
-    queryKey: qk.vehicles({ status: 'ACTIVE', limit: 1 }),
-    queryFn: () => client.get<OffsetPage<unknown>>(endpoints.vehicles.list, { params: { status: 'ACTIVE', limit: 1 } }),
-    ...typedCachePolicy<OffsetPage<unknown>>('list'),
-  });
-}
-
-function useAllVehicleCount() {
-  return useQuery({
-    queryKey: qk.vehicles({ limit: 1 }),
-    queryFn: () => client.get<OffsetPage<unknown>>(endpoints.vehicles.list, { params: { limit: 1 } }),
-    ...typedCachePolicy<OffsetPage<unknown>>('list'),
-  });
-}
-
-function useUnassignedDriving() {
-  return useQuery({
-    queryKey: qk.unidentified({ status: 'PENDING' }),
-    queryFn: () =>
-      client.get<{ items: { durationSec: number }[]; total: number }>(endpoints.unidentified.list, {
-        params: { status: 'PENDING' },
-      }),
-    ...typedCachePolicy<{ items: { durationSec: number }[]; total: number }>('list'),
-  });
-}
 
 /** Rows per page the violations table opens with — the first option of the shared select. */
 const VIOLATIONS_PAGE_SIZE = 10;
@@ -97,10 +44,10 @@ function useDashboardViolations(page: number, limit: number) {
   return useQuery({
     queryKey: qk.violations({ window: '24h', page, limit }),
     queryFn: () =>
-      client.get<OffsetPage<Violation>>(endpoints.violations.list, {
+      client.get<OffsetPage<DashboardViolation>>(endpoints.violations.list, {
         params: { window: '24h', page, limit },
       }),
-    ...typedCachePolicy<OffsetPage<Violation>>('list'),
+    ...typedCachePolicy<OffsetPage<DashboardViolation>>('list'),
     // Changing page keeps the current rows on screen instead of flashing the table skeleton.
     placeholderData: keepPreviousData,
   });
@@ -111,11 +58,10 @@ export default function DashboardPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
-  const carrier = useCarrier();
-  const active = useActiveVehicleCount();
-  const total = useAllVehicleCount();
-  const fleet = useLiveFleet();
-  const unassigned = useUnassignedDriving();
+  // Perf plan item 3 (WD-074) — one call (`GET /dashboard/summary`) feeds the KPI row, map
+  // preview, duty donut and carrier subtitle. The violations table keeps its own server-paginated
+  // query (B-6) so page/limit work; that is the only other request on open.
+  const summary = useDashboardSummary();
   const [violationsPage, setViolationsPage] = useState(1);
   const [violationsLimit, setViolationsLimit] = useState(VIOLATIONS_PAGE_SIZE);
   const violations = useDashboardViolations(violationsPage, violationsLimit);
@@ -132,33 +78,35 @@ export default function DashboardPage() {
   // `trip.status_changed` exist today and patch this screen point-wise; everything else (the KPI
   // counts, the violations table) rides the 30s `cachePolicy('live')` poll until §7.4 ships.
   useRoom('fleet', {
-    'safety.event_created': () => void queryClient.invalidateQueries({ queryKey: qk.violations() }),
-    'trip.status_changed': () => void queryClient.invalidateQueries({ queryKey: qk.liveFleet() }),
+    'safety.event_created': () => void queryClient.invalidateQueries({ queryKey: qk.dashboardSummary }),
+    'trip.status_changed': () => void queryClient.invalidateQueries({ queryKey: qk.dashboardSummary }),
   });
   useRoom('violations', {
-    'safety.event_created': () => void queryClient.invalidateQueries({ queryKey: qk.violations() }),
+    'safety.event_created': () => void queryClient.invalidateQueries({ queryKey: qk.dashboardSummary }),
   });
 
-  const carrierTz = carrier.data?.timezone ?? 'America/New_York';
-  const subtitle = carrier.data
-    ? `${carrier.data.name} · Today, ${formatCarrier(new Date(), carrierTz, 'MMM d yyyy')} · ${timezoneAbbreviation(carrierTz)}`
+  const carrierTz = summary.data?.carrier.timezone ?? 'America/New_York';
+  const subtitle = summary.data
+    ? `${summary.data.carrier.name} · Today, ${formatCarrier(new Date(), carrierTz, 'MMM d yyyy')} · ${timezoneAbbreviation(carrierTz)}`
     : null;
   useDynamicSubtitle(subtitle);
 
-  const units = fleet.data?.items ?? [];
-  const onDutyCount = units.filter((u) => DUTY_ON_STATUSES.includes(u.dutyStatus)).length;
-  const movingCount = units.filter((u) => u.dutyStatus === 'DRIVING').length;
-  const idleCount = units.filter((u) => u.dutyStatus === 'IDLE').length;
-  const offlineCount = units.filter((u) => u.dutyStatus === 'ELD_OFFLINE').length;
+  const units: LiveFleetUnit[] = summary.data?.liveFleet.items ?? [];
+  const counts = summary.data?.liveFleet.counts;
+  const onDutyCount = counts?.onDuty ?? 0;
+  const movingCount = counts?.moving ?? 0;
+  const idleCount = counts?.idle ?? 0;
+  const offlineCount = counts?.offline ?? 0;
 
-  const unassignedTotalSec = useMemo(
-    () => (unassigned.data?.items ?? []).reduce((sum, s) => sum + (s.durationSec ?? 0), 0),
-    [unassigned.data],
-  );
+  const unassignedTotalSec = summary.data?.unidentified.totalDurationSec ?? 0;
 
-  const kpiLoading = active.isLoading || total.isLoading || fleet.isLoading || unassigned.isLoading;
+  const kpiLoading = summary.isLoading;
+  const activeVehicles = summary.data?.vehicles.active;
+  const totalVehicles = summary.data?.vehicles.total;
+  const violationItems = violations.data?.items ?? [];
+  const unidentifiedTotal = summary.data?.unidentified.total;
 
-  const columns: ColumnDef<Violation, unknown>[] = [
+  const columns: ColumnDef<DashboardViolation, unknown>[] = [
     {
       id: 'severity',
       header: 'SEVERITY',
@@ -217,30 +165,30 @@ export default function DashboardPage() {
         <div className="grid grid-cols-4 gap-card-gap">
           <KpiCard
             label="Active vehicles"
-            value={active.isError ? '—' : formatNumber(active.data?.total)}
-            hint={total.isError ? undefined : `of ${formatNumber(total.data?.total)}`}
+            value={summary.isError ? '—' : formatNumber(activeVehicles)}
+            hint={summary.isError ? undefined : `of ${formatNumber(totalVehicles)}`}
             icon={Truck}
             iconTone="info"
           />
           <KpiCard
             label="Drivers on duty"
-            value={fleet.isError ? '—' : formatNumber(onDutyCount)}
+            value={summary.isError ? '—' : formatNumber(onDutyCount)}
             icon={Users}
             iconTone="success"
           />
           <KpiCard
             label="HOS violations · 24h"
-            value={violations.isError ? '—' : formatNumber(violations.data?.total)}
+            value={summary.isError ? '—' : formatNumber(violationsTotal)}
             icon={AlertTriangle}
             iconTone="danger"
           />
           <KpiCard
             label="Unassigned driving"
-            value={unassigned.isError ? '—' : formatDuration(unassignedTotalSec)}
+            value={summary.isError ? '—' : formatDuration(unassignedTotalSec)}
             chip={
-              unassigned.isError
+              summary.isError
                 ? undefined
-                : { text: `${formatNumber(unassigned.data?.total)} segments`, tone: 'warning' }
+                : { text: `${formatNumber(unidentifiedTotal)} segments`, tone: 'warning' }
             }
             icon={Clock}
             iconTone="warning"
@@ -254,7 +202,7 @@ export default function DashboardPage() {
             <SectionHeader
               title="Live fleet"
               subtitle={
-                fleet.isError
+                summary.isError
                   ? undefined
                   : `${movingCount} moving · ${idleCount} idle · ${offlineCount} ELD offline`
               }
@@ -271,12 +219,12 @@ export default function DashboardPage() {
             />
           </div>
           <div className="p-card pt-4">
-            {fleet.isLoading ? (
+            {summary.isLoading ? (
               <div className="h-map-preview animate-pulse rounded-md bg-bg-subtle" />
-            ) : fleet.isError ? (
+            ) : summary.isError ? (
               <ErrorState
                 title="Could not load the fleet"
-                onRetry={() => void fleet.refetch()}
+                onRetry={() => void summary.refetch()}
               />
             ) : units.length === 0 ? (
               <EmptyState title={EMPTY_STATE_COPY.liveFleet.title} description={EMPTY_STATE_COPY.liveFleet.description} />
@@ -291,13 +239,13 @@ export default function DashboardPage() {
         <Card>
           <SectionHeader
             title="Duty status · now"
-            subtitle={fleet.isError ? undefined : `${units.length} drivers · ${onDutyCount} on duty`}
+            subtitle={summary.isError ? undefined : `${units.length} drivers · ${onDutyCount} on duty`}
           />
           <div className="mt-4">
-            {fleet.isLoading ? (
+            {summary.isLoading ? (
               <div className="h-40 animate-pulse rounded-md bg-bg-subtle" />
-            ) : fleet.isError ? (
-              <ErrorState title="Could not load duty status" onRetry={() => void fleet.refetch()} />
+            ) : summary.isError ? (
+              <ErrorState title="Could not load duty status" onRetry={() => void summary.refetch()} />
             ) : (
               <Suspense fallback={<div className="h-40 animate-pulse rounded-md bg-bg-subtle" />}>
                 <DutyDonut units={units} onSegmentClick={(status) => navigate(`/drivers?status=${status}`)} />
@@ -332,14 +280,14 @@ export default function DashboardPage() {
               onRetry={() => void violations.refetch()}
             />
           </div>
-        ) : (violations.data?.items.length ?? 0) === 0 ? (
+        ) : violationItems.length === 0 ? (
           <div className="p-card">
             <EmptyState title="No violations in the last 24 hours" />
           </div>
         ) : (
           <>
             <DataTable
-              data={violations.data!.items}
+              data={violationItems}
               columns={columns}
               caption="HOS violations and alerts"
               getRowId={(row) => row.id}

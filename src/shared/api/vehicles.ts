@@ -3,16 +3,17 @@
 // `GET /vehicles` and `GET /vehicles/:id` are real endpoints but answer with the RAW Prisma
 // `Vehicle` row (see web/backend-gaps.md "Contract deviations"): the field is `odometerMi`, not
 // `odometerMiles`, and there is no `assignedDriverId` or device join. This module is the single
-// place that (a) types the real response shape, and (b) does the client-side join against
-// `GET /drivers` (for the assigned driver) and `GET /devices` (for the paired ELD serial, gap
-// B-35) — ONE extra list call per screen render, never per row.
+// place that (a) types the real response shape, and (b) joins one server page against the
+// session-wide `/drivers` and `/devices` lookups (`shared/api/lookups.ts`, gap B-35) — fetched
+// once per session, never per page and never per row (WD-073).
 import { useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { client } from './client';
 import { endpoints } from './endpoints';
 import { qk, qkRoot } from './queryKeys';
 import { typedCachePolicy } from './queryPolicy';
-import type { OffsetPage } from './types';
+import { useDevicesLookup, useDriversLookup, useVehiclesLookup, vehiclesLookupQuery } from './lookups';
+import { compactParams, pagePolicy, usePagedQuery, type PageQueryOptions } from './paging';
 
 /** The real, raw `Vehicle` row (backend/prisma/schema.prisma `model Vehicle`). */
 export interface VehicleRow {
@@ -83,15 +84,6 @@ export function totalVehicleMiles(v: Pick<VehicleRow, 'odometerMi' | 'deviceOdom
   return v.deviceOdometerMi + v.odometerOffsetMi;
 }
 
-export interface VehicleListParams {
-  [key: string]: string | number | boolean | undefined;
-  page?: number;
-  limit?: number;
-  sort?: string;
-  q?: string;
-  status?: string;
-}
-
 /** Row as the Vehicles table needs it — vehicle fields plus the client-joined driver/device. */
 export interface VehicleTableRow extends VehicleRow {
   driver: DriverRow | null;
@@ -101,7 +93,40 @@ export interface VehicleTableRow extends VehicleRow {
   firmwareOutdated: boolean;
 }
 
-function joinVehicles(vehicles: VehicleRow[], drivers: DriverRow[], devices: DeviceRow[]): VehicleTableRow[] {
+/** Lightweight vehicle list for pickers (Assign driver's unit dropdown, Add driver's "Assigned
+ * unit" field) — the session-wide `reference` lookup (`shared/api/lookups.ts`), shared instead of
+ * every picker re-fetching. */
+export function useVehiclesPicker() {
+  return useVehiclesLookup();
+}
+
+/** W-03 server-page params — exactly what `VehicleListQueryDto` accepts (page/limit/sort/q/status). */
+export interface VehiclesPageParams {
+  [key: string]: string | number | boolean | undefined;
+  page: number;
+  limit: number;
+  q?: string;
+  status?: 'ACTIVE' | 'INACTIVE' | 'OUT_OF_SERVICE';
+  sort?: string;
+}
+
+export const VEHICLES_DEFAULT_PAGE: VehiclesPageParams = { page: 1, limit: 10 };
+
+/** One `GET /vehicles` page — shared by the W-03 table and the sidebar prefetch (WD-073). */
+export const vehiclesPageQuery = (params: VehiclesPageParams): PageQueryOptions<VehicleRow> => ({
+  queryKey: qk.vehicles(compactParams(params)),
+  queryFn: () => client.list<VehicleRow>(endpoints.vehicles.list, compactParams(params)),
+  ...pagePolicy('list'),
+});
+
+/** `total` of a status slice via `limit: 1` — the same keys the Dashboard KPI tiles use. */
+export const vehiclesCountQuery = (status?: 'ACTIVE' | 'INACTIVE' | 'OUT_OF_SERVICE'): PageQueryOptions<VehicleRow> => ({
+  queryKey: qk.vehicles(compactParams({ status, limit: 1 })),
+  queryFn: () => client.list<VehicleRow>(endpoints.vehicles.list, compactParams({ status, limit: 1 })),
+  ...pagePolicy('list'),
+});
+
+export function joinVehicles(vehicles: VehicleRow[], drivers: DriverRow[], devices: DeviceRow[]): VehicleTableRow[] {
   const driverByVehicle = new Map(drivers.filter((d) => d.assignedVehicleId).map((d) => [d.assignedVehicleId as string, d]));
   const deviceByVehicle = new Map(devices.filter((d) => d.vehicleId).map((d) => [d.vehicleId as string, d]));
   return vehicles.map((v) => {
@@ -117,51 +142,84 @@ function joinVehicles(vehicles: VehicleRow[], drivers: DriverRow[], devices: Dev
   });
 }
 
-/** Lightweight vehicle list for pickers (Assign driver's unit dropdown, Add driver's "Assigned
- * unit" field) — one `reference`-cached call, shared instead of every picker re-fetching. */
-export function useVehiclesPicker() {
-  return useQuery({
-    queryKey: qk.vehicles({ limit: 500 }),
-    queryFn: () => client.list<VehicleRow>(endpoints.vehicles.list, { limit: 500 }),
-    ...typedCachePolicy<OffsetPage<VehicleRow>>('reference'),
-  });
+export interface VehiclesListInput {
+  /** Server page — `page`, `limit`, `q`, `status`. */
+  params: VehiclesPageParams;
+  /** True while a client-only 11.23 group or the UNASSIGNED segment is active (B-54): the newest
+   * `FILTER_WINDOW` units are loaded once and filtered in memory instead of one server page. */
+  useWindow: boolean;
+  /** Runs against the joined window rows only. */
+  filter: (rows: VehicleTableRow[]) => VehicleTableRow[];
 }
 
-/** W-03 Vehicles table. One `/vehicles` page call + one full `/drivers` + `/devices` list
- * (cached, `reference` policy) to resolve the DRIVER and ELD SERIAL columns client-side. */
-export function useVehiclesList(params: VehicleListParams) {
-  const vehiclesQuery = useQuery({
-    queryKey: qk.vehicles(params),
-    queryFn: () => client.list<VehicleRow>(endpoints.vehicles.list, params),
-    ...typedCachePolicy<OffsetPage<VehicleRow>>('list'),
-  });
-  const driversQuery = useQuery({
-    queryKey: qk.drivers({ limit: 500 }),
-    queryFn: () => client.list<DriverRow>(endpoints.drivers.list, { limit: 500 }),
-    ...typedCachePolicy<OffsetPage<DriverRow>>('reference'),
-  });
-  const devicesQuery = useQuery({
-    queryKey: qk.devices({ limit: 500 }),
-    queryFn: () => client.list<DeviceRow>(endpoints.devices.list, { limit: 500 }),
-    ...typedCachePolicy<OffsetPage<DeviceRow>>('reference'),
+/** W-03 Vehicles table — one `/vehicles` page per render plus the session-wide `/drivers` and
+ * `/devices` lookups (reference-cached, fetched once, never per page) for the DRIVER and
+ * ELD SERIAL columns (WD-073). */
+export function useVehiclesList({ params, useWindow, filter }: VehiclesListInput) {
+  const driversQuery = useDriversLookup();
+  const devicesQuery = useDevicesLookup();
+  const drivers = driversQuery.data?.items;
+  const devices = devicesQuery.data?.items;
+
+  const paged = usePagedQuery<VehicleRow>({
+    server: vehiclesPageQuery(params),
+    window: vehiclesLookupQuery(),
+    useWindow,
+    page: params.page,
+    limit: params.limit,
+    filter: (rows) => filter(joinVehicles(rows, drivers ?? [], devices ?? [])).map((r) => r as VehicleRow),
   });
 
   const rows = useMemo(
-    () => joinVehicles(vehiclesQuery.data?.items ?? [], driversQuery.data?.items ?? [], devicesQuery.data?.items ?? []),
-    [vehiclesQuery.data, driversQuery.data, devicesQuery.data],
+    () => joinVehicles(paged.items, drivers ?? [], devices ?? []),
+    [paged.items, drivers, devices],
+  );
+  /** The whole fleet (window mode only) — feeds the drawer's option lists. */
+  const fleetRows = useMemo(
+    () => joinVehicles(paged.windowRows, drivers ?? [], devices ?? []),
+    [paged.windowRows, drivers, devices],
   );
 
   return {
     rows,
-    page: vehiclesQuery.data,
-    isLoading: vehiclesQuery.isLoading,
+    total: paged.total,
+    totalPages: paged.totalPages,
+    page: paged.page,
+    mode: paged.mode,
+    isLoading: paged.isLoading,
+    isFetching: paged.isFetching,
     // WB-038 — a transient failure of the supporting `/drivers` or `/devices` lookup (used only
-    // to join the DRIVER / ELD SERIAL columns) used to blank the whole table even while
-    // `vehiclesQuery` still held good cached rows. Only the primary list going without any data
-    // at all is a real error state; the joins degrade to `Unassigned` / `Not assigned` already.
-    isError: vehiclesQuery.isError && !vehiclesQuery.data,
-    error: vehiclesQuery.error ?? driversQuery.error ?? devicesQuery.error,
-    refetch: vehiclesQuery.refetch,
+    // to join the DRIVER / ELD SERIAL columns) must not blank a table that has good rows. Only
+    // the primary list going without any data at all is a real error state; the joins degrade
+    // to `Unassigned` / `Not assigned` already.
+    isError: paged.isError,
+    error: paged.error ?? driversQuery.error ?? devicesQuery.error,
+    refetch: paged.refetch,
+    fleetRows,
+    driversLookup: driversQuery,
+    devicesLookup: devicesQuery,
+  };
+}
+
+/** Segment counters `All · Active · Inactive · Unassigned` without loading the fleet: three
+ * `limit: 1` totals (cached 60 s, shared with the Dashboard tiles) plus the drivers lookup —
+ * a unit is "unassigned" when no driver row points at it, exactly the DRIVER column's rule. */
+export function useVehicleCounts() {
+  const all = useQuery(vehiclesCountQuery());
+  const active = useQuery(vehiclesCountQuery('ACTIVE'));
+  const inactive = useQuery(vehiclesCountQuery('INACTIVE'));
+  const drivers = useDriversLookup();
+  const assigned = useMemo(
+    () => new Set((drivers.data?.items ?? []).map((d) => d.assignedVehicleId).filter(Boolean)).size,
+    [drivers.data],
+  );
+  const total = all.data?.total ?? 0;
+  return {
+    all: total,
+    active: active.data?.total ?? 0,
+    inactive: inactive.data?.total ?? 0,
+    unassigned: drivers.data ? Math.max(0, total - assigned) : 0,
+    isLoading: all.isLoading || active.isLoading || inactive.isLoading,
   };
 }
 
@@ -174,30 +232,25 @@ export function useVehicle(id: string | undefined) {
   });
 }
 
-/** The driver currently assigned to a unit — B-35 style client join against `/drivers`. */
+/** The driver currently assigned to a unit — B-35 style client join, read from the session-wide
+ * `/drivers` lookup (no extra request when Vehicles / Trips / DVIR already loaded it). */
 export function useVehicleAssignedDriver(vehicleId: string | undefined) {
-  return useQuery({
-    queryKey: qk.vehicleAssignedDriver(vehicleId ?? ''),
-    queryFn: async () => {
-      const page = await client.list<DriverRow>(endpoints.drivers.list, { limit: 500 });
-      return page.items.find((d) => d.assignedVehicleId === vehicleId) ?? null;
-    },
-    enabled: Boolean(vehicleId),
-    ...typedCachePolicy<DriverRow | null>('reference'),
-  });
+  const query = useDriversLookup(Boolean(vehicleId));
+  const data = useMemo(
+    () => (query.data ? (query.data.items.find((d) => d.assignedVehicleId === vehicleId) ?? null) : undefined),
+    [query.data, vehicleId],
+  );
+  return { ...query, data };
 }
 
-/** ⛔ GAP B-35 — no `GET /devices?vehicleId=` filter; list once and find client-side. */
+/** ⛔ GAP B-35 — no `GET /devices?vehicleId=` filter; read from the session-wide `/devices` lookup. */
 export function useVehicleDevice(vehicleId: string | undefined) {
-  return useQuery({
-    queryKey: qk.vehicleDevice(vehicleId ?? ''),
-    queryFn: async () => {
-      const page = await client.list<DeviceRow>(endpoints.devices.list, { limit: 500 });
-      return page.items.find((d) => d.vehicleId === vehicleId) ?? null;
-    },
-    enabled: Boolean(vehicleId),
-    ...typedCachePolicy<DeviceRow | null>('reference'),
-  });
+  const query = useDevicesLookup(Boolean(vehicleId));
+  const data = useMemo(
+    () => (query.data ? (query.data.items.find((d) => d.vehicleId === vehicleId) ?? null) : undefined),
+    [query.data, vehicleId],
+  );
+  return { ...query, data };
 }
 
 export interface DtcItem {

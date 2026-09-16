@@ -819,6 +819,7 @@ the session).
 **Owner:** web feature — Live Fleet map bounds-fitting (likely `features/live-fleet`), and
 whichever feature issues the per-driver `/logs/:id/range` calls instead of a bulk query (needs
 code-location follow-up; not fixed here — QA pass only, no code changed per task scope).
+**Resolution (fan-out half, `web-reports-transfer`, 2026-09-15):** the source was `useFleetRangeTotals` (WD-039) used by both W-13 Activity and W-15 FMCSA pack — one `GET /logs/:driverId/range` per ACTIVE driver each, uncancelled because the hooks passed no `signal`. W-01 never issued the call. Fixed per WD-070/WD-071: W-13 → one `GET /reports/activity/summary` (server paging/sort/terminal, B-46 shipped); W-15 → one summary read for all drivers or the picked driver's single range; every reports query and `useLogRange` pass TanStack's `signal`, and the jsdom/undici AbortSignal realm mismatch that made an earlier agent drop it is fixed in `tests/setup/jsdom-native-abort.ts`. Request counts per screen with a 50-driver fleet (`src/app/logsRangeFanOut.test.tsx`, guard ≤ 5): W-13 50 → 0, W-15 all drivers 50 → 0, W-15 one driver 50 → 1, W-01 0 → 0. Verified against the live `:3002` API (14-day fleet summary 0.31 s). The Live Fleet map half (item 1) belongs to `web-dashboard-fleet`.
 
 **Root cause (map part, confirmed 2026-09-14 with the ~247-unit `/api/live/fleet` mock — 170 mock
 + 77 seed, some with `null` lat/lon):** `shared/map/FleetMap.tsx` never fit the camera to the
