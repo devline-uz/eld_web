@@ -103,7 +103,7 @@ function DetailCard({
   const shiftEnds = useCountdown(unit.shiftEndsAt);
 
   return (
-    <div className="absolute right-4 top-4 w-detail-card rounded-lg bg-bg-surface p-4 shadow-pop">
+    <div className="absolute right-4 top-16 z-10 w-detail-card rounded-lg bg-bg-surface p-4 shadow-pop">
       <div className="flex items-start justify-between">
         <h3 className="text-card-title font-semibold text-text">Unit {unit.unitNumber}</h3>
         <button type="button" aria-label="Close" onClick={onClose} className="text-text-muted hover:text-text">
@@ -221,7 +221,13 @@ export default function LiveFleetPage() {
   }
 
   return (
-    <div className="flex h-full">
+    // The route stays `fullBleed` (app/router.tsx), so below 1280px this page keeps running
+    // edge-to-edge exactly as before. At `xl:` only, it becomes the W-16 Messages content
+    // container (features/messages/MessagesPage.tsx): `xl:m-page` stands in for the page padding
+    // the full-bleed `<main>` drops, which leaves `100vh - topbar - 2 * page` — precisely
+    // `--spacing-content-h`. `xl:overflow-hidden` clips the left column's square corners inside
+    // the new radius; both panes already scroll on their own.
+    <div className="flex h-full xl:m-page xl:h-content-h xl:overflow-hidden xl:rounded-lg xl:border xl:border-border xl:bg-bg-surface">
       <div className="flex w-unit-list shrink-0 flex-col border-r border-border bg-bg-surface">
         <div className="p-4">
           <label className="relative flex items-center">
