@@ -39,10 +39,14 @@ beforeEach(() => {
   setAccessToken('test-token');
 });
 
+/** Answers like the real `GET /vehicles`: one page, narrowed by `q` and `status` (WD-073). */
 function usePopulatedFleet() {
   server.use(
-    http.get(url(endpoints.vehicles.list), () =>
-      ok({
+    http.get(url(endpoints.vehicles.list), ({ request }) => {
+      const params = new URL(request.url).searchParams;
+      const q = (params.get('q') ?? '').toLowerCase();
+      const status = params.get('status');
+      const page = {
         items: [
           {
             id: 'veh_1',
@@ -71,8 +75,14 @@ function usePopulatedFleet() {
         limit: 500,
         total: 1,
         totalPages: 1,
-      }),
-    ),
+      };
+      const items = page.items.filter(
+        (v) =>
+          (!status || v.status === status) &&
+          (!q || [v.unitNumber, v.vin, v.licensePlate ?? ''].some((t) => t.toLowerCase().includes(q))),
+      );
+      return ok({ ...page, items, total: items.length });
+    }),
     http.get(url(endpoints.drivers.list), () =>
       ok({
         items: [

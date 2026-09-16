@@ -4,13 +4,10 @@
 // backend/src/modules/trips/dto/trips.dto.ts) — `status` there is the raw `Trip.status` enum
 // (`PLANNED`/`ASSIGNED`/`IN_PROGRESS`/`DELIVERED`/`CANCELLED`), not the drawn STATUS column,
 // which is the *computed* `displayStatus` (`On time`/`Late`/`Loading`/…, see
-// `shared/api/trips.ts` `computeDisplayStatus`). `useTripsList` already loads the full board
-// (`limit: 500`) once to join driver/vehicle and to compute the segment counts and KPIs on the
-// same set the table renders, exactly like W-03 Vehicles (web/decisions.md WD-024 precedent) —
-// so every group here, including `status`/`driverId` that the server *could* take, runs
-// client-side against that already-loaded set rather than firing a second, narrower request.
-// UNIT (vehicleId) and the depart-date range have no server param at all — recorded as
-// web/backend-gaps.md B-59.
+// `shared/api/trips.ts` `computeDisplayStatus`). The board is server-paged (WD-073): the Active
+// segment is a bounded in-memory set (exact), while Scheduled/Completed switch to the newest
+// `FILTER_WINDOW` rows only while one of these groups is active. UNIT (vehicleId) and the
+// depart-date range have no server param at all — recorded as web/backend-gaps.md B-59.
 import type { TripDisplayStatus, TripTableRow } from '@/shared/api/trips';
 
 export const TRIP_STATUS_OPTIONS: TripDisplayStatus[] = ['On time', 'Late', 'Loading', 'Delivered', 'Cancelled', 'Planned'];

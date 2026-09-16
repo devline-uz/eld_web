@@ -447,7 +447,8 @@ export function usePackRodsCounts(from: string, to: string, driverId: string | n
     // (transfers/snapshot.ts): a day with no persisted log is uncertified too (WD-070).
     const perDriver = items.map((i) => Math.max(0, rangeDays - i.certifiedDays));
     return {
-      dailyLogs: items.length * rangeDays,
+      // `days` = persisted DailyLog rows per driver (verified on the live API 2026-09-15).
+      dailyLogs: items.reduce((acc, i) => acc + i.days, 0),
       drivers: items.length,
       uncertified: perDriver.reduce((acc, n) => acc + n, 0),
       uncertifiedDrivers: perDriver.filter((n) => n > 0).length,

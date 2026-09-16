@@ -1,8 +1,8 @@
 // owner: web-api-client — the §6.4 cache table, expressed once. A screen declares its policy by
 // name (`...cachePolicy('live')`), never by a magic number:
 //
-//   me / carrier / roles      5 min   —
-//   lists                     30 s    —
+//   me / carrier / roles      10 min  —      (raised from 5 min — WD-073, perf plan item 4)
+//   lists                     60 s    —      (raised from 30 s — WD-073; window focus still refetches)
 //   Live Fleet, Dashboard     10 s    30 s
 //   HOS daily log             15 s    —      (invalidated by eld.events_ingested)
 //   report status             0       3 s    stops at READY / FAILED
@@ -16,8 +16,11 @@ import type { Query, QueryClientConfig, UseQueryOptions } from '@tanstack/react-
 import { ApiError } from './errors';
 
 export const STALE = {
-  reference: 5 * 60_000,
-  list: 30_000,
+  // WD-073 — reference lookups (drivers/vehicles/devices name joins) and lists are held longer so
+  // hovering between screens does not refetch on every visit; `live` stays 10 s and every list
+  // still refetches on window focus (§6.4). gcTime must stay ≥ the longest staleTime.
+  reference: 10 * 60_000,
+  list: 60_000,
   slowList: 60_000,
   live: 10_000,
   hosDay: 15_000,
@@ -125,7 +128,7 @@ export function cachePolicy(name: CachePolicyName): PolicyOptions {
 export const defaultQueryClientOptions: QueryClientConfig['defaultOptions'] = {
   queries: {
     staleTime: STALE.list,
-    gcTime: 5 * 60_000,
+    gcTime: 15 * 60_000,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
     retry: false,

@@ -3,19 +3,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ACCESS_TOKEN_TTL_MS,
   REFRESH_LEAD_MS,
+  clearSessionSnapshot,
   clearTokens,
   getAccessToken,
   getAccessTokenExpiry,
   getRefreshToken,
+  readSessionSnapshot,
   setAccessToken,
   setRefreshToken,
   storeTokenPair,
+  writeSessionSnapshot,
 } from './tokenStore';
 
 const KEY = 'obk.rt';
 
 beforeEach(() => {
   window.localStorage.clear();
+  window.sessionStorage.clear();
   clearTokens();
 });
 
@@ -106,5 +110,62 @@ describe('storeTokenPair / clearTokens', () => {
     expect(getAccessToken()).toBeNull();
     expect(getAccessTokenExpiry()).toBe(0);
     expect(window.localStorage.getItem(KEY)).toBeNull();
+  });
+});
+
+describe('the session snapshot (WD-072)', () => {
+  const SNAP_KEY = 'obk.session';
+  const ME = { id: 'usr_1', type: 'user', role: 'VIEWER', permissions: { dashboard: 'READ' } };
+
+  it('round-trips the /auth/me payload and the expiry through sessionStorage only', () => {
+    writeSessionSnapshot({ me: ME, accessTokenExpiresAt: 1_700_000_000_000 });
+    expect(readSessionSnapshot()).toEqual({ me: ME, accessTokenExpiresAt: 1_700_000_000_000 });
+    expect(window.sessionStorage.getItem(SNAP_KEY)).not.toBeNull();
+    expect(window.localStorage.getItem(SNAP_KEY)).toBeNull();
+  });
+
+  it('never stores a token, even if one is smuggled in on the payload', () => {
+    writeSessionSnapshot({
+      me: { ...ME, accessToken: 'a-secret', refreshToken: 'r-secret' } as never,
+      accessTokenExpiresAt: 1,
+    });
+    const raw = window.sessionStorage.getItem(SNAP_KEY) ?? '';
+    expect(raw).not.toContain('a-secret');
+    expect(raw).not.toContain('r-secret');
+    expect(readSessionSnapshot()?.me).toEqual(ME);
+  });
+
+  it('rejects a malformed or partial snapshot instead of trusting it', () => {
+    expect(readSessionSnapshot()).toBeNull();
+    window.sessionStorage.setItem(SNAP_KEY, 'not json');
+    expect(readSessionSnapshot()).toBeNull();
+    window.sessionStorage.setItem(SNAP_KEY, JSON.stringify({ me: { id: 'x' } }));
+    expect(readSessionSnapshot()).toBeNull();
+    window.sessionStorage.setItem(SNAP_KEY, JSON.stringify({ me: ME }));
+    expect(readSessionSnapshot()).toEqual({ me: ME, accessTokenExpiresAt: 0 });
+  });
+
+  it('is cleared by clearSessionSnapshot() and by clearTokens()', () => {
+    writeSessionSnapshot({ me: ME, accessTokenExpiresAt: 1 });
+    clearSessionSnapshot();
+    expect(readSessionSnapshot()).toBeNull();
+    writeSessionSnapshot({ me: ME, accessTokenExpiresAt: 1 });
+    clearTokens();
+    expect(readSessionSnapshot()).toBeNull();
+  });
+
+  it('survives a storage that throws', () => {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('QuotaExceededError');
+    });
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('SecurityError');
+    });
+    vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(() => {
+      throw new Error('SecurityError');
+    });
+    expect(() => writeSessionSnapshot({ me: ME, accessTokenExpiresAt: 1 })).not.toThrow();
+    expect(readSessionSnapshot()).toBeNull();
+    expect(() => clearSessionSnapshot()).not.toThrow();
   });
 });

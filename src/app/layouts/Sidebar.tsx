@@ -1,9 +1,12 @@
 // Sidebar chrome — web/tz.md §4.1 brand block, §4.2 navigation, §4.3 organisation card.
+import { useEffect, useMemo } from 'react';
 import { ChevronDown, Truck } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { usePermission } from '@/shared/auth/usePermission';
 import { NAV_SECTIONS, isNavItemVisible } from '../navigation';
+import { createRouteWarmer } from '../routePrefetch';
 
 const ICON = 18;
 
@@ -57,6 +60,11 @@ export function Sidebar() {
   const { user } = useAuth();
   const { can } = usePermission();
   const role = user?.role ?? null;
+  // WD-073 — hover/focus intent warms the route chunk and its primary list query (debounced, so
+  // sweeping the pointer down the sidebar fires only the link it settles on).
+  const queryClient = useQueryClient();
+  const warmer = useMemo(() => createRouteWarmer(queryClient), [queryClient]);
+  useEffect(() => () => warmer.cancel(), [warmer]);
 
   return (
     <aside className="flex w-sidebar shrink-0 flex-col border-r border-border bg-bg-sidebar">
@@ -76,6 +84,9 @@ export function Sidebar() {
                     <NavLink
                       to={item.to}
                       end={item.end ?? false}
+                      onMouseEnter={() => warmer.schedule(item.to)}
+                      onFocus={() => warmer.schedule(item.to)}
+                      onMouseLeave={warmer.cancel}
                       className={({ isActive }) =>
                         [
                           'flex h-nav-item items-center gap-3 rounded-md px-3 text-nav',

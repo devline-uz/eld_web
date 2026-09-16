@@ -3,18 +3,18 @@
 // `GET /dvir`, `GET /defects`, `GET /work-orders`, `GET /maintenance-schedules` all answer with
 // the RAW Prisma rows (see web/backend-gaps.md WD-024 pattern) — `driverId`/`vehicleId` only, no
 // name join, and `Defect` has no `assignedTo`/shop field at all (web/backend-gaps.md B-36). This
-// module is the single place that (a) types the real response shapes and (b) does the
-// client-side joins against `GET /vehicles` and `GET /drivers` (reference-cached, one extra list
-// call, not one per row — the same pattern as `shared/api/vehicles.ts`).
+// module is the single place that (a) types the real response shapes and (b) joins one server
+// page (or one bounded window) against the session-wide `/vehicles` and `/drivers` lookups
+// (`shared/api/lookups.ts`) — fetched once per session, never per page, never per row (WD-073).
 import { useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { client } from './client';
 import { endpoints } from './endpoints';
 import { qk, qkRoot } from './queryKeys';
 import { typedCachePolicy } from './queryPolicy';
-import type { OffsetPage } from './types';
-import { useDriversList } from './drivers';
-import { useVehiclesPicker, type DriverRow, type VehicleRow } from './vehicles';
+import { FILTER_WINDOW, useDriverMap, useVehicleMap } from './lookups';
+import { compactParams, pagePolicy, usePagedQuery, type PageQueryOptions } from './paging';
+import type { DriverRow, VehicleRow } from './vehicles';
 
 /* --------------------------------------------------------------------- raw shapes (Prisma) */
 
@@ -127,6 +127,9 @@ export interface DvirTableRow extends DvirRow {
   driver: DriverRow | null;
   vehicle: VehicleRow | null;
   defects: DefectRow[];
+  /** False when the DVIR reported defects but none sit inside the loaded defects window (B-66):
+   * the DEFECTS column then shows `—` (unknown), never `None`. */
+  defectsKnown: boolean;
 }
 
 export interface DefectTableRow extends DefectRow {
@@ -141,64 +144,85 @@ export interface ScheduleTableRow extends MaintenanceScheduleRow {
   vehicle: VehicleRow | null;
 }
 
-function driverMap(drivers: DriverRow[]): Map<string, DriverRow> {
-  return new Map(drivers.map((d) => [d.id, d]));
-}
-function vehicleMap(vehicles: VehicleRow[]): Map<string, VehicleRow> {
-  return new Map(vehicles.map((v) => [v.id, v]));
-}
 
 /* --------------------------------------------------------------------- DVIRs */
 
-export interface DvirListParams {
+/** Exactly `DvirListQueryDto` (page/limit/sort/vehicleId/driverId/repairStatus). */
+export interface DvirsPageParams {
   [key: string]: string | number | boolean | undefined;
-  page?: number;
-  limit?: number;
+  page: number;
+  limit: number;
   sort?: string;
   vehicleId?: string;
   driverId?: string;
   repairStatus?: RepairStatus;
 }
 
-/** W-09 `DVIRs` tab. One `/dvir` page call + one full `/defects` list (`reference`-cached) to
- * resolve the DEFECTS column without a per-row fan-out, plus the shared driver/vehicle joins. */
-export function useDvirsList(params: DvirListParams) {
-  const dvirQuery = useQuery({
-    queryKey: qk.dvirs(params),
-    queryFn: () => client.list<DvirRow>(endpoints.dvir.list, params),
-    ...typedCachePolicy<OffsetPage<DvirRow>>('list'),
-  });
-  const defectsQuery = useQuery({
-    queryKey: qk.defects({ limit: 500 }),
-    queryFn: () => client.list<DefectRow>(endpoints.defects.list, { limit: 500 }),
-    ...typedCachePolicy<OffsetPage<DefectRow>>('list'),
-  });
-  const driversQuery = useDriversList({ limit: 500 });
-  const vehiclesQuery = useVehiclesPicker();
+export const dvirsPageQuery = (params: DvirsPageParams): PageQueryOptions<DvirRow> => ({
+  queryKey: qk.dvirs(compactParams(params)),
+  queryFn: () => client.list<DvirRow>(endpoints.dvir.list, compactParams(params)),
+  ...pagePolicy('list'),
+});
 
-  const rows = useMemo((): DvirTableRow[] => {
-    const drivers = driverMap(driversQuery.data?.items ?? []);
-    const vehicles = vehicleMap(vehiclesQuery.data?.items ?? []);
-    const defectsByDvir = new Map<string, DefectRow[]>();
-    for (const defect of defectsQuery.data?.items ?? []) {
-      const list = defectsByDvir.get(defect.dvirId) ?? [];
-      list.push(defect);
-      defectsByDvir.set(defect.dvirId, list);
-    }
-    return (dvirQuery.data?.items ?? []).map((d) => ({
+/** The newest DVIRs (`submittedAt` desc is the API default). One request serves the "Recent
+ * DVIRs · Last 48 hours" list, the `DVIRs today` KPI and the 11.23 filter window (B-60). The
+ * API has no date-range param, so a day with more than `RECENT_DVIR_WINDOW` submissions is
+ * counted as `RECENT_DVIR_WINDOW+` (B-66). */
+export const RECENT_DVIR_WINDOW = 200;
+export const recentDvirsQuery = () => dvirsPageQuery({ page: 1, limit: RECENT_DVIR_WINDOW });
+
+/** The newest defects (`createdAt` desc) — joined onto the recent DVIRs by `dvirId`; `/dvir`
+ * does not embed its defects and `/defects` has no `dvirId` param (B-66). */
+export const RECENT_DEFECT_WINDOW = 200;
+export const recentDefectsQuery = () => defectsPageQuery({ page: 1, limit: RECENT_DEFECT_WINDOW });
+
+export function joinDvirs(
+  dvirs: DvirRow[],
+  drivers: Map<string, DriverRow>,
+  vehicles: Map<string, VehicleRow>,
+  defects: DefectRow[],
+): DvirTableRow[] {
+  const defectsByDvir = new Map<string, DefectRow[]>();
+  for (const defect of defects) {
+    const list = defectsByDvir.get(defect.dvirId) ?? [];
+    list.push(defect);
+    defectsByDvir.set(defect.dvirId, list);
+  }
+  return dvirs.map((d) => {
+    const own = defectsByDvir.get(d.id) ?? [];
+    return {
       ...d,
       driver: drivers.get(d.driverId) ?? null,
       vehicle: vehicles.get(d.vehicleId) ?? null,
-      defects: defectsByDvir.get(d.id) ?? [],
-    }));
-  }, [dvirQuery.data, defectsQuery.data, driversQuery.data, vehiclesQuery.data]);
+      defects: own,
+      defectsKnown: d.vehicleCondition === 'SATISFACTORY' || own.length > 0,
+    };
+  });
+}
+
+/** W-09 `DVIRs` tab (WD-073): the newest `RECENT_DVIR_WINDOW` DVIRs, joined with the session-wide
+ * driver/vehicle lookups and the newest defects. Filtering (48 h, search, 11.23 groups) is the
+ * page's — it runs on this bounded window, never on a fetch-everything set. */
+export function useRecentDvirs() {
+  const dvirQuery = useQuery(recentDvirsQuery());
+  const defectsQuery = useQuery(recentDefectsQuery());
+  const { map: drivers, query: driversQuery } = useDriverMap();
+  const { map: vehicles, query: vehiclesQuery } = useVehicleMap();
+
+  const rows = useMemo(
+    (): DvirTableRow[] => joinDvirs(dvirQuery.data?.items ?? [], drivers, vehicles, defectsQuery.data?.items ?? []),
+    [dvirQuery.data, defectsQuery.data, drivers, vehicles],
+  );
 
   return {
     rows,
     page: dvirQuery.data,
-    isLoading: dvirQuery.isLoading || driversQuery.isLoading || vehiclesQuery.isLoading,
-    isError: dvirQuery.isError || driversQuery.isError || vehiclesQuery.isError,
-    refetch: dvirQuery.refetch,
+    /** True when the window is full — a "today" count may then be a floor (B-66). */
+    windowFull: (dvirQuery.data?.items.length ?? 0) >= RECENT_DVIR_WINDOW,
+    isLoading: dvirQuery.isLoading,
+    isError: dvirQuery.isError && !dvirQuery.data,
+    error: dvirQuery.error ?? driversQuery.error ?? vehiclesQuery.error,
+    refetch: () => void dvirQuery.refetch(),
   };
 }
 
@@ -209,17 +233,10 @@ export function useDvir(id: string | undefined) {
     enabled: Boolean(id),
     ...typedCachePolicy<DvirDetail>('reference'),
   });
-  const driversQuery = useDriversList({ limit: 500 });
-  const vehiclesQuery = useVehiclesPicker();
-
-  const driver = useMemo(
-    () => driversQuery.data?.items.find((d) => d.id === dvirQuery.data?.driverId) ?? null,
-    [driversQuery.data, dvirQuery.data],
-  );
-  const vehicle = useMemo(
-    () => vehiclesQuery.data?.items.find((v) => v.id === dvirQuery.data?.vehicleId) ?? null,
-    [vehiclesQuery.data, dvirQuery.data],
-  );
+  const { map: drivers } = useDriverMap();
+  const { map: vehicles } = useVehicleMap();
+  const driver = dvirQuery.data ? drivers.get(dvirQuery.data.driverId) ?? null : null;
+  const vehicle = dvirQuery.data ? vehicles.get(dvirQuery.data.vehicleId) ?? null : null;
 
   return { ...dvirQuery, driver, vehicle };
 }
@@ -250,25 +267,69 @@ export interface DefectListParams {
   outOfService?: boolean;
 }
 
+export const defectsPageQuery = (params: DefectListParams): PageQueryOptions<DefectRow> => ({
+  queryKey: qk.defects(compactParams(params)),
+  queryFn: () => client.list<DefectRow>(endpoints.defects.list, compactParams(params)),
+  ...pagePolicy('list'),
+});
+
+function useJoinedDefects(items: DefectRow[]) {
+  const { map: vehicles, query } = useVehicleMap();
+  const rows = useMemo(
+    (): DefectTableRow[] => items.map((d) => ({ ...d, vehicle: vehicles.get(d.vehicleId) ?? null })),
+    [items, vehicles],
+  );
+  return { rows, vehiclesQuery: query };
+}
+
+/** A parameterised defects list (modals: "defects on this unit") — vehicle join from the lookup. */
 export function useDefectsList(params: DefectListParams) {
-  const defectsQuery = useQuery({
-    queryKey: qk.defects(params),
-    queryFn: () => client.list<DefectRow>(endpoints.defects.list, params),
-    ...typedCachePolicy<OffsetPage<DefectRow>>('list'),
-  });
-  const vehiclesQuery = useVehiclesPicker();
-
-  const rows = useMemo((): DefectTableRow[] => {
-    const vehicles = vehicleMap(vehiclesQuery.data?.items ?? []);
-    return (defectsQuery.data?.items ?? []).map((d) => ({ ...d, vehicle: vehicles.get(d.vehicleId) ?? null }));
-  }, [defectsQuery.data, vehiclesQuery.data]);
-
+  const defectsQuery = useQuery(defectsPageQuery(params));
+  const { rows, vehiclesQuery } = useJoinedDefects(defectsQuery.data?.items ?? []);
   return {
     rows,
     page: defectsQuery.data,
-    isLoading: defectsQuery.isLoading || vehiclesQuery.isLoading,
-    isError: defectsQuery.isError || vehiclesQuery.isError,
+    isLoading: defectsQuery.isLoading,
+    isError: defectsQuery.isError && !defectsQuery.data,
+    error: defectsQuery.error ?? vehiclesQuery.error,
     refetch: defectsQuery.refetch,
+  };
+}
+
+export interface OpenDefectsInput {
+  page: number;
+  limit: number;
+  /** Free text (unit / component / description) — `/defects` has no `q` (B-66), so a search
+   * switches to the bounded newest-first window and matches in memory. */
+  search: string;
+}
+
+/** W-09 "Open defects" table — one `status=OPEN` server page per render, plus the CRITICAL
+ * count (`limit: 1`) for the KPI chip and the section subtitle. */
+export function useOpenDefects({ page, limit, search }: OpenDefectsInput) {
+  const { map: vehicles } = useVehicleMap();
+  const needle = search.trim().toLowerCase();
+  const paged = usePagedQuery<DefectRow>({
+    server: defectsPageQuery({ page, limit, status: 'OPEN' }),
+    window: defectsPageQuery({ page: 1, limit: FILTER_WINDOW, status: 'OPEN' }),
+    useWindow: needle.length > 0,
+    page,
+    limit,
+    filter: (rows) =>
+      rows.filter((d) =>
+        [vehicles.get(d.vehicleId)?.unitNumber, d.category, d.description].some((t) => (t ?? '').toLowerCase().includes(needle)),
+      ),
+  });
+  const critical = useQuery(defectsPageQuery({ page: 1, limit: 1, status: 'OPEN', severity: 'CRITICAL' }));
+  const { rows } = useJoinedDefects(paged.items);
+  return {
+    rows,
+    total: paged.total,
+    totalPages: paged.totalPages,
+    criticalCount: critical.data?.total ?? 0,
+    isLoading: paged.isLoading,
+    isError: paged.isError,
+    refetch: paged.refetch,
   };
 }
 
@@ -320,24 +381,30 @@ export interface WorkOrderListParams {
   priority?: WorkOrderPriority;
 }
 
-export function useWorkOrdersList(params: WorkOrderListParams) {
-  const woQuery = useQuery({
-    queryKey: qk.workOrders(params),
-    queryFn: () => client.list<WorkOrderRow>(endpoints.workOrders.list, params),
-    ...typedCachePolicy<OffsetPage<WorkOrderRow>>('list'),
-  });
-  const vehiclesQuery = useVehiclesPicker();
+export const workOrdersPageQuery = (params: WorkOrderListParams): PageQueryOptions<WorkOrderRow> => ({
+  queryKey: qk.workOrders(compactParams(params)),
+  queryFn: () => client.list<WorkOrderRow>(endpoints.workOrders.list, compactParams(params)),
+  ...pagePolicy('list'),
+});
 
-  const rows = useMemo((): WorkOrderTableRow[] => {
-    const vehicles = vehicleMap(vehiclesQuery.data?.items ?? []);
-    return (woQuery.data?.items ?? []).map((w) => ({ ...w, vehicle: vehicles.get(w.vehicleId) ?? null }));
-  }, [woQuery.data, vehiclesQuery.data]);
+/** One `GET /work-orders` page (`q`, `status`, `priority`, `vehicleId` are real params). */
+export function useWorkOrdersList(params: WorkOrderListParams) {
+  const woQuery = useQuery(workOrdersPageQuery(params));
+  const { map: vehicles, query: vehiclesQuery } = useVehicleMap();
+
+  const rows = useMemo(
+    (): WorkOrderTableRow[] => (woQuery.data?.items ?? []).map((w) => ({ ...w, vehicle: vehicles.get(w.vehicleId) ?? null })),
+    [woQuery.data, vehicles],
+  );
 
   return {
     rows,
     page: woQuery.data,
-    isLoading: woQuery.isLoading || vehiclesQuery.isLoading,
-    isError: woQuery.isError || vehiclesQuery.isError,
+    total: woQuery.data?.total ?? 0,
+    totalPages: woQuery.data?.totalPages ?? 1,
+    isLoading: woQuery.isLoading,
+    isError: woQuery.isError && !woQuery.data,
+    error: woQuery.error ?? vehiclesQuery.error,
     refetch: woQuery.refetch,
   };
 }
@@ -397,26 +464,53 @@ export interface ScheduleListParams {
   dueOnly?: boolean;
 }
 
-export function useSchedulesList(params: ScheduleListParams) {
-  const scheduleQuery = useQuery({
-    queryKey: qk.schedules(params),
-    queryFn: () => client.list<MaintenanceScheduleRow>(endpoints.maintenanceSchedules.list, params),
-    ...typedCachePolicy<OffsetPage<MaintenanceScheduleRow>>('list'),
+export const schedulesPageQuery = (params: ScheduleListParams): PageQueryOptions<MaintenanceScheduleRow> => ({
+  queryKey: qk.schedules(compactParams(params)),
+  queryFn: () => client.list<MaintenanceScheduleRow>(endpoints.maintenanceSchedules.list, compactParams(params)),
+  ...pagePolicy('list'),
+});
+
+function useJoinedSchedules(items: MaintenanceScheduleRow[]) {
+  const { map: vehicles } = useVehicleMap();
+  return useMemo(
+    (): ScheduleTableRow[] => items.map((s) => ({ ...s, vehicle: vehicles.get(s.vehicleId) ?? null })),
+    [items, vehicles],
+  );
+}
+
+export interface SchedulesInput {
+  page: number;
+  limit: number;
+  /** No `q` on `/maintenance-schedules` (B-66) — a search uses the bounded window. */
+  search: string;
+}
+
+/** W-09 `Schedules` tab — one server page per render. */
+export function useSchedulesList({ page, limit, search }: SchedulesInput) {
+  const { map: vehicles } = useVehicleMap();
+  const needle = search.trim().toLowerCase();
+  const paged = usePagedQuery<MaintenanceScheduleRow>({
+    server: schedulesPageQuery({ page, limit }),
+    window: schedulesPageQuery({ page: 1, limit: FILTER_WINDOW }),
+    useWindow: needle.length > 0,
+    page,
+    limit,
+    filter: (rows) =>
+      rows.filter((s) => [vehicles.get(s.vehicleId)?.unitNumber, s.name].some((t) => (t ?? '').toLowerCase().includes(needle))),
   });
-  const vehiclesQuery = useVehiclesPicker();
+  const rows = useJoinedSchedules(paged.items);
+  return { rows, total: paged.total, totalPages: paged.totalPages, isLoading: paged.isLoading, isError: paged.isError, refetch: paged.refetch };
+}
 
-  const rows = useMemo((): ScheduleTableRow[] => {
-    const vehicles = vehicleMap(vehiclesQuery.data?.items ?? []);
-    return (scheduleQuery.data?.items ?? []).map((s) => ({ ...s, vehicle: vehicles.get(s.vehicleId) ?? null }));
-  }, [scheduleQuery.data, vehiclesQuery.data]);
+/** Every schedule currently DUE_SOON or OVERDUE (`dueOnly=true`, a real param) — the
+ * `Overdue services` KPI and the "Upcoming maintenance" panel share this one bounded read. */
+export const DUE_WINDOW = 500;
+export const dueSchedulesQuery = () => schedulesPageQuery({ page: 1, limit: DUE_WINDOW, dueOnly: true });
 
-  return {
-    rows,
-    page: scheduleQuery.data,
-    isLoading: scheduleQuery.isLoading || vehiclesQuery.isLoading,
-    isError: scheduleQuery.isError || vehiclesQuery.isError,
-    refetch: scheduleQuery.refetch,
-  };
+export function useDueSchedules() {
+  const query = useQuery(dueSchedulesQuery());
+  const rows = useJoinedSchedules(query.data?.items ?? []);
+  return { rows, isLoading: query.isLoading, isError: query.isError && !query.data, refetch: () => void query.refetch() };
 }
 
 export function useCompleteSchedule(id: string) {

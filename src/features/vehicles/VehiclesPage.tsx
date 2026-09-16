@@ -10,7 +10,8 @@ import { usePermission } from '@/shared/auth/usePermission';
 import { useIsOffline, OFFLINE_TOOLTIP } from '@/shared/realtime/RealtimeProvider';
 import { useDynamicSubtitle } from '@/app/layouts/Topbar';
 import { useLiveFleet } from '@/shared/api/liveFleet';
-import { useVehiclesList, type VehicleTableRow } from '@/shared/api/vehicles';
+import { useVehiclesList, useVehicleCounts, joinVehicles, type VehicleTableRow } from '@/shared/api/vehicles';
+import { useVehiclesLookup } from '@/shared/api/lookups';
 import { client } from '@/shared/api/client';
 import { endpoints } from '@/shared/api/endpoints';
 import { Button } from '@/shared/ui/Button';
@@ -69,63 +70,75 @@ export default function VehiclesPage() {
     setParams(next, { replace: true });
   }
 
-  // 69 rows total, well within a single client-side page — resolves per-row DRIVER/ELD SERIAL
-  // joins and the segment counts without an N+1 fan-out (web/backend-gaps.md contract deviations).
-  const allVehicles = useVehiclesList({ limit: 500 });
-  const liveFleet = useLiveFleet();
+  const filters = useMemo(() => parseVehicleFilters(params), [params]);
+  const activeFilterCount = countActiveVehicleFilters(filters);
 
+  // WD-073 — one `GET /vehicles` page per render. `q` and `status` are real `VehicleListQueryDto`
+  // params; the UNASSIGNED segment (a driver-side join) and the 11.23 drawer groups (B-54) have
+  // no server param, so only while one of them is active does the page fall back to the
+  // reference-cached fleet window and filter in memory.
+  const useWindow = segment === 'UNASSIGNED' || activeFilterCount > 0;
+  const liveFleet = useLiveFleet();
   const dutyByVehicle = useMemo(() => {
     const map = new Map<string, DutyStatus>();
     for (const unit of liveFleet.data?.items ?? []) map.set(unit.vehicleId, unit.dutyStatus);
     return map;
   }, [liveFleet.data]);
 
-  const filters = useMemo(() => parseVehicleFilters(params), [params]);
+  const allVehicles = useVehiclesList({
+    params: {
+      page,
+      limit,
+      q: debouncedSearch.trim() || undefined,
+      status: segment === 'ACTIVE' || segment === 'INACTIVE' ? segment : undefined,
+    },
+    useWindow,
+    filter: (rows) => {
+      let out = rows;
+      if (segment === 'ACTIVE') out = out.filter((r) => r.status === 'ACTIVE');
+      if (segment === 'INACTIVE') out = out.filter((r) => r.status === 'INACTIVE');
+      if (segment === 'UNASSIGNED') out = out.filter((r) => !r.driver);
+      if (debouncedSearch.trim()) {
+        const needle = debouncedSearch.trim().toLowerCase();
+        out = out.filter(
+          (r) =>
+            r.unitNumber.toLowerCase().includes(needle) ||
+            r.vin.toLowerCase().includes(needle) ||
+            (r.licensePlate ?? '').toLowerCase().includes(needle),
+        );
+      }
+      return out.filter((r) => matchesVehicleFilters(r, dutyByVehicle.get(r.id), filters));
+    },
+  });
+  const counts = useVehicleCounts();
 
+  // Drawer option lists come from the whole fleet, which is only loaded once the drawer opens
+  // (or a filter is already active) — never on a plain page visit.
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const fleetForOptions = useVehiclesLookup(filtersOpen || useWindow);
+  const optionRows = useMemo(
+    () =>
+      allVehicles.fleetRows.length > 0
+        ? allVehicles.fleetRows
+        : joinVehicles(fleetForOptions.data?.items ?? [], allVehicles.driversLookup.data?.items ?? [], allVehicles.devicesLookup.data?.items ?? []),
+    [allVehicles.fleetRows, fleetForOptions.data, allVehicles.driversLookup.data, allVehicles.devicesLookup.data],
+  );
   const eldDeviceOptions = useMemo(
-    () => Array.from(new Set(allVehicles.rows.map((r) => r.eldDeviceModel).filter((v): v is string => Boolean(v)))).sort(),
-    [allVehicles.rows],
+    () => Array.from(new Set(optionRows.map((r) => r.eldDeviceModel).filter((v): v is string => Boolean(v)))).sort(),
+    [optionRows],
   );
   const makeOptions = useMemo(
-    () => Array.from(new Set(allVehicles.rows.map((r) => r.make).filter((v): v is string => Boolean(v)))).sort(),
-    [allVehicles.rows],
+    () => Array.from(new Set(optionRows.map((r) => r.make).filter((v): v is string => Boolean(v)))).sort(),
+    [optionRows],
   );
   const terminalOptions = useMemo(
-    () => Array.from(new Set(allVehicles.rows.map((r) => r.driver?.homeTerminalName).filter((v): v is string => Boolean(v)))).sort(),
-    [allVehicles.rows],
+    () => Array.from(new Set(optionRows.map((r) => r.driver?.homeTerminalName).filter((v): v is string => Boolean(v)))).sort(),
+    [optionRows],
   );
 
-  const filtered = useMemo(() => {
-    let rows = allVehicles.rows;
-    if (segment === 'ACTIVE') rows = rows.filter((r) => r.status === 'ACTIVE');
-    if (segment === 'INACTIVE') rows = rows.filter((r) => r.status === 'INACTIVE');
-    if (segment === 'UNASSIGNED') rows = rows.filter((r) => !r.driver);
-    if (debouncedSearch.trim()) {
-      const needle = debouncedSearch.trim().toLowerCase();
-      rows = rows.filter(
-        (r) =>
-          r.unitNumber.toLowerCase().includes(needle) ||
-          r.vin.toLowerCase().includes(needle) ||
-          (r.licensePlate ?? '').toLowerCase().includes(needle),
-      );
-    }
-    rows = rows.filter((r) => matchesVehicleFilters(r, dutyByVehicle.get(r.id), filters));
-    return rows;
-  }, [allVehicles.rows, segment, debouncedSearch, filters, dutyByVehicle]);
-
-  const total = filtered.length;
-  const totalPages = Math.max(1, Math.ceil(total / limit));
-  const pageRows = filtered.slice((page - 1) * limit, page * limit);
-
-  const counts = useMemo(
-    () => ({
-      all: allVehicles.rows.length,
-      active: allVehicles.rows.filter((r) => r.status === 'ACTIVE').length,
-      inactive: allVehicles.rows.filter((r) => r.status === 'INACTIVE').length,
-      unassigned: allVehicles.rows.filter((r) => !r.driver).length,
-    }),
-    [allVehicles.rows],
-  );
+  const total = allVehicles.total;
+  const totalPages = allVehicles.totalPages;
+  const pageRows = allVehicles.rows;
 
   const [addOpen, setAddOpen] = useState(false);
   const [editVehicle, setEditVehicle] = useState<VehicleTableRow | null>(null);
@@ -133,7 +146,6 @@ export default function VehiclesPage() {
   const [assignVehicle, setAssignVehicle] = useState<VehicleTableRow | null>(null);
   const [calibrateVehicle, setCalibrateVehicle] = useState<VehicleTableRow | null>(null);
   const [importOpen, setImportOpen] = useState(false);
-  const [filtersOpen, setFiltersOpen] = useState(false);
   const [filtersRevision, setFiltersRevision] = useState(0);
   const [selection, setSelection] = useState<string[]>([]);
 
@@ -164,6 +176,9 @@ export default function VehiclesPage() {
         const duty = dutyByVehicle.get(row.original.id);
         if (row.original.status === 'OUT_OF_SERVICE') return <Badge tone="danger" dot>Out of service</Badge>;
         if (row.original.status === 'INACTIVE') return <DutyBadge status="INACTIVE" />;
+        // WD-073 — `/live/fleet` is the slowest call on this screen (~2 s server-side); the table
+        // no longer waits for it. The duty badge fills in when the snapshot lands.
+        if (!duty && liveFleet.isLoading) return <span aria-label="Loading status" className="inline-block h-5 w-16 animate-pulse rounded-full bg-bg-subtle" />;
         return duty ? <DutyBadge status={duty} /> : <Badge tone="success" dot>Active</Badge>;
       },
     },
@@ -211,7 +226,7 @@ export default function VehiclesPage() {
     },
   ];
 
-  const isLoading = allVehicles.isLoading || liveFleet.isLoading;
+  const isLoading = allVehicles.isLoading;
 
   return (
     <div className="flex flex-col gap-4">
@@ -243,7 +258,7 @@ export default function VehiclesPage() {
               setFiltersOpen(true);
             }}
           >
-            Filters{countActiveVehicleFilters(filters) > 0 ? ` · ${countActiveVehicleFilters(filters)}` : ''}
+            Filters{activeFilterCount > 0 ? ` · ${activeFilterCount}` : ''}
           </Button>
           <Button variant="secondary" iconLeft={<Download size={16} strokeWidth={1.75} />} onClick={handleExport}>
             Export
@@ -316,7 +331,7 @@ export default function VehiclesPage() {
         ) : allVehicles.isError ? (
           <ErrorState onRetry={() => allVehicles.refetch()} />
         ) : total === 0 ? (
-          debouncedSearch || countActiveVehicleFilters(filters) > 0 ? (
+          debouncedSearch || activeFilterCount > 0 ? (
             <EmptyState
               {...searchEmptyState(debouncedSearch || 'these filters')}
               actions={[

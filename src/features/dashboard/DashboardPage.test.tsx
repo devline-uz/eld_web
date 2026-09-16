@@ -39,31 +39,61 @@ afterEach(() => {
 });
 afterAll(() => server.close());
 
+// Perf plan item 3 (WD-074) — the page now fires one `GET /dashboard/summary` request instead of
+// six; these helpers build that single composite response per test case.
+interface SummaryOverrides {
+  liveFleet?: { items: unknown[]; generatedAt?: string };
+  violations?: { items: unknown[]; total: number };
+  unidentified?: { total: number; totalDurationSec: number };
+  vehicles?: { active: number; total: number };
+}
+
+const DUTY_ON = new Set(['DRIVING', 'ON_DUTY', 'SLEEPER']);
+
+function buildSummary(overrides: SummaryOverrides = {}) {
+  const liveItems = (overrides.liveFleet?.items ?? []) as Array<{ dutyStatus: string }>;
+  return {
+    liveFleet: {
+      items: liveItems,
+      generatedAt: overrides.liveFleet?.generatedAt ?? new Date().toISOString(),
+      counts: {
+        total: liveItems.length,
+        onDuty: liveItems.filter((u) => DUTY_ON.has(u.dutyStatus)).length,
+        moving: liveItems.filter((u) => u.dutyStatus === 'DRIVING').length,
+        idle: liveItems.filter((u) => u.dutyStatus === 'IDLE').length,
+        offline: liveItems.filter((u) => u.dutyStatus === 'ELD_OFFLINE').length,
+      },
+    },
+    violations: overrides.violations ?? { items: [], total: 0 },
+    unidentified: overrides.unidentified ?? { total: 3, totalDurationSec: 1800 },
+    notifications: { unreadCount: 0 },
+    carrier: { id: 'carrier', name: 'Universal Logistics Inc.', timezone: 'America/New_York' },
+    vehicles: overrides.vehicles ?? { active: 69, total: 69 },
+    generatedAt: new Date().toISOString(),
+  };
+}
+
 beforeEach(() => {
   setAuthBridge({ getAccessToken: () => 'test-token' });
   setAccessToken('test-token');
-  server.use(
-    http.get(url(endpoints.carrier.root), () =>
-      ok({ id: 'carrier', name: 'Universal Logistics Inc.', timezone: 'America/New_York' }),
-    ),
-    http.get(url(endpoints.vehicles.list), () => ok({ items: [], page: 1, limit: 1, total: 69, totalPages: 1 })),
-    http.get(url(endpoints.unidentified.list), () => ok({ items: [{ durationSec: 1800 }], total: 3 })),
-  );
 });
 
 describe('W-01 Fleet Dashboard', () => {
   it('renders the KPI row and an empty violations table', async () => {
     server.use(
-      http.get(url(endpoints.live.fleet), () =>
-        ok({
-          items: [
-            { vehicleId: 'v1', unitNumber: '#101', dutyStatus: 'DRIVING', lat: 40, lon: -83 },
-            { vehicleId: 'v2', unitNumber: '#102', dutyStatus: 'ON_DUTY', lat: 40.1, lon: -83.1 },
-          ],
-          generatedAt: new Date().toISOString(),
-        }),
+      http.get(url(endpoints.dashboard.summary), () =>
+        ok(
+          buildSummary({
+            liveFleet: {
+              items: [
+                { vehicleId: 'v1', unitNumber: '#101', dutyStatus: 'DRIVING', lat: 40, lon: -83 },
+                { vehicleId: 'v2', unitNumber: '#102', dutyStatus: 'ON_DUTY', lat: 40.1, lon: -83.1 },
+              ],
+            },
+            violations: { items: [], total: 0 },
+          }),
+        ),
       ),
-      http.get(url(endpoints.violations.list), () => ok({ items: [], total: 0 })),
     );
 
     renderPage();
@@ -76,57 +106,55 @@ describe('W-01 Fleet Dashboard', () => {
     expect(screen.getByText('Live fleet')).toBeInTheDocument();
   });
 
-  it("shows an in-card error state when GET /violations 404s (gap B-6) without breaking the rest of the page", async () => {
-    server.use(
-      http.get(url(endpoints.live.fleet), () => ok({ items: [], generatedAt: new Date().toISOString() })),
-      http.get(url(endpoints.violations.list), () => new Response(null, { status: 404 })),
-    );
+  it("shows an in-card error state when GET /dashboard/summary fails without leaving the page blank", async () => {
+    server.use(http.get(url(endpoints.dashboard.summary), () => new Response(null, { status: 404 })));
 
     renderPage();
 
     expect(await screen.findByText('HOS violations & alerts', {}, { timeout: 8000 })).toBeInTheDocument();
     expect(await screen.findByText('Could not load violations', {}, { timeout: 8000 })).toBeInTheDocument();
-    // the rest of the page still rendered — the failure is contained to its own card.
+    // the KPI row still renders its labels (values fall back to "—") — the page is not blank.
     expect(screen.getByText('Active vehicles')).toBeInTheDocument();
   });
 
   it('renders a violation row with its unit, driver and the FULL-only row menu, and navigates to HOS logs on click', async () => {
     server.use(
-      http.get(url(endpoints.live.fleet), () =>
-        ok({
-          items: [{ vehicleId: 'v1', unitNumber: '#101', dutyStatus: 'DRIVING', lat: 40, lon: -83 }],
-          generatedAt: new Date().toISOString(),
-        }),
-      ),
-      http.get(url(endpoints.violations.list), () =>
-        ok({
-          items: [
-            {
-              id: 'vio_1',
-              severity: 'VIOLATION',
-              driverId: 'drv_1',
-              driverName: 'John Smith',
-              vehicleId: 'v1',
-              unitNumber: '#101',
-              event: '11-hour driving limit exceeded',
-              locationLabel: '1.04 mi W of Harrisburg, OH',
-              occurredAt: new Date().toISOString(),
-              date: '2026-09-12',
+      http.get(url(endpoints.dashboard.summary), () =>
+        ok(
+          buildSummary({
+            liveFleet: {
+              items: [{ vehicleId: 'v1', unitNumber: '#101', dutyStatus: 'DRIVING', lat: 40, lon: -83 }],
             },
-            {
-              id: 'vio_2',
-              severity: 'WARNING',
-              driverId: null,
-              driverName: null,
-              vehicleId: 'v2',
-              unitNumber: '#102',
-              event: 'Unassigned driving · 1h 12m',
-              locationLabel: null,
-              occurredAt: new Date().toISOString(),
+            violations: {
+              items: [
+                {
+                  id: 'vio_1',
+                  severity: 'VIOLATION',
+                  driverId: 'drv_1',
+                  driverName: 'John Smith',
+                  vehicleId: 'v1',
+                  unitNumber: '#101',
+                  event: '11-hour driving limit exceeded',
+                  locationLabel: '1.04 mi W of Harrisburg, OH',
+                  occurredAt: new Date().toISOString(),
+                  date: '2026-09-12',
+                },
+                {
+                  id: 'vio_2',
+                  severity: 'WARNING',
+                  driverId: null,
+                  driverName: null,
+                  vehicleId: 'v2',
+                  unitNumber: '#102',
+                  event: 'Unassigned driving · 1h 12m',
+                  locationLabel: null,
+                  occurredAt: new Date().toISOString(),
+                },
+              ],
+              total: 2,
             },
-          ],
-          total: 2,
-        }),
+          }),
+        ),
       ),
     );
 

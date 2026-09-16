@@ -34,6 +34,7 @@ function row(overrides: Partial<DvirTableRow> = {}): DvirTableRow {
     driver: null,
     vehicle: null,
     defects: [],
+    defectsKnown: true,
     ...overrides,
   };
 }

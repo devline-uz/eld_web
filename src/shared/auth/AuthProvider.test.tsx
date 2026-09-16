@@ -7,7 +7,7 @@ import { http } from 'msw';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { server } from '@/mocks/server';
 import { fail, ok, url } from '@/mocks/envelope';
-import { resetAuthBridge } from '@/shared/api/client';
+import { client, resetAuthBridge } from '@/shared/api/client';
 import { endpoints } from '@/shared/api/endpoints';
 import { ApiError } from '@/shared/api/errors';
 import {
@@ -40,6 +40,7 @@ afterEach(() => {
   server.resetHandlers();
   resetAuthBridge();
   window.localStorage.clear();
+  window.sessionStorage.clear();
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
@@ -47,6 +48,7 @@ afterAll(() => server.close());
 
 beforeEach(() => {
   window.localStorage.clear();
+  window.sessionStorage.clear();
   // The token store is module state: without this a later test would inherit the previous
   // test's in-memory access token.
   clearTokens();
@@ -200,6 +202,137 @@ describe('cold boot', () => {
     setup();
     await waitFor(() => expect(status()).toBe('unauthenticated'));
     expect(window.localStorage.getItem(RT_KEY)).toBeNull();
+  });
+});
+
+/* ------------------------------------------ boot from the session snapshot (WD-072) */
+
+describe('boot from the session snapshot (WD-072)', () => {
+  const SNAP_KEY = 'obk.session';
+  const snapshotOf = (me: unknown) =>
+    JSON.stringify({ me, accessTokenExpiresAt: Date.now() + 10 * 60_000 });
+
+  it('renders children at once from the snapshot, then reconciles with /auth/me', async () => {
+    window.localStorage.setItem(RT_KEY, 'refresh-0');
+    window.sessionStorage.setItem(SNAP_KEY, snapshotOf(ME_DISPATCHER));
+    let refreshResolve: (() => void) | null = null;
+    server.use(
+      http.post(url(endpoints.auth.refresh), async () => {
+        await new Promise<void>((resolve) => {
+          refreshResolve = resolve;
+        });
+        return ok(ROTATED);
+      }),
+      // The server has since downgraded `trips` — the snapshot must not win.
+      http.get(url(endpoints.auth.me), () =>
+        ok({ ...ME_DISPATCHER, permissions: { ...ME_DISPATCHER.permissions, trips: 'READ' } }),
+      ),
+    );
+    setup();
+
+    // No skeleton, no waiting: the very first render is the app with the snapshot's session.
+    expect(status()).toBe('authenticated');
+    expect(screen.queryByText('Signing you in')).not.toBeInTheDocument();
+    expect(screen.getByTestId('role').textContent).toBe('DISPATCHER');
+    expect(screen.getByTestId('trips').textContent).toBe('FULL');
+    expect(getAccessToken()).toBeNull(); // the access token is never in the snapshot
+
+    await waitFor(() => expect(refreshResolve).not.toBeNull());
+    await act(async () => {
+      refreshResolve!();
+    });
+    await waitFor(() => expect(screen.getByTestId('trips').textContent).toBe('READ'));
+    expect(status()).toBe('authenticated');
+    expect(getAccessToken()).toBe('access-2');
+    expect(getRefreshToken()).toBe('refresh-2');
+    // The reconciled payload replaced the snapshot.
+    const stored = JSON.parse(window.sessionStorage.getItem(SNAP_KEY) ?? '{}');
+    expect(stored.me.permissions.trips).toBe('READ');
+    expect(JSON.stringify(stored)).not.toMatch(/access-2|refresh-2/);
+  });
+
+  it('a data request issued during boot waits for the one in-flight refresh', async () => {
+    window.localStorage.setItem(RT_KEY, 'refresh-0');
+    window.sessionStorage.setItem(SNAP_KEY, snapshotOf(ME_DISPATCHER));
+    let refreshes = 0;
+    const authHeaders: Array<string | null> = [];
+    server.use(
+      http.post(url(endpoints.auth.refresh), async () => {
+        refreshes += 1;
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        return ok(ROTATED);
+      }),
+      http.get(url(endpoints.auth.me), () => ok(ME_DISPATCHER)),
+      http.get(url(endpoints.vehicles.list), ({ request }) => {
+        authHeaders.push(request.headers.get('authorization'));
+        return ok({ items: [], page: 1, limit: 25, total: 0, totalPages: 0 });
+      }),
+    );
+    setup();
+    expect(status()).toBe('authenticated');
+
+    // Fired the way a screen's useQuery would — before the boot refresh has resolved.
+    const results = await act(async () =>
+      Promise.all([client.get(endpoints.vehicles.list), client.get(endpoints.vehicles.list)]),
+    );
+    expect(results).toHaveLength(2);
+    expect(authHeaders).toEqual(['Bearer access-2', 'Bearer access-2']);
+    await waitFor(() => expect(getRefreshToken()).toBe('refresh-2'));
+    // Boot + two parked requests = exactly one POST /auth/refresh (REFRESH_TOKEN_REUSED otherwise).
+    expect(refreshes).toBe(1);
+  });
+
+  it('a failed background refresh signs the user out and drops the snapshot', async () => {
+    window.localStorage.setItem(RT_KEY, 'stale');
+    window.sessionStorage.setItem(SNAP_KEY, snapshotOf(ME_DISPATCHER));
+    server.use(
+      http.post(url(endpoints.auth.refresh), () =>
+        fail(401, 'REFRESH_TOKEN_REUSED', 'This refresh token was already rotated.'),
+      ),
+    );
+    const view = setup();
+    expect(status()).toBe('authenticated');
+    await waitFor(() => expect(status()).toBe('unauthenticated'));
+    expect(view.auth.sessionEndedReason).toBe('expired');
+    expect(getRefreshToken()).toBeNull();
+    expect(window.sessionStorage.getItem(SNAP_KEY)).toBeNull();
+    expect(screen.getByTestId('trips').textContent).toBe('NONE');
+    expect(view.clearSpy).toHaveBeenCalled();
+  });
+
+  it('a snapshot without a refresh token is ignored — no API call, unauthenticated', async () => {
+    window.sessionStorage.setItem(SNAP_KEY, snapshotOf(ME_DISPATCHER));
+    let calls = 0;
+    server.use(
+      http.post(url(endpoints.auth.refresh), () => {
+        calls += 1;
+        return ok(PAIR);
+      }),
+    );
+    setup();
+    await waitFor(() => expect(status()).toBe('unauthenticated'));
+    expect(calls).toBe(0);
+  });
+
+  it('sign-in writes the snapshot and sign-out clears it', async () => {
+    server.use(
+      http.post(url(endpoints.auth.signIn), () => ok(PAIR)),
+      http.get(url(endpoints.auth.me), () => ok(ME_DISPATCHER)),
+      http.post(url(endpoints.auth.signOut), () => ok({ success: true })),
+    );
+    const view = setup();
+    await waitFor(() => expect(status()).toBe('unauthenticated'));
+    await act(async () => {
+      await view.signInWithPassword('a@b.example', 'pw');
+    });
+    const raw = window.sessionStorage.getItem(SNAP_KEY) ?? '';
+    expect(JSON.parse(raw).me.id).toBe('usr_disp');
+    expect(raw).not.toMatch(/access-1|refresh-1/);
+
+    await act(async () => {
+      view.signOut();
+    });
+    expect(window.sessionStorage.getItem(SNAP_KEY)).toBeNull();
   });
 });
 

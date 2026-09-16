@@ -2,20 +2,21 @@
 //
 // `GET /trips` returns the raw Prisma `Trip` row (plus its `stops`, always included by the
 // repository) — there is no driver/vehicle name join (web/backend-gaps.md B-36). This module is
-// the single place that (a) types the real response and (b) joins it against `GET /drivers` and
-// `GET /vehicles` client-side, exactly like `shared/api/vehicles.ts`'s `joinVehicles` — one extra
-// reference-cached list call, never per row.
+// the single place that (a) types the real response and (b) joins one server page against the
+// session-wide `/drivers` and `/vehicles` lookups (`shared/api/lookups.ts`) — fetched once per
+// session, never per page and never per row (WD-073).
 //
 // `GET /trips/unassigned-loads` does NOT include `stops` (`trips.repository.ts`
 // `unassignedLoads()` has no `include`) — pickup/delivery/window render as unavailable for that
 // list until the backend adds the join (same B-36).
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { client } from './client';
 import { endpoints } from './endpoints';
 import { qk, qkRoot } from './queryKeys';
 import { typedCachePolicy } from './queryPolicy';
-import type { OffsetPage } from './types';
+import { FILTER_WINDOW, useDriverMap, useVehicleMap } from './lookups';
+import { compactParams, pagePolicy, usePagedQuery, type PageQueryOptions } from './paging';
 import type { DriverRow, VehicleRow } from './vehicles';
 
 export type TripStatus = 'PLANNED' | 'ASSIGNED' | 'IN_PROGRESS' | 'DELIVERED' | 'CANCELLED';
@@ -99,36 +100,182 @@ function joinTrip(trip: TripRow, driverById: Map<string, DriverRow>, vehicleById
   };
 }
 
-/** W-11 board — the whole trip set, client-filtered into the ALL/ACTIVE/SCHEDULED/COMPLETED
- * segments and searched, exactly like W-03 Vehicles (web/decisions.md WD-024 precedent). */
-export function useTripsList() {
-  const tripsQuery = useQuery({
-    queryKey: qk.trips({ limit: 500 }),
-    queryFn: () => client.list<TripRow>(endpoints.trips.list, { limit: 500 }),
-    ...typedCachePolicy<OffsetPage<TripRow>>('list'),
-  });
-  const driversQuery = useQuery({
-    queryKey: qk.drivers({ limit: 500 }),
-    queryFn: () => client.list<DriverRow>(endpoints.drivers.list, { limit: 500 }),
-    ...typedCachePolicy<OffsetPage<DriverRow>>('reference'),
-  });
-  const vehiclesQuery = useQuery({
-    queryKey: qk.vehicles({ limit: 500 }),
-    queryFn: () => client.list<VehicleRow>(endpoints.vehicles.list, { limit: 500 }),
-    ...typedCachePolicy<OffsetPage<VehicleRow>>('reference'),
+/** W-11 server-page params — exactly `TripListQueryDto` (page/limit/sort/q/status/driverId). */
+export interface TripsPageParams {
+  [key: string]: string | number | boolean | undefined;
+  page: number;
+  limit: number;
+  status?: TripStatus;
+  q?: string;
+  driverId?: string;
+  sort?: string;
+}
+
+/** One `GET /trips` page — shared by the board, the counters and the sidebar prefetch (WD-073). */
+export const tripsPageQuery = (params: TripsPageParams): PageQueryOptions<TripRow> => ({
+  queryKey: qk.trips(compactParams(params)),
+  queryFn: () => client.list<TripRow>(endpoints.trips.list, compactParams(params)),
+  ...pagePolicy('list'),
+});
+
+/** The `Active` segment is ASSIGNED ∪ IN_PROGRESS; `status` takes one value (B-59), so the two
+ * slices are fetched side by side. Both are bounded working sets (a dispatch board, not history)
+ * — 200 rows each is the API maximum and far above any real active count. */
+export const TRIPS_ACTIVE_STATUSES = ['ASSIGNED', 'IN_PROGRESS'] as const satisfies readonly TripStatus[];
+export const ACTIVE_SLICE_LIMIT = 200;
+export const tripsActiveSliceQuery = (status: (typeof TRIPS_ACTIVE_STATUSES)[number]) =>
+  tripsPageQuery({ page: 1, limit: ACTIVE_SLICE_LIMIT, status });
+
+/** `total` of one lifecycle status via `limit: 1`. */
+export const tripsCountQuery = (status: TripStatus) => tripsPageQuery({ page: 1, limit: 1, status });
+
+/** The on-time KPI window: the newest `KPI_WINDOW` deliveries (`plannedStartAt` desc, the API's
+ * default sort). There is no aggregate endpoint (B-59); the card says which window it covers. */
+export const KPI_WINDOW = 100;
+export const tripsKpiQuery = () => tripsPageQuery({ page: 1, limit: KPI_WINDOW, status: 'DELIVERED' });
+
+/** Every ASSIGNED / IN_PROGRESS trip, joined — the Messages thread header's "current trip". */
+export function useActiveTrips() {
+  const { map: driverById } = useDriverMap();
+  const { map: vehicleById } = useVehicleMap();
+  const assignedQuery = useQuery(tripsActiveSliceQuery('ASSIGNED'));
+  const inProgressQuery = useQuery(tripsActiveSliceQuery('IN_PROGRESS'));
+  const rows = useMemo(
+    () =>
+      joinTrips(
+        [...(assignedQuery.data?.items ?? []), ...(inProgressQuery.data?.items ?? [])].sort(byPlannedStartDesc),
+        driverById,
+        vehicleById,
+      ),
+    [assignedQuery.data, inProgressQuery.data, driverById, vehicleById],
+  );
+  return { rows, isLoading: assignedQuery.isLoading || inProgressQuery.isLoading };
+}
+
+export type TripSegment = 'ACTIVE' | 'SCHEDULED' | 'COMPLETED' | 'UNASSIGNED';
+const SEGMENT_STATUS: Record<Exclude<TripSegment, 'ACTIVE' | 'UNASSIGNED'>, TripStatus> = {
+  SCHEDULED: 'PLANNED',
+  COMPLETED: 'DELIVERED',
+};
+
+export function joinTrips(trips: TripRow[], driverById: Map<string, DriverRow>, vehicleById: Map<string, VehicleRow>): TripTableRow[] {
+  return trips.map((t) => joinTrip(t, driverById, vehicleById));
+}
+
+function byPlannedStartDesc(a: TripRow, b: TripRow): number {
+  return (b.plannedStartAt ?? b.createdAt).localeCompare(a.plannedStartAt ?? a.createdAt);
+}
+
+export interface TripsBoardInput {
+  segment: TripSegment;
+  page: number;
+  limit: number;
+  /** Free text — sent as `q` (number / shipping document) in server mode; matched against
+   * number, driver name and pickup/delivery names in memory for the active set and the window. */
+  search: string;
+  /** True while a client-only 11.23 group is active (B-59). */
+  useWindow: boolean;
+  /** Runs against joined rows — the whole active set, or the newest `FILTER_WINDOW` rows of a
+   * history segment. */
+  filter: (rows: TripTableRow[]) => TripTableRow[];
+}
+
+/** W-11 board (WD-073): Active = two bounded slices (exact, filtered in memory); Scheduled and
+ * Completed = one server page per render; driver/unit names from the session-wide lookups. */
+export function useTripsBoard({ segment, page, limit, search, useWindow, filter }: TripsBoardInput) {
+  const { map: driverById, query: driversQuery } = useDriverMap();
+  const { map: vehicleById, query: vehiclesQuery } = useVehicleMap();
+
+  const assignedQuery = useQuery(tripsActiveSliceQuery('ASSIGNED'));
+  const inProgressQuery = useQuery(tripsActiveSliceQuery('IN_PROGRESS'));
+  const plannedCount = useQuery(tripsCountQuery('PLANNED'));
+  const kpiQuery = useQuery(tripsKpiQuery());
+
+  const needle = search.trim().toLowerCase();
+  const matchesSearch = useCallback(
+    (t: TripTableRow) => {
+      if (!needle) return true;
+      const driverName = t.driver ? `${t.driver.firstName} ${t.driver.lastName}` : '';
+      return (
+        t.number.toLowerCase().includes(needle) ||
+        driverName.toLowerCase().includes(needle) ||
+        (t.pickup?.name ?? '').toLowerCase().includes(needle) ||
+        (t.delivery?.name ?? '').toLowerCase().includes(needle)
+      );
+    },
+    [needle],
+  );
+
+  const activeRows = useMemo(
+    () =>
+      joinTrips(
+        [...(assignedQuery.data?.items ?? []), ...(inProgressQuery.data?.items ?? [])].sort(byPlannedStartDesc),
+        driverById,
+        vehicleById,
+      ),
+    [assignedQuery.data, inProgressQuery.data, driverById, vehicleById],
+  );
+
+  const historyStatus = segment === 'SCHEDULED' || segment === 'COMPLETED' ? SEGMENT_STATUS[segment] : undefined;
+  const history = usePagedQuery<TripRow>({
+    server: tripsPageQuery({ page, limit, status: historyStatus, q: needle || undefined }),
+    window: tripsPageQuery({ page: 1, limit: FILTER_WINDOW, status: historyStatus }),
+    useWindow,
+    page,
+    limit,
+    enabled: historyStatus !== undefined,
+    filter: (rows) => filter(joinTrips(rows, driverById, vehicleById).filter(matchesSearch)),
   });
 
-  const rows = useMemo(() => {
-    const driverById = new Map((driversQuery.data?.items ?? []).map((d) => [d.id, d]));
-    const vehicleById = new Map((vehiclesQuery.data?.items ?? []).map((v) => [v.id, v]));
-    return (tripsQuery.data?.items ?? []).map((t) => joinTrip(t, driverById, vehicleById));
-  }, [tripsQuery.data, driversQuery.data, vehiclesQuery.data]);
+  const activeFiltered = useMemo(() => filter(activeRows.filter(matchesSearch)), [activeRows, filter, matchesSearch]);
+  const historyRows = useMemo(() => joinTrips(history.items, driverById, vehicleById), [history.items, driverById, vehicleById]);
 
+  let rows: TripTableRow[];
+  let total: number;
+  let totalPages: number;
+  if (segment === 'ACTIVE') {
+    total = activeFiltered.length;
+    totalPages = Math.max(1, Math.ceil(total / limit));
+    const safePage = Math.min(page, totalPages);
+    rows = activeFiltered.slice((safePage - 1) * limit, safePage * limit);
+  } else {
+    rows = historyRows;
+    total = history.total;
+    totalPages = history.totalPages;
+  }
+
+  const delivered = kpiQuery.data?.items ?? [];
+  const onTimeDelivered = delivered.filter((t) => t.onTime !== false).length;
+  const activeTotal = (assignedQuery.data?.total ?? 0) + (inProgressQuery.data?.total ?? 0);
+
+  const isActiveLoading = assignedQuery.isLoading || inProgressQuery.isLoading;
   return {
     rows,
-    isLoading: tripsQuery.isLoading || driversQuery.isLoading || vehiclesQuery.isLoading,
-    isError: tripsQuery.isError || driversQuery.isError || vehiclesQuery.isError,
-    refetch: tripsQuery.refetch,
+    total,
+    totalPages,
+    /** Every active trip (joined) — the route panel and the drawer read from it. */
+    activeRows,
+    counts: {
+      active: activeTotal,
+      scheduled: plannedCount.data?.total ?? 0,
+      completed: kpiQuery.data?.total ?? 0,
+    },
+    kpis: {
+      onTimePct: delivered.length > 0 ? Math.round((onTimeDelivered / delivered.length) * 100) : 0,
+      onTimeWindow: delivered.length,
+      lateCount: activeRows.filter((t) => t.displayStatus === 'Late').length,
+    },
+    isLoading: segment === 'ACTIVE' ? isActiveLoading : history.isLoading,
+    isKpiLoading: isActiveLoading || kpiQuery.isLoading || plannedCount.isLoading,
+    isError: segment === 'ACTIVE' ? (assignedQuery.isError || inProgressQuery.isError) && !assignedQuery.data && !inProgressQuery.data : history.isError,
+    refetch: () => {
+      if (segment === 'ACTIVE') {
+        void assignedQuery.refetch();
+        void inProgressQuery.refetch();
+      } else history.refetch();
+    },
+    driversLookup: driversQuery,
+    vehiclesLookup: vehiclesQuery,
   };
 }
 

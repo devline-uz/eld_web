@@ -3,10 +3,9 @@
 // The backend `GET /vehicles` only accepts `page`/`limit`/`sort`/`q`/`status` — none of the
 // group filters the drawer draws (ELD device, make, year range, home terminal, defects,
 // firmware) exist as server query params (backend/src/modules/vehicles/vehicles.controller.ts).
-// The page already loads the full fleet client-side for the DRIVER/ELD SERIAL joins (69 rows,
-// `useVehiclesList({ limit: 500 })`), so every filter here runs against that same in-memory set —
-// no extra request, no client-side fan-out of anything the backend does not already ship.
-// Recorded as a gap (web/backend-gaps.md B-54) in case the fleet grows past one page.
+// The page is server-paged (WD-073); only while one of these groups (or the UNASSIGNED segment)
+// is active does it switch to the reference-cached fleet window and run the filter in memory.
+// Recorded as a gap (web/backend-gaps.md B-54).
 import type { VehicleTableRow } from '@/shared/api/vehicles';
 
 export const VEHICLE_STATUS_OPTIONS = ['DRIVING', 'IDLE', 'OFF_DUTY', 'ELD_OFFLINE', 'INACTIVE'] as const;

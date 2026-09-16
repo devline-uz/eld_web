@@ -5,32 +5,35 @@ import { http } from 'msw';
 import { endpoints } from '@/shared/api/endpoints';
 import { ok, url } from '../envelope';
 
+/** Shared with `dashboard.ts` (§20 dashboard summary MSW handler) so the two responses agree. */
+export const VIOLATIONS_FIXTURE = [
+  {
+    id: 'vio_1',
+    driverId: 'drv_1',
+    dailyLogId: 'dl_1',
+    logDate: '2026-09-14',
+    type: 'DRIVING_11',
+    occurredAt: '2026-09-14T14:26:00.000Z',
+    exceededBySec: 1560,
+    detail: 'Driving 11h26m',
+    status: 'OPEN',
+    resolvedAt: null,
+    resolvedById: null,
+    resolutionNote: null,
+    severity: 'VIOLATION',
+    driverName: 'John Smith',
+    vehicleId: 'veh_1',
+    unitNumber: '101',
+    event: '11-hour driving limit exceeded',
+    locationLabel: '1.04 mi W of Harrisburg, OH',
+    date: '2026-09-14',
+  },
+];
+
 export const hosGapHandlers = [
   http.get(url(endpoints.violations.list), () =>
     ok({
-      items: [
-        {
-          id: 'vio_1',
-          driverId: 'drv_1',
-          dailyLogId: 'dl_1',
-          logDate: '2026-09-14',
-          type: 'DRIVING_11',
-          occurredAt: '2026-09-14T14:26:00.000Z',
-          exceededBySec: 1560,
-          detail: 'Driving 11h26m',
-          status: 'OPEN',
-          resolvedAt: null,
-          resolvedById: null,
-          resolutionNote: null,
-          severity: 'VIOLATION',
-          driverName: 'John Smith',
-          vehicleId: 'veh_1',
-          unitNumber: '101',
-          event: '11-hour driving limit exceeded',
-          locationLabel: '1.04 mi W of Harrisburg, OH',
-          date: '2026-09-14',
-        },
-      ],
+      items: VIOLATIONS_FIXTURE,
       total: 1,
       page: 1,
       limit: 25,

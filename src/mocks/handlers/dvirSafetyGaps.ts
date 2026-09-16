@@ -4,19 +4,19 @@
 import { http } from 'msw';
 import { endpoints } from '@/shared/api/endpoints';
 import { fixture } from '../fixtures.generated';
-import { ok, url } from '../envelope';
+import { ok, url, serverPage } from '../envelope';
 
 export const dvirSafetyGapHandlers = [
   http.get(url(endpoints.dvir.detail(':id')), () => ok(fixture('GET /api/dvir/{id}'))),
   http.post(url(endpoints.dvir.mechanicSignoff(':id')), () => ok(fixture('POST /api/dvir/{id}/mechanic-signoff'))),
   http.patch(url(endpoints.dvir.nextDriverReview(':id')), () => ok(fixture('PATCH /api/dvir/{id}/next-driver-review'))),
 
-  http.get(url(endpoints.defects.list), () => ok(fixture('GET /api/defects'))),
+  http.get(url(endpoints.defects.list), ({ request }) => ok(serverPage(fixture('GET /api/defects'), request))),
   http.get(url(endpoints.defects.detail(':id')), () => ok(fixture('GET /api/defects/{id}'))),
   http.patch(url(endpoints.defects.resolve(':id')), () => ok(fixture('PATCH /api/defects/{id}/resolve'))),
   http.patch(url(endpoints.defects.workOrder(':id')), () => ok(fixture('PATCH /api/defects/{id}/work-order'))),
 
-  http.get(url(endpoints.workOrders.list), () => ok(fixture('GET /api/work-orders'))),
+  http.get(url(endpoints.workOrders.list), ({ request }) => ok(serverPage(fixture('GET /api/work-orders'), request, ['number', 'title', 'vendor']))),
   http.post(url(endpoints.workOrders.create), () => ok(fixture('POST /api/work-orders'), 201)),
   http.get(url(endpoints.workOrders.detail(':id')), () => ok(fixture('GET /api/work-orders/{id}'))),
   http.patch(url(endpoints.workOrders.update(':id')), () => ok(fixture('PATCH /api/work-orders/{id}'))),
@@ -24,7 +24,7 @@ export const dvirSafetyGapHandlers = [
   http.post(url(endpoints.workOrders.cancel(':id')), () => ok(fixture('POST /api/work-orders/{id}/cancel'), 201)),
   http.post(url(endpoints.workOrders.attachDefect(':id', ':defectId')), () => ok(fixture('POST /api/work-orders/{id}/defects/{defectId}'), 201)),
 
-  http.get(url(endpoints.maintenanceSchedules.list), () => ok(fixture('GET /api/maintenance-schedules'))),
+  http.get(url(endpoints.maintenanceSchedules.list), ({ request }) => ok(serverPage(fixture('GET /api/maintenance-schedules'), request))),
   http.post(url(endpoints.maintenanceSchedules.create), () => ok(fixture('POST /api/maintenance-schedules'), 201)),
   http.get(url(endpoints.maintenanceSchedules.detail(':id')), () => ok(fixture('GET /api/maintenance-schedules/{id}'))),
   http.patch(url(endpoints.maintenanceSchedules.update(':id')), () => ok(fixture('PATCH /api/maintenance-schedules/{id}'))),

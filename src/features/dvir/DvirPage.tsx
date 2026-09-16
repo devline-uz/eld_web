@@ -24,16 +24,18 @@ import { useNowTick } from '@/shared/format/useRelativeTime';
 import { formatOdometer } from '@/shared/format/numbers';
 import { orDash, orNone, orUnassigned } from '@/shared/format/empty';
 import {
-  useDvirsList,
-  useDefectsList,
+  useRecentDvirs,
+  useOpenDefects,
   useWorkOrdersList,
   useSchedulesList,
+  useDueSchedules,
   type DvirTableRow,
   type DefectTableRow,
   type WorkOrderTableRow,
   type ScheduleTableRow,
 } from '@/shared/api/dvir';
-import { useVehiclesPicker } from '@/shared/api/vehicles';
+import { useVehiclesLookup } from '@/shared/api/lookups';
+import { useDebouncedValue } from '@/shared/hooks/useDebouncedValue';
 import { DvirDrawer } from './components/DvirDrawer';
 import { CreateWorkOrderModal } from './components/CreateWorkOrderModal';
 import { ResolveDefectModal } from './components/ResolveDefectModal';
@@ -84,23 +86,22 @@ export default function DvirPage() {
     setParams(nextParams, { replace: true });
   }
 
-  const dvirs = useDvirsList({ limit: 500 });
-  const defects = useDefectsList({ limit: 500 });
-  const overdue = useSchedulesList({ dueOnly: true, limit: 500 });
-  const vehicles = useVehiclesPicker();
-  const workOrders = useWorkOrdersList({ limit: 500 });
-  const schedules = useSchedulesList({ limit: 500 });
+  // WD-073 — only the active tab's list is requested; the DVIRs tab is the default and also
+  // hosts the "Open defects" table, so it mounts: the newest-DVIRs window (1 request, also the
+  // `DVIRs today` KPI), one open-defects page, the CRITICAL count, the due-schedules set and
+  // the session-wide driver/vehicle lookups. Work orders / schedules load on click.
+  const debouncedSearch = useDebouncedValue(search, 300);
+  const dvirs = useRecentDvirs();
+  const overdue = useDueSchedules();
+  const vehicles = useVehiclesLookup();
+  const [defectsPage, setDefectsPage] = useState(1);
+  const [defectsLimit, setDefectsLimit] = useState(10);
+  const defects = useOpenDefects({ page: defectsPage, limit: defectsLimit, search: debouncedSearch });
 
-  const needle = search.trim().toLowerCase();
+  const needle = debouncedSearch.trim().toLowerCase();
   const matchesSearch = (unit: string | undefined, ...text: (string | null | undefined)[]) =>
     !needle || (unit ?? '').toLowerCase().includes(needle) || text.some((t) => (t ?? '').toLowerCase().includes(needle));
 
-  const openDefects = useMemo(
-    () => defects.rows.filter((d) => d.status === 'OPEN' && matchesSearch(d.vehicle?.unitNumber, d.category, d.description)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [defects.rows, needle],
-  );
-  const criticalOpen = useMemo(() => openDefects.filter((d) => d.severity === 'CRITICAL'), [openDefects]);
   const oldestOverdueDays = useMemo(() => {
     const days = overdue.rows.map((s) => Math.abs(s.due.daysRemaining ?? 0)).filter((d) => d > 0);
     return days.length ? Math.max(...days) : 0;
@@ -114,6 +115,8 @@ export default function DvirPage() {
     () => dvirsToday.filter((d) => d.vehicleCondition === 'SATISFACTORY').length,
     [dvirsToday],
   );
+  // The window is newest-first: if every row in it is from today, today has at least that many.
+  const dvirsTodayLabel = dvirs.windowFull && dvirsToday.length === dvirs.rows.length ? `${dvirsToday.length}+` : dvirsToday.length;
   const outOfServiceVehicles = useMemo(
     () => (vehicles.data?.items ?? []).filter((v) => v.status === 'OUT_OF_SERVICE'),
     [vehicles.data],
@@ -142,14 +145,15 @@ export default function DvirPage() {
 
   const upcomingSchedules = useMemo(
     () =>
-      schedules.rows
+      overdue.rows
         .filter((s) => s.due.state !== 'OK')
         .sort((a, b) => (a.due.milesRemaining ?? a.due.daysRemaining ?? 0) - (b.due.milesRemaining ?? b.due.daysRemaining ?? 0))
         .slice(0, 6),
-    [schedules.rows],
+    [overdue.rows],
   );
 
   async function handleExport() {
+    // The export is the open-defects page currently on screen (the API has no defects export).
     const blob = new Blob([JSON.stringify(defects.rows, null, 2)], { type: 'application/json' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
@@ -202,8 +206,8 @@ export default function DvirPage() {
         <div className="grid grid-cols-4 gap-card-gap">
           <KpiCard
             label="Open defects"
-            value={openDefects.length}
-            chip={criticalOpen.length > 0 ? { text: `${criticalOpen.length} critical`, tone: 'danger' } : undefined}
+            value={defects.total}
+            chip={defects.criticalCount > 0 ? { text: `${defects.criticalCount} critical`, tone: 'danger' } : undefined}
             icon={AlertTriangle}
             iconTone="danger"
           />
@@ -216,7 +220,7 @@ export default function DvirPage() {
           />
           <KpiCard
             label="DVIRs today"
-            value={dvirsToday.length}
+            value={dvirsTodayLabel}
             chip={dvirsToday.length > 0 ? { text: `${noDefectToday} no-defect`, tone: 'success' } : undefined}
             icon={ClipboardList}
             iconTone="success"
@@ -239,13 +243,8 @@ export default function DvirPage() {
         {(
           [
             ['dvirs', `DVIRs ${dvirs.page?.total ?? dvirs.rows.length}`],
-            ['defects', `Open defects ${openDefects.length}`],
-            ...(canMaintenanceRead
-              ? ([
-                  ['workOrders', `Work orders ${workOrders.page?.total ?? workOrders.rows.length}`],
-                  ['schedules', `Schedules ${schedules.page?.total ?? schedules.rows.length}`],
-                ] as [Tab, string][])
-              : []),
+            ['defects', `Open defects ${defects.total}`],
+            ...(canMaintenanceRead ? ([['workOrders', 'Work orders'], ['schedules', 'Schedules']] as [Tab, string][]) : []),
           ] as [Tab, string][]
         ).map(([value, label]) => (
           <button
@@ -342,6 +341,7 @@ export default function DvirPage() {
                         header: 'DEFECTS',
                         cell: ({ row }) => {
                           const cats = row.original.defects.map((d) => d.category).join(', ');
+                          if (!cats && !row.original.defectsKnown) return <span className="text-text-muted">{orDash(null, String)}</span>;
                           return <span className={cats ? 'text-text' : 'text-text-muted'}>{orNone(cats || null)}</span>;
                         },
                       },
@@ -362,7 +362,7 @@ export default function DvirPage() {
               <SectionHeader title="Upcoming maintenance" subtitle="Next 30 days" />
             </div>
             <div className="flex flex-col gap-3 p-card">
-              {schedules.isLoading ? (
+              {overdue.isLoading ? (
                 <LoadingState rows={3} />
               ) : upcomingSchedules.length === 0 ? (
                 <p className="text-body text-text-muted">No services due in the next 30 days.</p>
@@ -399,7 +399,7 @@ export default function DvirPage() {
 
           <Card padded={false} className="col-span-2">
             <div className="flex items-start justify-between p-card pb-0">
-              <SectionHeader title="Open defects" subtitle={`${openDefects.length} total · ${criticalOpen.length} critical`} />
+              <SectionHeader title="Open defects" subtitle={`${defects.total} total · ${defects.criticalCount} critical`} />
               <Can perm="maintenance" level="FULL">
                 <Button variant="secondary" iconLeft={<Plus size={16} strokeWidth={1.75} />} onClick={() => setCreateWoOpen(true)}>
                   Create work order
@@ -408,7 +408,16 @@ export default function DvirPage() {
             </div>
             <div className="p-card">
               <OpenDefectsTable
-                rows={openDefects}
+                rows={defects.rows}
+                total={defects.total}
+                totalPages={defects.totalPages}
+                page={defectsPage}
+                limit={defectsLimit}
+                onPageChange={setDefectsPage}
+                onLimitChange={(l) => {
+                  setDefectsLimit(l);
+                  setDefectsPage(1);
+                }}
                 isLoading={defects.isLoading}
                 isError={defects.isError}
                 onRetry={() => defects.refetch()}
@@ -422,11 +431,20 @@ export default function DvirPage() {
       {tab === 'defects' && (
         <Card padded={false}>
           <div className="p-card pb-0">
-            <SectionHeader title="Open defects" subtitle={`${openDefects.length} total · ${criticalOpen.length} critical`} />
+            <SectionHeader title="Open defects" subtitle={`${defects.total} total · ${defects.criticalCount} critical`} />
           </div>
           <div className="p-card">
             <OpenDefectsTable
-              rows={openDefects}
+              rows={defects.rows}
+              total={defects.total}
+              totalPages={defects.totalPages}
+              page={defectsPage}
+              limit={defectsLimit}
+              onPageChange={setDefectsPage}
+              onLimitChange={(l) => {
+                setDefectsLimit(l);
+                setDefectsPage(1);
+              }}
               isLoading={defects.isLoading}
               isError={defects.isError}
               onRetry={() => defects.refetch()}
@@ -437,15 +455,8 @@ export default function DvirPage() {
       )}
 
       <Can perm="maintenance" level="READ">
-        {tab === 'workOrders' && <WorkOrdersTab rows={workOrders.rows} isLoading={workOrders.isLoading} isError={workOrders.isError} onRetry={() => workOrders.refetch()} />}
-        {tab === 'schedules' && (
-          <SchedulesTab
-            rows={schedules.rows}
-            isLoading={schedules.isLoading}
-            isError={schedules.isError}
-            onRetry={() => schedules.refetch()}
-          />
-        )}
+        {tab === 'workOrders' && <WorkOrdersTab search={debouncedSearch} />}
+        {tab === 'schedules' && <SchedulesTab search={debouncedSearch} />}
       </Can>
 
       {drawerDvirId && (
@@ -479,38 +490,42 @@ export default function DvirPage() {
   );
 }
 
-/** Client-side pagination — every list here is already fetched at `limit: 500` for the joins
- * and KPI counts, so paging the already-loaded array avoids a second round trip per page. */
-function usePagedRows<T>(rows: T[]) {
-  const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(10);
-  const totalPages = Math.max(1, Math.ceil(rows.length / limit));
-  const pageRows = useMemo(() => rows.slice((page - 1) * limit, page * limit), [rows, page, limit]);
-  return { page, limit, totalPages, pageRows, setPage, setLimit };
+interface ServerPageProps {
+  total: number;
+  totalPages: number;
+  page: number;
+  limit: number;
+  onPageChange: (page: number) => void;
+  onLimitChange: (limit: number) => void;
 }
 
 function OpenDefectsTable({
   rows,
+  total,
+  totalPages,
+  page,
+  limit,
+  onPageChange,
+  onLimitChange,
   isLoading,
   isError,
   onRetry,
   onRowClick,
-}: {
+}: ServerPageProps & {
   rows: DefectTableRow[];
   isLoading: boolean;
   isError: boolean;
   onRetry: () => void;
   onRowClick?: (defect: DefectTableRow) => void;
 }) {
-  const { page, limit, totalPages, pageRows, setPage, setLimit } = usePagedRows(rows);
   if (isLoading) return <LoadingState />;
   if (isError) return <ErrorState onRetry={onRetry} />;
-  if (rows.length === 0) return <EmptyState {...EMPTY_STATE_COPY.openDefects} />;
+  if (total === 0) return <EmptyState {...EMPTY_STATE_COPY.openDefects} />;
   return (
     <>
     <DataTable
       caption="Open defects"
-      data={pageRows}
+      data={rows}
       getRowId={(r) => r.id}
       onRowClick={onRowClick}
       columns={
@@ -552,42 +567,37 @@ function OpenDefectsTable({
         ] as ColumnDef<DefectTableRow, unknown>[]
       }
     />
-    <Pagination page={page} limit={limit} total={rows.length} totalPages={totalPages} itemLabel="defects" onPageChange={setPage} onLimitChange={setLimit} />
+    <Pagination page={page} limit={limit} total={total} totalPages={totalPages} itemLabel="defects" onPageChange={onPageChange} onLimitChange={onLimitChange} />
     </>
   );
 }
 
-function WorkOrdersTab({
-  rows,
-  isLoading,
-  isError,
-  onRetry,
-}: {
-  rows: WorkOrderTableRow[];
-  isLoading: boolean;
-  isError: boolean;
-  onRetry: () => void;
-}) {
+/** Mounted only while its tab is active — `GET /work-orders` (`q` is a real param) per page. */
+function WorkOrdersTab({ search }: { search: string }) {
   const { can } = usePermission();
   const canFull = can('maintenance', 'FULL');
-  const { page, limit, totalPages, pageRows, setPage, setLimit } = usePagedRows(rows);
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
+  const q = search.trim() || undefined;
+  const { rows, total, totalPages, isLoading, isError, refetch } = useWorkOrdersList({ page, limit, q });
+  const onRetry = () => void refetch();
   return (
     <Card padded={false}>
       <div className="p-card pb-0">
-        <SectionHeader title="Work orders" subtitle={`${rows.length} total`} />
+        <SectionHeader title="Work orders" subtitle={`${total} total`} />
       </div>
       <div className="p-card">
         {isLoading ? (
           <LoadingState />
         ) : isError ? (
           <ErrorState onRetry={onRetry} />
-        ) : rows.length === 0 ? (
+        ) : total === 0 ? (
           <EmptyState title="No work orders yet" description="Create a work order from an open defect to track repair costs." />
         ) : (
           <>
           <DataTable
             caption="Work orders"
-            data={pageRows}
+            data={rows}
             getRowId={(r) => r.id}
             rowActions={
               canFull
@@ -636,7 +646,7 @@ function WorkOrdersTab({
               ] as ColumnDef<WorkOrderTableRow, unknown>[]
             }
           />
-          <Pagination page={page} limit={limit} total={rows.length} totalPages={totalPages} itemLabel="work orders" onPageChange={setPage} onLimitChange={setLimit} />
+          <Pagination page={page} limit={limit} total={total} totalPages={totalPages} itemLabel="work orders" onPageChange={setPage} onLimitChange={(l) => { setLimit(l); setPage(1); }} />
           </>
         )}
       </div>
@@ -644,37 +654,31 @@ function WorkOrdersTab({
   );
 }
 
-function SchedulesTab({
-  rows,
-  isLoading,
-  isError,
-  onRetry,
-}: {
-  rows: ScheduleTableRow[];
-  isLoading: boolean;
-  isError: boolean;
-  onRetry: () => void;
-}) {
+/** Mounted only while its tab is active — one `GET /maintenance-schedules` page per render. */
+function SchedulesTab({ search }: { search: string }) {
   const { can } = usePermission();
   const canFull = can('maintenance', 'FULL');
-  const { page, limit, totalPages, pageRows, setPage, setLimit } = usePagedRows(rows);
+  const [page, setPage] = useState(1);
+  const [limit, setLimit] = useState(10);
+  const { rows, total, totalPages, isLoading, isError, refetch } = useSchedulesList({ page, limit, search });
+  const onRetry = () => refetch();
   return (
     <Card padded={false}>
       <div className="p-card pb-0">
-        <SectionHeader title="Schedules" subtitle={`${rows.length} total`} />
+        <SectionHeader title="Schedules" subtitle={`${total} total`} />
       </div>
       <div className="p-card">
         {isLoading ? (
           <LoadingState />
         ) : isError ? (
           <ErrorState onRetry={onRetry} />
-        ) : rows.length === 0 ? (
+        ) : total === 0 ? (
           <EmptyState title="No maintenance schedules" description="Create a schedule to track preventive service by mileage or date." />
         ) : (
           <>
           <DataTable
             caption="Maintenance schedules"
-            data={pageRows}
+            data={rows}
             getRowId={(r) => r.id}
             rowActions={
               canFull
@@ -736,7 +740,7 @@ function SchedulesTab({
               ] as ColumnDef<ScheduleTableRow, unknown>[]
             }
           />
-          <Pagination page={page} limit={limit} total={rows.length} totalPages={totalPages} itemLabel="schedules" onPageChange={setPage} onLimitChange={setLimit} />
+          <Pagination page={page} limit={limit} total={total} totalPages={totalPages} itemLabel="schedules" onPageChange={setPage} onLimitChange={(l) => { setLimit(l); setPage(1); }} />
           </>
         )}
       </div>

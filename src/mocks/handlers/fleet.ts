@@ -2,13 +2,13 @@
 import { http } from 'msw';
 import { endpoints } from '@/shared/api/endpoints';
 import { fixture } from '../fixtures.generated';
-import { ok, url } from '../envelope';
+import { ok, url, serverPage } from '../envelope';
 
 /**
  * B-3 `GET /live/fleet` (shipped 2026-09-14) — same 17 fields + `generatedAt` as backend
  * `live-fleet.mapper.ts`; validated against openapi.json by the contract suite.
  */
-const LIVE_FLEET = {
+export const LIVE_FLEET = {
   items: [
     {
       vehicleId: 'veh_1',
@@ -91,14 +91,14 @@ const LIVE_FLEET = {
 };
 
 export const fleetHandlers = [
-  http.get(url(endpoints.vehicles.list), () => ok(fixture('GET /api/vehicles'))),
+  http.get(url(endpoints.vehicles.list), ({ request }) => ok(serverPage(fixture('GET /api/vehicles'), request, ['unitNumber', 'vin', 'make', 'model', 'licensePlate']))),
   http.get(url(endpoints.vehicles.detail(':id')), () => ok(fixture('GET /api/vehicles/{id}'))),
   http.get(url(endpoints.vehicles.dtc(':id')), () => ok(fixture('GET /api/vehicles/{id}/dtc'))),
-  http.get(url(endpoints.drivers.list), () => ok(fixture('GET /api/drivers'))),
+  http.get(url(endpoints.drivers.list), ({ request }) => ok(serverPage(fixture('GET /api/drivers'), request, ['firstName', 'lastName', 'username', 'cdlNumber']))),
   http.get(url(endpoints.drivers.detail(':id')), () => ok(fixture('GET /api/drivers/{id}'))),
   http.get(url(endpoints.trailers.list), () => ok(fixture('GET /api/trailers'))),
-  http.get(url(endpoints.devices.list), () => ok(fixture('GET /api/devices'))),
-  http.get(url(endpoints.trips.list), () => ok(fixture('GET /api/trips'))),
+  http.get(url(endpoints.devices.list), ({ request }) => ok(serverPage(fixture('GET /api/devices'), request, ['serial', 'model']))),
+  http.get(url(endpoints.trips.list), ({ request }) => ok(serverPage(fixture('GET /api/trips'), request, ['number', 'shippingDocument']))),
   http.get(url(endpoints.safety.events), () => ok(fixture('GET /api/safety/events'))),
   http.get(url(endpoints.safety.scorecard), () => ok(fixture('GET /api/safety/scorecard'))),
   http.get(url(endpoints.notifications.list), () => ok(fixture('GET /api/notifications'))),
@@ -108,7 +108,7 @@ export const fleetHandlers = [
     ok(fixture('GET /api/logs/{driverId}/events')),
   ),
   http.get(url(endpoints.unidentified.list), () => ok(fixture('GET /api/unidentified'))),
-  http.get(url(endpoints.dvir.list), () => ok(fixture('GET /api/dvir'))),
+  http.get(url(endpoints.dvir.list), ({ request }) => ok(serverPage(fixture('GET /api/dvir'), request))),
 
   // Gap stubs — served against the shape recorded in web/backend-gaps.md.
   http.get(url(endpoints.live.fleet), () => ok(LIVE_FLEET)),

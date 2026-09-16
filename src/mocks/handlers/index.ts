@@ -1,6 +1,7 @@
 // The default handler set: everything phase 1–2 touches. A feature agent appends its own file
 // here rather than redefining a base server.
 import { authHandlers } from './auth';
+import { dashboardHandlers } from './dashboard';
 import { fleetHandlers } from './fleet';
 import { vehiclesDriversGapHandlers } from './vehiclesDriversGaps';
 import { hosGapHandlers } from './hosGaps';
@@ -18,6 +19,7 @@ import { shellGapHandlers } from './shellGaps';
 // endpoints W-09/W-10 need beyond the base `GET /dvir` and `GET /safety/*` in `fleetHandlers`.
 export const handlers = [
   ...authHandlers,
+  ...dashboardHandlers,
   ...vehiclesDriversGapHandlers,
   ...hosGapHandlers,
   ...tripsMessagingGapHandlers,
@@ -30,6 +32,7 @@ export const handlers = [
 ];
 export {
   authHandlers,
+  dashboardHandlers,
   fleetHandlers,
   vehiclesDriversGapHandlers,
   hosGapHandlers,

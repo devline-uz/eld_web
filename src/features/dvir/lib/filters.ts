@@ -9,10 +9,9 @@
 // `GET /dvir` (`DvirListQueryDto`, backend/src/modules/service/dto/service.dto.ts) accepts
 // `repairStatus` server-side, but only a single enum value, while the drawer is a multi-select
 // checkbox group like every other 11.23 drawer; it has no `type` param at all, and DVIRs have no
-// severity field to filter server-side in the first place. `useDvirsList` already loads the full
-// set (`limit: 500`) once for the driver/vehicle/defect joins (same W-03/W-06/W-11 precedent,
-// web/decisions.md WD-024), so — consistent with that precedent — all three groups run
-// client-side against that already-loaded set. Recorded as web/backend-gaps.md B-60.
+// severity field to filter server-side in the first place. The DVIRs tab renders from the
+// newest-200 window (`useRecentDvirs`, WD-073), so all three groups run client-side against
+// that bounded window — never against a fetch-everything set. Recorded as web/backend-gaps.md B-60.
 import type { DefectSeverity, DvirTableRow, DvirType, RepairStatus } from '@/shared/api/dvir';
 
 export const DVIR_TYPE_OPTIONS: DvirType[] = ['PRE_TRIP', 'POST_TRIP', 'INTERMEDIATE'];

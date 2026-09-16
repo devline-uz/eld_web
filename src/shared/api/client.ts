@@ -3,6 +3,8 @@
 // 3 refresh 401 → signOut → /sign-in?reason=expired · 4 (retired, web/decisions.md WD-067) ·
 // 5 plain 403 → <ForbiddenState>, no toast · 6 422 → field errors ·
 // 7 5xx/network → GET retries twice (1 s, 3 s) · 8 X-Client-Version · 9 AbortController.
+// Plus WD-072: a request with no access token but a refresh token in hand awaits the
+// single-flight refresh instead of going out unauthenticated.
 //
 // The access token lives in a module variable only; the refresh token never leaves shared/auth
 // (localStorage `obk.rt`) — web/tz.md §17. Neither ever appears in a URL.
@@ -251,11 +253,26 @@ export function refreshAccessToken(): Promise<string> {
   return refreshPromise;
 }
 
+/**
+ * Boot-from-snapshot (web/decisions.md WD-072): right after a reload the refresh token is in
+ * storage but the in-memory access token is still empty while `POST /auth/refresh` is in flight.
+ * Instead of leaving unauthenticated and coming back as a 401 (+1 round trip, +1 refresh), the
+ * request parks on the same single-flight promise and goes out the moment the token lands.
+ * Resolves `true` when the request has already paid for a refresh (rule 2 must not run again).
+ */
+async function ensureAccessToken(options: InternalOptions): Promise<boolean> {
+  if (options.anonymous || options.retriedAfterRefresh) return false;
+  if (bridge.getAccessToken() || !bridge.getRefreshToken()) return false;
+  await refreshAccessToken();
+  return true;
+}
+
 /* ------------------------------------------------------------------ request pipeline */
 
 async function send<T>(options: InternalOptions): Promise<T> {
   const isGet = options.method === 'GET';
   let attempt = 0;
+  if (await ensureAccessToken(options)) options = { ...options, retriedAfterRefresh: true };
 
   for (;;) {
     let res: Response;
@@ -335,9 +352,10 @@ export const client = {
   },
   /**
    * A list read that honours a `limit` above the API maximum by paging (WB-030). With `limit ≤ 200`
-   * this is exactly one `GET` and the page comes back untouched. Above that it walks 200-row pages —
-   * sequentially, from the offset `page` implies — until it has `limit` rows or the server runs out,
-   * and returns one `OffsetPage` expressed in the caller's own `limit`.
+   * this is exactly one `GET` and the page comes back untouched. Above that it fetches the first
+   * 200-row page (from the offset `page` implies), then every remaining page it still needs **in
+   * parallel** (WD-073 — the old sequential walk cost one RTT per page), and returns one
+   * `OffsetPage` expressed in the caller's own `limit`.
    */
   async list<T>(
     path: string,
@@ -351,31 +369,27 @@ export const client = {
 
     const page = Math.max(1, Number(params.page) || 1);
     const offset = (page - 1) * requested;
-    let apiPage = Math.floor(offset / MAX_PAGE_LIMIT) + 1;
-    let skip = offset % MAX_PAGE_LIMIT;
-    const items: T[] = [];
-    let total = 0;
+    const firstApiPage = Math.floor(offset / MAX_PAGE_LIMIT) + 1;
+    const skip = offset % MAX_PAGE_LIMIT;
+    const fetchPage = (apiPage: number) =>
+      send<OffsetPage<T>>({ ...options, method: 'GET', path, params: { ...params, page: apiPage, limit: MAX_PAGE_LIMIT } });
 
-    for (;;) {
-      const chunk = await send<OffsetPage<T>>({
-        ...options,
-        method: 'GET',
-        path,
-        params: { ...params, page: apiPage, limit: MAX_PAGE_LIMIT },
-      });
-      total = chunk.total;
-      items.push(...chunk.items.slice(skip));
-      skip = 0;
-      if (items.length >= requested || apiPage >= chunk.totalPages || chunk.items.length === 0) break;
-      apiPage += 1;
+    const first = await fetchPage(firstApiPage);
+    const items: T[] = first.items.slice(skip);
+    const lastApiPage = Math.min(first.totalPages, firstApiPage + Math.ceil((requested + skip) / MAX_PAGE_LIMIT) - 1);
+    if (items.length < requested && first.items.length > 0 && lastApiPage > firstApiPage) {
+      const rest = await Promise.all(
+        Array.from({ length: lastApiPage - firstApiPage }, (_, i) => fetchPage(firstApiPage + 1 + i)),
+      );
+      for (const chunk of rest) items.push(...chunk.items);
     }
 
     return {
       items: items.slice(0, requested),
       page,
       limit: requested,
-      total,
-      totalPages: Math.max(1, Math.ceil(total / requested)),
+      total: first.total,
+      totalPages: Math.max(1, Math.ceil(first.total / requested)),
     };
   },
   /** Multipart upload (CSV import, DVIR photos). */
@@ -384,6 +398,7 @@ export const client = {
   },
   /** Presigned download — the URL is never logged or cached (§17). */
   async blob(path: string, options?: RequestOptions): Promise<Blob> {
+    await ensureAccessToken({ ...options, method: 'GET', path });
     const res = await fetchOnce({ ...options, method: 'GET', path });
     if (!res.ok) throw toApiError(res.status, await readBody(res));
     return await res.blob();
