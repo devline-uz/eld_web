@@ -39,8 +39,9 @@ afterEach(() => {
 });
 afterAll(() => server.close());
 
-// Perf plan item 3 (WD-074) — the page now fires one `GET /dashboard/summary` request instead of
-// six; these helpers build that single composite response per test case.
+// Perf plan item 3 (WD-074) — the KPI row, map, donut and carrier subtitle come from one
+// `GET /dashboard/summary`; the violations table keeps its own server-paginated `GET /violations`
+// (B-6) so page/limit work. These helpers build both responses per test case.
 interface SummaryOverrides {
   liveFleet?: { items: unknown[]; generatedAt?: string };
   violations?: { items: unknown[]; total: number };
@@ -73,12 +74,67 @@ function buildSummary(overrides: SummaryOverrides = {}) {
   };
 }
 
+/** The paginated violations feed the table reads (`page`/`limit` → `OffsetPage`). */
+function violationsPage(items: unknown[], total = items.length) {
+  return http.get(url(endpoints.violations.list), () =>
+    ok({ items, total, page: 1, limit: 10, totalPages: Math.max(1, Math.ceil(total / 10)) }),
+  );
+}
+
 beforeEach(() => {
   setAuthBridge({ getAccessToken: () => 'test-token' });
   setAccessToken('test-token');
 });
 
 describe('W-01 Fleet Dashboard', () => {
+  it('pages the violations table through GET /violations page/limit', async () => {
+    const rows = Array.from({ length: 12 }, (_, i) => ({
+      id: `vio_${i + 1}`,
+      severity: 'WARNING',
+      driverId: 'drv_1',
+      driverName: 'John Smith',
+      vehicleId: 'v1',
+      unitNumber: '#101',
+      event: `Event ${i + 1}`,
+      locationLabel: null,
+      occurredAt: new Date().toISOString(),
+    }));
+    const requested: { page: string | null; limit: string | null }[] = [];
+    server.use(
+      http.get(url(endpoints.live.fleet), () => ok({ items: [], generatedAt: new Date().toISOString() })),
+      http.get(url(endpoints.violations.list), ({ request }) => {
+        const search = new URL(request.url).searchParams;
+        requested.push({ page: search.get('page'), limit: search.get('limit') });
+        const page = Number(search.get('page'));
+        const limit = Number(search.get('limit'));
+        return ok({
+          items: rows.slice((page - 1) * limit, page * limit),
+          total: rows.length,
+          page,
+          limit,
+          totalPages: Math.ceil(rows.length / limit),
+        });
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByText('Event 1', {}, { timeout: 8000 })).toBeInTheDocument();
+    expect(screen.queryByText('Event 11')).not.toBeInTheDocument();
+    expect(screen.getByText('1–10 of 12 violations')).toBeInTheDocument();
+    expect(requested[0]).toEqual({ page: '1', limit: '10' });
+
+    await user.click(screen.getByRole('button', { name: 'Next page' }));
+
+    expect(await screen.findByText('Event 11', {}, { timeout: 8000 })).toBeInTheDocument();
+    expect(screen.queryByText('Event 1')).not.toBeInTheDocument();
+    expect(screen.getByText('11–12 of 12 violations')).toBeInTheDocument();
+    expect(requested.at(-1)).toEqual({ page: '2', limit: '10' });
+    // the KPI keeps counting every violation, not just the rows on the current page.
+    expect(screen.getByText('12')).toBeInTheDocument();
+  });
+
   it('renders the KPI row and an empty violations table', async () => {
     server.use(
       http.get(url(endpoints.dashboard.summary), () =>
@@ -90,10 +146,10 @@ describe('W-01 Fleet Dashboard', () => {
                 { vehicleId: 'v2', unitNumber: '#102', dutyStatus: 'ON_DUTY', lat: 40.1, lon: -83.1 },
               ],
             },
-            violations: { items: [], total: 0 },
           }),
         ),
       ),
+      violationsPage([]),
     );
 
     renderPage();
@@ -107,7 +163,10 @@ describe('W-01 Fleet Dashboard', () => {
   });
 
   it("shows an in-card error state when GET /dashboard/summary fails without leaving the page blank", async () => {
-    server.use(http.get(url(endpoints.dashboard.summary), () => new Response(null, { status: 404 })));
+    server.use(
+      http.get(url(endpoints.dashboard.summary), () => new Response(null, { status: 404 })),
+      http.get(url(endpoints.violations.list), () => new Response(null, { status: 404 })),
+    );
 
     renderPage();
 
@@ -125,37 +184,34 @@ describe('W-01 Fleet Dashboard', () => {
             liveFleet: {
               items: [{ vehicleId: 'v1', unitNumber: '#101', dutyStatus: 'DRIVING', lat: 40, lon: -83 }],
             },
-            violations: {
-              items: [
-                {
-                  id: 'vio_1',
-                  severity: 'VIOLATION',
-                  driverId: 'drv_1',
-                  driverName: 'John Smith',
-                  vehicleId: 'v1',
-                  unitNumber: '#101',
-                  event: '11-hour driving limit exceeded',
-                  locationLabel: '1.04 mi W of Harrisburg, OH',
-                  occurredAt: new Date().toISOString(),
-                  date: '2026-09-12',
-                },
-                {
-                  id: 'vio_2',
-                  severity: 'WARNING',
-                  driverId: null,
-                  driverName: null,
-                  vehicleId: 'v2',
-                  unitNumber: '#102',
-                  event: 'Unassigned driving · 1h 12m',
-                  locationLabel: null,
-                  occurredAt: new Date().toISOString(),
-                },
-              ],
-              total: 2,
-            },
           }),
         ),
       ),
+      violationsPage([
+        {
+          id: 'vio_1',
+          severity: 'VIOLATION',
+          driverId: 'drv_1',
+          driverName: 'John Smith',
+          vehicleId: 'v1',
+          unitNumber: '#101',
+          event: '11-hour driving limit exceeded',
+          locationLabel: '1.04 mi W of Harrisburg, OH',
+          occurredAt: new Date().toISOString(),
+          date: '2026-09-12',
+        },
+        {
+          id: 'vio_2',
+          severity: 'WARNING',
+          driverId: null,
+          driverName: null,
+          vehicleId: 'v2',
+          unitNumber: '#102',
+          event: 'Unassigned driving · 1h 12m',
+          locationLabel: null,
+          occurredAt: new Date().toISOString(),
+        },
+      ]),
     );
 
     const user = userEvent.setup();

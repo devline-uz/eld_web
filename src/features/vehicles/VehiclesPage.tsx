@@ -229,8 +229,8 @@ export default function VehiclesPage() {
   const isLoading = allVehicles.isLoading;
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col gap-4 xl:max-h-content-h">
+      <div className="flex items-center justify-between xl:shrink-0">
         <div>
           <h1 className="text-page-title text-text">Vehicles</h1>
           <p className="text-page-sub text-text-muted">
@@ -294,7 +294,7 @@ export default function VehiclesPage() {
         </div>
       </div>
 
-      <div className="flex h-9 w-fit overflow-hidden rounded-md border border-border">
+      <div className="flex h-9 w-fit overflow-hidden rounded-md border border-border xl:shrink-0">
         {(
           [
             ['ALL', `All ${counts.all}`],
@@ -319,13 +319,15 @@ export default function VehiclesPage() {
         ))}
       </div>
 
-      <VehicleFilterChips
-        filters={filters}
-        onRemove={(patch) => applyFilters({ ...filters, ...patch })}
-        onClearAll={() => applyFilters(EMPTY_VEHICLE_FILTERS)}
-      />
+      <div className="xl:shrink-0">
+        <VehicleFilterChips
+          filters={filters}
+          onRemove={(patch) => applyFilters({ ...filters, ...patch })}
+          onClearAll={() => applyFilters(EMPTY_VEHICLE_FILTERS)}
+        />
+      </div>
 
-      <Card padded={false}>
+      <Card padded={false} className="xl:flex xl:min-h-0 xl:flex-col">
         {isLoading ? (
           <LoadingState className="p-4" />
         ) : allVehicles.isError ? (
@@ -356,49 +358,54 @@ export default function VehiclesPage() {
           )
         ) : (
           <>
-            <DataTable
-              data={pageRows}
-              columns={columns}
-              caption="Vehicles"
-              getRowId={(r) => r.id}
-              selectable={canFull}
-              selection={selection}
-              onSelectionChange={setSelection}
-              onRowClick={(row) => navigate(`/vehicles/${row.id}`)}
-              rowActions={
-                canFull
-                  ? (row) => (
-                      <>
-                        <DropdownMenu.Item onSelect={() => navigate(`/vehicles/${row.id}`)} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
-                          View unit profile
-                        </DropdownMenu.Item>
-                        <DropdownMenu.Item onSelect={() => navigate(`/hos-logs?driverId=${row.driver?.id ?? ''}`)} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
-                          Open HOS logs
-                        </DropdownMenu.Item>
-                        <DropdownMenu.Item onSelect={() => navigate('/live-fleet')} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
-                          Track on map
-                        </DropdownMenu.Item>
-                        <DropdownMenu.Item onSelect={() => setAssignVehicle(row)} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
-                          Assign driver
-                        </DropdownMenu.Item>
-                        <DropdownMenu.Item onSelect={() => setCalibrateVehicle(row)} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
-                          Calibrate odometer
-                        </DropdownMenu.Item>
-                        <DropdownMenu.Item onSelect={() => navigate(`/vehicles/${row.id}/histories`)} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
-                          View histories
-                        </DropdownMenu.Item>
-                        <DropdownMenu.Separator className="my-1 h-px bg-border" />
-                        <DropdownMenu.Item onSelect={() => setEditVehicle(row)} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
-                          Edit unit
-                        </DropdownMenu.Item>
-                        <DropdownMenu.Item onSelect={() => setDeleteVehicle(row)} className="cursor-pointer rounded-md px-2 py-1.5 text-body text-danger outline-none hover:bg-danger-soft">
-                          Delete unit
-                        </DropdownMenu.Item>
-                      </>
-                    )
-                  : undefined
-              }
-            />
+            {/* Desktop only (xl:): the results list scrolls inside the card so the page itself
+                never grows past the viewport — same max-height + overflow-y-auto idea as the
+                W-16 Messages driver-search list. */}
+            <div className="xl:min-h-0 xl:overflow-y-auto">
+              <DataTable
+                data={pageRows}
+                columns={columns}
+                caption="Vehicles"
+                getRowId={(r) => r.id}
+                selectable={canFull}
+                selection={selection}
+                onSelectionChange={setSelection}
+                onRowClick={(row) => navigate(`/vehicles/${row.id}`)}
+                rowActions={
+                  canFull
+                    ? (row) => (
+                        <>
+                          <DropdownMenu.Item onSelect={() => navigate(`/vehicles/${row.id}`)} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                            View unit profile
+                          </DropdownMenu.Item>
+                          <DropdownMenu.Item onSelect={() => navigate(`/hos-logs?driverId=${row.driver?.id ?? ''}`)} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                            Open HOS logs
+                          </DropdownMenu.Item>
+                          <DropdownMenu.Item onSelect={() => navigate('/live-fleet')} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                            Track on map
+                          </DropdownMenu.Item>
+                          <DropdownMenu.Item onSelect={() => setAssignVehicle(row)} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                            Assign driver
+                          </DropdownMenu.Item>
+                          <DropdownMenu.Item onSelect={() => setCalibrateVehicle(row)} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                            Calibrate odometer
+                          </DropdownMenu.Item>
+                          <DropdownMenu.Item onSelect={() => navigate(`/vehicles/${row.id}/histories`)} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                            View histories
+                          </DropdownMenu.Item>
+                          <DropdownMenu.Separator className="my-1 h-px bg-border" />
+                          <DropdownMenu.Item onSelect={() => setEditVehicle(row)} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                            Edit unit
+                          </DropdownMenu.Item>
+                          <DropdownMenu.Item onSelect={() => setDeleteVehicle(row)} className="cursor-pointer rounded-md px-2 py-1.5 text-body text-danger outline-none hover:bg-danger-soft">
+                            Delete unit
+                          </DropdownMenu.Item>
+                        </>
+                      )
+                    : undefined
+                }
+              />
+            </div>
             <Pagination
               page={page}
               limit={limit}

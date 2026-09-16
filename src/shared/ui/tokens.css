@@ -132,6 +132,8 @@
 
   /* ---- W-01 / W-02 / 11.1 measurements (web/tz.md §10) ------------------- */
   --spacing-map-preview: 260px; /* W-01 "Live fleet" card map height */
+  --spacing-map-preview-xl: 333px; /* W-01 same map, desktop (≥xl) only: fills the card's leftover height beside the duty donut */
+  --spacing-duty-donut-xl-pad: 50px; /* W-01 "Duty status · now" desktop-only pad, keeps the card level with the map */
   --spacing-unit-list: 300px; /* W-02 left column width */
   --spacing-detail-card: 280px; /* W-02 selected-unit detail card width */
   --spacing-geofence-preview: 190px; /* 11.1 map preview height */

@@ -70,6 +70,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
 
   // --- generic / transport --------------------------------------------------------------------
   INTERNAL_ERROR: 'Something went wrong on our side. Try again.',
+  // Client-side only: `NetworkError` — the request never reached the backend, so no traceId.
+  NETWORK_ERROR: 'No connection. Check your network and try again.',
   NOT_IMPLEMENTED: 'This action is not available yet.',
   VALIDATION_FAILED: 'Check the highlighted fields and try again.',
   NOT_FOUND: 'Not found.',
