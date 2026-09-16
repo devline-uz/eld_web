@@ -96,7 +96,18 @@ export default function DvirPage() {
   const vehicles = useVehiclesLookup();
   const [defectsPage, setDefectsPage] = useState(1);
   const [defectsLimit, setDefectsLimit] = useState(10);
-  const defects = useOpenDefects({ page: defectsPage, limit: defectsLimit, search: debouncedSearch });
+  // A new search term re-pages the open-defects table from the start, and the page is clamped to
+  // the narrowed result: page 3 of a 1-page result is an empty server page (server mode) or rows
+  // that no longer match the page number Pagination shows (in-memory window mode, B-66).
+  // Adjusted during render, not in an effect — react.dev "you might not need an effect".
+  const [prevDefectsSearch, setPrevDefectsSearch] = useState(debouncedSearch);
+  const requestedDefectsPage = debouncedSearch === prevDefectsSearch ? defectsPage : 1;
+  if (debouncedSearch !== prevDefectsSearch) setPrevDefectsSearch(debouncedSearch);
+  const defects = useOpenDefects({ page: requestedDefectsPage, limit: defectsLimit, search: debouncedSearch });
+  const currentDefectsPage = defects.isLoading
+    ? requestedDefectsPage
+    : Math.min(requestedDefectsPage, Math.max(1, defects.totalPages));
+  if (currentDefectsPage !== defectsPage) setDefectsPage(currentDefectsPage);
 
   const needle = debouncedSearch.trim().toLowerCase();
   const matchesSearch = (unit: string | undefined, ...text: (string | null | undefined)[]) =>
@@ -411,7 +422,7 @@ export default function DvirPage() {
                 rows={defects.rows}
                 total={defects.total}
                 totalPages={defects.totalPages}
-                page={defectsPage}
+                page={currentDefectsPage}
                 limit={defectsLimit}
                 onPageChange={setDefectsPage}
                 onLimitChange={(l) => {
@@ -578,8 +589,16 @@ function WorkOrdersTab({ search }: { search: string }) {
   const canFull = can('maintenance', 'FULL');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(10);
+  // A new search term re-pages from the start, and the page is clamped to the narrowed result —
+  // otherwise `GET /work-orders?page=3` for a 1-page result answers an empty page and the table
+  // renders with no rows at all. Adjusted during render, not in an effect.
+  const [prevSearch, setPrevSearch] = useState(search);
+  const requestedPage = search === prevSearch ? page : 1;
+  if (search !== prevSearch) setPrevSearch(search);
   const q = search.trim() || undefined;
-  const { rows, total, totalPages, isLoading, isError, refetch } = useWorkOrdersList({ page, limit, q });
+  const { rows, total, totalPages, isLoading, isError, refetch } = useWorkOrdersList({ page: requestedPage, limit, q });
+  const currentPage = isLoading ? requestedPage : Math.min(requestedPage, Math.max(1, totalPages));
+  if (currentPage !== page) setPage(currentPage);
   const onRetry = () => void refetch();
   return (
     <Card padded={false}>
@@ -646,7 +665,7 @@ function WorkOrdersTab({ search }: { search: string }) {
               ] as ColumnDef<WorkOrderTableRow, unknown>[]
             }
           />
-          <Pagination page={page} limit={limit} total={total} totalPages={totalPages} itemLabel="work orders" onPageChange={setPage} onLimitChange={(l) => { setLimit(l); setPage(1); }} />
+          <Pagination page={currentPage} limit={limit} total={total} totalPages={totalPages} itemLabel="work orders" onPageChange={setPage} onLimitChange={(l) => { setLimit(l); setPage(1); }} />
           </>
         )}
       </div>
@@ -660,7 +679,14 @@ function SchedulesTab({ search }: { search: string }) {
   const canFull = can('maintenance', 'FULL');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(10);
-  const { rows, total, totalPages, isLoading, isError, refetch } = useSchedulesList({ page, limit, search });
+  // Same rule as the other two tables: a new search term re-pages from the start and the page is
+  // clamped to the narrowed result. Adjusted during render, not in an effect.
+  const [prevSearch, setPrevSearch] = useState(search);
+  const requestedPage = search === prevSearch ? page : 1;
+  if (search !== prevSearch) setPrevSearch(search);
+  const { rows, total, totalPages, isLoading, isError, refetch } = useSchedulesList({ page: requestedPage, limit, search });
+  const currentPage = isLoading ? requestedPage : Math.min(requestedPage, Math.max(1, totalPages));
+  if (currentPage !== page) setPage(currentPage);
   const onRetry = () => refetch();
   return (
     <Card padded={false}>
@@ -740,7 +766,7 @@ function SchedulesTab({ search }: { search: string }) {
               ] as ColumnDef<ScheduleTableRow, unknown>[]
             }
           />
-          <Pagination page={page} limit={limit} total={total} totalPages={totalPages} itemLabel="schedules" onPageChange={setPage} onLimitChange={(l) => { setLimit(l); setPage(1); }} />
+          <Pagination page={currentPage} limit={limit} total={total} totalPages={totalPages} itemLabel="schedules" onPageChange={setPage} onLimitChange={(l) => { setLimit(l); setPage(1); }} />
           </>
         )}
       </div>

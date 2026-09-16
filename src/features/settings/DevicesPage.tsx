@@ -52,7 +52,18 @@ export default function DevicesPage() {
   const [registerOpen, setRegisterOpen] = useState(false);
 
   const statusFilter: DeviceStatus | undefined = segment === 'UNASSIGNED' ? 'UNASSIGNED' : undefined;
-  const devicesQuery = useDevicesList({ page, limit, q: search || undefined, status: statusFilter });
+  // A new search term or segment re-pages the list from the start, and the page is clamped to the
+  // narrowed result — `GET /devices?page=3` for a 1-page result answers an empty page, which this
+  // screen renders as "No results for …" / "No devices registered yet" although matches exist.
+  // Adjusted during render, not in an effect (react.dev "you might not need an effect").
+  const listKey = JSON.stringify([search, segment]);
+  const [prevListKey, setPrevListKey] = useState(listKey);
+  const requestedPage = listKey === prevListKey ? page : 1;
+  if (listKey !== prevListKey) setPrevListKey(listKey);
+  const devicesQuery = useDevicesList({ page: requestedPage, limit, q: search || undefined, status: statusFilter });
+  const totalPages = devicesQuery.data?.totalPages ?? 1;
+  const currentPage = devicesQuery.isLoading ? requestedPage : Math.min(requestedPage, Math.max(1, totalPages));
+  if (currentPage !== page) setPage(currentPage);
   const unpairDevice = useUnpairDevice();
   const removeDevice = useRemoveDevice();
 
@@ -247,10 +258,10 @@ export default function DevicesPage() {
               }
             />
             <Pagination
-              page={page}
+              page={currentPage}
               limit={limit}
               total={devicesQuery.data?.total ?? 0}
-              totalPages={devicesQuery.data?.totalPages ?? 1}
+              totalPages={totalPages}
               itemLabel="devices"
               onPageChange={setPage}
               onLimitChange={(l) => {

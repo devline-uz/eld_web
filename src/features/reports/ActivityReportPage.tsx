@@ -113,6 +113,10 @@ export default function ActivityReportPage() {
   }, [summary.data, terminal, terminalOf]);
   const total = summary.data?.total ?? 0;
   const totalPages = summary.data?.totalPages ?? 1;
+  // The server can answer a page that no longer exists (drivers deactivated, the range narrowed
+  // between two requests) with an empty `items`: step back to the last page that still has rows
+  // instead of leaving the table blank with no reachable page button.
+  if (summary.data && total > 0 && page > totalPages) setPage(Math.max(1, totalPages));
   const kpis = summary.data?.kpis;
   const onDutyPct =
     kpis && kpis.drivingSec + kpis.onDutySec > 0

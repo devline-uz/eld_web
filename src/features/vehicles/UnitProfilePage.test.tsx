@@ -112,3 +112,44 @@ describe('W-04 Unit profile — four states', () => {
     expect(await screen.findByText('No activity recorded.')).toBeInTheDocument();
   });
 });
+
+// Regression: a long detail value (VIN, make/model, ELD serial) used to run into its label and
+// spill past the "Unit details" card — the value cell could not shrink below its content (flex
+// `min-width: auto`) and had no wrap rule. The row now gaps the pair, pins the label, and lets
+// the value wrap instead of truncating, so the whole value stays readable. Mirrors W-07.
+describe('W-04 Unit profile — long values stay inside the unit details card', () => {
+  const LONG_MODEL = 'Cascadia-Evolution-Sleeper-XT-126BBC-LongTrimPackage';
+
+  it('wraps a long make / model inside its row instead of overflowing the card', async () => {
+    server.use(
+      http.get(url(endpoints.vehicles.detail('veh_1')), () => ok({ ...VEHICLE, model: LONG_MODEL })),
+      http.get(url(endpoints.vehicles.activities('veh_1')), () => ok({ items: [] })),
+    );
+    renderPage();
+    await screen.findByText('Unit #101');
+
+    const value = await screen.findByText(`Freightliner ${LONG_MODEL}`);
+    expect(value.className).toContain('min-w-0');
+    expect(value.className).toContain('break-words');
+
+    const row = value.parentElement as HTMLElement;
+    expect(row.className).toContain('gap-4');
+
+    const label = screen.getByText('Make / model');
+    expect(label.className).toContain('shrink-0');
+    expect(label.parentElement).toBe(row);
+  });
+
+  it('leaves short values untouched in the same row layout', async () => {
+    server.use(
+      http.get(url(endpoints.vehicles.detail('veh_1')), () => ok(VEHICLE)),
+      http.get(url(endpoints.vehicles.activities('veh_1')), () => ok({ items: [] })),
+    );
+    renderPage();
+    await screen.findByText('Unit #101');
+
+    const plate = await screen.findByText('4821-JG');
+    expect(plate.className).toContain('text-right');
+    expect((plate.parentElement as HTMLElement).className).toContain('justify-between');
+  });
+});

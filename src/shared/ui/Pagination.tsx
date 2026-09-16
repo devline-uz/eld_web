@@ -1,3 +1,4 @@
+import { useId } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from './cn';
 
@@ -31,15 +32,24 @@ function pageList(page: number, totalPages: number): (number | '…')[] {
 }
 
 export function Pagination({ page, limit, total, totalPages, itemLabel, onPageChange, onLimitChange }: PaginationProps) {
-  const from = total === 0 ? 0 : (page - 1) * limit + 1;
-  const to = Math.min(total, page * limit);
+  // A page beyond the last one is not a rendering state of its own: the caller's `page` can lag one
+  // render behind a list that just shrank (a filter, a resolve, a refetch), and `(page - 1) * limit`
+  // would then read `41–3 of 3` with no page button marked current. Clamp for display only — the
+  // caller still owns `page` and is told through `onPageChange` where it landed.
+  const lastPage = Math.max(1, totalPages);
+  const safePage = Math.min(Math.max(1, page), lastPage);
+  const from = total === 0 ? 0 : Math.min((safePage - 1) * limit + 1, total);
+  const to = Math.min(total, safePage * limit);
+  // Two tables on one screen must not share `id="rows-per-page"`: a duplicate id points both
+  // labels at the first select.
+  const selectId = useId();
 
   return (
     <div className="flex h-14 items-center justify-between border-t border-border px-card">
       <div className="flex items-center gap-2 text-body text-text-secondary">
-        <label htmlFor="rows-per-page">Rows per page:</label>
+        <label htmlFor={selectId}>Rows per page:</label>
         <select
-          id="rows-per-page"
+          id={selectId}
           value={limit}
           onChange={(e) => onLimitChange(Number(e.target.value))}
           className="h-8 rounded-md border border-border bg-bg-surface px-2 text-body"
@@ -58,13 +68,13 @@ export function Pagination({ page, limit, total, totalPages, itemLabel, onPageCh
         <button
           type="button"
           aria-label="Previous page"
-          disabled={page <= 1}
-          onClick={() => onPageChange(page - 1)}
+          disabled={safePage <= 1}
+          onClick={() => onPageChange(safePage - 1)}
           className="flex size-8 items-center justify-center rounded-md hover:bg-bg-subtle disabled:opacity-40"
         >
           <ChevronLeft size={16} strokeWidth={1.75} />
         </button>
-        {pageList(page, totalPages).map((p, i) =>
+        {pageList(safePage, lastPage).map((p, i) =>
           p === '…' ? (
             <span key={`ellipsis-${i}`} className="px-1 text-text-muted">
               …
@@ -73,11 +83,11 @@ export function Pagination({ page, limit, total, totalPages, itemLabel, onPageCh
             <button
               key={p}
               type="button"
-              aria-current={p === page ? 'page' : undefined}
+              aria-current={p === safePage ? 'page' : undefined}
               onClick={() => onPageChange(p)}
               className={cn(
                 'tabular flex size-8 items-center justify-center rounded-md',
-                p === page ? 'bg-primary text-text-inverse' : 'text-text-secondary hover:bg-bg-subtle',
+                p === safePage ? 'bg-primary text-text-inverse' : 'text-text-secondary hover:bg-bg-subtle',
               )}
             >
               {p}
@@ -87,8 +97,8 @@ export function Pagination({ page, limit, total, totalPages, itemLabel, onPageCh
         <button
           type="button"
           aria-label="Next page"
-          disabled={page >= totalPages}
-          onClick={() => onPageChange(page + 1)}
+          disabled={safePage >= lastPage}
+          onClick={() => onPageChange(safePage + 1)}
           className="flex size-8 items-center justify-center rounded-md hover:bg-bg-subtle disabled:opacity-40"
         >
           <ChevronRight size={16} strokeWidth={1.75} />

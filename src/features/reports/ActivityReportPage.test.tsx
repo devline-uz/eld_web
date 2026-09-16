@@ -223,4 +223,32 @@ describe('W-13 Reports · Activity report', () => {
     renderPage(<ActivityReportPage />, '/reports/activity?from=2026-09-12&to=2026-09-01');
     expect(await screen.findByRole('row', { name: /John Smith/ })).toBeInTheDocument();
   });
+
+  // The server can answer the open page with nothing left on it (drivers deactivated between two
+  // requests): the screen must ask for the last page that still has rows, not sit on the empty one.
+  it('asks for the last page with rows when the server total shrinks under the open page', async () => {
+    const requested: string[] = [];
+    let calls = 0;
+    server.use(
+      http.get(url(endpoints.reports.activitySummary), ({ request }) => {
+        const search = new URL(request.url).searchParams;
+        requested.push(search.get('page') ?? '');
+        calls += 1;
+        const body = activitySummaryFixture(search);
+        // The first answer has three pages; by the time page 3 is asked for, only one is left.
+        if (calls === 1) return ok({ ...body, total: 25, totalPages: 3 });
+        return ok({ ...body, items: [], total: 2, totalPages: 1 });
+      }),
+    );
+    renderPage(<ActivityReportPage />, ROUTE);
+    await screen.findByRole('row', { name: /John Smith/ });
+
+    await userEvent.click(screen.getByRole('button', { name: '3' }));
+
+    // Page 3 came back empty, so the screen goes back to page 1 — whose rows are still cached —
+    // instead of leaving an empty table under `21–2 of 2 drivers`.
+    await waitFor(() => expect(screen.getByRole('button', { name: '1' })).toHaveAttribute('aria-current', 'page'));
+    expect(screen.getByRole('row', { name: /John Smith/ })).toBeInTheDocument();
+    expect(requested).toEqual(['1', '3']);
+  });
 });

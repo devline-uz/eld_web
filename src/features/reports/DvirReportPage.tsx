@@ -102,7 +102,13 @@ export default function DvirReportPage() {
     () => (defectType ? inRange.filter((r) => r.defects.some((d) => d.category === defectType)) : inRange),
     [inRange, defectType],
   );
-  const pageRows = rows.slice((page - 1) * limit, page * limit);
+  // Rows are paged client-side, so a shrinking list (a refetch, an invalidation from another
+  // screen) can leave `page` past the last one and the table empty with no way back except
+  // Previous. Step to the last page that still has rows, the way W-01 does.
+  const totalPages = Math.max(1, Math.ceil(rows.length / limit));
+  const currentPage = Math.min(page, totalPages);
+  if (currentPage !== page) setPage(currentPage);
+  const pageRows = rows.slice((currentPage - 1) * limit, currentPage * limit);
 
   const kpi = useMemo(() => {
     const withDefects = rows.filter((r) => r.vehicleCondition === 'DEFECTS_FOUND').length;
@@ -321,10 +327,10 @@ export default function DvirReportPage() {
             />
             {rows.length > 0 && (
               <Pagination
-                page={page}
+                page={currentPage}
                 limit={limit}
                 total={rows.length}
-                totalPages={Math.max(1, Math.ceil(rows.length / limit))}
+                totalPages={totalPages}
                 itemLabel="inspections"
                 onPageChange={setPage}
                 onLimitChange={(next) => {

@@ -14,12 +14,12 @@ import VehiclesPage from './VehiclesPage';
 
 vi.mock('@/shared/auth/usePermission', () => ({ usePermission: () => ({ can: () => true }) }));
 
-function renderPage() {
+function renderPage(initialEntries: string[] = ['/vehicles']) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
-        <MemoryRouter>
+        <MemoryRouter initialEntries={initialEntries}>
           <VehiclesPage />
         </MemoryRouter>
       </ToastProvider>
@@ -39,6 +39,29 @@ beforeEach(() => {
   setAccessToken('test-token');
 });
 
+const VEHICLE_ROW = {
+  id: 'veh_1',
+  unitNumber: '#101',
+  vin: '1FUJGLDR8LLLL1234',
+  make: 'Freightliner',
+  model: 'Cascadia',
+  year: 2021,
+  licensePlate: '4821-JG',
+  plateState: 'OH',
+  fuelType: 'DIESEL',
+  sleeperBerth: true,
+  odometerMi: 993589,
+  deviceOdometerMi: 981109,
+  odometerOffsetMi: 12480,
+  odometerCalibratedAt: null,
+  engineHours: '1070.2',
+  busType: null,
+  status: 'ACTIVE',
+  notes: null,
+  activatedAt: '2025-04-18T00:00:00.000Z',
+  createdAt: '2025-04-18T00:00:00.000Z',
+};
+
 /** Answers like the real `GET /vehicles`: one page, narrowed by `q` and `status` (WD-073). */
 function usePopulatedFleet() {
   server.use(
@@ -47,30 +70,7 @@ function usePopulatedFleet() {
       const q = (params.get('q') ?? '').toLowerCase();
       const status = params.get('status');
       const page = {
-        items: [
-          {
-            id: 'veh_1',
-            unitNumber: '#101',
-            vin: '1FUJGLDR8LLLL1234',
-            make: 'Freightliner',
-            model: 'Cascadia',
-            year: 2021,
-            licensePlate: '4821-JG',
-            plateState: 'OH',
-            fuelType: 'DIESEL',
-            sleeperBerth: true,
-            odometerMi: 993589,
-            deviceOdometerMi: 981109,
-            odometerOffsetMi: 12480,
-            odometerCalibratedAt: null,
-            engineHours: '1070.2',
-            busType: null,
-            status: 'ACTIVE',
-            notes: null,
-            activatedAt: '2025-04-18T00:00:00.000Z',
-            createdAt: '2025-04-18T00:00:00.000Z',
-          },
-        ],
+        items: [VEHICLE_ROW],
         page: 1,
         limit: 500,
         total: 1,
@@ -198,10 +198,9 @@ describe('W-03 Vehicles', () => {
     await user.click(screen.getByRole('button', { name: 'Set inactive' }));
     expect(await screen.findByText('1 units set inactive')).toBeInTheDocument();
 
-    // Export menu entry
-    await user.click(screen.getByRole('button', { name: 'More' }));
-    expect(await screen.findByText('Import from CSV')).toBeInTheDocument();
-    await user.keyboard('{Escape}');
+    // Import and Export are their own header buttons, not a "More" menu
+    expect(screen.getByRole('button', { name: 'Export Units' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Import Units' })).toBeInTheDocument();
   });
 
   it('the search box, pagination and every row-menu item all reach their handler', async () => {
@@ -258,6 +257,33 @@ describe('W-03 Vehicles', () => {
     await user.click(screen.getByRole('button', { name: 'Clear all' }));
     expect(await screen.findByText('#101')).toBeInTheDocument();
     expect(screen.getByText('Filters')).toBeInTheDocument();
+  });
+
+  // Regression — a `page` query param that is not a positive integer used to reach `Number()`
+  // untouched: `?page=abc` became `NaN` and the footer read `NaN–NaN of 1 vehicles`.
+  it('an invalid ?page= renders page 1 instead of a NaN footer', async () => {
+    usePopulatedFleet();
+    renderPage(['/vehicles?page=abc']);
+
+    expect(await screen.findByText('#101')).toBeInTheDocument();
+    expect(screen.getByText('1–1 of 1 vehicles')).toBeInTheDocument();
+  });
+
+  // Regression — a bookmarked/back-button `page` past the end of the list returned no items while
+  // `total` stayed non-zero, so the card rendered an empty table body under a bogus footer.
+  it('a ?page= past the last page snaps back to the last page instead of a blank table', async () => {
+    usePopulatedFleet();
+    server.use(
+      http.get(url(endpoints.vehicles.list), ({ request }) => {
+        const requested = Number(new URL(request.url).searchParams.get('page') ?? '1');
+        return ok({ items: requested > 1 ? [] : [VEHICLE_ROW], page: requested, limit: 10, total: 1, totalPages: 1 });
+      }),
+    );
+
+    renderPage(['/vehicles?page=9']);
+
+    expect(await screen.findByText('#101')).toBeInTheDocument();
+    expect(screen.getByText('1–1 of 1 vehicles')).toBeInTheDocument();
   });
 
   it('error: renders <ErrorState> with Retry when the list fails', async () => {

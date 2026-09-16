@@ -68,6 +68,12 @@ export function RecentlyGeneratedCard({ timezone, onSchedule, onGenerate }: Rece
   const [limit, setLimit] = useState(10);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const list = useReportsList({ page, limit });
+  // Reports expire (24 months) and the list can shrink under the open page; without this the table
+  // shows the "no reports yet" empty state while rows exist on page 1, and the pager is hidden
+  // (`total > limit` is false) so there is no way back.
+  if (list.data && list.data.total > 0 && page > list.data.totalPages) {
+    setPage(Math.max(1, list.data.totalPages));
+  }
 
   const columns = useMemo<ColumnDef<ReportRow, unknown>[]>(
     () => [
@@ -164,7 +170,7 @@ export function RecentlyGeneratedCard({ timezone, onSchedule, onGenerate }: Rece
           />
           {data && data.total > limit && (
             <Pagination
-              page={data.page}
+              page={page}
               limit={limit}
               total={data.total}
               totalPages={data.totalPages}

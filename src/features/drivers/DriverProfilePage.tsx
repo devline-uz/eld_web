@@ -35,9 +35,9 @@ const TAB_LABEL: Record<Tab, string> = {
 
 function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="flex justify-between border-b border-border py-2 last:border-b-0">
-      <span className="text-body text-text-muted">{label}</span>
-      <span className="text-body-strong text-text">{value}</span>
+    <div className="flex justify-between gap-4 border-b border-border py-2 last:border-b-0">
+      <span className="shrink-0 text-body text-text-muted">{label}</span>
+      <span className="min-w-0 break-words text-right text-body-strong text-text">{value}</span>
     </div>
   );
 }
@@ -246,15 +246,8 @@ export default function DriverProfilePage() {
             />
             <div className="mt-2">
               <DetailRow label="Username" value={driver.username} />
-              <DetailRow
-                label="Email"
-                value={
-                  <span className="flex items-center gap-1.5">
-                    {driver.email ?? '—'}
-                    {/* ⛔ GAP B-29/B-31 — no verification state on Driver.email yet. */}
-                  </span>
-                }
-              />
+              {/* ⛔ GAP B-29/B-31 — no verification state on Driver.email yet. */}
+              <DetailRow label="Email" value={driver.email ?? '—'} />
               <DetailRow label="Phone" value={driver.phone ?? '—'} />
               <DetailRow label="CDL number" value={driver.cdlNumber} />
               <DetailRow label="CDL state" value={driver.cdlState} />

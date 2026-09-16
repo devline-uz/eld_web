@@ -6,6 +6,7 @@
 // clocks, duty status, unit and open-violation count per driver, and NONE of that exists on
 // `Driver` — `GET /drivers/roster` (B-1, shipped 2026-09-14) is the only sane source (58 drivers,
 // not 58 requests). Types below were checked against backend `driver-roster.service.ts`.
+import { useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { client } from './client';
 import { endpoints } from './endpoints';
@@ -91,6 +92,54 @@ export function useDriverRoster(params: DriverRosterParams) {
     queryFn: () => client.get<DriverRosterResponse>(endpoints.drivers.roster, { params }),
     ...typedCachePolicy<DriverRosterResponse>('live'),
   });
+}
+
+/** Rows the segment counters read in one pass; `client.list` walks the API's 200-row maximum. */
+export const ROSTER_COUNT_LIMIT = 500;
+
+export interface DriverRosterCounts {
+  all: number;
+  onDuty: number;
+  offDuty: number;
+  violations: number;
+  isLoading: boolean;
+}
+
+/**
+ * `All · On duty · Off duty · Violations` over the **whole** roster (the server filters in
+ * `params` still apply), not over the page the table happens to be showing — W-06 used to count
+ * the 10 loaded rows and render `All 10` next to a `115 drivers` headline.
+ *
+ * `useVehicleCounts`' trick — one `limit: 1` request per slice, read `total` — cannot answer this
+ * one: B-1/B-55 give `GET /drivers/roster` only `page`, `limit`, `sort`, `q`, `status`
+ * (`Driver.status`, not duty), `terminal`, `hasOpenViolation` and `exempt`. There is no duty-status
+ * param and no `counts` block, so `On duty`/`Off duty` have to be counted client-side; one paged
+ * read then answers all four from a single consistent snapshot (`all` = `onDuty` + `offDuty`)
+ * instead of mixing four differently-timed requests.
+ *
+ * ⛔ Past `ROSTER_COUNT_LIMIT` drivers the duty split and the violation count describe the loaded
+ * window while `all` stays the server's `total` (same trade-off as `FILTER_WINDOW` in
+ * `shared/api/lookups.ts`). A `dutyStatus` query param — or a `counts` block on B-1 — is what
+ * would make it exact for a roster that big.
+ */
+export function useDriverRosterCounts(params: DriverRosterParams = {}): DriverRosterCounts {
+  const countParams: DriverRosterParams = { ...params, page: 1, limit: ROSTER_COUNT_LIMIT };
+  const query = useQuery({
+    queryKey: qk.driverRoster(countParams),
+    queryFn: () => client.list<DriverRosterEntry>(endpoints.drivers.roster, countParams),
+    ...typedCachePolicy<OffsetPage<DriverRosterEntry>>('live'),
+  });
+  return useMemo(() => {
+    const items = query.data?.items ?? [];
+    const offDuty = items.filter((r) => r.dutyStatus === 'OFF_DUTY').length;
+    return {
+      all: query.data?.total ?? items.length,
+      onDuty: items.length - offDuty,
+      offDuty,
+      violations: items.filter((r) => r.openViolations > 0).length,
+      isLoading: query.isLoading,
+    };
+  }, [query.data, query.isLoading]);
 }
 
 /** B-2 `GET /drivers/:id/hos` — backend `DriverHosClocks` (`driver-roster.service.ts`). */

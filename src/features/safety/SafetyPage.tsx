@@ -159,6 +159,10 @@ export default function SafetyPage() {
     setPage(1);
   }
   const totalPages = Math.max(1, Math.ceil(filteredEvents.length / limit));
+  // The drawer filters live in the URL, so they can shrink the result set while `page` still
+  // points past the end — clamp during render (same bail-out rule as the search reset above),
+  // otherwise the table body renders empty while Pagination still claims page N.
+  if (page > totalPages) setPage(totalPages);
   const pageEvents = filteredEvents.slice((page - 1) * limit, page * limit);
 
   const eventsByType = useMemo(() => {
@@ -341,7 +345,7 @@ export default function SafetyPage() {
                     ] as ColumnDef<SafetyEventTableRow, unknown>[]
                   }
                 />
-                <Pagination page={page} limit={limit} total={filteredEvents.length} totalPages={totalPages} itemLabel="events" onPageChange={setPage} onLimitChange={setLimit} />
+                <Pagination page={page} limit={limit} total={filteredEvents.length} totalPages={totalPages} itemLabel="events" onPageChange={setPage} onLimitChange={(l) => { setLimit(l); setPage(1); }} />
               </>
             )}
           </div>

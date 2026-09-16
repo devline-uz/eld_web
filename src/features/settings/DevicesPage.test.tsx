@@ -172,6 +172,68 @@ describe('DevicesPage — W-20', () => {
     expect(within(cells[3]!).getByText('—')).toBeInTheDocument();
   });
 
+  // Regression — `page` was kept across a query change, so a search typed on page 2 asked the
+  // server for page 2 of the narrowed result: an empty page, rendered as "No results for …"
+  // although the device exists. Same for switching segment.
+  describe('re-pages when the server query changes', () => {
+    const many = Array.from({ length: 30 }, (_, i) => ({
+      ...DEVICE,
+      id: `dev_${i}`,
+      serial: `PT30_${String(i).padStart(4, '0')}`,
+      status: i === 7 ? 'UNASSIGNED' : 'ASSIGNED',
+      vehicleId: i === 7 ? null : 'veh_1',
+    }));
+
+    function usePagedDevices() {
+      server.use(
+        http.get(url(endpoints.devices.list), ({ request }) => {
+          const p = new URL(request.url).searchParams;
+          const q = (p.get('q') ?? '').toLowerCase();
+          const status = p.get('status');
+          const page = Math.max(1, Number(p.get('page') ?? 1));
+          const limit = Math.max(1, Number(p.get('limit') ?? 25));
+          let items = many;
+          if (status) items = items.filter((d) => d.status === status);
+          if (q) items = items.filter((d) => d.serial.toLowerCase().includes(q));
+          const total = items.length;
+          return ok({
+            items: items.slice((page - 1) * limit, page * limit),
+            page,
+            limit,
+            total,
+            totalPages: Math.max(1, Math.ceil(total / limit)),
+          });
+        }),
+      );
+    }
+
+    it('shows the match instead of an empty state when a search is typed on page 2', async () => {
+      const user = userEvent.setup();
+      usePagedDevices();
+      renderPage();
+
+      await user.click(await screen.findByRole('button', { name: '2' }));
+      expect(await screen.findByText('PT30_0025')).toBeInTheDocument();
+
+      await user.type(screen.getByPlaceholderText('Search serial or unit…'), 'PT30_0003');
+      expect(await screen.findByText('PT30_0003')).toBeInTheDocument();
+      expect(screen.queryByText(/No results/i)).not.toBeInTheDocument();
+    });
+
+    it('shows the unassigned device instead of an empty state when the segment changes on page 2', async () => {
+      const user = userEvent.setup();
+      usePagedDevices();
+      renderPage();
+
+      await user.click(await screen.findByRole('button', { name: '2' }));
+      expect(await screen.findByText('PT30_0025')).toBeInTheDocument();
+
+      await user.click(screen.getByRole('button', { name: /^unassigned/i }));
+      expect(await screen.findByText('PT30_0007')).toBeInTheDocument();
+      expect(screen.queryByText('No devices registered yet')).not.toBeInTheDocument();
+    });
+  });
+
   it('exports devices to a JSON file', async () => {
     const user = userEvent.setup();
     server.use(http.get(url(endpoints.devices.list), () => ok({ items: [DEVICE], page: 1, limit: 25, total: 1, totalPages: 1 })));

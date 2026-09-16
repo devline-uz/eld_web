@@ -2,7 +2,8 @@
 // `+ New work order` control from the real fixture data.
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
@@ -19,12 +20,12 @@ vi.mock('@/shared/auth/Can', () => ({
     mockCan(perm, level) ? children : null,
 }));
 
-function renderPage() {
+function renderPage(route = '/dvir') {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
-        <MemoryRouter>
+        <MemoryRouter initialEntries={[route]}>
           <DvirPage />
         </MemoryRouter>
       </ToastProvider>
@@ -79,6 +80,85 @@ describe('DvirPage', () => {
     renderPage();
     await screen.findByText('DVIR & Maintenance');
     expect(screen.queryByRole('button', { name: 'New work order' })).not.toBeInTheDocument();
+  });
+
+  // Regression — each of the three paged tables kept its page across a search change, so a search
+  // typed on page 2 asked for page 2 of the narrowed result and the table rendered with no rows.
+  it('work orders: a search typed on page 2 re-pages to page 1', async () => {
+    const user = userEvent.setup();
+    const workOrders = Array.from({ length: 30 }, (_, i) => ({
+      id: `wo_${i}`,
+      number: `WO-${1000 + i}`,
+      vehicleId: 'veh_1',
+      title: `Brake job ${i}`,
+      priority: 'HIGH',
+      status: 'OPEN',
+      vendor: 'Shop',
+      costUsd: '120.00',
+      dueAt: null,
+    }));
+    server.use(
+      http.get(url(endpoints.workOrders.list), ({ request }) => {
+        const p = new URL(request.url).searchParams;
+        const q = (p.get('q') ?? '').toLowerCase();
+        const page = Math.max(1, Number(p.get('page') ?? 1));
+        const limit = Math.max(1, Number(p.get('limit') ?? 25));
+        const items = q ? workOrders.filter((w) => w.number.toLowerCase().includes(q)) : workOrders;
+        return ok({
+          items: items.slice((page - 1) * limit, page * limit),
+          page,
+          limit,
+          total: items.length,
+          totalPages: Math.max(1, Math.ceil(items.length / limit)),
+        });
+      }),
+    );
+    renderPage('/dvir?tab=workOrders');
+
+    await user.click(await screen.findByRole('button', { name: '2' }));
+    expect(await screen.findByText('WO-1010')).toBeInTheDocument();
+
+    await user.type(screen.getByPlaceholderText('Search unit, defect…'), 'WO-1003');
+    // Re-query on each tick — the clamp commits one more render after the page lands.
+    await waitFor(() => expect(screen.getByText('WO-1003')).toBeInTheDocument(), { timeout: 3000 });
+  });
+
+  it('open defects: a search typed on page 2 re-pages to page 1', async () => {
+    const user = userEvent.setup();
+    const defects = Array.from({ length: 30 }, (_, i) => ({
+      id: `def_${i}`,
+      vehicleId: 'veh_1',
+      dvirId: null,
+      category: `Component ${String(i).padStart(2, '0')}`,
+      description: `Defect ${i}`,
+      severity: 'MAJOR',
+      status: 'OPEN',
+      outOfService: false,
+      createdAt: new Date().toISOString(),
+    }));
+    server.use(
+      http.get(url(endpoints.defects.list), ({ request }) => {
+        const p = new URL(request.url).searchParams;
+        const page = Math.max(1, Number(p.get('page') ?? 1));
+        const limit = Math.max(1, Number(p.get('limit') ?? 25));
+        return ok({
+          items: defects.slice((page - 1) * limit, page * limit),
+          page,
+          limit,
+          total: defects.length,
+          totalPages: Math.max(1, Math.ceil(defects.length / limit)),
+        });
+      }),
+    );
+    renderPage('/dvir?tab=defects');
+
+    await user.click(await screen.findByRole('button', { name: '2' }));
+    expect(await screen.findByText('Component 10')).toBeInTheDocument();
+
+    // `/defects` has no `q` (B-66) — the search switches to the in-memory window, where page 2 of
+    // a single-row result would otherwise show nothing under a "page 2" pager.
+    await user.type(screen.getByPlaceholderText('Search unit, defect…'), 'Component 03');
+    await waitFor(() => expect(screen.getByText('Component 03')).toBeInTheDocument(), { timeout: 3000 });
   });
 
   it('error: renders <ErrorState> with Retry when the list fails', async () => {

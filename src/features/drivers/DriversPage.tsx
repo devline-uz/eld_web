@@ -2,7 +2,7 @@
 // Design: web/roles and screens/admin panel/Driver roster with live HOS clocks and violations.jpg
 //
 // B-1 `GET /drivers/roster` shipped 2026-09-14 (server-paginated, server filters per B-55).
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import type { ColumnDef } from '@tanstack/react-table';
 import { Search, Plus, Download, Filter, Upload } from 'lucide-react';
@@ -10,7 +10,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
 import { useDynamicSubtitle } from '@/app/layouts/Topbar';
-import { useDriverRoster, type DriverRosterEntry } from '@/shared/api/drivers';
+import { useDriverRoster, useDriverRosterCounts, type DriverRosterEntry } from '@/shared/api/drivers';
 import { client } from '@/shared/api/client';
 import { endpoints } from '@/shared/api/endpoints';
 import { Button } from '@/shared/ui/Button';
@@ -31,6 +31,14 @@ import { parseDriverFilters, writeDriverFilters, matchesDriverFilters, EMPTY_DRI
 type Segment = 'ALL' | 'ON_DUTY' | 'OFF_DUTY' | 'VIOLATIONS';
 const LIMIT_SEC = { drive: 39600, shift: 50400, cycle: 252000 };
 
+/** `?page=abc` is `NaN` and `?page=0` / `?page=-3` are pages no server can answer — both reached
+ * `GET /drivers/roster` verbatim and rendered a `NaN–NaN of 58` footer. Anything that is not a
+ * positive integer falls back to the default. */
+function positiveIntParam(raw: string | null, fallback: number): number {
+  const value = Number(raw);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
 export default function DriversPage() {
   const navigate = useNavigate();
   const { can } = usePermission();
@@ -40,8 +48,8 @@ export default function DriversPage() {
 
   const segment = (params.get('segment') as Segment) ?? 'ALL';
   const q = params.get('q') ?? '';
-  const page = Number(params.get('page') ?? '1');
-  const limit = Number(params.get('limit') ?? '10');
+  const page = positiveIntParam(params.get('page'), 1);
+  const limit = positiveIntParam(params.get('limit'), 10);
 
   useDynamicSubtitle(null);
 
@@ -56,14 +64,16 @@ export default function DriversPage() {
   const filters = useMemo(() => parseDriverFilters(params), [params]);
   // The roster is server-paginated: filters the backend supports (B-55) go to the server so they
   // apply to every driver, not only the loaded page. The client-side match below stays as-is.
-  const rosterQuery = useDriverRoster({
-    page,
-    limit,
-    q: q || undefined,
-    terminal: filters.terminal ?? undefined,
-    hasOpenViolation: filters.violationsOnly ? 'true' : undefined,
-    exempt: filters.exemptions.includes('eldExempt') ? 'true' : undefined,
-  });
+  const serverFilters = useMemo(
+    () => ({
+      q: q || undefined,
+      terminal: filters.terminal ?? undefined,
+      hasOpenViolation: (filters.violationsOnly ? 'true' : undefined) as 'true' | undefined,
+      exempt: (filters.exemptions.includes('eldExempt') ? 'true' : undefined) as 'true' | undefined,
+    }),
+    [q, filters],
+  );
+  const rosterQuery = useDriverRoster({ page, limit, ...serverFilters });
   const entries = useMemo(() => rosterQuery.data?.items ?? [], [rosterQuery.data]);
   const terminalOptions = useMemo(
     () => Array.from(new Set(entries.map((e) => e.driver.homeTerminalName).filter(Boolean))).sort(),
@@ -79,15 +89,31 @@ export default function DriversPage() {
     return rows;
   }, [entries, segment, filters]);
 
-  const counts = useMemo(
-    () => ({
-      all: entries.length,
-      onDuty: entries.filter((r) => r.dutyStatus !== 'OFF_DUTY').length,
-      offDuty: entries.filter((r) => r.dutyStatus === 'OFF_DUTY').length,
-      violations: entries.filter((r) => r.openViolations > 0).length,
-    }),
-    [entries],
-  );
+  // The headline and the segment tabs describe the roster the tabs narrow — the whole
+  // server-filtered roster, not the ~10 rows of the current server page. Counting `entries` put
+  // `All 10 | On duty 8 | Off duty 2` under a `115 drivers` headline that was itself half
+  // page-scoped (`total` for the first number, the page for the other two).
+  const counts = useDriverRosterCounts(serverFilters);
+
+  // The segment tabs and the 11.23 groups the roster API has no params for (B-55) narrow the
+  // *current server page* in memory, so the server's `total`/`totalPages` describe a different set
+  // than the table renders: picking `Off duty` left 3 rows on screen under a `1–10 of 58 drivers`
+  // footer that offered 6 pages, each one re-filtering a different slice. While an in-memory
+  // narrowing is in effect the footer counts exactly the rows that are on screen.
+  const clientNarrowed = filtered.length !== entries.length;
+  const serverLastPage = Math.max(1, rosterQuery.data?.totalPages ?? 1);
+  const pageTotal = clientNarrowed ? filtered.length : (rosterQuery.data?.total ?? filtered.length);
+  const pageTotalPages = clientNarrowed ? 1 : serverLastPage;
+  const shownPage = clientNarrowed ? 1 : Math.min(page, serverLastPage);
+
+  // A `page` past the end of the roster (a bookmark, the back button, or drivers deactivated since
+  // the link was made) came back with no items at all — the card then showed the "No drivers yet"
+  // empty state over a full roster. Snap back to the last page that exists.
+  useEffect(() => {
+    if (!rosterQuery.data || page <= serverLastPage) return;
+    setParam('page', String(serverLastPage));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, serverLastPage, rosterQuery.data]);
 
   const [addOpen, setAddOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -179,12 +205,12 @@ export default function DriversPage() {
   const isLoading = rosterQuery.isLoading;
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col gap-4 xl:max-h-content-h">
+      <div className="flex items-center justify-between xl:shrink-0">
         <div>
           <h1 className="text-page-title text-text">Drivers</h1>
           <p className="text-page-sub text-text-muted">
-            {rosterQuery.data?.total ?? counts.all} drivers · {counts.onDuty} on duty · {counts.violations} with active violations
+            {counts.all} drivers · {counts.onDuty} on duty · {counts.violations} with active violations
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -223,7 +249,7 @@ export default function DriversPage() {
         </div>
       </div>
 
-      <div className="flex h-9 w-fit overflow-hidden rounded-md border border-border">
+      <div className="flex h-9 w-fit overflow-hidden rounded-md border border-border xl:shrink-0">
         {(
           [
             ['ALL', `All ${counts.all}`],
@@ -248,13 +274,15 @@ export default function DriversPage() {
         ))}
       </div>
 
-      <DriverFilterChips
-        filters={filters}
-        onRemove={(patch) => applyFilters({ ...filters, ...patch })}
-        onClearAll={() => applyFilters(EMPTY_DRIVER_FILTERS)}
-      />
+      <div className="xl:shrink-0">
+        <DriverFilterChips
+          filters={filters}
+          onRemove={(patch) => applyFilters({ ...filters, ...patch })}
+          onClearAll={() => applyFilters(EMPTY_DRIVER_FILTERS)}
+        />
+      </div>
 
-      <Card padded={false}>
+      <Card padded={false} className="xl:flex xl:min-h-0 xl:flex-col">
         {isLoading ? (
           <LoadingState className="p-4" />
         ) : rosterQuery.isError ? (
@@ -285,67 +313,71 @@ export default function DriversPage() {
           )
         ) : (
           <>
-            <DataTable
-              data={filtered}
-              columns={columns}
-              caption="Drivers"
-              getRowId={(r) => r.driver.id}
-              selectable={canFull}
-              selection={selection}
-              onSelectionChange={setSelection}
-              onRowClick={(row) => navigate(`/drivers/${row.driver.id}`)}
-              rowActions={
-                canFull
-                  ? (row) => (
-                      <>
-                        <DropdownMenu.Item onSelect={() => navigate(`/drivers/${row.driver.id}`)} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
-                          View driver profile
-                        </DropdownMenu.Item>
-                        <DropdownMenu.Item onSelect={() => navigate(`/hos-logs?driverId=${row.driver.id}`)} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
-                          Open HOS logs
-                        </DropdownMenu.Item>
-                        <Can perm="messaging">
-                          <DropdownMenu.Item onSelect={() => navigate('/messages')} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
-                            Send message
+            {/* Desktop only (xl:): the results list scrolls inside the card so the page itself
+                never grows past the viewport — same pattern as Vehicles. */}
+            <div className="xl:min-h-0 xl:overflow-y-auto">
+              <DataTable
+                data={filtered}
+                columns={columns}
+                caption="Drivers"
+                getRowId={(r) => r.driver.id}
+                selectable={canFull}
+                selection={selection}
+                onSelectionChange={setSelection}
+                onRowClick={(row) => navigate(`/drivers/${row.driver.id}`)}
+                rowActions={
+                  canFull
+                    ? (row) => (
+                        <>
+                          <DropdownMenu.Item onSelect={() => navigate(`/drivers/${row.driver.id}`)} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                            View driver profile
                           </DropdownMenu.Item>
-                        </Can>
-                        <Can perm="trips" level="FULL">
-                          <DropdownMenu.Item onSelect={() => navigate('/trips')} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
-                            Assign trip
-                          </DropdownMenu.Item>
-                        </Can>
-                        <DropdownMenu.Separator className="my-1 h-px bg-border" />
-                        <p className="px-2 py-1 text-caption font-semibold uppercase tracking-wide text-text-muted">Compliance</p>
-                        <Can perm="hosEdit" level="FULL">
                           <DropdownMenu.Item onSelect={() => navigate(`/hos-logs?driverId=${row.driver.id}`)} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
-                            Request log edit
+                            Open HOS logs
                           </DropdownMenu.Item>
-                        </Can>
-                        <Can perm="hosCertifyOnBehalf" level="FULL">
-                          <DropdownMenu.Item onSelect={() => navigate(`/hos-logs?driverId=${row.driver.id}`)} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
-                            Certify on behalf
+                          <Can perm="messaging">
+                            <DropdownMenu.Item onSelect={() => navigate('/messages')} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                              Send message
+                            </DropdownMenu.Item>
+                          </Can>
+                          <Can perm="trips" level="FULL">
+                            <DropdownMenu.Item onSelect={() => navigate('/trips')} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                              Assign trip
+                            </DropdownMenu.Item>
+                          </Can>
+                          <DropdownMenu.Separator className="my-1 h-px bg-border" />
+                          <p className="px-2 py-1 text-caption font-semibold uppercase tracking-wide text-text-muted">Compliance</p>
+                          <Can perm="hosEdit" level="FULL">
+                            <DropdownMenu.Item onSelect={() => navigate(`/hos-logs?driverId=${row.driver.id}`)} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                              Request log edit
+                            </DropdownMenu.Item>
+                          </Can>
+                          <Can perm="hosCertifyOnBehalf" level="FULL">
+                            <DropdownMenu.Item onSelect={() => navigate(`/hos-logs?driverId=${row.driver.id}`)} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                              Certify on behalf
+                            </DropdownMenu.Item>
+                          </Can>
+                          <DropdownMenu.Item onSelect={() => toast({ kind: 'success', title: 'Export started' })} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                            Export 8-day RODS
                           </DropdownMenu.Item>
-                        </Can>
-                        <DropdownMenu.Item onSelect={() => toast({ kind: 'success', title: 'Export started' })} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
-                          Export 8-day RODS
-                        </DropdownMenu.Item>
-                        <DropdownMenu.Separator className="my-1 h-px bg-border" />
-                        <DropdownMenu.Item onSelect={() => toast({ kind: 'success', title: 'Password reset' })} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
-                          Reset app password
-                        </DropdownMenu.Item>
-                        <DropdownMenu.Item className="cursor-pointer rounded-md px-2 py-1.5 text-body text-danger outline-none hover:bg-danger-soft">
-                          Deactivate driver
-                        </DropdownMenu.Item>
-                      </>
-                    )
-                  : undefined
-              }
-            />
+                          <DropdownMenu.Separator className="my-1 h-px bg-border" />
+                          <DropdownMenu.Item onSelect={() => toast({ kind: 'success', title: 'Password reset' })} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                            Reset app password
+                          </DropdownMenu.Item>
+                          <DropdownMenu.Item className="cursor-pointer rounded-md px-2 py-1.5 text-body text-danger outline-none hover:bg-danger-soft">
+                            Deactivate driver
+                          </DropdownMenu.Item>
+                        </>
+                      )
+                    : undefined
+                }
+              />
+            </div>
             <Pagination
-              page={page}
+              page={shownPage}
               limit={limit}
-              total={rosterQuery.data?.total ?? filtered.length}
-              totalPages={rosterQuery.data?.totalPages ?? 1}
+              total={pageTotal}
+              totalPages={pageTotalPages}
               itemLabel="drivers"
               onPageChange={(p) => setParam('page', String(p))}
               onLimitChange={(l) => setParam('limit', String(l))}

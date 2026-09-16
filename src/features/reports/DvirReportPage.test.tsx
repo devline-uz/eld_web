@@ -9,7 +9,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
 import { fail, ok, url } from '@/mocks/envelope';
-import { reportScreenHandlers } from '@/mocks/handlers/reports';
+import { reportDvirs, reportScreenHandlers } from '@/mocks/handlers/reports';
 import { endpoints } from '@/shared/api/endpoints';
 import { resetAuthBridge, setAccessToken, setAuthBridge } from '@/shared/api/client';
 import type { Role } from '@/shared/auth/permissions';
@@ -155,5 +155,37 @@ describe('W-14 Reports · DVIR report', () => {
     server.use(http.get(url(endpoints.dvir.list), () => fail(403, 'FORBIDDEN', 'Insufficient permission.')));
     renderPage(<DvirReportPage />, ROUTE);
     expect(await screen.findByText('You do not have access to this page')).toBeInTheDocument();
+  });
+
+  // Rows are paged client-side: a refetch that returns fewer inspections must not leave the open
+  // page past the last one, with an empty table and `11–3 of 3` under it.
+  it('steps back to the last page with rows when the inspection list shrinks', async () => {
+    let rowCount = 15;
+    server.use(
+      http.get(url(endpoints.dvir.list), () => {
+        const items = Array.from({ length: rowCount }, (_, i) => ({ ...reportDvirs[0], id: `dvir_${i}` }));
+        return ok({ items, page: 1, limit: 200, total: items.length, totalPages: 1 });
+      }),
+    );
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <MemoryRouter initialEntries={[ROUTE]}>
+            <DvirReportPage />
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText('15 records · showing 10')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '2' }));
+    expect(screen.getByText('11–15 of 15 inspections')).toBeInTheDocument();
+
+    rowCount = 3;
+    void client.invalidateQueries();
+    await waitFor(() => expect(screen.getByText('3 records · showing 3')).toBeInTheDocument());
+    expect(screen.getByText('1–3 of 3 inspections')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '1' })).toHaveAttribute('aria-current', 'page');
   });
 });

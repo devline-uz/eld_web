@@ -1,9 +1,9 @@
 // owner: web-vehicles-drivers — W-03 Vehicles (web/tz.md §10 W-03).
 // Design: web/roles and screens/admin panel/Unit inventory — ELD serial, VIN, odometer.jpg
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import type { ColumnDef } from '@tanstack/react-table';
-import { Search, Plus, Download, Filter, MoreHorizontal } from 'lucide-react';
+import { Search, Plus, Download, Filter, Upload } from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
@@ -45,6 +45,14 @@ function useDebounced<T>(value: T, ms: number): T {
   return debounced;
 }
 
+/** `?page=abc` is `NaN` and `?page=0` / `?page=-3` are pages no server can answer — both reached
+ * `GET /vehicles` verbatim and rendered a `NaN–NaN of 57` footer. Anything that is not a positive
+ * integer falls back to the default. */
+function positiveIntParam(raw: string | null, fallback: number): number {
+  const value = Number(raw);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
 export default function VehiclesPage() {
   const navigate = useNavigate();
   const { can } = usePermission();
@@ -57,8 +65,8 @@ export default function VehiclesPage() {
   const q = params.get('q') ?? '';
   const [searchInput, setSearchInput] = useState(q);
   const debouncedSearch = useDebounced(searchInput, 300);
-  const page = Number(params.get('page') ?? '1');
-  const limit = Number(params.get('limit') ?? '10');
+  const page = positiveIntParam(params.get('page'), 1);
+  const limit = positiveIntParam(params.get('limit'), 10);
 
   useDynamicSubtitle(null);
 
@@ -139,6 +147,16 @@ export default function VehiclesPage() {
   const total = allVehicles.total;
   const totalPages = allVehicles.totalPages;
   const pageRows = allVehicles.rows;
+  const lastPage = Math.max(1, totalPages);
+
+  // A `page` past the end of the list (a bookmark, the back button, or units deleted since the
+  // link was made) asks the server for a slice it cannot answer: the card rendered an empty table
+  // body under a `51–60 of 47 vehicles` footer. Snap back to the last page that exists.
+  useEffect(() => {
+    if (allVehicles.isLoading || page <= lastPage) return;
+    setParam('page', String(lastPage));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, lastPage, allVehicles.isLoading]);
 
   const [addOpen, setAddOpen] = useState(false);
   const [editVehicle, setEditVehicle] = useState<VehicleTableRow | null>(null);
@@ -260,27 +278,13 @@ export default function VehiclesPage() {
           >
             Filters{activeFilterCount > 0 ? ` · ${activeFilterCount}` : ''}
           </Button>
-          <Button variant="secondary" iconLeft={<Download size={16} strokeWidth={1.75} />} onClick={handleExport}>
-            Export
+          <Button variant="secondary" iconLeft={<Upload size={16} strokeWidth={1.75} />} onClick={handleExport}>
+            Export Units
           </Button>
           <Can perm="vehicles" level="FULL">
-            <DropdownMenu.Root>
-              <DropdownMenu.Trigger asChild>
-                <Button variant="secondary" iconOnly aria-label="More">
-                  <MoreHorizontal size={16} strokeWidth={1.75} />
-                </Button>
-              </DropdownMenu.Trigger>
-              <DropdownMenu.Portal>
-                <DropdownMenu.Content align="end" className="z-50 min-w-44 rounded-md border border-border bg-bg-surface p-1 shadow-pop">
-                  <DropdownMenu.Item
-                    onSelect={() => setImportOpen(true)}
-                    className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle"
-                  >
-                    Import from CSV
-                  </DropdownMenu.Item>
-                </DropdownMenu.Content>
-              </DropdownMenu.Portal>
-            </DropdownMenu.Root>
+            <Button variant="secondary" iconLeft={<Download size={16} strokeWidth={1.75} />} onClick={() => setImportOpen(true)}>
+              Import Units
+            </Button>
             <Button
               variant="primary"
               iconLeft={<Plus size={16} strokeWidth={1.75} />}
@@ -407,7 +411,7 @@ export default function VehiclesPage() {
               />
             </div>
             <Pagination
-              page={page}
+              page={Math.min(page, lastPage)}
               limit={limit}
               total={total}
               totalPages={totalPages}

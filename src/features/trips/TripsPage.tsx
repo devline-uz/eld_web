@@ -253,8 +253,8 @@ export default function TripsPage() {
   const isLoading = trips.isKpiLoading || unassigned.isLoading;
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col gap-4 xl:max-h-content-h">
+      <div className="flex items-center justify-between xl:shrink-0">
         <div>
           <h1 className="text-page-title text-text">Dispatch &amp; Trips</h1>
           <p className="text-page-sub text-text-muted">
@@ -293,18 +293,20 @@ export default function TripsPage() {
         </div>
       </div>
 
-      {isLoading ? (
-        <KpiRowSkeleton />
-      ) : (
-        <div className="grid grid-cols-4 gap-card-gap">
-          <KpiCard label="On-time delivery" value={`${counts.onTimePct}%`} icon={MapPin} iconTone="success" hint={`last ${trips.kpis.onTimeWindow} deliveries`} />
-          <KpiCard label="Active trips" value={counts.active} icon={MapPin} iconTone="info" chip={{ text: '6 arriving today', tone: 'info' }} />
-          <KpiCard label="Running late" value={counts.lateCount} icon={MapPin} iconTone="warning" hint="avg 48 min" />
-          <KpiCard label="Unassigned loads" value={counts.unassignedCount} icon={Users} iconTone="warning" hint="needs driver" />
-        </div>
-      )}
+      <div className="xl:shrink-0">
+        {isLoading ? (
+          <KpiRowSkeleton />
+        ) : (
+          <div className="grid grid-cols-4 gap-card-gap">
+            <KpiCard label="On-time delivery" value={`${counts.onTimePct}%`} icon={MapPin} iconTone="success" hint={`last ${trips.kpis.onTimeWindow} deliveries`} />
+            <KpiCard label="Active trips" value={counts.active} icon={MapPin} iconTone="info" chip={{ text: '6 arriving today', tone: 'info' }} />
+            <KpiCard label="Running late" value={counts.lateCount} icon={MapPin} iconTone="warning" hint="avg 48 min" />
+            <KpiCard label="Unassigned loads" value={counts.unassignedCount} icon={Users} iconTone="warning" hint="needs driver" />
+          </div>
+        )}
+      </div>
 
-      <div className="flex h-9 w-fit overflow-hidden rounded-md border border-border">
+      <div className="flex h-9 w-fit overflow-hidden rounded-md border border-border xl:shrink-0">
         {(
           [
             ['ACTIVE', `Active ${counts.active}`],
@@ -329,19 +331,21 @@ export default function TripsPage() {
         ))}
       </div>
 
-      {segment !== 'UNASSIGNED' && (
-        <TripFilterChips
-          filters={filters}
-          driverById={driverNameById}
-          vehicleById={vehicleUnitById}
-          onRemove={(patch) => applyFilters({ ...filters, ...patch })}
-          onClearAll={() => applyFilters(EMPTY_TRIP_FILTERS)}
-        />
-      )}
+      <div className="xl:shrink-0">
+        {segment !== 'UNASSIGNED' && (
+          <TripFilterChips
+            filters={filters}
+            driverById={driverNameById}
+            vehicleById={vehicleUnitById}
+            onRemove={(patch) => applyFilters({ ...filters, ...patch })}
+            onClearAll={() => applyFilters(EMPTY_TRIP_FILTERS)}
+          />
+        )}
+      </div>
 
       {segment === 'UNASSIGNED' ? (
-        <Card padded={false}>
-          <div className="flex items-center justify-between p-card pb-0">
+        <Card padded={false} className="xl:flex xl:min-h-0 xl:flex-col">
+          <div className="flex items-center justify-between p-card pb-0 xl:shrink-0">
             <SectionHeader title="Unassigned loads" subtitle={`${counts.unassignedCount} loads waiting for a driver`} />
             <Can perm="trips" level="FULL">
               <Button variant="secondary" iconLeft={<Users size={16} strokeWidth={1.75} />} onClick={handleAutoAssign} loading={autoAssign.isPending} className="mb-4">
@@ -356,15 +360,14 @@ export default function TripsPage() {
           ) : (unassigned.data?.items.length ?? 0) === 0 ? (
             <EmptyState {...EMPTY_STATE_COPY.unassignedLoads} />
           ) : (
-            <DataTable data={unassigned.data?.items ?? []} columns={unassignedColumns} caption="Unassigned loads" getRowId={(r) => r.id} />
+            <div className="xl:min-h-0 xl:overflow-y-auto">
+              <DataTable data={unassigned.data?.items ?? []} columns={unassignedColumns} caption="Unassigned loads" getRowId={(r) => r.id} />
+            </div>
           )}
         </Card>
       ) : (
-        <div className="grid grid-cols-[1fr_348px] gap-card-gap">
-          <Card padded={false}>
-            <div className="flex items-center justify-between p-card pb-0">
-              <SectionHeader title="Active trips" subtitle={`${trips.total} trips in progress`} />
-            </div>
+        <div className="grid grid-cols-[1fr_348px] gap-card-gap xl:min-h-0 xl:grid-rows-[minmax(0,1fr)]">
+          <Card padded={false} className="xl:flex xl:min-h-0 xl:flex-col">
             {trips.isLoading ? (
               <LoadingState className="p-4" />
             ) : trips.isError ? (
@@ -385,13 +388,17 @@ export default function TripsPage() {
               )
             ) : (
               <>
-                <DataTable
-                  data={filteredRows}
-                  columns={columns}
-                  caption="Active trips"
-                  getRowId={(r) => r.id}
-                  onRowClick={(row) => setSelectedTripId(row.id)}
-                />
+                {/* Desktop only (xl:): the trips list scrolls inside the card so the page
+                    itself never grows past the viewport — same pattern as Vehicles. */}
+                <div className="xl:min-h-0 xl:overflow-y-auto">
+                  <DataTable
+                    data={filteredRows}
+                    columns={columns}
+                    caption="Active trips"
+                    getRowId={(r) => r.id}
+                    onRowClick={(row) => setSelectedTripId(row.id)}
+                  />
+                </div>
                 <Pagination
                   page={Math.min(page, trips.totalPages)}
                   limit={limit}
@@ -408,7 +415,7 @@ export default function TripsPage() {
             )}
           </Card>
 
-          <Card>
+          <Card className="xl:min-h-0 xl:overflow-y-auto">
             {selectedTrip ? (
               <>
                 <SectionHeader title={`Route · ${selectedTrip.number}`} subtitle={`${selectedTrip.pickup?.name ?? '—'} → ${selectedTrip.delivery?.name ?? '—'}`} />

@@ -2,7 +2,8 @@
 // RBAC-gated `Assign coaching` control.
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
@@ -75,6 +76,66 @@ describe('SafetyPage', () => {
   it('shows `Assign coaching` with safety FULL', async () => {
     renderPage();
     expect(await screen.findByRole('button', { name: 'Assign coaching' })).toBeInTheDocument();
+  });
+
+  // Regression — `onLimitChange` used to be `setLimit` alone, so raising `Rows per page` while on
+  // page 3 kept page 3: the client-side slice ran past the end and the table body went blank.
+  it('resets to page 1 when rows-per-page changes', async () => {
+    const user = userEvent.setup();
+    const items = Array.from({ length: 35 }, (_, i) => ({
+      id: `evt_${i}`,
+      type: 'SPEEDING',
+      status: 'NEW',
+      occurredAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+      vehicleId: 'veh_1',
+      driverId: null,
+      speedMph: 70 + i,
+      speedLimitMph: 65,
+      locationName: 'I-80',
+    }));
+    server.use(
+      http.get(url(endpoints.safety.events), () => ok({ items, page: 1, limit: 500, total: 35, totalPages: 1 })),
+    );
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: '4' }));
+    // Header + the 5 rows left over on page 4 of 10-row pages.
+    const rows = () => within(screen.getByRole('table', { name: 'Safety events' })).getAllByRole('row');
+    expect(rows()).toHaveLength(6);
+
+    await user.selectOptions(screen.getByLabelText('Rows per page:'), '100');
+    expect(screen.getByRole('button', { name: '1' })).toHaveAttribute('aria-current', 'page');
+    expect(rows()).toHaveLength(36);
+  });
+
+  // Regression — the drawer filters live in the URL and never reset the page, so narrowing the
+  // result set from page 4 left the table body empty with Pagination still on page 4.
+  it('clamps the page when a filter shrinks the result set', async () => {
+    const user = userEvent.setup();
+    const items = Array.from({ length: 35 }, (_, i) => ({
+      id: `evt_${i}`,
+      // Only 3 rows survive the `type=SEATBELT` filter below.
+      type: i < 3 ? 'SEATBELT' : 'SPEEDING',
+      status: 'NEW',
+      occurredAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+      vehicleId: 'veh_1',
+      driverId: null,
+      locationName: 'I-80',
+    }));
+    server.use(
+      http.get(url(endpoints.safety.events), () => ok({ items, page: 1, limit: 500, total: 35, totalPages: 1 })),
+    );
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: '4' }));
+    await user.click(screen.getByRole('button', { name: /^Filters/ }));
+    await user.click(await screen.findByLabelText('Seatbelt'));
+    await user.click(screen.getByRole('button', { name: /Apply 1 filters/ }));
+
+    // Header + the 3 surviving rows — before the clamp this table body was empty on page 4.
+    const eventsTable = await screen.findByRole('table', { name: 'Safety events' });
+    expect(within(eventsTable).getAllByRole('row')).toHaveLength(4);
+    expect(screen.getByRole('button', { name: '1' })).toHaveAttribute('aria-current', 'page');
   });
 
   it('error: renders <ErrorState> with Retry when the list fails', async () => {

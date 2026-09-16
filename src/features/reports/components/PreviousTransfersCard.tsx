@@ -77,6 +77,11 @@ export function PreviousTransfersCard({ timezone, onRetry }: PreviousTransfersCa
   const [limit, setLimit] = useState(25);
   const [openId, setOpenId] = useState<string | null>(null);
   const list = useTransfersList(expanded ? { page, limit } : { page: 1, limit: 5 });
+  // A history that shrank between two page requests answers the old page with no rows; step back
+  // to the last page that still has transfers.
+  if (expanded && list.data && list.data.total > 0 && page > list.data.totalPages) {
+    setPage(Math.max(1, list.data.totalPages));
+  }
 
   const columns = useMemo<ColumnDef<TransferRow, unknown>[]>(
     () => [
@@ -156,7 +161,7 @@ export function PreviousTransfersCard({ timezone, onRetry }: PreviousTransfersCa
           />
           {expanded && list.data && list.data.total > 0 && (
             <Pagination
-              page={list.data.page}
+              page={page}
               limit={limit}
               total={list.data.total}
               totalPages={list.data.totalPages}

@@ -127,3 +127,38 @@ describe('W-07 Driver profile — four states', () => {
     expect(await screen.findByText('No activity recorded.')).toBeInTheDocument();
   });
 });
+
+// Regression: a long email used to run into its label and spill past the card edge — the
+// value cell could not shrink below its content (flex `min-width: auto`) and had no wrap
+// rule. The row now gaps the pair, pins the label, and lets the value wrap instead of
+// truncating, so the whole address stays readable.
+describe('W-07 Driver profile — long values stay inside the profile card', () => {
+  const LONG_EMAIL = 'mock_justinadams106@mock.onebook.example.longsubdomain.invalid';
+
+  it('wraps a long email inside its row instead of overflowing the card', async () => {
+    server.use(http.get(url(endpoints.drivers.detail('drv_1')), () => ok({ ...DRIVER, email: LONG_EMAIL })));
+    renderPage();
+    await screen.findByRole('heading', { name: 'John Smith' });
+
+    const value = await screen.findByText(LONG_EMAIL);
+    expect(value.className).toContain('min-w-0');
+    expect(value.className).toContain('break-words');
+
+    const row = value.parentElement as HTMLElement;
+    expect(row.className).toContain('gap-4');
+
+    const label = screen.getByText('Email');
+    expect(label.className).toContain('shrink-0');
+    expect(label.parentElement).toBe(row);
+  });
+
+  it('leaves short values untouched in the same row layout', async () => {
+    server.use(http.get(url(endpoints.drivers.detail('drv_1')), () => ok(DRIVER)));
+    renderPage();
+    await screen.findByRole('heading', { name: 'John Smith' });
+
+    const cdl = await screen.findByText('W8569238');
+    expect(cdl.className).toContain('text-right');
+    expect((cdl.parentElement as HTMLElement).className).toContain('justify-between');
+  });
+});

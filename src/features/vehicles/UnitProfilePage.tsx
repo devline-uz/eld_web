@@ -43,9 +43,9 @@ const TAB_LABEL: Record<Tab, string> = {
 
 function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="flex justify-between border-b border-border py-2 last:border-b-0">
-      <span className="text-body text-text-muted">{label}</span>
-      <span className="text-body-strong text-text">{value}</span>
+    <div className="flex justify-between gap-4 border-b border-border py-2 last:border-b-0">
+      <span className="shrink-0 text-body text-text-muted">{label}</span>
+      <span className="min-w-0 break-words text-right text-body-strong text-text">{value}</span>
     </div>
   );
 }

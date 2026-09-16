@@ -306,6 +306,61 @@ describe('W-15 interactions', () => {
   });
 });
 
+describe('a list that shrinks under the open page', () => {
+  /** `n` rows of the same shape, paged the way the server pages them. */
+  const pageOf = <T,>(all: T[], search: URLSearchParams, limit: number) => {
+    const page = Number(search.get('page')) || 1;
+    return {
+      items: all.slice((page - 1) * limit, page * limit),
+      page,
+      limit,
+      total: all.length,
+      totalPages: Math.max(1, Math.ceil(all.length / limit)),
+    };
+  };
+
+  it('W-12 Recently generated steps back when the reports list shrinks between two page requests', async () => {
+    let calls = 0;
+    server.use(
+      http.get(url(endpoints.reports.list), ({ request }) => {
+        calls += 1;
+        const all = Array.from({ length: calls === 1 ? 30 : 3 }, (_, i) => ({ ...reportRows[0], id: `rpt_${i}` }));
+        return ok(pageOf(all, new URL(request.url).searchParams, 10));
+      }),
+    );
+    renderPage(<IftaReportPage />, '/reports/ifta?quarter=2026-Q3');
+    await screen.findAllByRole('row', { name: /IFTA mileage report/ });
+
+    await user.click(screen.getByRole('button', { name: '2' }));
+
+    // Page 2 came back empty; the card must land on a page that still has rows, not on the
+    // "no reports yet" empty state with the pager hidden.
+    await waitFor(() => expect(screen.getAllByRole('row', { name: /IFTA mileage report/ }).length).toBeGreaterThan(0));
+    expect(screen.queryByText('No reports generated yet')).toBeNull();
+  });
+
+  it('W-15 Previous transfers steps back when the history shrinks between two page requests', async () => {
+    let calls = 0;
+    server.use(
+      http.get(url(endpoints.transfers.list), ({ request }) => {
+        calls += 1;
+        const all = Array.from({ length: calls <= 2 ? 60 : 2 }, (_, i) => ({ ...transferRows[0], id: `trf_${i}` }));
+        return ok(pageOf(all, new URL(request.url).searchParams, calls === 1 ? 5 : 25));
+      }),
+    );
+    renderPage(<FmcsaPackPage />, '/reports/fmcsa?from=2026-09-01&to=2026-09-12');
+    await screen.findAllByRole('row', { name: /ROADSIDE INSPECTION 2026-09-10/ });
+    await user.click(screen.getByRole('button', { name: 'View all' }));
+    await screen.findByRole('button', { name: '3' });
+
+    await user.click(screen.getByRole('button', { name: '3' }));
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '1' })).toHaveAttribute('aria-current', 'page'));
+    expect(screen.getAllByRole('row', { name: /ROADSIDE INSPECTION 2026-09-10/ }).length).toBeGreaterThan(0);
+    expect(screen.queryByText('No transfers yet')).toBeNull();
+  });
+});
+
 describe('11.14 interactions', () => {
   function renderModal(onClose = vi.fn()) {
     renderPage(
