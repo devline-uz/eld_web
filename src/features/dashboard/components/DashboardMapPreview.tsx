@@ -9,7 +9,12 @@ const LEGEND: LiveFleetUnit['dutyStatus'][] = ['DRIVING', 'ON_DUTY', 'SLEEPER', 
 
 export default function DashboardMapPreview({ units }: { units: LiveFleetUnit[] }) {
   return (
-    <div className="relative h-map-preview overflow-hidden rounded-md">
+    // Desktop (≥1280px) fills the card: `h-map-preview` (260px) still drives every narrower
+    // viewport, while at `xl:` the map grows to `--spacing-map-preview-xl` so the card matches
+    // the `Duty status · now` card beside it exactly — no dead space under the map. `xl:mt-1`
+    // tops the wrapper's `pt-4` up to the card's own 20px padding, so the inset is equal on
+    // all four sides.
+    <div className="relative h-map-preview overflow-hidden rounded-md xl:mt-1 xl:h-map-preview-xl">
       <FleetMap
         units={units.map((u) => ({ id: u.vehicleId, lat: u.lat!, lon: u.lon!, dutyStatus: u.dutyStatus, headingDeg: u.headingDeg }))}
       />

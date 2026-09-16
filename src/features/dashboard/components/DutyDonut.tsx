@@ -47,7 +47,9 @@ export default function DutyDonut({
   }
 
   return (
-    <div className="flex flex-col items-center gap-4">
+    // Desktop-only +50px so this card keeps pace with the `Live fleet` map preview beside it
+    // (both grow by the same 50px at `xl:`); mobile and tablet stay exactly as they were.
+    <div className="flex flex-col items-center gap-4 xl:pb-duty-donut-xl-pad">
       <div className="relative">
         <PieChart width={180} height={180}>
           <Pie

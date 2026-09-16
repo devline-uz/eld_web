@@ -59,9 +59,9 @@ export function Sidebar() {
   const role = user?.role ?? null;
 
   return (
-    <aside className="flex w-sidebar shrink-0 flex-col border-r border-border bg-bg-sidebar">
+    <aside className="flex w-sidebar shrink-0 flex-col border-r border-border bg-bg-sidebar xl:h-full">
       <Brand />
-      <nav aria-label="Main" className="flex-1 overflow-y-auto px-3 pb-4">
+      <nav aria-label="Main" className="flex-1 overflow-y-auto px-3 pb-4 xl:min-h-0">
         {NAV_SECTIONS.map((section) => {
           const items = section.items.filter((item) => isNavItemVisible(item, can, role));
           if (items.length === 0) return null;

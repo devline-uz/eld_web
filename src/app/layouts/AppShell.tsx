@@ -16,7 +16,7 @@ function useFullBleed(): boolean {
 export function AppShell() {
   const fullBleed = useFullBleed();
   return (
-    <div className="flex min-h-screen bg-bg-app">
+    <div className="flex min-h-screen bg-bg-app xl:h-screen xl:overflow-hidden">
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:absolute focus:m-2 focus:rounded-md focus:bg-bg-surface focus:p-2"
@@ -24,10 +24,17 @@ export function AppShell() {
         Skip to content
       </a>
       <Sidebar />
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col xl:min-h-0">
         <DynamicSubtitleProvider>
           <Topbar />
-          <main id="main-content" className={fullBleed ? 'flex-1 overflow-hidden' : 'flex-1 p-page'}>
+          <main
+            id="main-content"
+            className={
+              fullBleed
+                ? 'flex-1 overflow-hidden xl:min-h-0'
+                : 'flex-1 p-page xl:min-h-0 xl:overflow-y-auto'
+            }
+          >
             <Suspense fallback={<RouteFallback />}>
               <Outlet />
             </Suspense>

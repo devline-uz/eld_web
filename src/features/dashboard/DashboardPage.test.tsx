@@ -52,6 +52,54 @@ beforeEach(() => {
 });
 
 describe('W-01 Fleet Dashboard', () => {
+  it('pages the violations table through GET /violations page/limit', async () => {
+    const rows = Array.from({ length: 12 }, (_, i) => ({
+      id: `vio_${i + 1}`,
+      severity: 'WARNING',
+      driverId: 'drv_1',
+      driverName: 'John Smith',
+      vehicleId: 'v1',
+      unitNumber: '#101',
+      event: `Event ${i + 1}`,
+      locationLabel: null,
+      occurredAt: new Date().toISOString(),
+    }));
+    const requested: { page: string | null; limit: string | null }[] = [];
+    server.use(
+      http.get(url(endpoints.live.fleet), () => ok({ items: [], generatedAt: new Date().toISOString() })),
+      http.get(url(endpoints.violations.list), ({ request }) => {
+        const search = new URL(request.url).searchParams;
+        requested.push({ page: search.get('page'), limit: search.get('limit') });
+        const page = Number(search.get('page'));
+        const limit = Number(search.get('limit'));
+        return ok({
+          items: rows.slice((page - 1) * limit, page * limit),
+          total: rows.length,
+          page,
+          limit,
+          totalPages: Math.ceil(rows.length / limit),
+        });
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByText('Event 1', {}, { timeout: 8000 })).toBeInTheDocument();
+    expect(screen.queryByText('Event 11')).not.toBeInTheDocument();
+    expect(screen.getByText('1–10 of 12 violations')).toBeInTheDocument();
+    expect(requested[0]).toEqual({ page: '1', limit: '10' });
+
+    await user.click(screen.getByRole('button', { name: 'Next page' }));
+
+    expect(await screen.findByText('Event 11', {}, { timeout: 8000 })).toBeInTheDocument();
+    expect(screen.queryByText('Event 1')).not.toBeInTheDocument();
+    expect(screen.getByText('11–12 of 12 violations')).toBeInTheDocument();
+    expect(requested.at(-1)).toEqual({ page: '2', limit: '10' });
+    // the KPI keeps counting every violation, not just the rows on the current page.
+    expect(screen.getByText('12')).toBeInTheDocument();
+  });
+
   it('renders the KPI row and an empty violations table', async () => {
     server.use(
       http.get(url(endpoints.live.fleet), () =>
