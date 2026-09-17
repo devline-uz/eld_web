@@ -908,8 +908,9 @@ budget is met (initial, route chunks, maplibre 286.2/290 KB, recharts 97/120 KB,
 
 **Numbering note:** `WB-049`–`WB-052` are referenced from code comments and tests
 (`shared/map/FleetMap.tsx`, `shared/api/liveFleet.ts`, `mocks/handlers/vehiclesDriversGaps.ts`,
-`features/account/AccountPage.tsx`) but were never written into this file, so those four ids are
-already spoken for. This audit therefore starts at `WB-053`.
+`features/account/AccountPage.tsx`), so those four ids are already spoken for. `WB-049` and
+`WB-050` are written up above (they arrived from `main` after this audit was drafted); `WB-051`
+and `WB-052` live only in the code. This audit therefore starts at `WB-053`.
 
 ---
 
