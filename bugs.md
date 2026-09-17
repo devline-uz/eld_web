@@ -855,6 +855,44 @@ time it causes; no redeploy risk from this change beyond the normal web build/re
 `preview-20260914`'s successor.
 
 
+## WB-049 · W-08 crashed on `day.certification.certified` — the MSW logs fixtures are truncated stubs
+**Found:** 2026-09-17, dev (`/hos-logs`, MSW). `TypeError: Cannot read properties of undefined
+(reading 'certified')` in `HosLogsPage.tsx`; React Router's error boundary replaced the whole page.
+**Severity:** blocker — the compliance screen was unreachable in dev/demo.
+**Cause:** `fixtures.generated.ts` `'GET /api/logs/{driverId}'` carries only `driverId/date/timezone/
+summary/graph` (one 1-hour OFF block, a `summary` that is not a `RodsDaySummary`), with no
+`certification`, `events` or `violations` — all required by `LogDayResponse`. `fleet.ts` served it
+verbatim, and the page dereferenced the nested object behind a `day &&` guard only.
+**Fix:** (1) `mocks/handlers/hosGaps.ts` now builds the RODS day, range and event list itself — a
+full 24-hour graph in the driver's own `homeTerminalTimezone` (sleeper → pre-trip → drive → 30-min
+break → drive → yard move → drive → post-trip → personal conveyance → off duty), derived totals, a
+recorded `DRIVING_11` violation, §395.8 events including the superseded (2) and proposed (3) audit
+records, and a `certification` block; segments are clamped to the real end of the day so a 23-/25-
+hour DST day still sums to `dayLengthSec`. The truncated fixture handlers were removed from
+`fleet.ts`. (2) `HosLogsPage.tsx` no longer dereferences query data unguarded: `certification`,
+`summary`, `graph`, `violations` and `timezone` all fall back, and a partial payload renders the
+grid card's existing `<ErrorState>` instead of the router boundary.
+
+### WB-050 — `/account` showed two scrollbars: the page scrolled behind the main scroll area
+**Found:** W-26 My profile at 1280×800 (`AppShell` single-scroll mode, `xl:` and up). The content
+inside `<main>` scrolled *and* the whole window — sidebar and topbar included — scrolled with it.
+**Severity:** medium (visual/UX; every long screen containing an `sr-only` caption or hint could
+hit it — `/account` is simply the first page tall enough).
+**Cause:** not `AccountLayout` (it is shape-identical to `SettingsLayout`) and not `AccountPage`.
+Tailwind's `sr-only` utility is `position:absolute`. `<main>` was `static`, and nothing between it
+and `<html>` is positioned, so the sr-only `<caption>` of the Active sessions table and the
+sr-only sort hint in its `<th>` resolved against the *initial* containing block: at their static
+position ~1400px down the un-scrolled content, they stretched `document.documentElement` to
+`scrollHeight: 1402` against a `clientHeight` of 720 while `body.scrollHeight` stayed at 720 —
+a document-level scrollbar produced by two invisible 1px elements that are not even in body's
+scroll box. `/vehicles` has the same sr-only caption but is short enough to stay under the fold.
+**Fix:** `src/app/layouts/AppShell.tsx` — `<main>` is now `relative` in both the padded and the
+full-bleed variant, so it is the containing block for its absolutely positioned descendants and
+their overflow belongs to the scroll container instead of `<html>`. `position:relative` with no
+offsets and `z-index:auto` moves nothing and creates no stacking context, so there is no visual
+change and no change to sub-`xl` page-scroll behaviour.
+
+
 ---
 
 # Audit 2026-09-17 — full-project sweep (WB-053 …)

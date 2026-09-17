@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Calendar, ChevronLeft, ChevronRight, Download, FileText, Plus } from 'lucide-react';
+import { Calendar, ChevronLeft, ChevronRight, FileText, Plus, Upload } from 'lucide-react';
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz';
 import { Card, SectionHeader } from '@/shared/ui/Card';
 import { Button } from '@/shared/ui/Button';
@@ -141,6 +141,10 @@ export default function HosLogsPage() {
   }
 
   const day = dayQuery.data;
+  // WB-049 — a partial payload (a stub fixture, an older server) must degrade to the card's own
+  // error state, never to React Router's boundary: nothing below dereferences `day` unguarded.
+  const dayIsUsable = Boolean(day?.summary?.dayLengthSec && day?.graph);
+  const certification = day?.certification;
   const dayEvents = day?.events;
   const rawEvents = eventsQuery.data?.events;
   const events = useMemo(() => rawEvents ?? dayEvents ?? [], [rawEvents, dayEvents]);
@@ -225,9 +229,9 @@ export default function HosLogsPage() {
               <ChevronRight size={16} strokeWidth={1.75} />
             </button>
           </div>
-          {day && (
-            <Badge tone={day.certification.certified ? 'success' : 'warning'} dot>
-              {day.certification.certified ? 'Certified' : 'Uncertified'}
+          {certification && (
+            <Badge tone={certification.certified ? 'success' : 'warning'} dot>
+              {certification.certified ? 'Certified' : 'Uncertified'}
             </Badge>
           )}
         </div>
@@ -246,7 +250,7 @@ export default function HosLogsPage() {
             </Button>
           </Can>
           <Button variant="secondary" onClick={() => window.print()}>
-            <Download size={16} strokeWidth={1.75} />
+            <Upload size={16} strokeWidth={1.75} />
             Export PDF
           </Button>
           <Can perm="reportsTransfer" level="FULL">
@@ -294,7 +298,7 @@ export default function HosLogsPage() {
             <div className="mt-4">
               {dayQuery.isLoading ? (
                 <LoadingState rows={4} />
-              ) : dayQuery.isError || !day ? (
+              ) : dayQuery.isError || !day || !dayIsUsable ? (
                 <ErrorState
                   title="Could not load this RODS day"
                   description="The log service did not respond. Your data is safe — try again in a moment."
@@ -305,9 +309,9 @@ export default function HosLogsPage() {
                   <GraphGrid
                     summary={day.summary}
                     graph={day.graph}
-                    violations={day.violations}
+                    violations={day.violations ?? []}
                     unassigned={unassignedSegments}
-                    timezone={day.timezone}
+                    timezone={day.timezone ?? timezone}
                     dateLabel={dateLabel}
                     zone={zone}
                     locationAt={locationAt}

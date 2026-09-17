@@ -4,7 +4,7 @@
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { ColumnDef } from '@tanstack/react-table';
-import { Download, Filter, Search, ShieldCheck, AlertTriangle, Gauge, Users } from 'lucide-react';
+import { Filter, Search, Upload, ShieldCheck, AlertTriangle, Gauge, Users } from 'lucide-react';
 import { Can } from '@/shared/auth/Can';
 import { useDynamicSubtitle } from '@/app/layouts/Topbar';
 import { useRoom } from '@/shared/realtime/useRoom';
@@ -212,7 +212,7 @@ export default function SafetyPage() {
           >
             Filters{countActiveSafetyFilters(filters) > 0 ? ` · ${countActiveSafetyFilters(filters)}` : ''}
           </Button>
-          <Button variant="secondary" iconLeft={<Download size={16} strokeWidth={1.75} />} onClick={handleExport}>
+          <Button variant="secondary" iconLeft={<Upload size={16} strokeWidth={1.75} />} onClick={handleExport}>
             Export
           </Button>
         </div>

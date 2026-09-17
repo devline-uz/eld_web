@@ -278,15 +278,16 @@ export default function VehiclesPage() {
           >
             Filters{activeFilterCount > 0 ? ` · ${activeFilterCount}` : ''}
           </Button>
-          <Button variant="secondary" iconLeft={<Upload size={16} strokeWidth={1.75} />} onClick={handleExport}>
+          <Button variant="secondary" className="w-btn-wide" iconLeft={<Upload size={16} strokeWidth={1.75} />} onClick={handleExport}>
             Export Units
           </Button>
           <Can perm="vehicles" level="FULL">
-            <Button variant="secondary" iconLeft={<Download size={16} strokeWidth={1.75} />} onClick={() => setImportOpen(true)}>
+            <Button variant="secondary" className="w-btn-wide" iconLeft={<Download size={16} strokeWidth={1.75} />} onClick={() => setImportOpen(true)}>
               Import Units
             </Button>
             <Button
               variant="primary"
+              className="w-btn-add"
               iconLeft={<Plus size={16} strokeWidth={1.75} />}
               onClick={() => setAddOpen(true)}
               disabled={isOffline}
