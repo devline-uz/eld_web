@@ -872,3 +872,22 @@ hour DST day still sums to `dayLengthSec`. The truncated fixture handlers were r
 `fleet.ts`. (2) `HosLogsPage.tsx` no longer dereferences query data unguarded: `certification`,
 `summary`, `graph`, `violations` and `timezone` all fall back, and a partial payload renders the
 grid card's existing `<ErrorState>` instead of the router boundary.
+
+### WB-050 — `/account` showed two scrollbars: the page scrolled behind the main scroll area
+**Found:** W-26 My profile at 1280×800 (`AppShell` single-scroll mode, `xl:` and up). The content
+inside `<main>` scrolled *and* the whole window — sidebar and topbar included — scrolled with it.
+**Severity:** medium (visual/UX; every long screen containing an `sr-only` caption or hint could
+hit it — `/account` is simply the first page tall enough).
+**Cause:** not `AccountLayout` (it is shape-identical to `SettingsLayout`) and not `AccountPage`.
+Tailwind's `sr-only` utility is `position:absolute`. `<main>` was `static`, and nothing between it
+and `<html>` is positioned, so the sr-only `<caption>` of the Active sessions table and the
+sr-only sort hint in its `<th>` resolved against the *initial* containing block: at their static
+position ~1400px down the un-scrolled content, they stretched `document.documentElement` to
+`scrollHeight: 1402` against a `clientHeight` of 720 while `body.scrollHeight` stayed at 720 —
+a document-level scrollbar produced by two invisible 1px elements that are not even in body's
+scroll box. `/vehicles` has the same sr-only caption but is short enough to stay under the fold.
+**Fix:** `src/app/layouts/AppShell.tsx` — `<main>` is now `relative` in both the padded and the
+full-bleed variant, so it is the containing block for its absolutely positioned descendants and
+their overflow belongs to the scroll container instead of `<html>`. `position:relative` with no
+offsets and `z-index:auto` moves nothing and creates no stacking context, so there is no visual
+change and no change to sub-`xl` page-scroll behaviour.

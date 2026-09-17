@@ -29,10 +29,16 @@ export function AppShell() {
           <Topbar />
           <main
             id="main-content"
+            // `relative` is load-bearing (web/bugs.md WB-050): Tailwind's `sr-only` is
+            // `position:absolute`, so without a positioned ancestor every sr-only caption /
+            // header hint inside a long page resolves against the initial containing block and
+            // stretches <html> to the full un-scrolled content height — a second, page-level
+            // scrollbar on top of the one inside <main>. Making <main> the containing block
+            // keeps that overflow inside the scroll container. No visual effect at any width.
             className={
               fullBleed
-                ? 'flex-1 overflow-hidden xl:min-h-0'
-                : 'flex-1 p-page xl:min-h-0 xl:overflow-y-auto'
+                ? 'relative flex-1 overflow-hidden xl:min-h-0'
+                : 'relative flex-1 p-page xl:min-h-0 xl:overflow-y-auto'
             }
           >
             <Suspense fallback={<RouteFallback />}>
