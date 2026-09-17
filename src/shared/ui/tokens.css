@@ -119,6 +119,8 @@
   --spacing-btn: 36px;
   --spacing-btn-sm: 32px;
   --spacing-btn-lg: 40px;
+  --spacing-btn-wide: 150px; /* Vehicles/Drivers toolbar: Export/Import fixed width, so the two pages align pixel-for-pixel (web/tz.md §10 W-03/W-06) */
+  --spacing-btn-add: 134px; /* Vehicles/Drivers toolbar: Add vehicle/Add driver fixed width, same alignment goal */
   --spacing-input: 40px;
   --spacing-min-width: 1280px;
   --spacing-search: 220px;

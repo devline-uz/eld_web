@@ -233,16 +233,14 @@ export default function DriversPage() {
           >
             Filters{countActiveDriverFilters(filters) > 0 ? ` · ${countActiveDriverFilters(filters)}` : ''}
           </Button>
-          <Can perm="drivers" level="FULL">
-            <Button variant="secondary" iconLeft={<Upload size={16} strokeWidth={1.75} />} onClick={() => setImportOpen(true)}>
-              Import
-            </Button>
-          </Can>
-          <Button variant="secondary" iconLeft={<Download size={16} strokeWidth={1.75} />} onClick={handleExport}>
-            Export
+          <Button variant="secondary" className="w-btn-wide" iconLeft={<Upload size={16} strokeWidth={1.75} />} onClick={handleExport}>
+            Export Drivers
           </Button>
           <Can perm="drivers" level="FULL">
-            <Button variant="primary" iconLeft={<Plus size={16} strokeWidth={1.75} />} onClick={() => setAddOpen(true)}>
+            <Button variant="secondary" className="w-btn-wide" iconLeft={<Download size={16} strokeWidth={1.75} />} onClick={() => setImportOpen(true)}>
+              Import Drivers
+            </Button>
+            <Button variant="primary" className="w-btn-add" iconLeft={<Plus size={16} strokeWidth={1.75} />} onClick={() => setAddOpen(true)}>
               Add driver
             </Button>
           </Can>
