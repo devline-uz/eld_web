@@ -4,7 +4,7 @@
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { ColumnDef } from '@tanstack/react-table';
-import { Download, Filter, Plus, Search, Wrench, AlertTriangle, ClipboardList, ShieldOff } from 'lucide-react';
+import { Filter, Plus, Search, Upload, Wrench, AlertTriangle, ClipboardList, ShieldOff } from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
@@ -200,7 +200,7 @@ export default function DvirPage() {
           >
             Filters{countActiveDvirFilters(filters) > 0 ? ` · ${countActiveDvirFilters(filters)}` : ''}
           </Button>
-          <Button variant="secondary" iconLeft={<Download size={16} strokeWidth={1.75} />} onClick={handleExport}>
+          <Button variant="secondary" iconLeft={<Upload size={16} strokeWidth={1.75} />} onClick={handleExport}>
             Export
           </Button>
           <Can perm="maintenance" level="FULL">

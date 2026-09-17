@@ -854,3 +854,21 @@ separate item under the same WB-048 owner note: the `/logs/:id/range` fan-out an
 time it causes; no redeploy risk from this change beyond the normal web build/release of
 `preview-20260914`'s successor.
 
+
+## WB-049 · W-08 crashed on `day.certification.certified` — the MSW logs fixtures are truncated stubs
+**Found:** 2026-09-17, dev (`/hos-logs`, MSW). `TypeError: Cannot read properties of undefined
+(reading 'certified')` in `HosLogsPage.tsx`; React Router's error boundary replaced the whole page.
+**Severity:** blocker — the compliance screen was unreachable in dev/demo.
+**Cause:** `fixtures.generated.ts` `'GET /api/logs/{driverId}'` carries only `driverId/date/timezone/
+summary/graph` (one 1-hour OFF block, a `summary` that is not a `RodsDaySummary`), with no
+`certification`, `events` or `violations` — all required by `LogDayResponse`. `fleet.ts` served it
+verbatim, and the page dereferenced the nested object behind a `day &&` guard only.
+**Fix:** (1) `mocks/handlers/hosGaps.ts` now builds the RODS day, range and event list itself — a
+full 24-hour graph in the driver's own `homeTerminalTimezone` (sleeper → pre-trip → drive → 30-min
+break → drive → yard move → drive → post-trip → personal conveyance → off duty), derived totals, a
+recorded `DRIVING_11` violation, §395.8 events including the superseded (2) and proposed (3) audit
+records, and a `certification` block; segments are clamped to the real end of the day so a 23-/25-
+hour DST day still sums to `dayLengthSec`. The truncated fixture handlers were removed from
+`fleet.ts`. (2) `HosLogsPage.tsx` no longer dereferences query data unguarded: `certification`,
+`summary`, `graph`, `violations` and `timezone` all fall back, and a partial payload renders the
+grid card's existing `<ErrorState>` instead of the router boundary.
