@@ -14,12 +14,12 @@ export function AccountLayout() {
         <ul className="flex flex-col gap-1">
           {ACCOUNT_NAV.map((item) => (
             <li key={item.to}>
-              <a
-                href={item.to.slice(item.to.indexOf('#'))}
+              <NavLink
+                to={item.to}
                 className="flex h-nav-item items-center rounded-md px-3 text-nav text-text-secondary hover:bg-bg-subtle"
               >
                 {item.label}
-              </a>
+              </NavLink>
             </li>
           ))}
         </ul>

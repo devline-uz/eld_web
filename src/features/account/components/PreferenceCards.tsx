@@ -25,7 +25,7 @@ function AnchoredCard({
   const titleId = `account-${id}-title`;
   return (
     <section
-      id={id}
+      id={`account-section-${id}`}
       tabIndex={-1}
       aria-labelledby={titleId}
       className="scroll-mt-page focus-visible:ring-2 focus-visible:ring-primary"

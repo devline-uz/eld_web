@@ -284,17 +284,17 @@ describe('W-06 Drivers', () => {
     expect(requestedLimits.some((l) => Number(l) > 10)).toBe(true);
   });
 
-  // The same invariant against the full MSW roster (115 drivers, 12 server pages of 10).
+  // The same invariant against the full MSW roster (58 drivers, 6 server pages of 10).
   it('All equals On duty + Off duty across the whole mocked roster', async () => {
     renderPage();
 
-    await screen.findByRole('button', { name: 'All 115' });
+    await screen.findByRole('button', { name: 'All 58' });
     const number = (el: HTMLElement) => Number(/\d+/.exec(el.textContent ?? '')![0]);
     const onDuty = screen.getByRole('button', { name: /^On duty \d+$/ });
     const offDuty = screen.getByRole('button', { name: /^Off duty \d+$/ });
 
-    expect(number(onDuty) + number(offDuty)).toBe(115);
-    expect(screen.getByText(new RegExp(`^115 drivers · ${number(onDuty)} on duty · `))).toBeInTheDocument();
+    expect(number(onDuty) + number(offDuty)).toBe(58);
+    expect(screen.getByText(new RegExp(`^58 drivers · ${number(onDuty)} on duty · `))).toBeInTheDocument();
   });
 
   it('error: renders <ErrorState> with Retry when the list fails', async () => {

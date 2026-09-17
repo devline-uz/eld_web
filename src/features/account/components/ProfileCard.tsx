@@ -216,7 +216,7 @@ function ProfileForm({ profile }: { profile: MyProfile }) {
 export function ProfileCard({ query }: { query: UseQueryResult<MyProfile, Error> }) {
   return (
     <section
-      id="profile"
+      id="account-section-profile"
       tabIndex={-1}
       aria-labelledby="account-profile-title"
       className="scroll-mt-page focus-visible:ring-2 focus-visible:ring-primary"

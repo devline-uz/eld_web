@@ -32,11 +32,27 @@ export default function AccountPage() {
 
   // Scroll + focus the anchored section; again once the profile has loaded, because the cards
   // above the anchor grow from their skeletons and would push it out of view.
+  //
+  // The section elements are NOT given `id="profile"` / `id="sessions"` etc. (matching the URL
+  // hash exactly) — Chrome's own fragment navigation retries `getElementById(hash)` for a few
+  // seconds after load until a match appears in the DOM, and fires its own native scroll the
+  // moment `SessionsCard` etc. mount. That native scroll walks `<main>` AND `<html>` and, once it
+  // interleaves with this effect, leaves `<html>` holding a scroll position it should never have
+  // had — dragging the fixed Sidebar off-screen with it (web/bugs.md WB-052). The `account-section-`
+  // prefix (below and in each card's own `id`) keeps the hash from ever matching a real id, so
+  // only this effect scrolls, and only `#main-content` (the real scroll owner at `xl:` widths,
+  // AppShell's `xl:overflow-y-auto`) ever moves; below `xl:`, where `<main>` does not scroll on
+  // its own, this falls back to the native whole-page `scrollIntoView`.
   useEffect(() => {
     const id = location.hash.slice(1);
-    const section = id ? document.getElementById(id) : null;
+    const section = id ? document.getElementById(`account-section-${id}`) : null;
     if (!section) return;
-    section.scrollIntoView({ block: 'start' });
+    const container = document.getElementById('main-content');
+    if (container && container.scrollHeight > container.clientHeight) {
+      container.scrollTop += section.getBoundingClientRect().top - container.getBoundingClientRect().top;
+    } else {
+      section.scrollIntoView({ block: 'start' });
+    }
     section.focus({ preventScroll: true });
   }, [location.hash, profile.isPending]);
 

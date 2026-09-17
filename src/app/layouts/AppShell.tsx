@@ -32,7 +32,7 @@ export function AppShell() {
             className={
               fullBleed
                 ? 'flex-1 overflow-hidden xl:min-h-0'
-                : 'flex-1 p-page xl:min-h-0 xl:overflow-y-auto'
+                : 'flex-1 overscroll-contain p-page xl:min-h-0 xl:overflow-y-auto'
             }
           >
             <Suspense fallback={<RouteFallback />}>

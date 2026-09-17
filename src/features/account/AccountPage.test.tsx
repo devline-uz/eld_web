@@ -192,7 +192,7 @@ describe('W-26 — states', () => {
     api();
     renderPage('/account#sessions');
     await waitFor(() => expect(scroll).toHaveBeenCalled());
-    expect(scroll.mock.contexts[0]).toBe(document.getElementById('sessions'));
+    expect(scroll.mock.contexts[0]).toBe(document.getElementById('account-section-sessions'));
   });
 });
 
@@ -201,19 +201,20 @@ describe('W-26 — section anchors (11.26 Account menu, Notifications panel)', (
     api();
     const { container } = renderPage();
     await screen.findByLabelText(/First name/);
-    expect([...container.querySelectorAll('section[id]')].map((s) => s.id)).toEqual([...ACCOUNT_SECTIONS]);
+    expect([...container.querySelectorAll('section[id]')].map((s) => s.id)).toEqual(
+      ACCOUNT_SECTIONS.map((id) => `account-section-${id}`),
+    );
   });
 
-  it.each(['profile', 'security', 'notifications', 'language', 'sessions'])(
-    'focuses #%s when the URL names it',
-    async (id) => {
-      const scroll = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => undefined);
-      api();
-      renderPage(`/account#${id}`);
-      await waitFor(() => expect(document.activeElement).toBe(document.getElementById(id)));
-      expect(scroll).toHaveBeenCalled();
-    },
-  );
+  it.each(ACCOUNT_SECTIONS)('focuses #%s when the URL names it', async (id) => {
+    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => undefined);
+    api();
+    renderPage(`/account#${id}`);
+    await waitFor(() =>
+      expect(document.activeElement).toBe(document.getElementById(`account-section-${id}`)),
+    );
+    expect(scroll).toHaveBeenCalled();
+  });
 
   it('ignores a hash that names no section', async () => {
     const scroll = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => undefined);

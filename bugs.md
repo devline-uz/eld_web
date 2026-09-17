@@ -854,3 +854,760 @@ separate item under the same WB-048 owner note: the `/logs/:id/range` fan-out an
 time it causes; no redeploy risk from this change beyond the normal web build/release of
 `preview-20260914`'s successor.
 
+
+---
+
+# Audit 2026-09-17 — full-project sweep (WB-053 …)
+
+A read-only audit of the whole panel (~54 000 lines) run area by area against the code as it
+stands on branch `shohruh` at `123fdeb`, plus the uncommitted working tree. Nothing below was
+fixed; every entry is **open** and carries the evidence needed to reproduce it.
+
+**Gates as of this audit:** `tsc --noEmit` clean · `eslint --max-warnings=0` clean ·
+`vitest run` 1083/1084 (the one failure is WB-056) · `npm run build` succeeds and every bundle
+budget is met (initial, route chunks, maplibre 286.2/290 KB, recharts 97/120 KB, total
+873.8/1228.8 KB).
+
+**Numbering note:** `WB-049`–`WB-052` are referenced from code comments and tests
+(`shared/map/FleetMap.tsx`, `shared/api/liveFleet.ts`, `mocks/handlers/vehiclesDriversGaps.ts`,
+`features/account/AccountPage.tsx`) but were never written into this file, so those four ids are
+already spoken for. This audit therefore starts at `WB-053`.
+
+---
+
+## Build, dependencies and CI
+
+## WB-053 · `maplibre-gl` ships a critical XSS sanitizer bypass
+**Found:** `npm audit --omit=dev` — `maplibre-gl` `^5.24.0` is covered by GHSA-jrc7-96c5-q579
+("XSS Sanitizer Bypass in `DOM.sanitize()` via Live NamedNodeMap Removal Skip"), which affects
+every version `<= 6.4.0`.
+**Severity:** critical — the map renders carrier-controlled strings (unit numbers, driver names,
+geofence names) inside popups, which is exactly the sanitizer path the advisory bypasses.
+**Fix (proposed):** bump to `maplibre-gl@6.10.0`. It is a major bump, so it has to be re-measured
+against the 290 KB maplibre budget (WD-023) and `shared/map/FleetMap.tsx` re-verified against the
+v6 API. Three further moderate advisories exist in dev-only deps (`vitest`/`@vitest/mocker`).
+
+## WB-054 · Production build publishes 74 source maps
+**Found:** `vite.config.ts` sets `build.sourcemap: true` and nothing in `deploy/` removes them —
+a verified `npm run build` emits 74 `*.map` files into `dist/assets/`, and the nginx snippet
+serves the directory as-is.
+**Severity:** medium — the panel's full readable source, including every internal endpoint path
+and permission check, is downloadable from production.
+**Fix (proposed):** either `sourcemap: 'hidden'` with the maps uploaded to Sentry and deleted
+from `dist/` before sync, or a `find dist -name '*.map' -delete` step in the deploy script.
+
+## WB-055 · There is no CI configuration at all
+**Found:** the repository has no `.github/`, and no pipeline file of any kind, although
+`tz.md` §2.4/§16 and the §18 done-checklist require a green `web` job whose gates are the bundle
+budget and `npm audit --production` (`tz.md:3519`, `:3564`, `:3851` — "`high`+ → build tushadi").
+**Severity:** medium — every gate the spec calls mandatory is manual today. The audit gate in
+particular would currently fail on WB-053, which is how that advisory went unnoticed.
+**Fix (proposed):** add the `web` job running `typecheck`, `lint`, `test:unit`, `test:contract`,
+`build` (which already includes the budget check) and `npm audit --omit=dev --audit-level=high`.
+
+## WB-056 · The unit suite cannot pass without the backend repo checked out beside it
+**Found:** `src/shared/api/cache.test.ts:101` throws `backend Prisma schema not found` when
+`../backend/prisma/schema.prisma` is absent. The hard throw is deliberate (a silent skip would let
+the enum cross-check rot), but it makes `npm run test:unit` red on any checkout of this repo alone.
+**Severity:** low — it is the single failing test in an otherwise green 1084-test suite, and it
+fails for an environmental reason rather than a defect in the panel.
+**Fix (proposed):** keep the hard failure in CI (where both repos are present) but let it fail
+loudly-and-skippably elsewhere, e.g. `it.skipIf(!existsSync(schemaPath))` combined with a CI-only
+assertion that the file *was* found.
+
+---
+
+## W-08 HOS Logs — the compliance core
+
+## WB-057 · Unassigned-driving window is built from UTC midnights, so the end of the RODS day is never fetched
+**Found:** `src/features/hos-logs/HosLogsPage.tsx:82` requests
+`from: ${shiftDay(date,-1)}T00:00:00.000Z`, `to: ${shiftDay(date,1)}T00:00:00.000Z`. Verified by
+reading the call site: for a `America/New_York` home terminal that window is
+`[day-1 20:00 ET, day 20:00 ET]`, not the driver's RODS day.
+**Severity:** critical — a PENDING unidentified segment at 21:30 ET on the viewed day falls outside
+the request. The grid draws no hatched block, the header chip reads "No unassigned segments", and
+modal 11.13 cannot resolve it. Unassigned driving that an auditor would see is invisible in the panel.
+**Fix (proposed):** build the window from `rodsDayStart(date, timezone)` ± one day, the same helper
+the grid itself already uses, instead of from UTC midnights.
+
+## WB-058 · The unassigned chip and the 11.13 subtitle count neighbouring days
+**Found:** `HosLogsPage.tsx:181`, `:283-289` and `components/UnassignedDrivingModal.tsx:103` use the
+raw ±1-day list; only `plotUnassigned` clamps to the viewed day before drawing.
+**Severity:** high — a day with zero overlapping segments still shows the "N unassigned segments"
+warning chip because yesterday has one, and the modal's "N segments · total" header is inflated.
+**Fix (proposed):** filter by overlap with `[dayStart, dayStart + dayLengthSec)` before counting.
+
+## WB-059 · The §395.30 guard is inverted — driving time can be re-stated away
+**Found:** `components/RequestLogEditModal.tsx:238-239` computes
+`disabled = (chip.value === 'D' && touchesAutomaticDriving) || 'YM' || 'PC'`. Verified by reading
+the fieldset: when the requested interval covers automatic driving, `D` is greyed out while
+`OFF`, `SB` and `ON` stay selectable and submittable — and the red note "Driving time can never be
+shortened, deleted or restatused (49 CFR §395.30)" is rendered next to the one chip that is safe.
+**Severity:** high — the modal permits precisely the edit §395.30 forbids and blocks the one it
+allows. Only the server's `DRIVING_TIME_IMMUTABLE` refusal stops the request.
+**Fix (proposed):** when `touchesAutomaticDriving`, disable `OFF`/`SB`/`ON` and leave `D` enabled,
+keeping the §14.3 text.
+
+## WB-060 · `Resolve` always resolves the first open violation
+**Found:** `components/ViolationsCard.tsx:47` — the single card-level button targets `open[0]`, and
+there is no per-row action.
+**Severity:** high — on a day with `DRIVING_11` and `BREAK_30` both OPEN, the second violation is
+unreachable until the first is resolved; a compliance officer resolving "the one they clicked"
+actually resolves a different violation and writes the resolution note against it.
+**Fix (proposed):** move `Resolve` onto each OPEN row.
+
+## WB-061 · Resolved violations are drawn exactly like open ones
+**Found:** `ViolationsCard.tsx:58-84` maps every violation; only `open` feeds the count.
+**Severity:** medium — a RESOLVED `DRIVING_11` keeps its red danger band and "Exceeded by 01:12 at
+14:30" while the card subtitle says "0 open". An inspector cannot tell the two states apart.
+**Fix (proposed):** render `status !== 'OPEN'` rows muted with a `Resolved` badge.
+
+## WB-062 · A day edited after certification can never be re-certified, and the modal's selection is frozen
+**Found:** `components/CertifyLogsModal.tsx:116` disables the checkbox for every `day.certified`,
+even though `RodsDaySummary` carries `hasEdits`/`certificationCount` and `RodsCertification` has
+`recertificationRequired`. Separately, `selected` (`:43-45`) is seeded from the first render only.
+**Severity:** medium — §395.8 re-certification after a carrier edit is impossible from this screen;
+days that arrive while the modal is open (range query still loading, or a refetch after
+`eld.events_ingested`) can never be selected, and a day certified elsewhere meanwhile stays in
+`selected` and is re-posted.
+**Fix (proposed):** enable the checkbox when `recertificationRequired`/`hasEdits`, and reconcile
+`selected` against the latest `days` instead of seeding it once.
+
+## WB-063 · A partial multi-segment assignment leaves the list stale and invites a double assign
+**Found:** `src/shared/api/hosLogs.ts:318-348` — `useResolveUnidentified` POSTs sequentially in a
+loop and invalidates only in `onSuccess`.
+**Severity:** medium — select 5 segments, have the 3rd return 409: segments 1–2 are already assigned
+server-side, the modal shows the refusal, the list still shows all 5 as pending, and pressing the
+button again re-posts 1–2.
+**Fix (proposed):** invalidate in `onSettled` and report which segments succeeded.
+
+## WB-064 · "Yard move" and "Personal conveyance" send byte-identical requests
+**Found:** `components/UnassignedDrivingModal.tsx:77-78` — `ANNOTATE_YARD` and `ANNOTATE_PC` both
+build `{ kind: 'annotate', annotation }`; the category itself is dropped.
+**Severity:** medium — a segment annotated as PC is indistinguishable from YM in the record, and the
+two options in the UI promise a distinction the payload does not carry.
+**Fix (proposed):** send the category, or record the missing field as a `B-NN` backend gap and merge
+the two options into one until it exists.
+
+## WB-065 · "N driver edits pending review" counts edits that were already applied
+**Found:** `HosLogsPage.tsx:155-162`, `:358` → `components/LogEventsCard.tsx:152` add
+`pendingEditCount` (`recordStatus = 3`, genuinely proposed) to `driverEditCount`
+(`recordStatus = 1 && recordOrigin = 2`, accepted driver edits).
+**Severity:** medium — a day with 1 proposal and 4 accepted driver edits reads "5 driver edits
+pending review", sending a compliance officer looking for four reviews that do not exist.
+**Fix (proposed):** pass only the proposed count to the card.
+
+## WB-066 · A malformed `?date=` crashes the screen
+**Found:** `HosLogsPage.tsx:76`, `:170` take `date` straight from the URL with no validation;
+`/hos-logs?driverId=drv_1&date=banana` reaches `fromZonedTime('bananaT12:00:00', tz)` and
+`formatInTimeZone` throws `RangeError: Invalid time value` during render.
+**Severity:** medium — a mistyped or truncated shared link white-screens the compliance screen
+rather than falling back.
+**Fix (proposed):** validate against `/^\d{4}-\d{2}-\d{2}$/` (and the ≤ 62-day range rule) and fall
+back to `todayKey`.
+
+## WB-067 · The Before/After preview shows the proposed value in the "Before" column
+**Found:** `components/RequestLogEditModal.tsx:308-310` prints `endTime` — the value being typed
+into *End time* — inside the Before block.
+**Severity:** medium — typing `15:30` makes the original record read `ON 14:26 → 15:30`, identical
+to After, so the reviewer approving the edit cannot see what is actually changing.
+**Fix (proposed):** derive Before from the original event/graph segment.
+
+## WB-068 · `role="img"` hides the graph's own screen-reader audit table
+**Found:** `components/GraphGrid.tsx:111` puts `role="img"` on the wrapper that contains the
+`sr-only` table, which removes the table's children from the accessibility tree.
+**Severity:** low — the accessible alternative to the 24-hour grid exists but is never exposed.
+**Fix (proposed):** move `role="img"` onto the drawn SVG only, leaving the table a sibling.
+
+## WB-069 · `isDirty` ignores four of the edit modal's fields
+**Found:** `components/RequestLogEditModal.tsx:164` — status, location, odometer and engine hours
+are not part of the dirty check.
+**Severity:** low — 11.30 Discard changes is skipped and those edits are silently lost on Esc.
+**Fix (proposed):** include every controlled field in the comparison.
+
+## WB-070 · The typed location is collected and never sent, with no hint to the user
+**Found:** `components/RequestLogEditModal.tsx:269` — `location` has no representation in
+`CreateEditRequestDto` (gap B-39) but is rendered as an ordinary enabled field.
+**Severity:** low — the user believes they corrected the location.
+**Fix (proposed):** disable the field with the gap note, as the `YM`/`PC` chips already do.
+
+## WB-071 · The available-hours subtitle hardcodes the 70/8 cycle
+**Found:** `components/AvailableHoursCard.tsx:19` always renders
+`Property-carrying · 70 hr / 8 day`, even when `cycleLimitSec` describes the 60/7 cycle
+(`CYCLE_60` exists in the type).
+**Severity:** low — a 60/7 carrier reads the wrong rule set beside correct numbers.
+**Fix (proposed):** derive the label from the cycle on the response.
+
+## WB-072 · A 25-hour DST day is documented as 89 600 seconds
+**Found:** `src/shared/api/hosLogs.ts:8`, `:72` and `src/features/hos-logs/lib/grid.test.ts:147`
+all say `89_600`; 25 hours is `90_000`.
+**Severity:** low — the computed value comes from real timestamps, so only the comments and the test
+fixture are wrong, but they will mislead the next reader of the DST math.
+**Fix (proposed):** correct the constant in both comments and the test.
+
+## WB-073 · `hos: NONE` renders an error, not the forbidden state
+**Found:** `HosLogsPage.tsx:183` returns `<ErrorState>` where the rest of the panel returns the
+full-page `<ForbiddenState>`.
+**Severity:** low — a Viewer without `hos` is told something broke instead of that they lack access.
+**Fix (proposed):** return `<ForbiddenState>`, matching the other screens.
+
+**Verified correct in this area (no action):** `rodsDayStart`'s two-probe DST math (checked against
+2026-03-08 and 2026-11-01 in `America/New_York`), the 24-column/25-label axis, `fractionOf` against
+`dayLengthSec`, the strict `>` on `DRIVING_LIMIT_SEC`, the absence of any client-side violation
+computation, invalidation after certify, and the absence of per-day/per-driver request fan-out.
+
+---
+
+## W-09 DVIR & maintenance · W-10 Safety
+
+## WB-074 · Six row-action menu items on the DVIR screen do nothing at all
+**Found:** `src/features/dvir/DvirPage.tsx:621-637` (Work orders — `Close`, `Cancel`, `Edit`) and
+`:709-724` (Schedules — `Complete`, `Edit`, `Delete`). Verified by reading both `rowActions`
+renderers: every `DropdownMenu.Item` is a bare styled element with no `onSelect`/`onClick`. The
+mutations that should back them — `useCancelWorkOrder`, `useCompleteSchedule`
+(`src/shared/api/dvir.ts:446-454`, `:516+`) — are exported and never imported by `DvirPage.tsx`,
+and no update/delete-schedule mutation exists at all.
+**Severity:** critical — a Fleet Manager or Admin can never close a work order or complete, edit or
+delete a maintenance schedule from this screen; every click is a silent no-op with no error.
+**Fix (proposed):** wire each item to its mutation (adding the missing edit/delete ones) with the
+confirm + invalidate pattern the rest of the file already uses.
+
+## WB-075 · "Return unit to service" is decoration — the flag is never sent
+**Found:** `src/features/dvir/components/ResolveDefectModal.tsx:33-54`. The checkbox (checked by
+default) only picks the wording of the success toast; `submit()` never puts `returnToService` in
+the payload, and `useResolveDefect` (`src/shared/api/dvir.ts:345-357`) has no such field.
+**Severity:** high — unchecking the box to *keep* a unit down (because a second CRITICAL defect is
+still open) has no effect whatsoever, while the toast can claim the unit was returned to service.
+**Fix (proposed):** send the flag, or remove the checkbox and state the actual consequence.
+
+## WB-076 · Mechanic sign-off always records `REPAIRED`
+**Found:** `src/features/dvir/components/DvirDrawer.tsx:165-190` hardcodes
+`repairStatus: 'REPAIRED'`, although `RepairStatus` (`src/shared/api/dvir.ts:23`) also has
+`NOT_REQUIRED`, `PENDING` and `DEFERRED`, and the sign-off box is shown for every DVIR lacking a
+mechanic signature — including `SATISFACTORY` ones with no defects.
+**Severity:** medium — the maintenance record claims a repair that never happened, on exactly the
+documents an auditor reads.
+**Fix (proposed):** derive the status from the DVIR's defect state, or let the mechanic choose.
+
+## WB-077 · "No repair needed" is submitted as `REPAIRED`
+**Found:** `components/ResolveDefectModal.tsx:36` —
+`resolution === 'DEFERRED' ? 'DEFERRED' : 'REPAIRED'`, while the modal offers three resolutions
+(`:100-105`) and the API accepts two (`src/shared/api/dvir.ts:348`).
+**Severity:** medium — "inspected and found within specification" is written to the audit trail as a
+completed repair, indistinguishable downstream from a real one.
+**Fix (proposed):** add a `NOT_REQUIRED` resolution to the DTO as a backend gap, or carry the
+distinction in a `resolutionType` field.
+
+## WB-078 · DVIRs whose defects are outside the loaded window silently fail every severity filter
+**Found:** `src/features/dvir/lib/filters.ts:69-74` — severity is matched against child defects, so
+a DVIR with `defectsKnown: false` (B-66) matches nothing.
+**Severity:** low — results are understated with no indication that the defects are merely unknown.
+**Fix (proposed):** exclude unknown-defect DVIRs from the filtered count explicitly, or surface the
+bound in the UI.
+
+---
+
+## Authentication, session and RBAC
+
+## WB-079 · Sign-out loses the race with an in-flight refresh and re-persists a valid token
+**Found:** `src/shared/auth/AuthProvider.tsx:171-184` (`resetSession` → `clearTokens()`) versus the
+bridge's `onTokens` at `:196-206`, which writes unconditionally. Nothing cancels the single
+in-flight `refreshPromise` in `src/shared/api/client.ts:206-254`.
+**Severity:** high — with `POST /auth/refresh` in flight (proactive timer or a 401 replay), the user
+clicks Sign out: `resetSession` wipes `obk.rt`, the refresh then resolves and `setRefreshToken(new)`
+writes a *fresh, unrevoked* refresh token back. The UI shows the sign-in page, but the next reload
+boots straight back into the session — and `logoutSession` already revoked only the superseded token,
+so the live one was never revoked server-side. On a shared machine this is a real session-leak.
+**Fix (proposed):** give `resetSession` a generation counter / `signedOut` flag that `onTokens`
+checks before writing, and cancel the client's refresh promise on sign-out.
+
+## WB-080 · A two-second network blip during refresh destroys the session and deletes the refresh token
+**Found:** `AuthProvider.tsx:219-227` — `runRefresh()` ends in `.catch(() => null)`, flattening every
+failure into `null`; the boot path (`:250-254`) and the proactive timer (`:275-279`) both treat
+`null` as `resetSession('expired')`. `fetchOnce` throws `NetworkError` (`client.ts:198-201`) without
+ever calling `bridge.onSignOut`, so this is not the server rejecting anything.
+**Severity:** high — a Wi-Fi drop or a server hiccup at minute 14 of a 15-minute token logs a
+dispatcher out mid-work, clears `obk.rt`, clears the query cache and shows "Your session has
+expired." Work in an open modal is lost for a transient fault.
+**Fix (proposed):** distinguish `NetworkError`/5xx from an auth rejection — retry with backoff and
+keep the session; only 401/403/`REFRESH_TOKEN_REUSED` may reset.
+
+## WB-081 · Every deep link opened while signed out is discarded after sign-in
+**Found:** `src/app/guards.tsx:14` navigates with `state={{ from: location.pathname + location.search }}`,
+but nothing in `src/` ever reads `location.state`; `src/features/auth/SignInPage.tsx:114`
+unconditionally renders `<Navigate to="/" replace />`.
+**Severity:** medium — an emailed `/hos-logs?driverId=…&date=…` or `/vehicles/:id` link dumps the
+user on the dashboard after Google sign-in, with the context they were sent silently dropped.
+**Fix (proposed):** read `useLocation().state?.from` in `SignInPage` and navigate there, accepting
+only a same-origin path that starts with a single `/` (reject `//host` and absolute URLs — this is
+an open-redirect surface).
+
+## WB-082 · The MY ACCOUNT sub-nav is a no-op when the hash does not change
+**Found:** the uncommitted `<a>` → `NavLink` change in `src/app/layouts/AccountLayout.tsx:17-22`
+combined with `src/features/account/AccountPage.tsx:46-57`, where scrolling now happens only in an
+effect keyed on `[location.hash, profile.isPending]`, and the native anchors were renamed to
+`account-section-*` so the browser will not scroll either.
+**Severity:** medium — click "Active sessions" (it scrolls), scroll back up by hand, click it again:
+React Router pushes an entry with the same hash, the effect deps do not change, nothing happens. The
+old plain anchor handled this natively.
+**Fix (proposed):** key the effect on `location.key` as well as `location.hash`, or scroll from the
+`NavLink`'s `onClick`.
+
+## WB-083 · The server's token lifetime is parsed, passed along, and then thrown away
+**Found:** independently by both the auth and the API-layer pass. `client.ts:240-247` computes
+`expiresAt` from the refresh response's `expiresIn` and hands it to `bridge.onTokens`;
+`AuthProvider.tsx:199-203` destructures only `{ accessToken, refreshToken }` and calls
+`setAccessToken(accessToken)`, which falls back to `tokenStore.ts:30-33`'s hard-coded
+`ACCESS_TOKEN_TTL_MS = 15 * 60_000`. The §17 "refresh 60 s before expiry" timer (`:274`) then
+schedules off that assumption.
+**Severity:** medium-high — if the backend issues a 5-minute access token, the timer fires about
+11 minutes late: every request in the gap pays a 401 + refresh + replay round trip, the first one
+after a long idle can bounce the user through `onSignOut`, and `writeSessionSnapshot`'s
+`accessTokenExpiresAt` is fiction. The correct value is already on the wire and already parsed.
+**Fix (proposed):** `onTokens: ({ accessToken, refreshToken, expiresAt }) =>
+setAccessToken(accessToken, expiresAt ? expiresAt - Date.now() : undefined)`.
+
+## WB-084 · Escape on the idle warning counts as "I am here" and grants another full window
+**Found:** `src/shared/auth/IdleWarningModal.tsx:29` passes `onClose={onStay}`, and
+`AuthProvider.tsx:300-313` re-arms the idle effect whenever `idleWarning` goes false.
+**Severity:** low — a stray Escape, a backdrop click, or any Radix dismiss on an unattended machine
+extends the session by the full idle period, which is the opposite of what §17 asks of the modal.
+**Fix (proposed):** point `onClose` at `onSignOut`, or make the modal non-dismissible.
+
+## WB-085 · Firebase keeps the Google session after the panel session ends
+**Found:** `src/shared/auth/firebase.ts:62-88` — there is no `authModule.signOut(auth)` anywhere in
+`src/`, so the Firebase user object and its IndexedDB persistence survive `signOut()`.
+**Severity:** low — on a shared machine a Google credential for the panel's Firebase app outlives
+what the user believes was a sign-out. `prompt: 'select_account'` limits but does not remove this.
+**Fix (proposed):** `await authModule.signOut(auth)` from `resetSession`.
+
+**Verified correct in this area (no action):** `toPermissionMap` degrades unknown keys and levels to
+`NONE`; `toAuthUser` falls back to `VIEWER`, never to a permissive role; `router.tsx:217-231`
+enforces `can(perm)` per route and substitutes `<ForbiddenPage/>`, so hidden nav is genuinely backed
+by route enforcement; the session-revoke hooks invalidate `qk.sessions` correctly; the dev password
+block sits behind an inlined `VITE_AUTH_MODE === 'dev'` literal in both call sites.
+
+---
+
+## `shared/api` and `shared/format`
+
+## WB-086 · `client.blob()` bypasses the 401 → refresh → replay rule
+**Found:** `src/shared/api/client.ts:400-405` calls `fetchOnce` directly instead of `send()`, so
+neither rule 2 (single-flight refresh and replay) nor rule 7 (GET retry) applies. The
+`ensureAccessToken` guard on `:401` only fires when there is *no* access token — an expired token is
+still a token, so it returns false and `:403` throws on the resulting `401 TOKEN_EXPIRED`.
+**Severity:** high — leave W-15 open past the access-token TTL and click `Download`:
+`downloadTransferFile()` (`reports.ts:315-317`) throws `ApiError(401)`, the user sees "Your session
+has expired." and gets no file, while `obk.rt` is perfectly valid and the next table refetch
+succeeds silently through `send()`. Every future `client.blob` caller inherits this.
+**Fix (proposed):** give `blob` the same 401 branch as `send` (refresh once, re-issue with
+`retriedAfterRefresh`), or route it through `send` with a response-type flag.
+
+## WB-087 · One query key with two conflicting cache policies — `qk.drivers({ limit: 500 })`
+**Found:** `src/shared/api/lookups.ts:26-30` registers `['drivers', {limit:500}]` with
+`pagePolicy('reference')` (10 min stale, no refetch on focus), while `src/shared/api/safety.ts:85`,
+`:125` and `src/features/messages/MessagesPage.tsx:66` (via `messaging.ts:81-85`) register the
+identical key through `useDriversList({ limit: 500 })` with `typedCachePolicy('list')` (60 s stale,
+refetch on focus). TanStack keeps one cache entry but applies each observer's own options, so the
+most aggressive policy wins for everyone.
+**Severity:** medium — with Safety or Messages mounted, alt-tabbing away and back refetches the
+session-wide driver lookup that WD-073 exists to fetch once, and above 200 drivers each refetch is
+three parallel `GET /drivers?limit=200` calls. Vehicles, Trips and DVIR silently pay for it too.
+**Fix (proposed):** have those call sites consume `useDriversLookup()`/`useDriverMap()` instead of
+re-declaring the key with the list policy.
+
+## WB-088 · `formatEngineHoursLong` can render `60 m`
+**Found:** `src/shared/format/numbers.ts:42-47` — `Math.round((value - whole) * 60)` returns 60 for
+any fraction ≥ 0.99167 and there is no carry into the hour. Verified by execution:
+`1070.995` → `1,070 h 60 m`.
+**Severity:** medium — the W-04 engine-hours tile shows an impossible clock for roughly 0.8 % of
+values, on a number that feeds maintenance scheduling.
+**Fix (proposed):** carry (`if (minutes === 60) { minutes = 0; whole += 1; }`) plus a test.
+
+## WB-089 · Rule 9 (abort on unmount) is wired into three hooks and missing from every other one
+**Found:** only `reports.ts` and `hosLogs.useLogRange` (`:171`) forward TanStack's `signal` into
+`client.get`/`client.list`. Every other `queryFn` — `drivers.ts:32,40,92,129,164`,
+`vehicles.ts:118,125,229,272,291,339`, `trips.ts:117,287,295`, `dvir.ts:163,232,274,469`,
+`safety.ts:82,122`, `hosLogs.ts:160,184,300`, `notifications.ts:62`, `liveFleet.ts:43`,
+`dashboardSummary.ts:46` and all of `settingsAdmin.ts` — is `() => client.get(...)`, so
+`fetchOnce` passes `signal: undefined` to `fetch` and unmounting cancels nothing.
+**Severity:** medium — clicking quickly through Vehicles → Drivers → Trips leaves each screen's
+lookup fan-out (up to three parallel 200-row requests) running to completion for a screen that no
+longer exists, on top of the `live`-policy roster and dashboard queries. `search.ts:117-118`
+documents the reason (jsdom `AbortSignal` vs MSW's undici `Request`) — a test-environment problem
+being paid for in production behaviour.
+**Fix (proposed):** thread `({ signal })` through the query functions and solve the jsdom/MSW
+incompatibility in the test setup instead.
+
+## WB-090 · `useGlobalSearch` leaves `scope` out of the query key
+**Found:** `src/shared/api/search.ts:116` keys on `qk.search(q)` = `['search', q]`, while
+`fetchGlobalSearch(q, scope)` filters drivers and vehicles by `scope` (`:92-93`, `:102-103`).
+**Severity:** low (latent) — two scopes share one cache entry and, because the key never changes,
+widening the scope triggers no refetch at all: the narrowed result is served indefinitely. `scope`
+is currently derived from permissions and stable per session (`CommandPalette.tsx:55`), so this bites
+the first person who makes it a user-facing toggle.
+**Fix (proposed):** `search: (q, scope) => ['search', q, p(scope)]`.
+
+## WB-091 · `formatJurisdiction` is missing Alaska
+**Found:** `src/shared/format/jurisdiction.ts:8-18` — the `US` map runs `AL, AZ, AR, CA, …`; `AK` is
+absent. Verified: DC and HI are correctly excluded (not IFTA members), but Alaska is one.
+**Severity:** low — an Alaska row on W-12 falls through to the pass-through branch (`:32`) and
+renders `AK` where every other row renders a full state name, which is exactly the inconsistency
+WB-046 was raised to remove.
+**Fix (proposed):** add `AK: 'Alaska'`.
+
+## WB-092 · `timezoneAbbreviation` invents labels for zones that never observe DST
+**Found:** `src/shared/format/datetime.ts:79-87` collapses any three-letter abbreviation whose middle
+character is `S` or `D`. Verified by execution against `Intl`: `America/Phoenix` is `MST`
+year-round but renders `MT`; `Pacific/Honolulu` is `HST` always but renders `HT`, which is not a
+real label; `America/Anchorage` is four letters so it passes through as `AKDT`.
+**Severity:** low — the dashboard subtitle reads `· ET`, `· MT` and `· AKDT` across carriers, and
+two of the three are wrong for the timezone rule §5 cares about.
+**Fix (proposed):** strip the middle letter only when the zone's summer and winter abbreviations
+actually differ.
+
+## WB-093 · `upsertMessage` overwrites the thread's server-side `total`
+**Found:** `src/shared/api/messaging.ts:139-145` sets `total: withoutDuplicate.length + 1`, replacing
+the server's count with the number of messages currently cached (≤ 100).
+**Severity:** low — a 350-message thread drops to `total: 101` the moment the dispatcher sends one,
+and again on every `message.new` echo. `useMessages` hard-codes `limit: 100` so nothing paginates on
+it today, but any future counter or "load older" affordance reads a fabricated number.
+**Fix (proposed):** `total: prev.total + (isNew ? 1 : 0)`.
+
+**Verified correct in this area (no action):** `client.list()`'s above-200 paging arithmetic
+(`offset`/`skip`/`firstApiPage`/`lastApiPage` worked through by hand for 500@p1, 500@p2, 250@p1,
+250@p2, a short last page and a page past the end); `buildUrl`'s limit clamp and empty-value
+dropping; `formatHosHours`/`formatDuration` padding and the >24 h cycle case; `rodsDayFraction`/
+`rodsDayOffsetSec` DST handling; `hasPosition`'s null-island guard; the `untilTerminal` poll gates;
+`formatNumber(value, 0)`. Two suspected invalidation bugs (`qk.violations()`, `qk.schedules()`) were
+investigated and dismissed — TanStack's `partialMatchKey` deep-partial-matches `{}`, so those calls
+do reach the parameterised list keys.
+
+---
+
+## W-12 … W-15 Reports and the FMCSA transfer
+
+## WB-094 · The inspector-email rule accepts any domain that merely ends with `fmcsa.dot.gov`
+**Found:** `src/shared/forms/fields.ts:20-22` —
+`/\.?fmcsa\.dot\.gov$/i` has no left anchor and the dot is optional. Verified by execution:
+`evilfmcsa.dot.gov` and `notfmcsa.dot.gov` both pass.
+**Severity:** high — typing `officer@notfmcsa.dot.gov` in 11.14 (`SendLogsModal.tsx:314`) or on the
+pack card (`FmcsaPackPage.tsx:141-144`) passes client validation and POSTs a complete RODS file — a
+driver's full duty history — to `/transfers` for a privately registered domain. Only the server's
+`INVALID_TRANSFER_RECIPIENT` stands between that and an exfiltrated compliance record.
+**Fix (proposed):** `/^(?:[^@]+\.)?fmcsa\.dot\.gov$/i`.
+
+## WB-095 · "Uncertified logs" is computed two different ways and the single-driver one contradicts the backend
+**Found:** `src/shared/api/reports.ts:439-456` — the single-driver branch counts persisted logs that
+are uncertified (`days.filter(d => !d.certified).length`); the all-drivers branch counts
+`rangeDays − certifiedDays`, which the comment on `:446` identifies as the backend's own
+`uncertifiedDayCount`.
+**Severity:** high — for Sep 1–30 with a driver who has 4 DailyLogs, all certified, W-15 shows
+`Uncertified logs 0` with that driver selected and `26` for the same driver under "All drivers", and
+`POST /transfers` then refuses with `UNCERTIFIED_LOGS` after the page said the pack was clean.
+**Fix (proposed):** use `Math.max(0, rangeDays - certifiedDays)` in both branches.
+
+## WB-096 · The DVIR report filters a date range client-side over the newest 200 inspections
+**Found:** `src/shared/api/reports.ts:489-495` calls `GET /dvir` with `limit: 200`,
+`sort: submittedAt:desc` and no `from`/`to` (gap B-47); `DvirReportPage.tsx:89-96` then filters
+those 200 by day.
+**Severity:** medium — a fleet that has submitted more than 200 DVIRs since `to` (a week for a
+100-truck fleet) sees an empty table and `0` inspections, `0` with defects, `—` average fix time for
+any earlier range, while `Export CSV` (`:252`, server-side `from`/`to`) downloads the real rows. The
+same window feeds `DVIRs included` on the audit pack (`FmcsaPackPage.tsx:104-113`).
+**Fix (proposed):** page until `submittedAt < from`, or state the "newest 200 inspections" bound
+instead of rendering a silent zero.
+
+## WB-097 · Exports ignore filters that are applied on screen
+**Found:** `ActivityReportPage.tsx:230` sends only `{ from, to }`, dropping the `terminal` filter and
+the `status: 'ACTIVE'` restriction the table uses (`:88`); `DvirReportPage.tsx:252`, `:264` send
+`{ from, to, vehicleId }` and drop the defect-category filter.
+**Severity:** medium — filter Activity to the Chicago terminal (3 drivers on screen), click
+`Export CSV`, receive all 240 drivers of every status. The file does not match what was exported from.
+**Fix (proposed):** forward the applied filters, or disable/annotate the export while an unsupported
+filter is set.
+
+## WB-098 · The Activity terminal filter narrows one page while the pager keeps server totals
+**Found:** `ActivityReportPage.tsx:105-119`, `:283`, `:300-312` — `rows` drops drivers outside the
+chosen terminal, but `total`/`totalPages` come from the unfiltered response, and `terminalOf` only
+knows the first 200 drivers (`useReportDrivers`, `limit: 200`), with `t === undefined` treated as a
+match.
+**Severity:** medium — "240 drivers · showing 2", pages that render entirely empty, and driver #201
+onward leaking through the filter.
+**Fix (proposed):** filter server-side, or derive the totals from the filtered set and bound the
+lookup honestly.
+
+## WB-099 · `RODS` and `IDLE_FUEL` rows render blank, and the ready toast says "undefined"
+**Found:** `src/features/reports/reportMeta.ts:22-29` keys `REPORT_LABEL` on `ReportType`, which
+omits two types the backend can still store (gap B-14);
+`components/RecentlyGeneratedCard.tsx:83`, `:115` and `useReportJobs.ts:45`, `:47` read it directly.
+**Severity:** medium — a `RODS` row shows an empty `Report` cell and `aria-label="Download undefined"`,
+and `report.ready` produces the toast `undefined · 2.4 MB`.
+**Fix (proposed):** `REPORT_LABEL[type] ?? type`.
+
+## WB-100 · The download object URL is revoked on the same tick as the click
+**Found:** `src/features/reports/reportMeta.ts:182-192` — `saveFile` calls `URL.revokeObjectURL(href)`
+immediately after `link.click()`. The blob callers are `Download a copy` in 11.14
+(`SendLogsModal.tsx:221`) and the transfer drawer (`PreviousTransfersCard.tsx:204`).
+**Severity:** low — in Firefox and Safari the download can abort with no error, leaving a safety
+official without the file during a TEST-mode transfer.
+**Fix (proposed):** revoke inside `setTimeout(…, 0)`.
+
+## WB-101 · The 11.14 preview counts calendar days as daily logs
+**Found:** `components/SendLogsModal.tsx:192` builds `records` from `span`, the inclusive day count,
+although `range.data.days` is already loaded on `:128`.
+**Severity:** low — an 8-day range always reads "8 daily logs · … events" even when only 3 RODS days
+exist, overstating the compliance preview shown to a safety official.
+**Fix (proposed):** `range.data?.days.length ?? EMPTY.dash`.
+
+## WB-102 · A half-specified report deep link is silently replaced by month-to-date
+**Found:** `src/features/reports/useReportRange.ts:13-15` requires both `from` and `to` to be present.
+**Severity:** low — `/reports/activity?from=2026-01-01` shows a different period from the one the
+sender was looking at, with no indication.
+**Fix (proposed):** fill the missing half (`to = today`, `from = monthStart(to)`).
+
+**Verified correct in this area (no action):** report and transfer polling stop at terminal statuses;
+list invalidation after generate/queue; IFTA quarter arithmetic; money and distance formatting never
+convert or re-round; page-overflow clamping in all three lists.
+
+---
+
+## W-03 … W-07 Vehicles and drivers
+
+## WB-103 · Driver segments and half the filter drawer narrow only the loaded page, then claim to be complete
+**Found:** `src/features/drivers/DriversPage.tsx:83-90` with `lib/filters.ts:77-83`. The roster is now
+server-paginated (`limit` 10), but the ON_DUTY/OFF_DUTY/VIOLATIONS segment tabs and the 11.23
+`status`/`exemptions` fields run through `matchesDriverFilters` over `entries` — the current page
+only. `serverFilters` (`:67-75`) forwards just `terminal`, `violationsOnly` and `eldExempt`. The
+code then collapses `pageTotalPages`/`shownPage` to 1 (`:103-107`).
+**Severity:** high — selecting "Personal conveyance" or a duty status, or clicking a segment tab
+while on any page, filters roughly ten rows and presents the result as the complete filtered list.
+Matching drivers on other pages are invisible with no hint that more exist. This is WB-047 returning
+through the pagination change.
+**Fix (proposed):** forward `status` and the exemption flags to the server (extend B-55), or fetch a
+full roster window (as `VehiclesPage`'s `useWindow` does) whenever a client-only filter is active.
+
+## WB-104 · `Assign driver` is disabled with no reason, defeating the modal built to give one
+**Found:** `src/features/vehicles/UnitProfilePage.tsx:146` sets
+`disabled={vehicle.status === 'OUT_OF_SERVICE'}` with no `title`, while
+`components/AssignDriverModal.tsx:1-2`, `:69-73` exists specifically to say "Unit X is out of
+service. Close the critical defect before assigning a driver." — its own header comment reads "show
+the reason, never a silent 409". `VehiclesPage.tsx:391` gets this right: the row action is not gated
+and the modal explains the refusal.
+**Severity:** high — the screen most likely to be used for this silently refuses and never states the
+CRITICAL-defect rule, contradicting both §4 and the component's own contract.
+**Fix (proposed):** let the button open the modal, exactly as the row action does.
+
+## WB-105 · The active-DTC badge on the unit header is a dead literal
+**Found:** `UnitProfilePage.tsx:98` — `const activeDtcCount = 0;` with a comment claiming it is
+"resolved on the Diagnostics tab query below when open", but it is never wired to `dtcQuery`.
+**Severity:** medium — the `{activeDtcCount} active DTCs` badge (`:130`) never renders, even when the
+Diagnostics tab has loaded uncleared DTCs; a fault-code warning the header is supposed to carry is
+permanently absent.
+**Fix (proposed):** derive it from `dtcQuery.data?.items.filter(d => !d.clearedAt).length`.
+
+## WB-106 · Both CSV importers break on quoted fields and on a BOM
+**Found:** `src/features/drivers/components/ImportDriversModal.tsx:25-31` and
+`src/features/vehicles/components/ImportVehiclesModal.tsx:25-31` both do a naive `line.split(',')`,
+and `text.trim()` does not strip a leading UTF-8 BOM.
+**Severity:** medium — an address like `"123 Main St, Suite 4"` shifts every later column for that
+row, and an Excel-exported file makes the first header key `"﻿name"`, so that column silently
+fails to map for every row. The failure is silent in both cases: bad data is imported, not rejected.
+**Fix (proposed):** use a quote-aware tokenizer and strip the BOM before splitting.
+
+## WB-107 · The "Missing or duplicate email" warning never checks for duplicates
+**Found:** `ImportDriversModal.tsx:42-45` tests only `!row.email`.
+**Severity:** low — two rows with the same non-empty address produce no warning, although Q-3 and
+B-30 make email the identity field and the web is the only place uniqueness is checked today.
+**Fix (proposed):** track seen addresses while parsing and flag repeats.
+
+## WB-108 · The advertised import row caps are not enforced
+**Found:** `ImportDriversModal.tsx:103` promises "500 rows maximum" and
+`ImportVehiclesModal.tsx:96` "2,000 rows maximum"; neither `handleFile` checks `parsed.length`.
+**Severity:** low — a larger file is accepted and submitted whole, and the rejection (if any) comes
+from the server after the upload.
+**Fix (proposed):** validate against the stated limit before enabling Import.
+
+---
+
+## W-17 … W-25 Settings
+
+## WB-109 · Device pairing sends whatever the admin types as the vehicle id
+**Found:** `src/features/settings/components/RegisterDeviceModal.tsx:44-54`, `:119` — "Assign to
+unit" is a plain text `<input>` registered on `vehicleId`, placeholder `Unit 126`, and the value goes
+verbatim into `pairDevice.mutate({ id, vehicleId })` → `POST /devices/:id/pair`. `DevicesPage.tsx`
+one file over does this correctly through `useVehiclesPicker`.
+**Severity:** high — typing exactly what the placeholder invites sends a non-UUID; the pairing either
+fails opaquely or targets the wrong resource, and an ELD device silently ends up on no unit.
+**Fix (proposed):** replace the input with a picker sourced from `useVehiclesPicker()`.
+
+## WB-110 · Two destructive actions fire with no confirmation
+**Found:** `src/features/settings/DevicesPage.tsx:249-254` (`Retire device` →
+`removeDevice.mutate(row.id)`) and `src/features/settings/AlertRulesPage.tsx:197-202` (`Delete` →
+`deleteRule.mutate(rule.id)`) are wired straight to `DropdownMenu.Item onSelect`.
+`RolesPage.tsx:319-338` shows the house pattern (open `ConfirmDelete`, then mutate).
+**Severity:** high — one stray click in a row menu permanently retires an ELD device or deletes an
+alert rule, with no warning and nothing stating what survives (house rule 11.3).
+**Fix (proposed):** route both through `ConfirmDelete`, as Roles does.
+
+## WB-111 · Audit-log CSV export ignores every active filter
+**Found:** `src/features/settings/AuditLogPage.tsx:149-161` — `handleExportCsv` always requests
+`{ limit: 200 }` with no `actorId`, `objectType`, date range, `action` or `search`, while the table
+on screen is filtered by all of them.
+**Severity:** medium — an admin who filters to "Role changes, last 7 days" and exports for a
+compliance request receives the newest 200 unrelated entries instead, with nothing saying so.
+**Fix (proposed):** forward the same parameters the table query uses.
+
+## WB-112 · `eldIdentifier` is silently auto-corrected, against the rule stated beside it
+**Found:** `src/features/settings/CompanyProfilePage.tsx:314-318` — `onChange` applies
+`.toUpperCase()` before storing and validating, although §14.2 says the value is never auto-corrected.
+**Severity:** medium — the FMCSA registration identifier a carrier typed is rewritten under them
+rather than flagged, so a genuinely wrong value can be "corrected" into a plausible one.
+**Fix (proposed):** store what was typed, validate `/^[A-Z0-9]{4}$/` as-is, and let the field's
+FMCSA text explain the case requirement.
+
+## WB-113 · Nothing stops an admin from disabling the last admin, or themselves
+**Found:** `src/features/settings/UsersPage.tsx:89-99` — `handleDisableToggle` disables any user for
+any holder of `users:FULL`, with no last-active-ADMIN or self check on the client, and no such check
+in the mock handlers either.
+**Severity:** low — a carrier can lock itself out of its own panel in one click.
+**Fix (proposed):** at minimum a confirm dialog when the target is the last active ADMIN or the
+current user.
+
+**Not re-reported (already documented gaps):** B-8 device diagnostics, B-9 alert-rule test, B-12
+support ticket permission mismatch, B-64/WB-043 audit-log filters and date range being client-side.
+
+---
+
+## W-11 Dispatch · W-16 Messages · W-01 Dashboard · W-02 Live Fleet
+
+## WB-114 · Trip KPIs and segment counts go stale on `trip.status_changed`
+**Found:** `src/features/trips/TripsPage.tsx:108-121` — the realtime handler only
+`setQueriesData`-patches rows inside `qkRoot.trips`; it never invalidates the separately-filtered KPI
+queries (`tripsKpiQuery` for DELIVERED, `tripsCountQuery('PLANNED')`, the ASSIGNED/IN_PROGRESS
+totals). The inline comment claims there is "nothing to refetch", which is not true of those caches.
+**Severity:** high — when a trip moves IN_PROGRESS → DELIVERED the row is patched in place in the
+in-progress cache, never removed from it and never added to the delivered one, and no count moves.
+"Active trips", "Running late", "Completed" and on-time % all stay wrong until a reload — on the one
+screen a dispatcher watches live. `DashboardPage.tsx` does this correctly for `dashboardSummary`.
+**Fix (proposed):** invalidate the KPI/count keys after patching.
+
+## WB-115 · Create trip does not enforce the assignment block it displays
+**Found:** `src/features/trips/components/CreateTripModal.tsx:150` computes `assignmentBlocked` from
+the shared `blocksAssignment` helper and renders the warning, but the `Create trip` button carries no
+`disabled` for it. `components/AssignLoadModal.tsx:42` — the other call site of the same helper —
+does `disabled={!selectedId || blocked}`.
+**Severity:** high — a dispatcher can create and assign a trip to a driver flagged unverified (B-31)
+straight from this modal, so the "one check, one place" rule holds for the helper but not for its
+enforcement.
+**Fix (proposed):** `disabled={isSubmitting || assignmentBlocked}`.
+
+## WB-116 · A failed message stays in the thread looking sent
+**Found:** `src/features/messages/MessagesPage.tsx:104-131` — `handleSend` optimistically appends via
+`upsertMessage`, then `sendMessage.mutate(..., { onError: () => toast(...) })`. On failure only the
+toast fires; the `optimistic-${clientId}` row is never removed or marked failed.
+**Severity:** high — the dispatcher sees their message in the conversation, indistinguishable from a
+delivered one, with no retry. A missed dispatch instruction is a safety problem, not a UI nit.
+**Fix (proposed):** roll the optimistic row back (or mark it failed with a retry action) in `onError`.
+
+## WB-117 · The unread badge can never clear — nothing marks a conversation read
+**Found:** `src/shared/api/messaging.ts:64-72` derives `unread` from
+`lastMessageAt > participant.lastReadAt`; `src/shared/api/endpoints.ts:164-170` has no
+mark-read entry and `MessagesPage.tsx` calls none — opening a conversation only fetches messages.
+**Severity:** medium — once a conversation has an unread message, its list dot and the "Unread"
+segment count stay for the rest of the session, even after the dispatcher reads and replies.
+Note that B-37 documents the missing `unreadCount`, but not the missing write path; if the backend
+has no `POST /conversations/:id/read`, this needs a new `B-NN` entry in `backend-gaps.md` rather than
+a silent UI that can never be right.
+**Fix (proposed):** call the mark-read endpoint on selection and invalidate the list, or record the
+gap and stop rendering an unread state the panel cannot clear.
+
+## WB-118 · Donut percentages need not add up to 100
+**Found:** `src/features/dashboard/components/DutyDonut.tsx:87-89` rounds each segment
+independently (`Math.round((s.count / total) * 100)`) with no largest-remainder allocation.
+**Severity:** low — the legend beside a chart that represents the whole fleet can read 33 / 33 / 33
+or 34 / 33 / 34.
+**Fix (proposed):** allocate the last segment as the remainder.
+
+**Verified correct in this area (no action):** global search is race-safe (per-term key plus
+`keepPreviousData`); `DashboardPage.tsx:73-75`'s clamp-during-render is the sanctioned React pattern.
+**Left open, not verifiable here:** neither `AssignLoadModal` nor `CreateTripModal` filters out
+drivers already on an active trip, and backend enforcement could not be checked without the backend
+repo.
+
+---
+
+## Realtime
+
+## WB-119 · Routine token rotation fires a false "Reconnected" toast and a full refetch storm
+**Found:** `src/shared/realtime/RealtimeProvider.tsx:244-256` — the token-refresh effect does
+`socket.auth = { token }; socket.disconnect().connect();`, which emits the socket's own `disconnect`
+and `connect`. The `connect` handler (`:209-217`) gates only on a local `everConnected` boolean,
+never on the disconnect `reason`.
+**Severity:** high — for a user sitting on Live Fleet or the dashboard, every access-token rotation
+(roughly every 14 minutes, an entirely healthy event) runs `queryClient.invalidateQueries()` across
+every mounted query and pops the green "Reconnected" toast, teaching dispatchers to ignore the one
+banner that is meant to mean the connection dropped.
+**Fix (proposed):** mark the self-initiated cycle (a ref set before `disconnect().connect()`, or
+`reason === 'io client disconnect'` plus a token-cycle flag) and skip the invalidate and the toast
+for it.
+
+**Verified correct in this area (no action):** `useRoom` resubscribing on every `connected`
+transition is required (server-side room membership does not survive a reconnect); `FleetMap`
+disposes its map, layers and observers; `isValidCoord` rejects NaN, out-of-range and `0,0`;
+`scrub.ts`/`sentry.ts` scrub tokens and PII recursively including `extra`; `polling.ts` gates on
+`visibilitychange`; no phantom §7.4 event is wired anywhere; the MSW envelope and pagination doubles
+match the documented contract.
+
+---
+
+## Shared UI and the app shell
+
+## WB-120 · The date-range calendar cannot leave the current month
+**Found:** `src/shared/ui/DateRangePicker.tsx:175-223` — `MonthCalendar` renders
+`format(month, 'MMMM yyyy')` with no previous/next controls, and `month` is hard-wired to
+`draft.from` with no separate view-month state.
+**Severity:** high — any custom range outside the month `draft.from` already sits in is unreachable;
+only the fixed presets (Today, Last 7, This month …) can get there. On the report screens, where an
+auditor asks for a specific past period, that is the primary interaction.
+**Fix (proposed):** add a `viewMonth` state with previous/next buttons that do not move `draft`.
+
+## WB-121 · Column reorder has only a "move up" button, on every row
+**Found:** `src/shared/ui/TableSettings.tsx:79-86` — one button per row
+(`aria-label="Move {label} up"`, `move(i, -1)`), no "move down", and the `GripVertical` icon implies
+drag-and-drop that is not wired (no `draggable`/`onDragStart`/`onDrop`).
+**Severity:** medium — moving a column toward the end of the table means clicking "move up" on every
+column below it, and for a screen-reader user the operation is not discoverable at all.
+**Fix (proposed):** add a real "move down" control (or implement the drag-and-drop the icon promises)
+with correct labels.
+
+## WB-122 · The account sub-nav never shows which section you are on
+**Found:** `src/app/layouts/AccountLayout.tsx:17-22` passes `NavLink`'s `className` as a static
+string instead of the `({ isActive }) => …` form used in `Sidebar.tsx:90-97`.
+**Severity:** low — none of the five `/account#…` items is ever highlighted, even though the page
+does scroll to the matching section. Not a regression from the uncommitted change (the old plain
+anchors had no active state either), but the component now supports it.
+**Fix (proposed):** mirror the Sidebar pattern.
+
+**Verified correct in this area (no action):** `DataTable`, `Modal`/`Drawer`/`ConfirmDelete`/
+`DiscardChangesDialog`, `Pagination`, `router.tsx`/`guards.tsx`, and the uncommitted `AppShell`/
+`Sidebar` diffs (the `overscroll-contain` additions are right, and `router.tsx`'s
+`useMemo(() => createBrowserRouter(...), [permissions, role])` is safe because `AuthProvider`
+preserves permission-map identity through `samePermissions`, per WB-034).
+
+---
+
+## Summary
+
+| Severity | Count | Ids |
+|---|---|---|
+| Critical | 3 | WB-053, WB-057, WB-074 |
+| High | 17 | WB-058, WB-059, WB-060, WB-079, WB-080, WB-086, WB-094, WB-095, WB-103, WB-104, WB-109, WB-110, WB-114, WB-115, WB-116, WB-119, WB-120 |
+| Medium | 29 | WB-054, WB-055, WB-061…WB-067, WB-075…WB-077, WB-081…WB-083, WB-087, WB-088, WB-089, WB-096…WB-099, WB-105, WB-106, WB-111, WB-112, WB-117, WB-121 |
+| Low | 21 | WB-056, WB-068…WB-073, WB-078, WB-084, WB-085, WB-090…WB-093, WB-100…WB-102, WB-107, WB-108, WB-113, WB-118, WB-122 |
+
+Suggested order of work: the three critical entries first (WB-074 is a few hours of wiring, WB-057
+is a one-line window fix with a test, WB-053 is a dependency bump with a bundle re-measure), then the
+compliance and data-integrity highs — WB-059, WB-094, WB-095, WB-103 — then the session pair
+WB-079/WB-080, which are the ones most likely to be reported as "it logged me out" or "it did not
+log me out".
