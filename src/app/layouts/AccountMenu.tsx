@@ -110,7 +110,7 @@ export default function AccountMenu({ open, onOpenChange, onOpenShortcuts }: Acc
           </DropdownMenu.Group>
           <Separator />
           <DropdownMenu.Group>
-            <Item icon={HelpCircle} label="Help centre" onSelect={() => navigate('/settings/support')} />
+            <Item icon={HelpCircle} label="Help center" onSelect={() => navigate('/settings/support')} />
             <Item icon={Keyboard} label="Keyboard shortcuts" hint="?" onSelect={onOpenShortcuts} />
             <Item icon={Sparkles} label="What is new" disabled />
           </DropdownMenu.Group>

@@ -50,7 +50,7 @@ export function SessionsCard() {
 
   return (
     <section
-      id="sessions"
+      id="account-section-sessions"
       tabIndex={-1}
       aria-labelledby="account-sessions-title"
       className="scroll-mt-page focus-visible:ring-2 focus-visible:ring-primary"

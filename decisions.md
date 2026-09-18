@@ -825,7 +825,7 @@ patches every cached page with `setQueryData` and toasts only `severity=CRITICAL
 **Problem.** The 11.26 design contains items v1 cannot back.
 **Choice.** `Switch role` removed (§20.4 Q3). `Switch organisation` disabled, hinted `v2`; the
 design's `3` is not rendered because no org count exists. `Appearance` disabled, hinted `Light`.
-`What is new` disabled because there is no changelog source or route. `Help centre` goes to
+`What is new` disabled because there is no changelog source or route. `Help center` goes to
 `/settings/support`, which every role can open. `Keyboard shortcuts` opens a dialog listing only
 the shortcuts the shell implements, also bound to `?`. `Language` goes to `/account#language`.
 `All terminals` is static, since terminal scoping is not a security boundary (§20.4 Q2). Role
