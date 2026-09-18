@@ -164,20 +164,27 @@ describe('W-06 Drivers', () => {
     expect(await screen.findByText('Kristin Watson')).toBeInTheDocument();
   });
 
-  // Regression — the segment tabs and the B-55 client-side filter groups narrow the current server
-  // page in memory, but the footer used to report the server's `total`/`totalPages`: one visible
-  // row under "1–10 of 58 drivers", with 6 pages that each re-filtered a different slice.
+  // Regression — the segment tabs and the B-55 client-side filter groups used to narrow the
+  // current server page in memory while the footer still reported the server's
+  // `total`/`totalPages`: one visible row under "1–10 of 58 drivers", with 6 pages that each
+  // re-filtered a different slice. OFF_DUTY now switches to the roster window (WB-103); this fixed
+  // fixture does not vary by request params, so the window is the same two rows and the footer's
+  // honest fallback (count exactly what was matched) still applies.
   it('the footer counts the rows on screen while a segment narrows the server page', async () => {
+    // Only page 1 is stubbed (a genuine gap in this fixture, not a real backend) — the OFF_DUTY
+    // window fetch walks the declared `totalPages` in parallel (WB-103) and must see every other
+    // page as empty instead of the same two rows repeated.
     server.use(
-      http.get(url(endpoints.drivers.roster), () =>
-        ok({
-          items: [rosterEntry('drv_a', 'Ada', 'OFF_DUTY'), rosterEntry('drv_b', 'Bob', 'DRIVING')],
-          page: 1,
+      http.get(url(endpoints.drivers.roster), ({ request }) => {
+        const page = Number(new URL(request.url).searchParams.get('page') ?? 1);
+        return ok({
+          items: page === 1 ? [rosterEntry('drv_a', 'Ada', 'OFF_DUTY'), rosterEntry('drv_b', 'Bob', 'DRIVING')] : [],
+          page,
           limit: 10,
           total: 58,
           totalPages: 6,
-        }),
-      ),
+        });
+      }),
     );
     const user = userEvent.setup();
     renderPage();
@@ -189,6 +196,73 @@ describe('W-06 Drivers', () => {
 
     expect(await screen.findByText('1–1 of 1 drivers')).toBeInTheDocument();
     expect(screen.queryByText('1–10 of 58 drivers')).not.toBeInTheDocument();
+  });
+
+  // WB-103 — the OFF_DUTY segment tab used to filter only the loaded ~10-row server page, so a
+  // match that lived on another page was invisible with no hint more existed. It now switches to
+  // the reference-cached roster window (`useDriverRosterWindow`) and finds matches across what
+  // would have been every server page.
+  it('WB-103 — the OFF_DUTY segment tab narrows the whole roster window, not just the loaded page', async () => {
+    const OFF_DUTY_IDX = [0, 5, 11];
+    const roster = Array.from({ length: 12 }, (_, i) =>
+      rosterEntry(`drv_${i}`, `Driver${i}`, OFF_DUTY_IDX.includes(i) ? 'OFF_DUTY' : 'DRIVING'),
+    );
+    server.use(
+      http.get(url(endpoints.drivers.roster), ({ request }) => {
+        const params = new URL(request.url).searchParams;
+        const limit = Number(params.get('limit') ?? 10);
+        const page = Number(params.get('page') ?? 1);
+        return ok({
+          items: roster.slice((page - 1) * limit, page * limit),
+          page,
+          limit,
+          total: roster.length,
+          totalPages: Math.max(1, Math.ceil(roster.length / limit)),
+        });
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText('Driver0 Tester');
+    // Row index 11 lives on what would be server page 2 (limit 10) — invisible to an in-memory
+    // narrowing of page 1 alone.
+    await user.click(screen.getByRole('button', { name: /Off duty/ }));
+
+    expect(await screen.findByText('Driver11 Tester')).toBeInTheDocument();
+    expect(screen.getByText('1–3 of 3 drivers')).toBeInTheDocument();
+  });
+
+  // WB-103 — same gap for the 11.23 drawer's "Status" field (duty status, no server param either).
+  it('WB-103 — the 11.23 "status" filter narrows the whole roster window, not just the loaded page', async () => {
+    const DRIVING_IDX = [0, 5, 11];
+    const roster = Array.from({ length: 12 }, (_, i) =>
+      rosterEntry(`drv_${i}`, `Driver${i}`, DRIVING_IDX.includes(i) ? 'DRIVING' : 'OFF_DUTY'),
+    );
+    server.use(
+      http.get(url(endpoints.drivers.roster), ({ request }) => {
+        const params = new URL(request.url).searchParams;
+        const limit = Number(params.get('limit') ?? 10);
+        const page = Number(params.get('page') ?? 1);
+        return ok({
+          items: roster.slice((page - 1) * limit, page * limit),
+          page,
+          limit,
+          total: roster.length,
+          totalPages: Math.max(1, Math.ceil(roster.length / limit)),
+        });
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('Driver0 Tester');
+
+    await user.click(screen.getByRole('button', { name: /^Filters$/ }));
+    await user.click(await screen.findByLabelText('Driving'));
+    await user.click(screen.getByRole('button', { name: /Apply 1 filters/ }));
+
+    expect(await screen.findByText('Driver11 Tester')).toBeInTheDocument();
+    expect(screen.getByText('1–3 of 3 drivers')).toBeInTheDocument();
   });
 
   // Regression — `Number('abc')` is `NaN` and `?page=0` / `?page=-3` stay out of range, and all

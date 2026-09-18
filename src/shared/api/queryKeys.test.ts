@@ -38,7 +38,11 @@ describe('qk factory', () => {
     expect(qk.audit()).toEqual(['audit-log', {}]);
     expect(qk.tickets()).toEqual(['support', 'tickets', {}]);
     expect(qk.scorecard()).toEqual(['safety', 'scorecard', {}]);
-    expect(qk.search('101')).toEqual(['search', '101']);
+    expect(qk.search('101')).toEqual(['search', '101', {}]);
+    // WB-090: two scopes never share one cache entry.
+    expect(qk.search('101', { drivers: true, vehicles: false })).not.toEqual(
+      qk.search('101', { drivers: true, vehicles: true }),
+    );
   });
 
   it('nests every detail key under its list root so one invalidation clears both', () => {

@@ -6,6 +6,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
@@ -151,5 +152,55 @@ describe('W-04 Unit profile — long values stay inside the unit details card', 
     const plate = await screen.findByText('4821-JG');
     expect(plate.className).toContain('text-right');
     expect((plate.parentElement as HTMLElement).className).toContain('justify-between');
+  });
+});
+
+// WB-104 — the header `Assign driver` button used to disable itself (no `title`) for an
+// OUT_OF_SERVICE unit, silently defeating `AssignDriverModal`, whose own contract is to state the
+// CRITICAL-defect refusal instead of a silent 409. The button must stay clickable and open the
+// modal, exactly like the Vehicles table row action (`VehiclesPage.tsx`).
+describe('W-04 Unit profile — Assign driver stays clickable when OUT_OF_SERVICE', () => {
+  it('opens AssignDriverModal, which states the refusal, instead of disabling the button', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(url(endpoints.vehicles.detail('veh_1')), () => ok({ ...VEHICLE, status: 'OUT_OF_SERVICE' })),
+      http.get(url(endpoints.vehicles.activities('veh_1')), () => ok({ items: [] })),
+    );
+    renderPage();
+    await screen.findByText('Unit #101');
+
+    const assignButton = screen.getByRole('button', { name: 'Assign driver' });
+    expect(assignButton).not.toBeDisabled();
+
+    await user.click(assignButton);
+    expect(
+      await screen.findByText(/is out of service\. Close the critical defect before assigning/),
+    ).toBeInTheDocument();
+  });
+});
+
+// WB-105 — `activeDtcCount` used to be a dead `const activeDtcCount = 0`, so the header's
+// "N active DTCs" badge never rendered even once the Diagnostics tab had loaded uncleared DTCs.
+describe('W-04 Unit profile — active DTC badge (WB-105)', () => {
+  it('shows the count of uncleared DTCs once the Diagnostics tab has loaded them', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(url(endpoints.vehicles.detail('veh_1')), () => ok(VEHICLE)),
+      http.get(url(endpoints.vehicles.activities('veh_1')), () => ok({ items: [] })),
+      http.get(url(endpoints.vehicles.dtc('veh_1')), () =>
+        ok({
+          items: [
+            { id: 'dtc_1', vehicleId: 'veh_1', spn: 100, fmi: 1, occurrence: 1, source: 'ENGINE', description: null, firstSeenAt: '2025-04-18T00:00:00.000Z', lastSeenAt: '2025-04-18T00:00:00.000Z', clearedAt: null },
+            { id: 'dtc_2', vehicleId: 'veh_1', spn: 101, fmi: 2, occurrence: 1, source: 'ENGINE', description: null, firstSeenAt: '2025-04-18T00:00:00.000Z', lastSeenAt: '2025-04-18T00:00:00.000Z', clearedAt: '2025-04-19T00:00:00.000Z' },
+          ],
+        }),
+      ),
+    );
+    renderPage();
+    await screen.findByText('Unit #101');
+    expect(screen.queryByText(/active DTCs/)).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Diagnostics' }));
+    expect(await screen.findByText('1 active DTCs')).toBeInTheDocument();
   });
 });

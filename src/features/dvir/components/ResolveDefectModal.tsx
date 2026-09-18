@@ -24,26 +24,33 @@ export function ResolveDefectModal({ defect, onClose }: { defect: DefectTableRow
   const [partsCost, setPartsCost] = useState('');
   const [workOrderId, setWorkOrderId] = useState('');
   const [notes, setNotes] = useState('');
-  const [returnToService, setReturnToService] = useState(true);
   const [serverError, setServerError] = useState<string | null>(null);
 
   const isDeferred = resolution === 'DEFERRED';
   const valid = correctedBy.trim() !== '' && notes.trim() !== '';
 
   function submit() {
+    // WB-077 — `POST /defects/:id/resolve` (`DefectResolveDto`) only accepts
+    // `status: 'REPAIRED' | 'DEFERRED'`; there is no `NOT_REQUIRED` value and no separate
+    // `resolutionType` field to carry "inspected, no repair needed" (web/backend-gaps.md B-68).
+    // The only place the distinction survives is the free-text note, so it is tagged there
+    // rather than written to the audit trail as an indistinguishable completed repair.
+    const status = resolution === 'DEFERRED' ? 'DEFERRED' : 'REPAIRED';
+    const resolutionNote = resolution === 'NO_REPAIR' ? `[No repair needed] ${notes.trim()}` : notes.trim();
     mutation.mutate(
-      {
-        status: resolution === 'DEFERRED' ? 'DEFERRED' : 'REPAIRED',
-        resolutionNote: notes.trim(),
-      },
+      { status, resolutionNote },
       {
         onSuccess: () => {
           toast({
             kind: 'success',
             title: 'Defect resolved',
+            // WB-075 — there is no `returnToService` field on the resolve DTO; the backend
+            // derives OUT_OF_SERVICE from whether any CRITICAL defect on the unit is still
+            // OPEN (see the informational note above), so the toast states the consequence
+            // conditionally instead of asserting an outcome the client cannot confirm.
             description:
-              defect.outOfService && returnToService && !isDeferred
-                ? `Unit ${defect.vehicle?.unitNumber ?? ''} returned to service.`
+              defect.outOfService && !isDeferred
+                ? `Unit ${defect.vehicle?.unitNumber ?? ''} returns to service unless another critical defect is still open.`
                 : undefined,
           });
           onClose();
@@ -61,16 +68,7 @@ export function ResolveDefectModal({ defect, onClose }: { defect: DefectTableRow
       subtitle={`Unit ${defect.vehicle?.unitNumber ?? '—'} · ${defect.category} · reported ${formatLocal(defect.createdAt, 'dateTime')}`}
       size="md"
       footer={
-        <div className="flex w-full items-center justify-between">
-          <label className="flex items-center gap-2 text-body text-text">
-            <input
-              type="checkbox"
-              checked={returnToService && !isDeferred}
-              disabled={isDeferred}
-              onChange={(e) => setReturnToService(e.target.checked)}
-            />
-            Return unit {defect.vehicle?.unitNumber ?? ''} to service
-          </label>
+        <div className="flex w-full items-center justify-end">
           <div className="flex gap-2">
             <Button variant="secondary" size="lg" onClick={onClose} disabled={mutation.isPending}>
               Cancel
@@ -93,6 +91,14 @@ export function ResolveDefectModal({ defect, onClose }: { defect: DefectTableRow
           </div>
           <p className="mt-1 text-body text-text-secondary">{defect.description}</p>
         </div>
+
+        {defect.outOfService && (
+          <p className="rounded-md bg-warning-soft p-3 text-body text-text">
+            Unit {defect.vehicle?.unitNumber ?? ''} is out of service because of this defect. Marking it{' '}
+            {isDeferred ? 'deferred keeps the unit out of service' : 'resolved returns the unit to service unless another critical defect is still open'}
+            .
+          </p>
+        )}
 
         <div>
           <p className="mb-2 text-label font-semibold uppercase tracking-wide text-text-muted">Resolution</p>

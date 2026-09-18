@@ -16,6 +16,7 @@ import type { Role } from '@/shared/auth/permissions';
 import { EMPTY_STATE_COPY } from '@/shared/ui/copy';
 import { ToastProvider } from '@/shared/ui/Toast';
 import DvirReportPage from './DvirReportPage';
+import { DVIR_EXPORT_SCOPE, DVIR_WINDOW_NOTE } from './reportMeta';
 import { resetAnnouncedReports } from './useReportJobs';
 
 const mocks = vi.hoisted(() => ({ role: 'FLEET_MANAGER' as string }));
@@ -105,6 +106,33 @@ describe('W-14 Reports · DVIR report', () => {
     renderPage(<DvirReportPage />, `${ROUTE}&defect=Brakes`);
     expect(await screen.findByRole('row', { name: /#110/ })).toBeInTheDocument();
     expect(screen.queryByRole('row', { name: /#101/ })).toBeNull();
+  });
+
+  it('states that the defect filter does not reach the exported file (WB-097)', async () => {
+    renderPage(<DvirReportPage />, `${ROUTE}&defect=Brakes`);
+    await screen.findByRole('row', { name: /#110/ });
+    expect(screen.getByRole('button', { name: 'Export CSV' })).toHaveAccessibleDescription(DVIR_EXPORT_SCOPE);
+  });
+
+  it('adds no export note without a defect filter', async () => {
+    renderPage(<DvirReportPage />, ROUTE);
+    await screen.findByRole('row', { name: /#110/ });
+    expect(screen.queryByText(DVIR_EXPORT_SCOPE)).toBeNull();
+  });
+
+  it('labels the counts as a lower bound when the DVIR walk is capped before `from` (WB-096)', async () => {
+    const recent = { ...reportDvirs[0]!, submittedAt: '2026-09-11T12:00:00.000Z' };
+    server.use(
+      // Every page is full and still newer than `from`, so the walk hits DVIR_REPORT_MAX_PAGES.
+      http.get(url(endpoints.dvir.list), ({ request }) => {
+        const page = Number(new URL(request.url).searchParams.get('page'));
+        const items = Array.from({ length: 200 }, (_, i) => ({ ...recent, id: `dvir_${page}_${i}` }));
+        return ok({ items, page, limit: 200, total: 10_000, totalPages: 50 });
+      }),
+    );
+    renderPage(<DvirReportPage />, ROUTE);
+    expect(await screen.findByText(DVIR_WINDOW_NOTE)).toBeInTheDocument();
+    expect(screen.getByText('2,000+ records · showing 10')).toBeInTheDocument();
   });
 
   it('removes Schedule for VIEWER but keeps Export CSV and Download PDF', async () => {

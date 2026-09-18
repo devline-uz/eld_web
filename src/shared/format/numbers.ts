@@ -41,8 +41,13 @@ export const formatEngineHours = (value: Num): string =>
 /** `1,070 h 12 m` — the KPI form. */
 export function formatEngineHoursLong(value: Num): string {
   if (!isFiniteNumber(value)) return EMPTY.dash;
-  const whole = Math.trunc(value);
-  const minutes = Math.round((value - whole) * 60);
+  let whole = Math.trunc(value);
+  let minutes = Math.round((value - whole) * 60);
+  // 1070.995 rounds to 60 m — carry into the hour instead of rendering an impossible clock.
+  if (minutes === 60) {
+    minutes = 0;
+    whole += 1;
+  }
   return `${formatNumber(whole)} h ${String(minutes).padStart(2, '0')} m`;
 }
 

@@ -95,7 +95,7 @@ export default function UnitProfilePage() {
   const vehicle = vehicleQuery.data;
   const driver = driverQuery.data;
   const device = deviceQuery.data;
-  const activeDtcCount = 0; // resolved on the Diagnostics tab query below when open
+  const activeDtcCount = dtcQuery.data?.items.filter((d) => !d.clearedAt).length ?? 0;
   const total = totalVehicleMiles(vehicle);
 
   function setTab(next: Tab) {
@@ -143,7 +143,10 @@ export default function UnitProfilePage() {
               Track on map
             </Button>
             <Can perm="vehicles" level="FULL">
-              <Button variant="primary" iconLeft={<UserPlus size={16} strokeWidth={1.75} />} onClick={() => setAssignOpen(true)} disabled={vehicle.status === 'OUT_OF_SERVICE'}>
+              {/* WB-104 — never disable this silently: an OUT_OF_SERVICE unit still opens
+                  `AssignDriverModal`, which states the CRITICAL-defect refusal verbatim (§4),
+                  exactly like the row action on the Vehicles table. */}
+              <Button variant="primary" iconLeft={<UserPlus size={16} strokeWidth={1.75} />} onClick={() => setAssignOpen(true)}>
                 Assign driver
               </Button>
             </Can>

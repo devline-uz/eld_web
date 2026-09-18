@@ -5,6 +5,7 @@ import type { DutyStatus } from '@/shared/ui/Badge';
 import { DutyBadge } from '@/shared/ui/Badge';
 import type { LiveFleetUnit } from '@/shared/api/liveFleet';
 import { formatPercent } from '@/shared/format/numbers';
+import { allocatePercents } from '../lib/allocatePercents';
 
 const SEGMENTS: DutyStatus[] = ['DRIVING', 'ON_DUTY', 'SLEEPER', 'OFF_DUTY'];
 
@@ -41,6 +42,10 @@ export default function DutyDonut({
   const onDuty = counted
     .filter((s) => s.status !== 'OFF_DUTY')
     .reduce((sum, s) => sum + s.count, 0);
+  const percents = allocatePercents(
+    counted.map((s) => s.count),
+    total,
+  );
 
   if (total === 0) {
     return <p className="py-8 text-center text-body text-text-muted">No drivers reporting</p>;
@@ -74,7 +79,7 @@ export default function DutyDonut({
         </div>
       </div>
       <div className="flex w-full flex-col gap-2">
-        {counted.map((s) => (
+        {counted.map((s, index) => (
           <button
             key={s.status}
             type="button"
@@ -84,9 +89,7 @@ export default function DutyDonut({
             <DutyBadge status={s.status} />
             <span className="flex items-center gap-3">
               <span className="tabular-nums font-semibold text-text">{s.count}</span>
-              <span className="tabular-nums text-text-muted">
-                {formatPercent(total ? Math.round((s.count / total) * 100) : 0)}
-              </span>
+              <span className="tabular-nums text-text-muted">{formatPercent(percents[index])}</span>
             </span>
           </button>
         ))}

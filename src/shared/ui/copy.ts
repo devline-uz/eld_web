@@ -164,4 +164,29 @@ export const TOAST_COPY = {
     title: 'Geofence created',
     description: `${name} will start triggering arrival and departure events.`,
   }),
+  /** WB-074 · W-09 Work orders tab row actions — not in §13.3's table; named consistently with
+   * `unitDeleted`/`unitCreated`. */
+  workOrderClosed: (number: string): ToastCopy => ({
+    title: `Work order ${number} closed`,
+    description: 'The unit and any attached defects were updated.',
+  }),
+  workOrderCancelled: (number: string): ToastCopy => ({
+    title: `Work order ${number} cancelled`,
+    description: 'No further work is scheduled against it.',
+  }),
+  workOrderUpdated: (number: string): ToastCopy => ({
+    title: `Work order ${number} updated`,
+  }),
+  /** WB-074 · W-09 Schedules tab row actions — not in §13.3's table. */
+  scheduleCompleted: (name: string): ToastCopy => ({
+    title: `${name} marked complete`,
+    description: 'The next due date was recalculated.',
+  }),
+  scheduleUpdated: (name: string): ToastCopy => ({
+    title: `${name} updated`,
+  }),
+  scheduleDeleted: (name: string): ToastCopy => ({
+    title: `${name} deleted`,
+    description: 'Historical service records stay in place for audits.',
+  }),
 } as const;

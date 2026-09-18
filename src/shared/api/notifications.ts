@@ -58,14 +58,14 @@ export const NOTIFICATIONS_EXPANDED_SIZE = 100;
 /** The unread counter is the `total` of a one-row `unreadOnly` page — no count endpoint exists. */
 export const UNREAD_COUNT_PARAMS: NotificationListParams = { unreadOnly: true, limit: 1 };
 
-function fetchPage(params: NotificationListParams) {
-  return client.get<NotificationsPage>(endpoints.notifications.list, { params });
+function fetchPage(params: NotificationListParams, signal?: AbortSignal) {
+  return client.get<NotificationsPage>(endpoints.notifications.list, { params, signal });
 }
 
 export function useNotifications(params: NotificationListParams) {
   return useQuery({
     queryKey: qk.notifications(params),
-    queryFn: () => fetchPage(params),
+    queryFn: ({ signal }) => fetchPage(params, signal),
     ...typedCachePolicy<NotificationsPage>('list'),
   });
 }
@@ -74,7 +74,7 @@ export function useNotifications(params: NotificationListParams) {
 export function useUnreadNotificationCount(enabled = true): number {
   const query = useQuery({
     queryKey: qk.notifications(UNREAD_COUNT_PARAMS),
-    queryFn: () => fetchPage(UNREAD_COUNT_PARAMS),
+    queryFn: ({ signal }) => fetchPage(UNREAD_COUNT_PARAMS, signal),
     enabled,
     ...typedCachePolicy<NotificationsPage>('list'),
   });

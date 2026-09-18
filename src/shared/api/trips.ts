@@ -114,7 +114,7 @@ export interface TripsPageParams {
 /** One `GET /trips` page — shared by the board, the counters and the sidebar prefetch (WD-073). */
 export const tripsPageQuery = (params: TripsPageParams): PageQueryOptions<TripRow> => ({
   queryKey: qk.trips(compactParams(params)),
-  queryFn: () => client.list<TripRow>(endpoints.trips.list, compactParams(params)),
+  queryFn: ({ signal }) => client.list<TripRow>(endpoints.trips.list, compactParams(params), { signal }),
   ...pagePolicy('list'),
 });
 
@@ -284,7 +284,7 @@ export function useTripsBoard({ segment, page, limit, search, useWindow, filter 
 export function useUnassignedLoads() {
   return useQuery({
     queryKey: qk.unassignedLoads(),
-    queryFn: () => client.get<{ items: TripRow[] }>(endpoints.trips.unassignedLoads),
+    queryFn: ({ signal }) => client.get<{ items: TripRow[] }>(endpoints.trips.unassignedLoads, { signal }),
     ...typedCachePolicy<{ items: TripRow[] }>('list'),
   });
 }
@@ -292,7 +292,7 @@ export function useUnassignedLoads() {
 export function useTrip(id: string | undefined) {
   return useQuery({
     queryKey: qk.trip(id ?? ''),
-    queryFn: () => client.get<TripRow>(endpoints.trips.detail(id as string)),
+    queryFn: ({ signal }) => client.get<TripRow>(endpoints.trips.detail(id as string), { signal }),
     enabled: Boolean(id),
     ...typedCachePolicy<TripRow>('reference'),
   });

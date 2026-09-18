@@ -110,6 +110,20 @@ describe('CompanyProfilePage — W-17', () => {
     expect(await screen.findByText('The ELD identifier is exactly 4 characters.')).toBeInTheDocument();
   });
 
+  it('WB-112 — a lowercase ELD identifier is kept exactly as typed, never auto-corrected to uppercase', async () => {
+    const user = userEvent.setup();
+    server.use(http.get(url(endpoints.carrier.root), () => ok(CARRIER)));
+    renderPage();
+
+    const eldInputs = await screen.findAllByDisplayValue('OBK1');
+    const eldInput = eldInputs[0]!;
+    await user.clear(eldInput);
+    await user.type(eldInput, 'obk1');
+
+    expect(eldInput).toHaveValue('obk1');
+    expect(await screen.findByText('The ELD identifier is exactly 4 characters.')).toBeInTheDocument();
+  });
+
   it('touches every remaining field once', async () => {
     const user = userEvent.setup();
     server.use(http.get(url(endpoints.carrier.root), () => ok(CARRIER)));

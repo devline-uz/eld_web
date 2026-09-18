@@ -6,7 +6,7 @@
 // Markers are a GeoJSON source + a symbol layer, never DOM nodes: the fleet grows 69 → 300 units
 // and a DOM marker per unit would not hold that budget (§16.3 rule 5 / §16.2 "< 1.5s / 69 marker").
 import { useEffect, useRef, useState } from 'react';
-import maplibregl from 'maplibre-gl';
+import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { MapPin } from 'lucide-react';
 import type { Feature, FeatureCollection, Point } from 'geojson';

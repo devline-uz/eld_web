@@ -1,5 +1,5 @@
 import * as Popover from '@radix-ui/react-popover';
-import { GripVertical, Settings2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, GripVertical, Settings2 } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from './Button';
 import { cn } from './cn';
@@ -75,14 +75,25 @@ export function TableSettings({ columns, onApply, onReset }: TableSettingsProps)
           <ul className="mt-1 flex flex-col gap-1">
             {draft.map((col, i) => (
               <li key={col.id} className="flex items-center gap-2 rounded-md px-1 py-1.5 hover:bg-bg-subtle">
-                <span className="flex items-center gap-1 text-text-muted">
+                <GripVertical size={14} strokeWidth={1.75} className="text-text-muted" aria-hidden="true" />
+                <span className="flex items-center text-text-muted">
                   <button
                     type="button"
                     aria-label={`Move ${col.label} up`}
+                    disabled={i === 0}
                     onClick={() => move(i, -1)}
-                    className="cursor-grab"
+                    className="rounded p-0.5 hover:bg-bg-subtle disabled:cursor-not-allowed disabled:opacity-30"
                   >
-                    <GripVertical size={14} strokeWidth={1.75} />
+                    <ChevronUp size={14} strokeWidth={1.75} />
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`Move ${col.label} down`}
+                    disabled={i === draft.length - 1}
+                    onClick={() => move(i, 1)}
+                    className="rounded p-0.5 hover:bg-bg-subtle disabled:cursor-not-allowed disabled:opacity-30"
+                  >
+                    <ChevronDown size={14} strokeWidth={1.75} />
                   </button>
                 </span>
                 <span className="flex-1 text-body text-text">{col.label}</span>

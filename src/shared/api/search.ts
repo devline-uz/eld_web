@@ -113,10 +113,8 @@ export async function fetchGlobalSearch(
 export function useGlobalSearch(term: string, scope: SearchScope) {
   const q = term.trim();
   return useQuery({
-    queryKey: qk.search(q),
-    // No TanStack `signal` here, same as every other shared/api hook: a stale response is dropped by
-    // its query key, and jsdom's AbortSignal breaks MSW's undici Request in tests.
-    queryFn: () => fetchGlobalSearch(q, scope),
+    queryKey: qk.search(q, { drivers: scope.drivers, vehicles: scope.vehicles }),
+    queryFn: ({ signal }) => fetchGlobalSearch(q, scope, signal),
     enabled: q.length >= SEARCH_MIN_CHARS && (scope.drivers || scope.vehicles),
     staleTime: 30_000,
     placeholderData: keepPreviousData,

@@ -109,7 +109,8 @@ class FakeLngLatBounds {
 }
 
 vi.mock('maplibre-gl', () => ({
-  default: { Map: FakeMap, LngLatBounds: FakeLngLatBounds },
+  Map: FakeMap,
+  LngLatBounds: FakeLngLatBounds,
 }));
 vi.mock('maplibre-gl/dist/maplibre-gl.css', () => ({}));
 

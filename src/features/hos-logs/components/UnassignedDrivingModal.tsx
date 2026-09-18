@@ -15,14 +15,19 @@ import { ApiError } from '@/shared/api/errors';
 import { LIMITS, VALIDATION_MESSAGES } from '@/shared/forms/messages';
 import { formatHosHours, formatDistance } from '@/shared/format';
 import {
+  UnidentifiedBatchError,
   useResolveUnidentified,
   type UnidentifiedAction,
   type UnidentifiedSegment,
 } from '@/shared/api/hosLogs';
 
-/** `Annotate as yard move` / `personal conveyance` / `Leave unassigned` + every driver. */
-export const ANNOTATE_YARD = '__yard-move';
-export const ANNOTATE_PC = '__personal-conveyance';
+/**
+ * `Leave unassigned` / every driver / annotate. WB-064 — `POST /unidentified/:id/annotate` carries
+ * only `annotation`; there is no yard-move / personal-conveyance category on the wire (backend gap).
+ * Two options that sent byte-identical requests promised a distinction the record does not keep, so
+ * they are one option until the field exists, and the category is written in the annotation text.
+ */
+export const ANNOTATE = '__annotate';
 export const LEAVE_UNASSIGNED = '__leave-unassigned';
 
 export interface UnassignedDriverOption {
@@ -47,7 +52,13 @@ export function UnassignedDrivingModal({
 }: UnassignedDrivingModalProps) {
   const { toast } = useToast();
   const mutation = useResolveUnidentified();
-  const [selected, setSelected] = useState<string[]>([]);
+  const [picked, setPicked] = useState<string[]>([]);
+  // WB-063 — after a (partial) write the list refetches; a segment that is no longer PENDING leaves
+  // `segments` and therefore the selection, so it can never be posted twice.
+  const selected = useMemo(
+    () => picked.filter((id) => segments.some((segment) => segment.id === id)),
+    [picked, segments],
+  );
   const [choice, setChoice] = useState<Record<string, string>>({});
   const [annotation, setAnnotation] = useState('');
   const [askDriver, setAskDriver] = useState(true);
@@ -60,7 +71,7 @@ export function UnassignedDrivingModal({
   );
 
   function toggle(id: string) {
-    setSelected((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]));
+    setPicked((prev) => (prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id]));
   }
 
   function submit() {
@@ -74,7 +85,7 @@ export function UnassignedDrivingModal({
     for (const id of selected) {
       const value = choice[id] ?? LEAVE_UNASSIGNED;
       if (value === LEAVE_UNASSIGNED) continue;
-      if (value === ANNOTATE_YARD || value === ANNOTATE_PC) {
+      if (value === ANNOTATE) {
         actions.push({ kind: 'annotate', id, annotation: annotation.trim() });
       } else {
         actions.push({ kind: 'assign', id, driverId: value, annotation: annotation.trim() });
@@ -89,8 +100,20 @@ export function UnassignedDrivingModal({
         toast({ kind: 'success', ...TOAST_COPY.segmentsAssigned(actions.length) });
         onClose();
       },
-      onError: (error) =>
-        setBanner(error instanceof ApiError ? error.userMessage : 'Something went wrong.'),
+      onError: (error) => {
+        const cause = error instanceof UnidentifiedBatchError ? error.error : error;
+        const refusal = cause instanceof ApiError ? cause.userMessage : 'Something went wrong.';
+        const done = error instanceof UnidentifiedBatchError ? error.succeededIds : [];
+        if (done.length > 0) {
+          // WB-063 — say exactly what was already written; drop it from the selection.
+          setPicked((prev) => prev.filter((id) => !done.includes(id)));
+          setBanner(
+            `${done.length} of ${actions.length} segments were saved before the server refused the next one: ${refusal}`,
+          );
+          return;
+        }
+        setBanner(refusal);
+      },
     });
   }
 
@@ -190,8 +213,7 @@ export function UnassignedDrivingModal({
                     {driver.name}
                   </option>
                 ))}
-                <option value={ANNOTATE_YARD}>Annotate as yard move</option>
-                <option value={ANNOTATE_PC}>Annotate as personal conveyance</option>
+                <option value={ANNOTATE}>Annotate as yard move or personal conveyance</option>
               </select>
             </div>
           );
@@ -210,6 +232,12 @@ export function UnassignedDrivingModal({
           className="min-h-20 rounded-md border border-border bg-bg-surface p-3 text-body text-text"
         />
         {annotationError && <span className="text-caption text-danger">{annotationError}</span>}
+        {selected.some((id) => choice[id] === ANNOTATE) && (
+          <span className="text-caption text-text-muted">
+            The category is not stored separately — state yard move or personal conveyance in the
+            annotation.
+          </span>
+        )}
       </label>
     </Modal>
   );

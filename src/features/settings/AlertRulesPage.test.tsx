@@ -2,7 +2,7 @@
 // toggle mutation.
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http } from 'msw';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
@@ -146,7 +146,33 @@ describe('AlertRulesPage — W-21', () => {
     await user.click(screen.getByRole('button', { name: 'Rule actions' }));
     await user.click(screen.getByText('Delete'));
 
+    // WB-110 — the row menu only opens the confirm modal; nothing is sent until confirmed.
+    const dialog = await screen.findByRole('dialog', { name: /delete hos violation\?/i });
+    expect(deleted).toBe(false);
+    await user.click(within(dialog).getByRole('button', { name: 'Delete' }));
     await waitFor(() => expect(deleted).toBe(true));
+  });
+
+  it('WB-110 — deleting a rule requires confirmation and cancel sends nothing', async () => {
+    const user = userEvent.setup();
+    server.use(http.get(url(endpoints.alertRules.list), () => ok([RULE])));
+    let deleted = false;
+    server.use(
+      http.delete(url(endpoints.alertRules.remove(RULE.id)), () => {
+        deleted = true;
+        return ok({ success: true });
+      }),
+    );
+
+    renderPage();
+    await screen.findByText('HOS violation');
+    await user.click(screen.getByRole('button', { name: 'Rule actions' }));
+    await user.click(screen.getByText('Delete'));
+
+    const dialog = await screen.findByRole('dialog', { name: /delete hos violation\?/i });
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(deleted).toBe(false);
   });
 
   it('opens the New alert rule modal and creates a rule without SMS in the payload', async () => {

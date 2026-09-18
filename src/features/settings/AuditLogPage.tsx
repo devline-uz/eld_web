@@ -104,8 +104,10 @@ export default function AuditLogPage() {
   // both only narrow the window of pages already loaded, exactly like `search` already did.
   const rangeStartMs = startOfDayMs(dateRange.from);
   const rangeEndMs = endOfDayMs(dateRange.to);
-  const filtered = useMemo(() => {
-    let out = items;
+  // WB-111 — the same predicate the table uses, factored out so `Export CSV` (below) can apply
+  // every active filter to the rows it fetches instead of shipping an unfiltered batch.
+  function applyLocalFilters(entries: AuditEntry[]): AuditEntry[] {
+    let out = entries;
     if (action) out = out.filter((e) => e.action === action);
     out = out.filter((e) => {
       const t = new Date(e.createdAt).getTime();
@@ -121,7 +123,12 @@ export default function AuditLogPage() {
       );
     }
     return out;
-  }, [items, search, action, rangeStartMs, rangeEndMs]);
+  }
+  const filtered = useMemo(
+    () => applyLocalFilters(items),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [items, search, action, rangeStartMs, rangeEndMs],
+  );
 
   const objectTypeOptions = useMemo(
     () => Array.from(new Set([...KNOWN_OBJECT_TYPES, ...items.map((e) => e.objectType)])).sort(),
@@ -147,9 +154,15 @@ export default function AuditLogPage() {
   }
 
   async function handleExportCsv() {
-    const data = await client.get<{ items: AuditEntry[] }>(endpoints.auditLog.list, { params: { limit: 200 } });
+    // WB-111 — forward the same params the on-screen table query uses: `actorId`/`objectType`
+    // are real server params (web/backend-gaps.md), `action`/date range/`search` have no server
+    // support (B-64) so they're applied locally to the fetched batch, exactly as the table does.
+    const data = await client.get<{ items: AuditEntry[] }>(endpoints.auditLog.list, {
+      params: { limit: 200, actorId: actorId || undefined, objectType: objectType || undefined },
+    });
+    const rows = applyLocalFilters(data.items);
     const header = 'timestamp,user,action,object,ip\n';
-    const body = data.items
+    const body = rows
       .map((e) => [formatCarrier(e.createdAt, timezone, 'dateTimeSeconds'), e.actorName ?? '', e.action, e.objectLabel ?? e.objectType, e.ipAddress ?? ''].join(','))
       .join('\n');
     const blob = new Blob([header + body], { type: 'text/csv' });

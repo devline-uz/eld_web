@@ -3,7 +3,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { http } from 'msw';
+import { http, HttpResponse } from 'msw';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { server } from '@/mocks/server';
 import { fail, ok, url } from '@/mocks/envelope';
@@ -14,6 +14,7 @@ import {
   AuthProvider,
   IDLE_TIMEOUT_MS,
   IDLE_WARNING_MS,
+  REFRESH_RETRY_DELAYS_MS,
   samePermissions,
   useAuth,
 } from './AuthProvider';
@@ -23,7 +24,14 @@ import {
   refreshAccessToken,
   registerSocketDisconnect,
 } from './authEvents';
+import type * as FirebaseModule from './firebase';
 import { clearTokens, getAccessToken, getRefreshToken } from './tokenStore';
+
+const signOutOfGoogle = vi.fn(() => Promise.resolve());
+vi.mock('./firebase', async (importOriginal) => ({
+  ...(await importOriginal<typeof FirebaseModule>()),
+  signOutOfGoogle: () => signOutOfGoogle(),
+}));
 
 const RT_KEY = 'obk.rt';
 const PAIR = { accessToken: 'access-1', refreshToken: 'refresh-1', tokenType: 'Bearer' };
@@ -446,6 +454,60 @@ describe('refresh', () => {
     expect(getRefreshToken()).not.toBe('refresh-0');
   });
 
+  it('schedules the proactive refresh from the server expiresIn, not a 15-minute guess (WB-083)', async () => {
+    window.localStorage.setItem(RT_KEY, 'refresh-0');
+    let refreshes = 0;
+    server.use(
+      http.post(url(endpoints.auth.refresh), () => {
+        refreshes += 1;
+        return ok({
+          accessToken: `access-${refreshes}`,
+          refreshToken: `refresh-${refreshes}`,
+          expiresIn: 300,
+        });
+      }),
+      http.get(url(endpoints.auth.me), () => ok(ME_DISPATCHER)),
+    );
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    setup();
+    await waitFor(() => expect(status()).toBe('authenticated'));
+    expect(refreshes).toBe(1);
+
+    // A 5-minute token renews 60 s early: at ~4 min, not at ~14.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3 * 60_000 + 50_000);
+    });
+    expect(refreshes).toBe(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_000);
+    });
+    expect(refreshes).toBe(2);
+    expect(JSON.parse(window.sessionStorage.getItem('obk.session') ?? '{}').accessTokenExpiresAt)
+      .toBeLessThanOrEqual(Date.now() + 5 * 60_000 + 1_000);
+  });
+
+  it('sign-in honours the expiresIn of the issued pair too (WB-083)', async () => {
+    let refreshes = 0;
+    server.use(
+      http.post(url(endpoints.auth.signIn), () => ok({ ...PAIR, expiresIn: 180 })),
+      http.post(url(endpoints.auth.refresh), () => {
+        refreshes += 1;
+        return ok({ ...ROTATED, expiresIn: 180 });
+      }),
+      http.get(url(endpoints.auth.me), () => ok(ME_DISPATCHER)),
+    );
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const view = setup();
+    await waitFor(() => expect(status()).toBe('unauthenticated'));
+    await act(async () => {
+      await view.signInWithPassword('a@b.example', 'pw');
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2 * 60_000 + 10_000);
+    });
+    expect(refreshes).toBe(1);
+  });
+
   it('is single-flight: parallel callers share one POST /auth/refresh', async () => {
     window.localStorage.setItem(RT_KEY, 'refresh-0');
     let refreshes = 0;
@@ -532,6 +594,23 @@ describe('sign-out (§17)', () => {
     expect(socket).toHaveBeenCalledTimes(1);
   });
 
+  it('ends the Firebase Google session with the panel session (WB-085)', async () => {
+    server.use(
+      http.post(url(endpoints.auth.signIn), () => ok(PAIR)),
+      http.get(url(endpoints.auth.me), () => ok(ME_DISPATCHER)),
+      http.post(url(endpoints.auth.signOut), () => ok({ success: true })),
+    );
+    const view = setup();
+    await waitFor(() => expect(status()).toBe('unauthenticated'));
+    await act(async () => {
+      await view.signInWithPassword('a@b.example', 'pw');
+    });
+    signOutOfGoogle.mockClear();
+    act(() => view.signOut());
+    await waitFor(() => expect(status()).toBe('unauthenticated'));
+    expect(signOutOfGoogle).toHaveBeenCalledTimes(1);
+  });
+
   it('tells the backend to revoke the session', async () => {
     const revoked: unknown[] = [];
     server.use(
@@ -573,6 +652,204 @@ describe('sign-out (§17)', () => {
 });
 
 /* -------------------------------------------------------------------- the client.ts seam */
+
+describe('sign-out racing an in-flight refresh (WB-079)', () => {
+  /** Signs in (refresh-1), then holds the next POST /auth/refresh until the test releases it. */
+  async function signedInWithHeldRefresh() {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let refreshes = 0;
+    const revoked: unknown[] = [];
+    server.use(
+      http.post(url(endpoints.auth.signIn), () => ok(PAIR)),
+      http.get(url(endpoints.auth.me), () => ok(ME_DISPATCHER)),
+      http.post(url(endpoints.auth.refresh), async () => {
+        refreshes += 1;
+        await gate;
+        return ok(ROTATED);
+      }),
+      http.post(url(endpoints.auth.signOut), async ({ request }) => {
+        revoked.push(await request.json());
+        return ok({ success: true });
+      }),
+    );
+    const view = setup();
+    await waitFor(() => expect(status()).toBe('unauthenticated'));
+    await act(async () => {
+      await view.signInWithPassword('a@b.example', 'pw');
+    });
+    expect(status()).toBe('authenticated');
+    return { view, release, revoked, refreshes: () => refreshes };
+  }
+
+  it('a refresh that resolves after sign-out leaves no token behind and revokes the rotated one', async () => {
+    const { view, release, revoked, refreshes } = await signedInWithHeldRefresh();
+
+    const inFlight = refreshAccessToken();
+    await waitFor(() => expect(refreshes()).toBe(1));
+    await act(async () => {
+      view.signOut();
+    });
+    await act(async () => {
+      release();
+      await inFlight;
+    });
+
+    expect(status()).toBe('unauthenticated');
+    expect(window.localStorage.getItem(RT_KEY)).toBeNull();
+    expect(getRefreshToken()).toBeNull();
+    expect(getAccessToken()).toBeNull();
+    // A deliberate sign-out stays deliberate: the late response does not relabel it `expired`.
+    expect(view.auth.sessionEndedReason).toBeNull();
+    // Both the token signed out with and the one the in-flight refresh minted are revoked.
+    await waitFor(() =>
+      expect(revoked).toEqual(
+        expect.arrayContaining([{ refreshToken: 'refresh-1' }, { refreshToken: 'refresh-2' }]),
+      ),
+    );
+  });
+
+  it('a request replaying a 401 through the refresh cannot resurrect the session', async () => {
+    const { view, release, refreshes } = await signedInWithHeldRefresh();
+    server.use(
+      http.get(url(endpoints.vehicles.list), () => fail(401, 'TOKEN_EXPIRED', 'Token expired.')),
+    );
+
+    const request = client.get(endpoints.vehicles.list).catch((e: unknown) => e);
+    await waitFor(() => expect(refreshes()).toBe(1));
+    await act(async () => {
+      view.signOut();
+    });
+    await act(async () => {
+      release();
+      await request;
+    });
+
+    expect(window.localStorage.getItem(RT_KEY)).toBeNull();
+    expect(getAccessToken()).toBeNull();
+    expect(status()).toBe('unauthenticated');
+  });
+});
+
+describe('a refresh that fails in transit keeps the session (WB-080)', () => {
+  const SNAP_KEY = 'obk.session';
+
+  it('a network blip on the proactive refresh retries and never touches obk.rt', async () => {
+    let refreshes = 0;
+    server.use(
+      http.post(url(endpoints.auth.signIn), () => ok(PAIR)),
+      http.get(url(endpoints.auth.me), () => ok(ME_DISPATCHER)),
+      http.post(url(endpoints.auth.refresh), () => {
+        refreshes += 1;
+        return refreshes <= 2 ? HttpResponse.error() : ok(ROTATED);
+      }),
+    );
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const view = setup();
+    await waitFor(() => expect(status()).toBe('unauthenticated'));
+    await act(async () => {
+      await view.signInWithPassword('a@b.example', 'pw');
+    });
+
+    // The proactive timer fires at minute 14 into a dead network.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(14 * 60_000 + 1_000);
+    });
+    expect(refreshes).toBe(1);
+    expect(status()).toBe('authenticated');
+    expect(getRefreshToken()).toBe('refresh-1');
+    expect(view.clearSpy).not.toHaveBeenCalled();
+
+    // Backoff: a second failed attempt, then the network is back.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REFRESH_RETRY_DELAYS_MS[0] + REFRESH_RETRY_DELAYS_MS[1]);
+    });
+    await waitFor(() => expect(getRefreshToken()).toBe('refresh-2'));
+    expect(refreshes).toBe(3);
+    expect(status()).toBe('authenticated');
+    expect(getAccessToken()).toBe('access-2');
+    expect(view.auth.sessionEndedReason).toBeNull();
+  });
+
+  it('a 5xx on the boot refresh keeps the snapshot session and recovers', async () => {
+    window.localStorage.setItem(RT_KEY, 'refresh-0');
+    window.sessionStorage.setItem(
+      SNAP_KEY,
+      JSON.stringify({ me: ME_DISPATCHER, accessTokenExpiresAt: Date.now() + 10 * 60_000 }),
+    );
+    let refreshes = 0;
+    server.use(
+      http.post(url(endpoints.auth.refresh), () => {
+        refreshes += 1;
+        return refreshes === 1 ? fail(503, 'SERVICE_UNAVAILABLE', 'Down.') : ok(ROTATED);
+      }),
+      http.get(url(endpoints.auth.me), () => ok(ME_DISPATCHER)),
+    );
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const view = setup();
+    await waitFor(() => expect(refreshes).toBe(1));
+    expect(status()).toBe('authenticated');
+    expect(getRefreshToken()).toBe('refresh-0');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REFRESH_RETRY_DELAYS_MS[0]);
+    });
+    await waitFor(() => expect(getRefreshToken()).toBe('refresh-2'));
+    expect(status()).toBe('authenticated');
+    expect(view.clearSpy).not.toHaveBeenCalled();
+  });
+
+  it('a cold boot into a dead network waits behind the skeleton instead of signing out', async () => {
+    window.localStorage.setItem(RT_KEY, 'refresh-0');
+    let refreshes = 0;
+    server.use(
+      http.post(url(endpoints.auth.refresh), () => {
+        refreshes += 1;
+        return refreshes === 1 ? HttpResponse.error() : ok(ROTATED);
+      }),
+      http.get(url(endpoints.auth.me), () => ok(ME_DISPATCHER)),
+    );
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    setup();
+    await waitFor(() => expect(refreshes).toBe(1));
+    expect(screen.getByText('Signing you in')).toBeInTheDocument();
+    expect(getRefreshToken()).toBe('refresh-0');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(REFRESH_RETRY_DELAYS_MS[0]);
+    });
+    await waitFor(() => expect(status()).toBe('authenticated'));
+    expect(getRefreshToken()).toBe('refresh-2');
+  });
+
+  it('a transient failure followed by a 401 still ends the session as expired', async () => {
+    let refreshes = 0;
+    server.use(
+      http.post(url(endpoints.auth.signIn), () => ok(PAIR)),
+      http.get(url(endpoints.auth.me), () => ok(ME_DISPATCHER)),
+      http.post(url(endpoints.auth.refresh), () => {
+        refreshes += 1;
+        return refreshes === 1
+          ? HttpResponse.error()
+          : fail(401, 'REFRESH_TOKEN_REUSED', 'Already rotated.');
+      }),
+    );
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const view = setup();
+    await waitFor(() => expect(status()).toBe('unauthenticated'));
+    await act(async () => {
+      await view.signInWithPassword('a@b.example', 'pw');
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(14 * 60_000 + 1_000 + REFRESH_RETRY_DELAYS_MS[0]);
+    });
+    await waitFor(() => expect(status()).toBe('unauthenticated'));
+    expect(refreshes).toBe(2);
+    expect(getRefreshToken()).toBeNull();
+    expect(view.auth.sessionEndedReason).toBe('expired');
+  });
+});
 
 describe('the seam other modules plug into', () => {
   it('notifySessionExpired() from client.ts ends the session', async () => {
@@ -668,6 +945,23 @@ describe('30-minute idle timeout (§17)', () => {
     await user.click(screen.getByRole('button', { name: 'Stay signed in' }));
     expect(screen.queryByText('Still there?')).not.toBeInTheDocument();
     expect(status()).toBe('authenticated');
+  });
+
+  it('Escape on the warning is not "I am here" — it ends the session (WB-084)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const view = await signedIn();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(IDLE_TIMEOUT_MS + 1_000);
+    });
+    expect(screen.getByText('Still there?')).toBeInTheDocument();
+
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(status()).toBe('unauthenticated'));
+    expect(screen.queryByText('Still there?')).not.toBeInTheDocument();
+    expect(view.auth.sessionEndedReason).toBe('idle');
+    expect(window.localStorage.getItem(RT_KEY)).toBeNull();
   });
 
   it('`Stay signed in` arms a fresh 30 minutes (WB-036)', async () => {

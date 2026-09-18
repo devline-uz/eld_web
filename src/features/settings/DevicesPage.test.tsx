@@ -151,7 +151,34 @@ describe('DevicesPage — W-20', () => {
     const targetRow = (await screen.findByText('PT30_A86E')).closest('tr')!;
     await user.click(within(targetRow).getByRole('button', { name: 'Row actions' }));
     await user.click(screen.getByText('Retire device'));
+
+    // WB-110 — the row menu action only opens the confirm modal; nothing is sent yet.
+    const dialog = await screen.findByRole('dialog', { name: /retire device PT30_A86E\?/i });
+    expect(retired).toBe(false);
+    await user.click(within(dialog).getByRole('button', { name: 'Retire device' }));
     await waitFor(() => expect(retired).toBe(true));
+  });
+
+  it('WB-110 — retiring a device requires confirmation and cancel sends nothing', async () => {
+    const user = userEvent.setup();
+    server.use(http.get(url(endpoints.devices.list), () => ok({ items: [DEVICE], page: 1, limit: 25, total: 1, totalPages: 1 })));
+    let retired = false;
+    server.use(
+      http.delete(url(endpoints.devices.remove(DEVICE.id)), () => {
+        retired = true;
+        return ok({ ...DEVICE, status: 'RETIRED' });
+      }),
+    );
+
+    renderPage();
+    const targetRow = (await screen.findByText('PT30_A86E')).closest('tr')!;
+    await user.click(within(targetRow).getByRole('button', { name: 'Row actions' }));
+    await user.click(screen.getByText('Retire device'));
+
+    const dialog = await screen.findByRole('dialog', { name: /retire device PT30_A86E\?/i });
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(retired).toBe(false);
   });
 
   it('WB-041 — UNIT column shows the joined unit number, not the raw vehicle UUID, and — for an unassigned device', async () => {

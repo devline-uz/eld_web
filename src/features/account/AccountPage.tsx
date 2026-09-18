@@ -38,7 +38,9 @@ export default function AccountPage() {
     if (!section) return;
     section.scrollIntoView({ block: 'start' });
     section.focus({ preventScroll: true });
-  }, [location.hash, profile.isPending]);
+    // `location.key` too (WB-082): navigating to the hash you are already on (the account menu,
+    // the notifications panel) is a new history entry with the same hash, and must scroll again.
+  }, [location.key, location.hash, profile.isPending]);
 
   if (isApiError(profile.error) && profile.error.isForbidden) {
     return <ForbiddenState screenName="My profile" />;

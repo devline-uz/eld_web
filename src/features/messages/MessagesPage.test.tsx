@@ -2,7 +2,7 @@
 // and `message.new` patching the open thread via `useRoom` (no polling, `staleTime: 0`).
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -224,6 +224,69 @@ describe('W-16 Messages', () => {
     });
 
     expect(await screen.findByText('Pulling in now.')).toBeInTheDocument();
+  });
+
+  it('marks a failed send with a red-border/Retry state, never left looking delivered (WB-116)', async () => {
+    usePopulatedConversations();
+    let attempts = 0;
+    server.use(
+      http.post(url(endpoints.conversations.sendMessage(':id')), async ({ request }) => {
+        attempts += 1;
+        const body = (await request.json()) as { body: string; clientId?: string };
+        if (attempts === 1) {
+          return HttpResponse.json({ statusCode: 500, code: 'INTERNAL', message: 'Boom' }, { status: 500 });
+        }
+        return ok({
+          id: 'msg_retry',
+          conversationId: 'cnv_1',
+          senderUserId: 'usr_1',
+          senderDriverId: null,
+          body: body.body,
+          attachmentId: null,
+          clientId: body.clientId ?? null,
+          sentAt: new Date().toISOString(),
+          deliveredAt: null,
+          readAt: null,
+        });
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByText('John Smith'));
+    await screen.findByText('On schedule.');
+
+    const composer = screen.getByPlaceholderText('Write a message to John Smith…');
+    await user.type(composer, 'Delivering late{Enter}');
+
+    // Still in the thread, but flagged failed with a Retry action — never indistinguishable
+    // from a delivered message.
+    expect(await screen.findByText('Delivering late')).toBeInTheDocument();
+    expect(await screen.findByText('Not delivered.')).toBeInTheDocument();
+    const retryButton = await screen.findByRole('button', { name: 'Retry' });
+
+    await user.click(retryButton);
+
+    await waitFor(() => expect(screen.queryByText('Not delivered.')).not.toBeInTheDocument());
+    expect(attempts).toBe(2);
+    expect(screen.getByText('Delivering late')).toBeInTheDocument();
+  });
+
+  it('clears the unread dot and the Unread segment count on opening a conversation (WB-117)', async () => {
+    usePopulatedConversations();
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText('John Smith');
+    // CONVERSATION's usr_1 participant has `lastReadAt: null` and a real `lastMessageAt` — unread.
+    expect(screen.getByLabelText('Unread')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Unread 1' })).toBeInTheDocument();
+
+    await user.click(screen.getByText('John Smith'));
+    await screen.findByText('On schedule.');
+
+    await waitFor(() => expect(screen.queryByLabelText('Unread')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Unread 0' })).toBeInTheDocument();
   });
 
   it('error: renders <ErrorState> with Retry when the list fails', async () => {

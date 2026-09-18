@@ -81,4 +81,17 @@ describe('useGlobalSearch', () => {
     const real = renderHook(() => useGlobalSearch(' smith ', { drivers: true, vehicles: true }), { wrapper });
     await waitFor(() => expect(real.result.current.data?.drivers).toHaveLength(2));
   });
+
+  it('refetches when the scope widens instead of serving the narrowed result (WB-090)', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    const { result, rerender } = renderHook(({ vehicles }) => useGlobalSearch('smith', { drivers: true, vehicles }), {
+      wrapper,
+      initialProps: { vehicles: false },
+    });
+    await waitFor(() => expect(result.current.data?.drivers).toHaveLength(2));
+    expect(result.current.data?.vehicles).toEqual([]);
+    rerender({ vehicles: true });
+    await waitFor(() => expect(result.current.data?.vehicles).toHaveLength(1));
+  });
 });

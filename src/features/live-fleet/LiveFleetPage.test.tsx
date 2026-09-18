@@ -16,15 +16,6 @@ import LiveFleetPage from './LiveFleetPage';
 vi.mock('@/shared/auth/usePermission', () => ({ usePermission: () => ({ can: () => true }) }));
 vi.mock('@/shared/realtime/useRoom', () => ({ useRoom: () => ({ joined: false }) }));
 
-// `maplibre-gl` calls `window.URL.createObjectURL` as a *module-load* side effect (to spin up its
-// worker), before this test ever reaches `HAS_STYLE` — jsdom has no such API. This is the same
-// polyfill a real browser provides for free; it does not change what FleetMap renders (no
-// VITE_MAP_STYLE_URL in this test env still means `MapUnavailable`, per web/decisions.md WD-016's
-// neighbour, the map-fallback contract in shared/map/FleetMap.tsx).
-if (!window.URL.createObjectURL) {
-  window.URL.createObjectURL = () => 'blob:mock';
-}
-
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(

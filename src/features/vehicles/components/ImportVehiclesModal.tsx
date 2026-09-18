@@ -9,8 +9,10 @@ import { useToast } from '@/shared/ui/Toast';
 import { TOAST_COPY } from '@/shared/ui/copy';
 import { useImportVehicles } from '@/shared/api/vehicles';
 import { ApiError } from '@/shared/api/errors';
+import { parseCsv } from '@/shared/lib/csv';
 
 const MAX_BYTES = 5 * 1024 * 1024;
+const MAX_ROWS = 2000;
 
 export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
   const { toast } = useToast();
@@ -22,14 +24,6 @@ export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
   const [sendSummary, setSendSummary] = useState(false);
   const mutation = useImportVehicles();
 
-  function parseCsv(text: string): Array<Record<string, unknown>> {
-    const [headerLine, ...lines] = text.trim().split(/\r?\n/);
-    const headers = (headerLine ?? '').split(',').map((h) => h.trim());
-    return lines
-      .filter(Boolean)
-      .map((line) => Object.fromEntries(headers.map((h, i) => [h, line.split(',')[i]?.trim()])));
-  }
-
   function handleFile(selected: File) {
     setError(null);
     if (selected.size > MAX_BYTES) {
@@ -38,6 +32,12 @@ export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
     }
     selected.text().then((text) => {
       const parsed = parseCsv(text);
+      if (parsed.length > MAX_ROWS) {
+        setError(`File has ${parsed.length} rows — 2,000 rows maximum.`);
+        setFile(null);
+        setRows([]);
+        return;
+      }
       setRows(parsed);
       setFile(selected);
     });

@@ -92,7 +92,7 @@ export default function FmcsaPackPage() {
   const announce = useAnnounceReport();
 
   const totals = usePackRodsCounts(from, to, driverFilter, daysInRange(from, to));
-  const dvirs = useDvirReportRows(undefined);
+  const dvirs = useDvirReportRows(undefined, from);
   const unassigned = usePendingUnassignedCount(from, to);
   const drivers = useReportDrivers();
   const packs = useReportsList({ type: 'FMCSA_PACK', limit: 10 });
@@ -259,7 +259,8 @@ export default function FmcsaPackPage() {
           />
           <KpiCard
             label="DVIRs included"
-            value={dvirs.isError ? EMPTY.dash : formatNumber(kpi.dvirs)}
+            // A capped DVIR walk (WB-096, gap B-47) is a lower bound, never a silent short count.
+            value={dvirs.isError ? EMPTY.dash : `${formatNumber(kpi.dvirs)}${dvirs.complete ? '' : '+'}`}
             chip={dvirs.isError ? undefined : { text: `${formatNumber(kpi.dvirsWithDefects)} with defects`, tone: 'neutral' }}
             icon={ClipboardCheck}
             iconTone="success"

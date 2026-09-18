@@ -10,6 +10,8 @@ import { useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { client } from './client';
 import { endpoints } from './endpoints';
+import { FILTER_WINDOW } from './lookups';
+import { pagePolicy, type PageQueryOptions } from './paging';
 import { qk, qkRoot } from './queryKeys';
 import { typedCachePolicy } from './queryPolicy';
 import type { OffsetPage } from './types';
@@ -29,7 +31,7 @@ export interface DriverListParams {
 export function useDriversList(params: DriverListParams) {
   return useQuery({
     queryKey: qk.drivers(params),
-    queryFn: () => client.list<DriverRow>(endpoints.drivers.list, params),
+    queryFn: ({ signal }) => client.list<DriverRow>(endpoints.drivers.list, params, { signal }),
     ...typedCachePolicy<OffsetPage<DriverRow>>('list'),
   });
 }
@@ -37,7 +39,7 @@ export function useDriversList(params: DriverListParams) {
 export function useDriver(id: string | undefined) {
   return useQuery({
     queryKey: qk.driver(id ?? ''),
-    queryFn: () => client.get<DriverRow>(endpoints.drivers.detail(id as string)),
+    queryFn: ({ signal }) => client.get<DriverRow>(endpoints.drivers.detail(id as string), { signal }),
     enabled: Boolean(id),
     ...typedCachePolicy<DriverRow>('reference'),
   });
@@ -86,12 +88,34 @@ export interface DriverRosterParams extends DriverListParams {
   exempt?: 'true' | 'false';
 }
 
-export function useDriverRoster(params: DriverRosterParams) {
+export function useDriverRoster(params: DriverRosterParams, options: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: qk.driverRoster(params),
-    queryFn: () => client.get<DriverRosterResponse>(endpoints.drivers.roster, { params }),
+    queryFn: ({ signal }) => client.get<DriverRosterResponse>(endpoints.drivers.roster, { params, signal }),
     ...typedCachePolicy<DriverRosterResponse>('live'),
+    enabled: options.enabled ?? true,
   });
+}
+
+/**
+ * The bounded newest-first roster window (`FILTER_WINDOW` rows) — same trade-off
+ * `vehiclesLookupQuery` documents for W-03/B-54. Used only while a client-only 11.23 group (the
+ * duty-status `status` field, or an exemption other than `eldExempt`) or the ON_DUTY/OFF_DUTY
+ * segment tab is active: none of those have a server param on `GET /drivers/roster` (extends
+ * B-55, web/backend-gaps.md). `q`/`terminal`/`hasOpenViolation`/`exempt` still narrow the window
+ * fetch itself since B-55 already ships real support for them — only the remaining groups run in
+ * memory against the window. Matches outside the window are not shown, as recorded per gap.
+ */
+export const driverRosterWindowQuery = (
+  serverFilters: Omit<DriverRosterParams, 'page' | 'limit'>,
+): PageQueryOptions<DriverRosterEntry> => ({
+  queryKey: qk.driverRoster({ ...serverFilters, limit: FILTER_WINDOW }),
+  queryFn: ({ signal }) => client.list<DriverRosterEntry>(endpoints.drivers.roster, { ...serverFilters, limit: FILTER_WINDOW }, { signal }),
+  ...pagePolicy('reference'),
+});
+
+export function useDriverRosterWindow(serverFilters: Omit<DriverRosterParams, 'page' | 'limit'>, enabled = true) {
+  return useQuery({ ...driverRosterWindowQuery(serverFilters), enabled });
 }
 
 /** Rows the segment counters read in one pass; `client.list` walks the API's 200-row maximum. */
@@ -126,7 +150,7 @@ export function useDriverRosterCounts(params: DriverRosterParams = {}): DriverRo
   const countParams: DriverRosterParams = { ...params, page: 1, limit: ROSTER_COUNT_LIMIT };
   const query = useQuery({
     queryKey: qk.driverRoster(countParams),
-    queryFn: () => client.list<DriverRosterEntry>(endpoints.drivers.roster, countParams),
+    queryFn: ({ signal }) => client.list<DriverRosterEntry>(endpoints.drivers.roster, countParams, { signal }),
     ...typedCachePolicy<OffsetPage<DriverRosterEntry>>('live'),
   });
   return useMemo(() => {
@@ -161,7 +185,7 @@ export interface DriverHosResponse {
 export function useDriverHos(driverId: string | undefined) {
   return useQuery({
     queryKey: qk.driverHos(driverId ?? ''),
-    queryFn: () => client.get<DriverHosResponse>(endpoints.drivers.hos(driverId as string)),
+    queryFn: ({ signal }) => client.get<DriverHosResponse>(endpoints.drivers.hos(driverId as string), { signal }),
     enabled: Boolean(driverId),
     ...typedCachePolicy<DriverHosResponse>('hosDay'),
   });

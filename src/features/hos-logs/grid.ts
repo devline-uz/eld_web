@@ -268,6 +268,11 @@ export interface PlottedViolation {
   from: number;
   to: number;
   title: string;
+  /**
+   * WB-061 — `false` once the violation is RESOLVED / AUTO_CLEARED. It still happened, so it stays
+   * on the grid (the audit trail is never hidden), but muted so it never reads as an open one.
+   */
+  open: boolean;
 }
 
 export function plotViolations(
@@ -282,7 +287,11 @@ export function plotViolations(
       at: fractionOf(atMs, dayStartMs, dayLengthSec),
       from: fractionOf(atMs - violation.exceededBySec * 1000, dayStartMs, dayLengthSec),
       to: fractionOf(atMs, dayStartMs, dayLengthSec),
-      title: VIOLATION_TITLE[violation.type],
+      title:
+        violation.status === 'OPEN'
+          ? VIOLATION_TITLE[violation.type]
+          : `${VIOLATION_TITLE[violation.type]} · Resolved`,
+      open: violation.status === 'OPEN',
     };
   });
 }
@@ -295,15 +304,28 @@ export interface PlottedUnassigned {
   to: number;
 }
 
+/**
+ * Segments that overlap the RODS day `[dayStart, dayStart + dayLengthSec)` — the one definition the
+ * grid, the header chip and the 11.13 subtitle all count by (WB-058).
+ */
+export function unassignedInDay<T extends Pick<UnidentifiedSegment, 'startAt' | 'endAt'>>(
+  segments: T[],
+  dayStartMs: number,
+  dayLengthSec: number,
+): T[] {
+  const dayEndMs = dayStartMs + dayLengthSec * 1000;
+  return segments.filter(
+    (segment) => Date.parse(segment.startAt) < dayEndMs && Date.parse(segment.endAt) > dayStartMs,
+  );
+}
+
 /** Grey hatched blocks — segments that overlap this RODS day, clamped to it. */
 export function plotUnassigned(
   segments: UnidentifiedSegment[],
   dayStartMs: number,
   dayLengthSec: number,
 ): PlottedUnassigned[] {
-  const dayEndMs = dayStartMs + dayLengthSec * 1000;
-  return segments
-    .filter((segment) => Date.parse(segment.startAt) < dayEndMs && Date.parse(segment.endAt) > dayStartMs)
+  return unassignedInDay(segments, dayStartMs, dayLengthSec)
     .map((segment) => ({
       id: segment.id,
       from: fractionOf(Date.parse(segment.startAt), dayStartMs, dayLengthSec),
@@ -406,4 +428,32 @@ export function certificationNote(
       ? labels[0]
       : `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
   return `Driver signature required for ${list}.`;
+}
+
+/* ------------------------------------------------------------------ page helpers */
+
+/**
+ * WB-066 — a `?date=` is used only when it is a real calendar day (`2026-02-31` and `banana` both
+ * fail the round-trip) and not after today in the home-terminal zone; anything else falls back to
+ * today instead of throwing `RangeError: Invalid time value` in render. The 62-day rule bounds a
+ * RANGE's length (transfer/report), not how far back a single RODS day may be opened, so older
+ * valid days stay reachable (§395.8(k) retention).
+ */
+export function validDayKey(raw: string | null, todayKey: string): string {
+  if (!raw || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) return todayKey;
+  const parsed = Date.parse(`${raw}T00:00:00Z`);
+  if (Number.isNaN(parsed) || new Date(parsed).toISOString().slice(0, 10) !== raw) return todayKey;
+  return raw > todayKey ? todayKey : raw;
+}
+
+/**
+ * WB-071 — the rule set is read off the response's `cycleLimitSec` (§395.3(b): 60 h / 7 days or
+ * 70 h / 8 days), never hardcoded. An unrecognised limit prints its hours without inventing a
+ * day count; until the clocks load, no rule is claimed.
+ */
+export function cycleRuleLabel(cycleLimitSec: number | undefined): string {
+  if (cycleLimitSec === undefined) return 'Property-carrying';
+  if (cycleLimitSec === 70 * 3600) return 'Property-carrying · 70 hr / 8 day';
+  if (cycleLimitSec === 60 * 3600) return 'Property-carrying · 60 hr / 7 day';
+  return `Property-carrying · ${formatHosHours(cycleLimitSec)} cycle`;
 }

@@ -27,7 +27,10 @@ export function IdleWarningModal({
   return (
     <Modal
       open
-      onClose={onStay}
+      // WB-084 — Escape, a backdrop click or the X is not "I am here": on an unattended machine
+      // any stray dismiss must end the session, not grant another 30 minutes. Only the explicit
+      // `Stay signed in` button extends it.
+      onClose={onSignOut}
       size="sm"
       title="Still there?"
       subtitle="You have been inactive for 30 minutes."

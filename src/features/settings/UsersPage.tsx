@@ -7,11 +7,13 @@ import { Search, UserPlus, Mail, Filter } from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
+import { useAuth } from '@/shared/auth/AuthProvider';
 import { Button } from '@/shared/ui/Button';
 import { Badge } from '@/shared/ui/Badge';
 import { Avatar } from '@/shared/ui/Avatar';
 import { DataTable } from '@/shared/ui/DataTable';
 import { Card, SectionHeader } from '@/shared/ui/Card';
+import { Modal } from '@/shared/ui/Modal';
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
 import { searchEmptyState } from '@/shared/ui/copy';
 import { useToast } from '@/shared/ui/Toast';
@@ -39,6 +41,7 @@ const STATUS_LABEL = { ACTIVE: 'Active', INVITED: 'Invited', DISABLED: 'Disabled
 export default function UsersPage() {
   const { can } = usePermission();
   const canFull = can('users', 'FULL');
+  const { user: currentUser } = useAuth();
   const { toast } = useToast();
   const usersQuery = useUsersList();
   const rolesQuery = useRolesList();
@@ -48,6 +51,9 @@ export default function UsersPage() {
   const [segment, setSegment] = useState<Segment>('ALL');
   const [search, setSearch] = useState('');
   const [inviteOpen, setInviteOpen] = useState(false);
+  // WB-113 — nothing on the server stops an admin from disabling themself or the last active
+  // ADMIN either (this is a UI guard only; the write must also be refused server-side).
+  const [blockedDisable, setBlockedDisable] = useState<{ user: UserRow; reason: 'self' | 'lastAdmin' } | null>(null);
   const [params, setParams] = useSearchParams();
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filtersRevision, setFiltersRevision] = useState(0);
@@ -86,6 +92,9 @@ export default function UsersPage() {
 
   const pending = rows.filter((r) => r.status === 'INVITED');
 
+  // WB-113 — count of active ADMIN accounts, to refuse disabling the last one.
+  const activeAdminCount = rows.filter((r) => r.role.key === 'ADMIN' && r.status === 'ACTIVE').length;
+
   function handleDisableToggle(user: UserRow) {
     const nextStatus = user.status === 'DISABLED' ? 'ACTIVE' : 'DISABLED';
     updateUser.mutate(
@@ -96,6 +105,23 @@ export default function UsersPage() {
           toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }),
       },
     );
+  }
+
+  // WB-113 — refuse in the UI, with a clear reason, rather than disabling yourself or the last
+  // active admin in one click. Enabling a disabled user is never blocked.
+  function attemptDisableToggle(user: UserRow) {
+    const nextStatus = user.status === 'DISABLED' ? 'ACTIVE' : 'DISABLED';
+    if (nextStatus === 'DISABLED') {
+      if (currentUser && user.id === currentUser.id) {
+        setBlockedDisable({ user, reason: 'self' });
+        return;
+      }
+      if (user.role.key === 'ADMIN' && user.status === 'ACTIVE' && activeAdminCount <= 1) {
+        setBlockedDisable({ user, reason: 'lastAdmin' });
+        return;
+      }
+    }
+    handleDisableToggle(user);
   }
 
   function handleResendInvite(user: UserRow) {
@@ -269,7 +295,7 @@ export default function UsersPage() {
                       )}
                       <DropdownMenu.Separator className="my-1 h-px bg-border" />
                       <DropdownMenu.Item
-                        onSelect={() => handleDisableToggle(row)}
+                        onSelect={() => attemptDisableToggle(row)}
                         className="cursor-pointer rounded-md px-2 py-1.5 text-body text-danger outline-none hover:bg-danger-soft"
                       >
                         {row.status === 'DISABLED' ? 'Enable user' : 'Disable user'}
@@ -338,6 +364,25 @@ export default function UsersPage() {
         filters={filters}
         onApply={applyFilters}
       />
+
+      {/* WB-113 — refusal, not a confirmation: neither case has a path forward from here. */}
+      <Modal
+        open={Boolean(blockedDisable)}
+        onClose={() => setBlockedDisable(null)}
+        title="Can't disable this user"
+        size="sm"
+        footer={
+          <Button variant="secondary" size="lg" onClick={() => setBlockedDisable(null)}>
+            Close
+          </Button>
+        }
+      >
+        <p className="text-body text-text-secondary">
+          {blockedDisable?.reason === 'self'
+            ? 'You cannot disable your own account. Ask another admin to do this.'
+            : 'This is the last active admin. Promote another user to Admin before disabling this account.'}
+        </p>
+      </Modal>
     </div>
   );
 }

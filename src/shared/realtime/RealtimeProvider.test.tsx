@@ -1,6 +1,6 @@
 // owner: web-realtime — connect-once, reconnect invalidation (§7.2 — no resume/seq), sign-out on
 // a server-rejected token, and the offline banner/`Reconnected` toast, against a mocked socket.
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ToastProvider } from '@/shared/ui/Toast';
@@ -9,13 +9,14 @@ import { useRoom } from './useRoom';
 
 const signOut = vi.fn();
 let isAuthenticated = true;
+let accessToken = 'test-access-token';
 
 vi.mock('@/shared/auth/AuthProvider', () => ({
   useAuth: () => ({ isAuthenticated, signOut }),
 }));
 
 vi.mock('@/shared/api/client', () => ({
-  getAccessToken: () => 'test-access-token',
+  getAccessToken: () => accessToken,
 }));
 
 class FakeSocket {
@@ -74,8 +75,12 @@ function renderProvider(queryClient: QueryClient) {
 describe('RealtimeProvider', () => {
   beforeEach(() => {
     isAuthenticated = true;
+    accessToken = 'test-access-token';
     signOut.mockClear();
     lastSocket = null;
+  });
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('connects once authenticated, handshaking with the token in `auth`', async () => {
@@ -113,6 +118,60 @@ describe('RealtimeProvider', () => {
     act(() => lastSocket!.trigger('disconnect', 'io server disconnect'));
 
     expect(signOut).toHaveBeenCalledTimes(1);
+  });
+
+  describe('access-token rotation (WB-119)', () => {
+    /** Connects, rotates the token and lets the 5 s token watcher cycle the socket. */
+    async function rotate(queryClient: QueryClient) {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      renderProvider(queryClient);
+      await waitFor(() => expect(lastSocket).not.toBeNull());
+      act(() => lastSocket!.trigger('connect'));
+
+      accessToken = 'rotated-access-token';
+      act(() => {
+        vi.advanceTimersByTime(5_000);
+      });
+      expect(lastSocket!.auth).toEqual({ token: 'rotated-access-token' });
+      expect(lastSocket!.disconnect).toHaveBeenCalledTimes(1);
+      expect(lastSocket!.connect).toHaveBeenCalledTimes(1);
+      // What socket.io emits for our own `disconnect().connect()`.
+      act(() => lastSocket!.trigger('disconnect', 'io client disconnect'));
+    }
+
+    it('cycles the socket onto the new token without a refetch storm or a `Reconnected` toast', async () => {
+      const queryClient = new QueryClient();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      await rotate(queryClient);
+      act(() => lastSocket!.trigger('connect'));
+
+      expect(invalidateSpy).not.toHaveBeenCalled();
+      expect(screen.queryByText('Reconnected')).not.toBeInTheDocument();
+      expect(signOut).not.toHaveBeenCalled();
+    });
+
+    it('a real drop after the rotation still invalidates and toasts', async () => {
+      const queryClient = new QueryClient();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      await rotate(queryClient);
+      act(() => lastSocket!.trigger('connect')); // the rotation's own connect — silent
+
+      act(() => lastSocket!.trigger('disconnect', 'transport close'));
+      act(() => lastSocket!.trigger('connect'));
+
+      expect(invalidateSpy).toHaveBeenCalledTimes(1);
+      expect(screen.getByText('Reconnected')).toBeInTheDocument();
+    });
+
+    it('a rotation whose reconnect fails counts as a genuine reconnect once it recovers', async () => {
+      const queryClient = new QueryClient();
+      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+      await rotate(queryClient);
+      act(() => lastSocket!.trigger('connect_error'));
+      act(() => lastSocket!.trigger('connect'));
+
+      expect(invalidateSpy).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('shows the offline banner once the socket has failed twice and stays down', async () => {

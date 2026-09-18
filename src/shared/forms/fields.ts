@@ -16,10 +16,18 @@ export const requiredString = (message: string = M.required) =>
 /** RFC-lite — the backend does the authoritative check. */
 export const email = () => requiredString(M.email).regex(EMAIL_RE, M.email);
 
-/** 11.14 — an eRODS transfer only goes to a government address. */
+/**
+ * 11.14 — an eRODS transfer only goes to a government address. The domain must be `fmcsa.dot.gov`
+ * itself or one of its subdomains; a lookalike that merely *ends with* those characters
+ * (`evilfmcsa.dot.gov`) is a different, privately registered domain (web/bugs.md WB-094).
+ */
+const INSPECTOR_DOMAIN_RE = /^(?:[a-z0-9-]+\.)*fmcsa\.dot\.gov$/i;
+
 export const inspectorEmail = () =>
-  email()
-    .refine((value) => /\.?fmcsa\.dot\.gov$/i.test(value.split('@')[1] ?? ''), M.inspectorEmail);
+  email().refine(
+    (value) => INSPECTOR_DOMAIN_RE.test(value.split('@')[1] ?? ''),
+    M.inspectorEmail,
+  );
 
 /** The only password in the panel: the mobile-app password an admin sets in `Add driver`. */
 export const driverPassword = () =>
@@ -44,6 +52,17 @@ export const odometer = () =>
     .int(M.odometer)
     .min(0, M.odometer)
     .max(LIMITS.odometerMax, M.odometer);
+
+/**
+ * 11.2 Add/Edit vehicle — `Year`. The upper bound is "not in the future", evaluated inside the
+ * `refine` at validation time so a long-lived tab never freezes last year's cutoff (WD note).
+ */
+export const vehicleYear = () =>
+  z
+    .number({ required_error: M.yearMin, invalid_type_error: M.yearMin })
+    .int(M.yearMin)
+    .min(LIMITS.vehicleYearMin, M.yearMin)
+    .refine((value) => value <= new Date().getFullYear(), M.yearFuture);
 
 export const outputFileComment = () =>
   requiredString(M.outputFileComment).max(LIMITS.outputFileCommentMax, M.outputFileComment);

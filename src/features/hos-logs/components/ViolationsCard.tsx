@@ -7,6 +7,7 @@ import { AlertTriangle } from 'lucide-react';
 import { formatInTimeZone } from 'date-fns-tz';
 import { Card, SectionHeader } from '@/shared/ui/Card';
 import { Button } from '@/shared/ui/Button';
+import { Badge } from '@/shared/ui/Badge';
 import { Modal } from '@/shared/ui/Modal';
 import { Can } from '@/shared/auth/Can';
 import { useToast } from '@/shared/ui/Toast';
@@ -38,38 +39,43 @@ export function ViolationsCard({
 
   return (
     <Card>
-      <SectionHeader
-        title="Violations · today"
-        subtitle={`${open.length} open`}
-        action={
-          open.length > 0 ? (
-            <Can perm="hosEdit" level="FULL">
-              <Button variant="secondary" onClick={() => setResolving(open[0] ?? null)}>
-                Resolve
-              </Button>
-            </Can>
-          ) : undefined
-        }
-      />
+      {/* WB-060 — `Resolve` lives on each OPEN row, so the violation resolved (and the note written
+          against it) is always the one the user clicked, never `open[0]`. */}
+      <SectionHeader title="Violations · today" subtitle={`${open.length} open`} />
       <div className="mt-4 flex flex-col gap-2">
         {violations.length === 0 ? (
           <p className="py-8 text-center text-body text-success">● No violations today</p>
         ) : (
-          violations.map((violation) => (
+          violations.map((violation) => {
+            // WB-061 — a RESOLVED / AUTO_CLEARED violation stays listed (audit trail) but muted, with
+            // a status badge, so it can never be mistaken for an open one next to "0 open".
+            const isOpen = violation.status === 'OPEN';
+            return (
             <div
               key={violation.id}
+              data-status={isOpen ? 'open' : 'resolved'}
               className={cn(
                 'flex items-start gap-3 rounded-md p-3',
-                isWarning(violation) ? 'bg-warning-soft' : 'bg-danger-soft',
+                !isOpen ? 'bg-bg-subtle' : isWarning(violation) ? 'bg-warning-soft' : 'bg-danger-soft',
               )}
             >
               <AlertTriangle
                 size={16}
                 strokeWidth={1.75}
-                className={cn('mt-0.5 shrink-0', isWarning(violation) ? 'text-warning' : 'text-danger')}
+                className={cn(
+                  'mt-0.5 shrink-0',
+                  !isOpen ? 'text-text-muted' : isWarning(violation) ? 'text-warning' : 'text-danger',
+                )}
               />
-              <div className="min-w-0">
-                <p className="text-body-strong text-text">{VIOLATION_TITLE[violation.type]}</p>
+              <div className="min-w-0 flex-1">
+                <p className={cn('flex items-center gap-2 text-body-strong', isOpen ? 'text-text' : 'text-text-muted')}>
+                  {VIOLATION_TITLE[violation.type]}
+                  {!isOpen && (
+                    <Badge tone="neutral">
+                      {violation.status === 'AUTO_CLEARED' ? 'Auto-cleared' : 'Resolved'}
+                    </Badge>
+                  )}
+                </p>
                 <p className="tabular text-caption text-text-muted">
                   {isWarning(violation)
                     ? violation.detail
@@ -80,8 +86,21 @@ export function ViolationsCard({
                       )}`}
                 </p>
               </div>
+              {isOpen && (
+                <Can perm="hosEdit" level="FULL">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    aria-label={`Resolve ${VIOLATION_TITLE[violation.type]}`}
+                    onClick={() => setResolving(violation)}
+                  >
+                    Resolve
+                  </Button>
+                </Can>
+              )}
             </div>
-          ))
+            );
+          })
         )}
       </div>
 

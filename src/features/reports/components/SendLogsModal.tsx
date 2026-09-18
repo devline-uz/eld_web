@@ -189,7 +189,9 @@ export function SendLogsModal({ open, onClose, initial, erodsMode, eldIdentifier
   const precheckKnown = result || (uncertified !== null && pendingSegments !== null);
 
   const events = result?.counts.events;
-  const records = `${Number.isFinite(span) ? span : EMPTY.dash} daily logs · ${events ?? EMPTY.dash} events · ${pendingSegments ?? EMPTY.dash} unassigned`;
+  // Daily logs are the RODS days the range holds, not its calendar days (WB-101).
+  const dailyLogs = range.data?.days.length;
+  const records = `${dailyLogs ?? EMPTY.dash} daily logs · ${events ?? EMPTY.dash} events · ${pendingSegments ?? EMPTY.dash} unassigned`;
   const certificate = `ELD registration #${eldIdentifier ?? EMPTY.dash}${builtInTest ? ' · TEST (pending)' : ''}`;
 
   return (

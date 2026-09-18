@@ -16,6 +16,7 @@ import { client } from './client';
 import { endpoints } from './endpoints';
 import { qk, qkRoot } from './queryKeys';
 import { typedCachePolicy } from './queryPolicy';
+import { useDriversLookup } from './lookups';
 import type { OffsetPage } from './types';
 import type { DriverRow } from './vehicles';
 
@@ -51,6 +52,10 @@ export interface MessageRow {
   sentAt: string;
   deliveredAt: string | null;
   readAt: string | null;
+  /** Client-only — never on the wire. Drives the optimistic bubble while `useSendMessage`'s
+   * POST is in flight (`'sending'`) or has failed (`'failed'`, red border + `Retry` per
+   * web/tz.md W-16). Absent for every real (server- or echo-confirmed) message. */
+  status?: 'sending' | 'failed';
 }
 
 export interface ConversationListItem extends ConversationRow {
@@ -75,14 +80,11 @@ function joinConversation(conversation: ConversationRow, driverById: Map<string,
 export function useConversationsList(currentUserId: string | undefined) {
   const conversationsQuery = useQuery({
     queryKey: qk.conversations(),
-    queryFn: () => client.get<{ items: ConversationRow[] }>(endpoints.conversations.list),
+    queryFn: ({ signal }) => client.get<{ items: ConversationRow[] }>(endpoints.conversations.list, { signal }),
     ...typedCachePolicy<{ items: ConversationRow[] }>('list'),
   });
-  const driversQuery = useQuery({
-    queryKey: qk.drivers({ limit: 500 }),
-    queryFn: () => client.list<DriverRow>(endpoints.drivers.list, { limit: 500 }),
-    ...typedCachePolicy<OffsetPage<DriverRow>>('reference'),
-  });
+  // The session-wide `reference` lookup (WB-087) — one key, one policy, shared with every screen.
+  const driversQuery = useDriversLookup();
 
   const items = useMemo(() => {
     const driverById = new Map((driversQuery.data?.items ?? []).map((d) => [d.id, d]));
@@ -94,7 +96,10 @@ export function useConversationsList(currentUserId: string | undefined) {
   return {
     items,
     isLoading: conversationsQuery.isLoading || driversQuery.isLoading,
-    isError: conversationsQuery.isError || driversQuery.isError,
+    // Same class as WB-038 (`paging.ts:91,109`) and `safety.ts` — only the primary query drives the
+    // error state, and only when it has nothing cached. A transient `/drivers` join failure leaves
+    // `driver` null and the row falls back to its title / `Conversation` instead of blanking W-16.
+    isError: conversationsQuery.isError && !conversationsQuery.data,
     refetch: conversationsQuery.refetch,
   };
 }
@@ -104,7 +109,7 @@ export function useConversationsList(currentUserId: string | undefined) {
 export function useMessages(conversationId: string | undefined) {
   return useQuery({
     queryKey: qk.messages(conversationId ?? ''),
-    queryFn: () => client.list<MessageRow>(endpoints.conversations.messages(conversationId as string), { limit: 100 }),
+    queryFn: ({ signal }) => client.list<MessageRow>(endpoints.conversations.messages(conversationId as string), { limit: 100 }, { signal }),
     enabled: Boolean(conversationId),
     ...typedCachePolicy<OffsetPage<MessageRow>>('conversation'),
   });
@@ -141,7 +146,51 @@ export function upsertMessage(
     const withoutDuplicate = prev.items.filter(
       (m) => m.id !== message.id && !(message.clientId && m.clientId === message.clientId),
     );
-    return { ...prev, items: [...withoutDuplicate, message], total: withoutDuplicate.length + 1 };
+    // Keep the server's count (WB-093): only a genuinely new message adds one; replacing the
+    // optimistic placeholder or de-duplicating an echo leaves `total` as it was.
+    const isNew = withoutDuplicate.length === prev.items.length;
+    return { ...prev, items: [...withoutDuplicate, message], total: prev.total + (isNew ? 1 : 0) };
+  });
+}
+
+/** Marks one optimistic message `'sending'` or `'failed'` in place, matched by `clientId` — used
+ * on `useSendMessage` failure (and on retry) so the bubble never looks delivered when it is not
+ * (web/tz.md W-16: red border + `Retry`; never silently dropped or left indistinguishable). */
+export function setMessageStatus(
+  queryClient: ReturnType<typeof useQueryClient>,
+  conversationId: string,
+  clientId: string,
+  status: MessageRow['status'],
+): void {
+  queryClient.setQueryData<OffsetPage<MessageRow> | undefined>(qk.messages(conversationId), (prev) => {
+    if (!prev) return prev;
+    return { ...prev, items: prev.items.map((m) => (m.clientId === clientId ? { ...m, status } : m)) };
+  });
+}
+
+/** WB-117 — there is no `POST /conversations/:id/read` (or similar) on the wire; see
+ * `web/backend-gaps.md` B-67. Rather than render an "Unread" badge/segment that can never clear
+ * for the rest of the session (the previous behaviour), this patches the caller's own
+ * `ConversationParticipant.lastReadAt` in the local cache the moment the conversation is opened —
+ * an honest record of what the panel actually knows (the user did just view these messages), not
+ * a fabricated server value. It does not persist: a refresh, another tab, or the backend's own
+ * copy of `lastReadAt` still shows the conversation unread until B-67 ships a real write path. */
+export function markConversationRead(
+  queryClient: ReturnType<typeof useQueryClient>,
+  conversationId: string,
+  currentUserId: string | undefined,
+): void {
+  if (!currentUserId) return;
+  queryClient.setQueryData<{ items: ConversationRow[] } | undefined>(qk.conversations(), (prev) => {
+    if (!prev) return prev;
+    const readAt = new Date().toISOString();
+    return {
+      items: prev.items.map((c) =>
+        c.id === conversationId
+          ? { ...c, participants: c.participants.map((p) => (p.userId === currentUserId ? { ...p, lastReadAt: readAt } : p)) }
+          : c,
+      ),
+    };
   });
 }
 

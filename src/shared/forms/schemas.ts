@@ -10,7 +10,7 @@ export const vehicleSchema = z.object({
   vin: f.vin(),
   make: f.requiredString(),
   model: f.requiredString(),
-  year: z.number().int().min(1900).max(2100),
+  year: f.vehicleYear(),
   licensePlate: z.string().trim().max(20).optional(),
   licenseState: z.string().trim().length(2).optional(),
   odometer: f.odometer().optional(),
@@ -80,22 +80,42 @@ export const certifySchema = z.object({
   dates: z.array(f.isoDay()).min(1, M.required).max(31),
 });
 
-/** 11.14 · Send logs to a safety official — ≤ 8 days, fmcsa.dot.gov only, comment ≤ 60. */
-export const transferSchema = z
-  .object({
-    method: z.enum(['EMAIL', 'WEB_SERVICE']),
-    recipient: f.inspectorEmail(),
-    outputFileComment: f.outputFileComment(),
-    from: f.isoDay(),
-    to: f.isoDay(),
-  })
-  .refine(
-    (value) => {
-      const span = f.daySpan(value.from, value.to);
-      return Number.isFinite(span) && span >= 1 && span <= 8;
-    },
-    { message: M.transferRange, path: ['to'] },
-  );
+/**
+ * 11.14 · Send logs to a safety official — ≤ 8 days, fmcsa.dot.gov only, comment 1–60.
+ * `method` is spelled as `CreateTransferDto.method` (`WEB_SERVICES | EMAIL`); the inspector address
+ * is required only for `EMAIL` — an eRODS web-services transfer has no recipient (web/bugs.md WB-029).
+ * `transferFields` + `refineTransfer` let a form add its own fields (e.g. 11.14's `driverId`) and
+ * keep these rules as the single source of truth.
+ */
+export const transferFields = z.object({
+  method: z.enum(['WEB_SERVICES', 'EMAIL']),
+  recipient: z.string().trim().optional(),
+  outputFileComment: f.outputFileComment(),
+  from: f.isoDay(),
+  to: f.isoDay(),
+});
+
+export function refineTransfer(
+  value: Pick<z.infer<typeof transferFields>, 'method' | 'recipient' | 'from' | 'to'>,
+  ctx: z.RefinementCtx,
+): void {
+  if (value.method === 'EMAIL') {
+    const parsed = f.inspectorEmail().safeParse(value.recipient ?? '');
+    if (!parsed.success) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['recipient'],
+        message: parsed.error.issues[0]?.message ?? M.inspectorEmail,
+      });
+    }
+  }
+  const span = f.daySpan(value.from, value.to);
+  if (!(Number.isFinite(span) && span >= 1 && span <= LIMITS.transferRangeDays)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['to'], message: M.transferRange });
+  }
+}
+
+export const transferSchema = transferFields.superRefine(refineTransfer);
 export type TransferFormValues = z.infer<typeof transferSchema>;
 
 /** 11.16 · Create work order */

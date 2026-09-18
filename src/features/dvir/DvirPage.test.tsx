@@ -170,4 +170,352 @@ describe('DvirPage', () => {
     renderPage();
     expect(await screen.findByRole('button', { name: /retry/i })).toBeInTheDocument();
   });
+
+  // WB-074 — every `…` row action on Work orders/Schedules now fires its mutation instead of
+  // being a silent no-op.
+  describe('WB-074 row-action menus', () => {
+    it('Work orders: Close calls POST /work-orders/:id/close and toasts', async () => {
+      const user = userEvent.setup();
+      let closed = false;
+      server.use(
+        http.post(url(endpoints.workOrders.close('wo_1')), () => {
+          closed = true;
+          return ok({ id: 'wo_1', status: 'DONE' }, 201);
+        }),
+      );
+      renderPage('/dvir?tab=workOrders');
+
+      await user.click(await screen.findByRole('button', { name: 'Row actions' }));
+      await user.click(await screen.findByText('Close'));
+      await user.click(await screen.findByRole('button', { name: 'Close work order' }));
+
+      expect(await screen.findByText('Work order WO-0001 closed')).toBeInTheDocument();
+      expect(closed).toBe(true);
+    });
+
+    it('Work orders: Cancel calls POST /work-orders/:id/cancel and toasts', async () => {
+      const user = userEvent.setup();
+      let cancelled = false;
+      server.use(
+        http.post(url(endpoints.workOrders.cancel('wo_1')), () => {
+          cancelled = true;
+          return ok({ id: 'wo_1', status: 'CANCELLED' }, 201);
+        }),
+      );
+      renderPage('/dvir?tab=workOrders');
+
+      await user.click(await screen.findByRole('button', { name: 'Row actions' }));
+      await user.click(await screen.findByText('Cancel'));
+      await user.click(await screen.findByRole('button', { name: 'Cancel work order' }));
+
+      expect(await screen.findByText('Work order WO-0001 cancelled')).toBeInTheDocument();
+      expect(cancelled).toBe(true);
+    });
+
+    it('Work orders: Edit calls PATCH /work-orders/:id with the edited fields and toasts', async () => {
+      const user = userEvent.setup();
+      let body: unknown;
+      server.use(
+        http.get(url(endpoints.workOrders.list), () =>
+          ok({
+            items: [
+              {
+                id: 'wo_1',
+                number: 'WO-0001',
+                vehicleId: 'veh_1',
+                title: 'Brake job',
+                priority: 'NORMAL',
+                status: 'OPEN',
+                vendor: 'Shop A',
+                costUsd: '120.00',
+                dueAt: null,
+              },
+            ],
+            page: 1,
+            limit: 25,
+            total: 1,
+            totalPages: 1,
+          }),
+        ),
+        http.patch(url(endpoints.workOrders.update('wo_1')), async ({ request }) => {
+          body = await request.json();
+          return ok({ id: 'wo_1', status: 'OPEN' });
+        }),
+      );
+      renderPage('/dvir?tab=workOrders');
+
+      await screen.findByText('WO-0001');
+      await user.click(await screen.findByRole('button', { name: 'Row actions' }));
+      await user.click(await screen.findByText('Edit'));
+      const titleInput = await screen.findByDisplayValue('Brake job');
+      await user.clear(titleInput);
+      await user.type(titleInput, 'Brake job — urgent');
+      await user.click(await screen.findByRole('button', { name: 'Save changes' }));
+
+      expect(await screen.findByText('Work order WO-0001 updated')).toBeInTheDocument();
+      expect((body as { title?: string })?.title).toBe('Brake job — urgent');
+    });
+
+    it('Schedules: Complete calls POST /maintenance-schedules/:id/complete and toasts', async () => {
+      const user = userEvent.setup();
+      let completed = false;
+      server.use(
+        http.post(url(endpoints.maintenanceSchedules.complete('ms_1')), () => {
+          completed = true;
+          return ok({ id: 'ms_1', lastServiceMi: 994700 }, 201);
+        }),
+      );
+      renderPage('/dvir?tab=schedules');
+
+      await user.click(await screen.findByRole('button', { name: 'Row actions' }));
+      await user.click(await screen.findByText('Complete'));
+      await user.click(await screen.findByRole('button', { name: 'Mark complete' }));
+
+      expect(await screen.findByText('Brake service marked complete')).toBeInTheDocument();
+      expect(completed).toBe(true);
+    });
+
+    it('Schedules: Edit calls PATCH /maintenance-schedules/:id with the edited fields and toasts', async () => {
+      const user = userEvent.setup();
+      let body: unknown;
+      server.use(
+        http.patch(url(endpoints.maintenanceSchedules.update('ms_1')), async ({ request }) => {
+          body = await request.json();
+          return ok({ id: 'ms_1' });
+        }),
+      );
+      renderPage('/dvir?tab=schedules');
+
+      await user.click(await screen.findByRole('button', { name: 'Row actions' }));
+      await user.click(await screen.findByText('Edit'));
+      const nameInput = await screen.findByDisplayValue('Brake service');
+      await user.clear(nameInput);
+      await user.type(nameInput, 'Brake service — full');
+      await user.click(await screen.findByRole('button', { name: 'Save changes' }));
+
+      expect(await screen.findByText('Brake service updated')).toBeInTheDocument();
+      expect((body as { name?: string })?.name).toBe('Brake service — full');
+    });
+
+    it('Schedules: Delete calls DELETE /maintenance-schedules/:id and toasts', async () => {
+      const user = userEvent.setup();
+      let deleted = false;
+      server.use(
+        http.delete(url(endpoints.maintenanceSchedules.remove('ms_1')), () => {
+          deleted = true;
+          return ok({ deleted: true });
+        }),
+      );
+      renderPage('/dvir?tab=schedules');
+
+      await user.click(await screen.findByRole('button', { name: 'Row actions' }));
+      await user.click(await screen.findByText('Delete'));
+      await user.click(await screen.findByRole('button', { name: 'Delete schedule' }));
+
+      expect(await screen.findByText('Brake service deleted')).toBeInTheDocument();
+      expect(deleted).toBe(true);
+    });
+  });
+
+  // WB-075 — the "Return unit to service" checkbox was decorative (never sent); replaced with an
+  // informational note, and the toast states the consequence conditionally instead of asserting one.
+  describe('WB-075 resolve defect — no invented returnToService flag', () => {
+    it('shows the out-of-service consequence as a note, not a checkbox, and never sends returnToService', async () => {
+      const user = userEvent.setup();
+      let body: unknown;
+      server.use(
+        http.get(url(endpoints.defects.list), () =>
+          ok({
+            items: [
+              {
+                id: 'def_1',
+                vehicleId: 'veh_1',
+                category: 'Brake pads',
+                description: 'Worn beyond spec',
+                severity: 'CRITICAL',
+                status: 'OPEN',
+                outOfService: true,
+                createdAt: '2026-09-10T12:00:00.000Z',
+              },
+            ],
+            page: 1,
+            limit: 25,
+            total: 1,
+            totalPages: 1,
+          }),
+        ),
+        http.patch(url(endpoints.defects.resolve('def_1')), async ({ request }) => {
+          body = await request.json();
+          return ok({ id: 'def_1', status: 'REPAIRED' });
+        }),
+      );
+      renderPage('/dvir?tab=defects');
+
+      await user.click(await screen.findByText('Brake pads'));
+      expect(await screen.findByText(/is out of service because of this defect/)).toBeInTheDocument();
+      expect(screen.queryByText(/Return unit .* to service/)).not.toBeInTheDocument();
+
+      await user.type(screen.getByPlaceholderText('Mike Rowan · Shop A'), 'Mike Rowan');
+      await user.type(screen.getByLabelText(/Repair notes/i), 'Replaced pads');
+      await user.click(await screen.findByRole('button', { name: 'Mark as resolved' }));
+
+      await waitFor(() => expect(body).toBeTruthy());
+      expect(body).not.toHaveProperty('returnToService');
+      expect((body as { status: string }).status).toBe('REPAIRED');
+    });
+  });
+
+  // WB-077 — the third "No repair needed" resolution used to be submitted identically to a
+  // completed repair; the API has no NOT_REQUIRED value on this endpoint (backend-gaps.md B-67),
+  // so the distinction is tagged in the only free-text field the DTO offers.
+  describe('WB-077 "No repair needed" is tagged, not silently REPAIRED', () => {
+    it('sends status REPAIRED with a distinguishing note prefix', async () => {
+      const user = userEvent.setup();
+      let body: unknown;
+      server.use(
+        http.get(url(endpoints.defects.list), () =>
+          ok({
+            items: [
+              {
+                id: 'def_1',
+                vehicleId: 'veh_1',
+                category: 'Mirror',
+                description: 'Hairline crack',
+                severity: 'MINOR',
+                status: 'OPEN',
+                outOfService: false,
+                createdAt: '2026-09-10T12:00:00.000Z',
+              },
+            ],
+            page: 1,
+            limit: 25,
+            total: 1,
+            totalPages: 1,
+          }),
+        ),
+        http.patch(url(endpoints.defects.resolve('def_1')), async ({ request }) => {
+          body = await request.json();
+          return ok({ id: 'def_1', status: 'REPAIRED' });
+        }),
+      );
+      renderPage('/dvir?tab=defects');
+
+      await user.click(await screen.findByText('Mirror'));
+      await user.click(await screen.findByText('No repair needed'));
+      await user.type(screen.getByPlaceholderText('Mike Rowan · Shop A'), 'Mike Rowan');
+      await user.type(screen.getByLabelText(/Repair notes/i), 'Inspected, within spec');
+      await user.click(await screen.findByRole('button', { name: 'Mark as resolved' }));
+
+      await waitFor(() => expect(body).toBeTruthy());
+      expect((body as { status: string }).status).toBe('REPAIRED');
+      expect((body as { resolutionNote: string }).resolutionNote).toBe('[No repair needed] Inspected, within spec');
+    });
+  });
+
+  // WB-076 — mechanic sign-off used to hardcode `repairStatus: 'REPAIRED'` for every DVIR. It now
+  // derives a truthful default from the DVIR's defect state and lets the mechanic override it.
+  describe('WB-076 mechanic sign-off — derived repair status, not always REPAIRED', () => {
+    function mockDvirDetail(defects: Array<Record<string, unknown>>) {
+      return [
+        http.get(url(endpoints.dvir.list), () =>
+          ok({
+            items: [
+              {
+                id: 'dvir_1',
+                driverId: 'drv_1',
+                vehicleId: 'veh_1',
+                type: 'PRE_TRIP',
+                submittedAt: new Date().toISOString(),
+                odometerMi: 100000,
+                vehicleCondition: 'DEFECTS_FOUND',
+                repairStatus: 'PENDING',
+              },
+            ],
+            page: 1,
+            limit: 200,
+            total: 1,
+            totalPages: 1,
+          }),
+        ),
+        http.get(url(endpoints.dvir.detail(':id')), () =>
+          ok({
+            id: 'dvir_1',
+            driverId: 'drv_1',
+            vehicleId: 'veh_1',
+            type: 'PRE_TRIP',
+            submittedAt: new Date().toISOString(),
+            odometerMi: 100000,
+            mechanicSignedAt: null,
+            defects,
+            photos: [],
+          }),
+        ),
+      ];
+    }
+
+    it('defaults to "Repair pending" while a defect on the DVIR is still OPEN', async () => {
+      const user = userEvent.setup();
+      let body: unknown;
+      server.use(
+        ...mockDvirDetail([
+          { id: 'def_1', dvirId: 'dvir_1', vehicleId: 'veh_1', category: 'Brakes', severity: 'CRITICAL', status: 'OPEN', outOfService: true },
+        ]),
+        http.post(url(endpoints.dvir.mechanicSignoff('dvir_1')), async ({ request }) => {
+          body = await request.json();
+          return ok({ id: 'dvir_1', mechanicName: 'J. Alvarez', repairStatus: 'PENDING', mechanicSignedAt: new Date().toISOString() });
+        }),
+      );
+      renderPage();
+
+      await user.click(await screen.findByText('Pre-trip'));
+      await user.type(await screen.findByPlaceholderText('Mechanic name'), 'J. Alvarez');
+      await user.click(await screen.findByRole('button', { name: 'Sign off' }));
+
+      await waitFor(() => expect(body).toBeTruthy());
+      expect((body as { repairStatus: string }).repairStatus).toBe('PENDING');
+    });
+
+    it('defaults to "No repair required" when the DVIR raised no defects', async () => {
+      const user = userEvent.setup();
+      let body: unknown;
+      server.use(
+        ...mockDvirDetail([]),
+        http.post(url(endpoints.dvir.mechanicSignoff('dvir_1')), async ({ request }) => {
+          body = await request.json();
+          return ok({ id: 'dvir_1', mechanicName: 'J. Alvarez', repairStatus: 'NOT_REQUIRED', mechanicSignedAt: new Date().toISOString() });
+        }),
+      );
+      renderPage();
+
+      await user.click(await screen.findByText('Pre-trip'));
+      await user.type(await screen.findByPlaceholderText('Mechanic name'), 'J. Alvarez');
+      await user.click(await screen.findByRole('button', { name: 'Sign off' }));
+
+      await waitFor(() => expect(body).toBeTruthy());
+      expect((body as { repairStatus: string }).repairStatus).toBe('NOT_REQUIRED');
+    });
+
+    it('lets the mechanic override the derived status', async () => {
+      const user = userEvent.setup();
+      let body: unknown;
+      server.use(
+        ...mockDvirDetail([
+          { id: 'def_1', dvirId: 'dvir_1', vehicleId: 'veh_1', category: 'Brakes', severity: 'CRITICAL', status: 'OPEN', outOfService: true },
+        ]),
+        http.post(url(endpoints.dvir.mechanicSignoff('dvir_1')), async ({ request }) => {
+          body = await request.json();
+          return ok({ id: 'dvir_1', mechanicName: 'J. Alvarez', repairStatus: 'DEFERRED', mechanicSignedAt: new Date().toISOString() });
+        }),
+      );
+      renderPage();
+
+      await user.click(await screen.findByText('Pre-trip'));
+      await user.selectOptions(await screen.findByRole('combobox'), 'DEFERRED');
+      await user.type(screen.getByPlaceholderText('Mechanic name'), 'J. Alvarez');
+      await user.click(await screen.findByRole('button', { name: 'Sign off' }));
+
+      await waitFor(() => expect(body).toBeTruthy());
+      expect((body as { repairStatus: string }).repairStatus).toBe('DEFERRED');
+    });
+  });
 });

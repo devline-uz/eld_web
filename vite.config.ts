@@ -22,7 +22,9 @@ export default defineConfig({
   },
   build: {
     target: 'es2022',
-    sourcemap: true,
+    // WB-054 — maps are generated for error-tracker upload but never referenced from the bundle;
+    // `scripts/extract-sourcemaps.mjs` (part of `npm run build`) moves them out of dist/.
+    sourcemap: 'hidden',
     chunkSizeWarningLimit: 900,
     rollupOptions: {
       output: {

@@ -25,7 +25,7 @@ import { EMPTY_STATE_COPY } from '@/shared/ui/copy';
 import { DataTable } from '@/shared/ui/DataTable';
 import { Pagination } from '@/shared/ui/Pagination';
 import { EmptyState, ErrorState } from '@/shared/ui/states';
-import { REPORT_LABEL, REPORT_STATUS_BADGE, periodOf, refusalText, saveFile } from '../reportMeta';
+import { REPORT_STATUS_BADGE, reportLabel, periodOf, refusalText, saveFile } from '../reportMeta';
 import { useAnnounceReport } from '../useReportJobs';
 import { ActionAlert } from './ActionAlert';
 
@@ -80,7 +80,7 @@ export function RecentlyGeneratedCard({ timezone, onSchedule, onGenerate }: Rece
       {
         id: 'report',
         header: 'Report',
-        cell: ({ row }) => <span className="font-semibold text-text">{REPORT_LABEL[row.original.type]}</span>,
+        cell: ({ row }) => <span className="font-semibold text-text">{reportLabel(row.original.type)}</span>,
       },
       { id: 'period', header: 'Period', cell: ({ row }) => <span className="tabular-nums">{periodOf(row.original)}</span> },
       {
@@ -112,7 +112,7 @@ export function RecentlyGeneratedCard({ timezone, onSchedule, onGenerate }: Rece
               <Button
                 variant="ghost"
                 iconOnly
-                aria-label={`Download ${REPORT_LABEL[row.original.type]}`}
+                aria-label={`Download ${reportLabel(row.original.type)}`}
                 onClick={() => {
                   setDownloadError(null);
                   fetchReportDownload(row.original.id)

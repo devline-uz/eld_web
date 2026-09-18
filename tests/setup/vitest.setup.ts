@@ -44,3 +44,8 @@ Element.prototype.scrollIntoView ??= () => {};
 Element.prototype.hasPointerCapture ??= () => false;
 Element.prototype.setPointerCapture ??= () => {};
 Element.prototype.releasePointerCapture ??= () => {};
+
+// `maplibre-gl` calls `window.URL.createObjectURL` as a *module-load* side effect (to spin up its
+// worker), so any test that lazy-loads FleetMap crashes on import under jsdom, which has no such
+// API (WB-016). Real browsers provide it; the stub does not change what FleetMap renders.
+window.URL.createObjectURL ??= () => 'blob:mock';

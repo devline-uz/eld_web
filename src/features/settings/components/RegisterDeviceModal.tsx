@@ -9,6 +9,7 @@ import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
 import { ApiError } from '@/shared/api/errors';
 import { useCreateDevice, usePairDevice, type DeviceModel } from '@/shared/api/settingsAdmin';
+import { useVehiclesPicker } from '@/shared/api/vehicles';
 import { Field, inputClass, ToggleRow } from './formKit';
 
 import {
@@ -24,6 +25,7 @@ export function RegisterDeviceModal({ onClose }: { onClose: () => void }) {
 
   const createDevice = useCreateDevice();
   const pairDevice = usePairDevice();
+  const vehiclesQuery = useVehiclesPicker();
 
   const {
     register,
@@ -116,7 +118,14 @@ export function RegisterDeviceModal({ onClose }: { onClose: () => void }) {
 
         <div className="grid grid-cols-2 gap-4">
           <Field label="Assign to unit">
-            <input {...register('vehicleId')} placeholder="Unit 126" disabled={isSubmitting} className={inputClass} />
+            <select {...register('vehicleId')} disabled={isSubmitting} className={inputClass}>
+              <option value="">None</option>
+              {(vehiclesQuery.data?.items ?? []).map((v) => (
+                <option key={v.id} value={v.id}>
+                  {v.unitNumber}
+                </option>
+              ))}
+            </select>
           </Field>
           <Field label="Firmware">
             <input value="L113 (latest)" readOnly className={inputClass} />

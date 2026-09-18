@@ -10,13 +10,14 @@ import { HosMeter } from '@/shared/ui/HosMeter';
 import { ErrorState, LoadingState } from '@/shared/ui/states';
 import { formatHosHours } from '@/shared/format';
 import { useDriverHos } from '@/shared/api/drivers';
+import { cycleRuleLabel } from '../grid';
 
 export function AvailableHoursCard({ driverId }: { driverId: string }) {
   const query = useDriverHos(driverId);
 
   return (
     <Card>
-      <SectionHeader title="Available hours" subtitle="Property-carrying · 70 hr / 8 day" />
+      <SectionHeader title="Available hours" subtitle={cycleRuleLabel(query.data?.cycleLimitSec)} />
       <div className="mt-4">
         {query.isLoading ? (
           <LoadingState rows={4} />

@@ -24,7 +24,7 @@ import {
 import { useRoom } from '@/shared/realtime/useRoom';
 import { TOAST_COPY } from '@/shared/ui/copy';
 import { useToast, type ToastInput } from '@/shared/ui/Toast';
-import { REPORT_LABEL, fileSizeLabel, refusalText, saveFile } from './reportMeta';
+import { reportLabel, fileSizeLabel, refusalText, saveFile } from './reportMeta';
 
 /** A report is announced once per session, whether WS or polling saw READY first. */
 const announced = new Set<string>();
@@ -42,9 +42,9 @@ export function reportReadyToast(
   return {
     kind: 'success',
     title: copy.title,
-    description: report.type === 'FMCSA_PACK' ? copy.description : `${REPORT_LABEL[report.type]} · ${size}`,
+    description: report.type === 'FMCSA_PACK' ? copy.description : `${reportLabel(report.type)} · ${size}`,
     // §13.3 — `Download` fetches a fresh presigned URL at click time (GET /reports/:id/download).
-    action: { label: 'Download', altText: `Download ${REPORT_LABEL[report.type]}`, onClick: onDownload },
+    action: { label: 'Download', altText: `Download ${reportLabel(report.type)}`, onClick: onDownload },
   };
 }
 

@@ -10,7 +10,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
 import { useDynamicSubtitle } from '@/app/layouts/Topbar';
-import { useDriverRoster, useDriverRosterCounts, type DriverRosterEntry } from '@/shared/api/drivers';
+import { useDriverRoster, useDriverRosterCounts, useDriverRosterWindow, type DriverRosterEntry } from '@/shared/api/drivers';
 import { client } from '@/shared/api/client';
 import { endpoints } from '@/shared/api/endpoints';
 import { Button } from '@/shared/ui/Button';
@@ -62,29 +62,41 @@ export default function DriversPage() {
   }
 
   const filters = useMemo(() => parseDriverFilters(params), [params]);
-  // The roster is server-paginated: filters the backend supports (B-55) go to the server so they
-  // apply to every driver, not only the loaded page. The client-side match below stays as-is.
+
+  // WB-103 — the duty-status `status` field, every exemption but `eldExempt`, and the ON_DUTY /
+  // OFF_DUTY segment tabs have no server param on `GET /drivers/roster` (extends B-55,
+  // web/backend-gaps.md): the server-filtered page cannot answer them. `VIOLATIONS` reuses the
+  // real `hasOpenViolation` param instead of narrowing in memory. While one of the unsupported
+  // groups is active the page switches to the reference-cached roster window
+  // (`useDriverRosterWindow`) — the same trade-off `features/vehicles/lib/filters.ts` documents
+  // for W-03/B-54 — instead of presenting the ~10 loaded rows as the complete filtered roster.
+  const useWindow = segment === 'ON_DUTY' || segment === 'OFF_DUTY' || filters.status.length > 0 || filters.exemptions.some((e) => e !== 'eldExempt');
   const serverFilters = useMemo(
     () => ({
       q: q || undefined,
       terminal: filters.terminal ?? undefined,
-      hasOpenViolation: (filters.violationsOnly ? 'true' : undefined) as 'true' | undefined,
+      hasOpenViolation: (filters.violationsOnly || segment === 'VIOLATIONS' ? 'true' : undefined) as 'true' | undefined,
       exempt: (filters.exemptions.includes('eldExempt') ? 'true' : undefined) as 'true' | undefined,
     }),
-    [q, filters],
+    [q, filters, segment],
   );
-  const rosterQuery = useDriverRoster({ page, limit, ...serverFilters });
-  const entries = useMemo(() => rosterQuery.data?.items ?? [], [rosterQuery.data]);
+  const rosterQuery = useDriverRoster({ page, limit, ...serverFilters }, { enabled: !useWindow });
+  const windowQuery = useDriverRosterWindow(serverFilters, useWindow);
+  const entries = useMemo(
+    () => (useWindow ? windowQuery.data?.items : rosterQuery.data?.items) ?? [],
+    [useWindow, windowQuery.data, rosterQuery.data],
+  );
   const terminalOptions = useMemo(
     () => Array.from(new Set(entries.map((e) => e.driver.homeTerminalName).filter(Boolean))).sort(),
     [entries],
   );
 
+  // Duty status still narrows in memory (no server param either way); `VIOLATIONS` is already
+  // applied at the fetch layer via `hasOpenViolation` above.
   const filtered = useMemo(() => {
     let rows = entries;
     if (segment === 'ON_DUTY') rows = rows.filter((r) => r.dutyStatus !== 'OFF_DUTY');
     if (segment === 'OFF_DUTY') rows = rows.filter((r) => r.dutyStatus === 'OFF_DUTY');
-    if (segment === 'VIOLATIONS') rows = rows.filter((r) => r.openViolations > 0);
     rows = rows.filter((r) => matchesDriverFilters(r, filters));
     return rows;
   }, [entries, segment, filters]);
@@ -95,25 +107,24 @@ export default function DriversPage() {
   // page-scoped (`total` for the first number, the page for the other two).
   const counts = useDriverRosterCounts(serverFilters);
 
-  // The segment tabs and the 11.23 groups the roster API has no params for (B-55) narrow the
-  // *current server page* in memory, so the server's `total`/`totalPages` describe a different set
-  // than the table renders: picking `Off duty` left 3 rows on screen under a `1–10 of 58 drivers`
-  // footer that offered 6 pages, each one re-filtering a different slice. While an in-memory
-  // narrowing is in effect the footer counts exactly the rows that are on screen.
-  const clientNarrowed = filtered.length !== entries.length;
-  const serverLastPage = Math.max(1, rosterQuery.data?.totalPages ?? 1);
-  const pageTotal = clientNarrowed ? filtered.length : (rosterQuery.data?.total ?? filtered.length);
-  const pageTotalPages = clientNarrowed ? 1 : serverLastPage;
-  const shownPage = clientNarrowed ? 1 : Math.min(page, serverLastPage);
+  // Server mode: the roster page and its `total`/`totalPages` already describe the whole
+  // server-filtered roster. Window mode: `filtered` is every match inside the reference-cached
+  // window, paged in memory — honest against the window (its size is recorded per gap), not
+  // against only the rows that happened to be on screen.
+  const totalPages = useWindow ? Math.max(1, Math.ceil(filtered.length / limit)) : Math.max(1, rosterQuery.data?.totalPages ?? 1);
+  const shownPage = Math.min(page, totalPages);
+  const pageTotal = useWindow ? filtered.length : (rosterQuery.data?.total ?? filtered.length);
+  const pageRows = useWindow ? filtered.slice((shownPage - 1) * limit, shownPage * limit) : filtered;
 
   // A `page` past the end of the roster (a bookmark, the back button, or drivers deactivated since
   // the link was made) came back with no items at all — the card then showed the "No drivers yet"
   // empty state over a full roster. Snap back to the last page that exists.
   useEffect(() => {
-    if (!rosterQuery.data || page <= serverLastPage) return;
-    setParam('page', String(serverLastPage));
+    const dataReady = useWindow ? Boolean(windowQuery.data) : Boolean(rosterQuery.data);
+    if (!dataReady || page <= totalPages) return;
+    setParam('page', String(totalPages));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, serverLastPage, rosterQuery.data]);
+  }, [page, totalPages, useWindow, rosterQuery.data, windowQuery.data]);
 
   const [addOpen, setAddOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -202,7 +213,9 @@ export default function DriversPage() {
     },
   ];
 
-  const isLoading = rosterQuery.isLoading;
+  const isLoading = useWindow ? windowQuery.isLoading : rosterQuery.isLoading;
+  const isError = useWindow ? windowQuery.isError : rosterQuery.isError;
+  const refetch = () => (useWindow ? windowQuery.refetch() : rosterQuery.refetch());
 
   return (
     <div className="flex flex-col gap-4 xl:max-h-content-h">
@@ -283,8 +296,8 @@ export default function DriversPage() {
       <Card padded={false} className="xl:flex xl:min-h-0 xl:flex-col">
         {isLoading ? (
           <LoadingState className="p-4" />
-        ) : rosterQuery.isError ? (
-          <ErrorState onRetry={() => rosterQuery.refetch()} />
+        ) : isError ? (
+          <ErrorState onRetry={refetch} />
         ) : filtered.length === 0 ? (
           q || countActiveDriverFilters(filters) > 0 ? (
             <EmptyState
@@ -315,7 +328,7 @@ export default function DriversPage() {
                 never grows past the viewport — same pattern as Vehicles. */}
             <div className="xl:min-h-0 xl:overflow-y-auto">
               <DataTable
-                data={filtered}
+                data={pageRows}
                 columns={columns}
                 caption="Drivers"
                 getRowId={(r) => r.driver.id}
@@ -375,7 +388,7 @@ export default function DriversPage() {
               page={shownPage}
               limit={limit}
               total={pageTotal}
-              totalPages={pageTotalPages}
+              totalPages={totalPages}
               itemLabel="drivers"
               onPageChange={(p) => setParam('page', String(p))}
               onLimitChange={(l) => setParam('limit', String(l))}

@@ -108,7 +108,10 @@ export function GraphGrid({
   }
 
   return (
-    <div role="img" aria-label={spoken} className="flex items-stretch gap-3">
+    <div>
+      {/* WB-068 — `role="img"` wraps only the drawn part. Its children are presentational, so the
+          sr-only audit table must be a SIBLING, or it is dropped from the accessibility tree. */}
+      <div role="img" aria-label={spoken} className="flex items-stretch gap-3">
       {/* left column: OFF / SB / D / ON with their sub-labels */}
       <div aria-hidden className="w-hos-labels shrink-0" style={{ paddingTop: GRID.axisHeight }}>
         {ROW_ORDER.map((row) => (
@@ -202,7 +205,8 @@ export function GraphGrid({
                 y="0"
                 width={Math.max(ux(violation.to - violation.from), 0.2)}
                 height={PLOT_HEIGHT}
-                fill="var(--color-danger-soft)"
+                fill={violation.open ? 'var(--color-danger-soft)' : 'var(--color-neutral-soft)'}
+                data-status={violation.open ? 'open' : 'resolved'}
                 data-testid="hos-violation-band"
               />
             ))}
@@ -274,10 +278,11 @@ export function GraphGrid({
                 x2={ux(violation.at)}
                 y1="0"
                 y2={PLOT_HEIGHT}
-                stroke="var(--color-danger)"
+                stroke={violation.open ? 'var(--color-danger)' : 'var(--color-text-muted)'}
                 strokeWidth="1.5"
                 strokeDasharray="3 2"
                 vectorEffect="non-scaling-stroke"
+                data-status={violation.open ? 'open' : 'resolved'}
                 data-testid="hos-violation-mark"
               >
                 <title>{violation.title}</title>
@@ -332,6 +337,8 @@ export function GraphGrid({
             {total.label}
           </div>
         ))}
+      </div>
+
       </div>
 
       {/* the audit-proof text equivalent of everything drawn above */}

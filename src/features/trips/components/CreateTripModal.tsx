@@ -147,7 +147,13 @@ export function CreateTripModal({ onClose }: { onClose: () => void }) {
           <Button variant="secondary" size="lg" disabled={isSubmitting}>
             Save as draft
           </Button>
-          <Button variant="primary" size="lg" loading={isSubmitting} onClick={handleSubmit(onSubmit)}>
+          <Button
+            variant="primary"
+            size="lg"
+            disabled={isSubmitting || assignmentBlocked}
+            loading={isSubmitting}
+            onClick={handleSubmit(onSubmit)}
+          >
             Create trip
           </Button>
         </>

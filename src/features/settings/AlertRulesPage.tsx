@@ -10,6 +10,7 @@ import { usePermission } from '@/shared/auth/usePermission';
 import { Button } from '@/shared/ui/Button';
 import { Badge } from '@/shared/ui/Badge';
 import { Card, SectionHeader } from '@/shared/ui/Card';
+import { ConfirmDelete } from '@/shared/ui/Modal';
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
 import { useToast } from '@/shared/ui/Toast';
 import { ApiError } from '@/shared/api/errors';
@@ -40,6 +41,7 @@ export default function AlertRulesPage() {
   const [segment, setSegment] = useState<Segment>('ALL');
   const [search, setSearch] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<AlertRuleRow | null>(null);
 
   const rows = rulesQuery.rows;
   const active = rows.filter((r) => r.enabled).length;
@@ -195,7 +197,7 @@ export default function AlertRulesPage() {
                           <DropdownMenu.Item className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">Mute for 24 h</DropdownMenu.Item>
                           <DropdownMenu.Separator className="my-1 h-px bg-border" />
                           <DropdownMenu.Item
-                            onSelect={() => deleteRule.mutate(rule.id)}
+                            onSelect={() => setDeleteTarget(rule)}
                             className="cursor-pointer rounded-md px-2 py-1.5 text-body text-danger outline-none hover:bg-danger-soft"
                           >
                             Delete
@@ -212,6 +214,26 @@ export default function AlertRulesPage() {
       </Card>
 
       {createOpen && <NewAlertRuleModal onClose={() => setCreateOpen(false)} />}
+      <ConfirmDelete
+        open={Boolean(deleteTarget)}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => {
+          if (!deleteTarget) return;
+          deleteRule.mutate(deleteTarget.id, {
+            onSuccess: () => {
+              toast({ kind: 'success', title: `Rule ${deleteTarget.name} deleted` });
+              setDeleteTarget(null);
+            },
+            onError: (error) => {
+              toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+              setDeleteTarget(null);
+            },
+          });
+        }}
+        title={`Delete ${deleteTarget?.name ?? 'rule'}?`}
+        description="Deleting this rule stops new alerts from firing. Alerts it already sent stay in the notification history. This cannot be undone."
+        loading={deleteRule.isPending}
+      />
     </div>
   );
 }

@@ -5,7 +5,7 @@
 // `backend/tz.md`. Two things the openapi examples get wrong and the code gets right:
 //   • `graph[]` segments carry `special: 'NONE' | 'PC' | 'YM'` (rods.ts `RodsSegment`) — the grid
 //     needs it to draw personal conveyance / yard move as DASHED lines that do not move the row.
-//   • `summary.dayLengthSec` is 82_800 / 86_400 / 89_600 on a DST day (§23). The grid keeps 24
+//   • `summary.dayLengthSec` is 82_800 / 86_400 / 90_000 on a DST day (§23). The grid keeps 24
 //     columns and measures every coordinate against it.
 //
 // B-6 — `GET /violations` and `POST /violations/:id/resolve` shipped 2026-09-14. W-08 still reads
@@ -69,7 +69,7 @@ export interface RodsDaySummary {
   drivingSec: number;
   onDutySec: number;
   totalDistanceMi: number;
-  /** 82_800 / 86_400 / 89_600 — the DST-correct length of this RODS day (§23). */
+  /** 82_800 / 86_400 / 90_000 — the DST-correct length of this RODS day (§23). */
   dayLengthSec: number;
   certified: boolean;
   certifiedAt: string | null;
@@ -157,8 +157,8 @@ export interface LogEventsResponse {
 export function useLogDay(driverId: string | undefined, date: string) {
   return useQuery({
     queryKey: qk.logDay(driverId ?? '', date),
-    queryFn: () =>
-      client.get<LogDayResponse>(endpoints.logs.day(driverId as string), { params: { date } }),
+    queryFn: ({ signal }) =>
+      client.get<LogDayResponse>(endpoints.logs.day(driverId as string), { params: { date }, signal }),
     enabled: Boolean(driverId) && Boolean(date),
     ...typedCachePolicy<LogDayResponse>('hosDay'),
   });
@@ -181,9 +181,10 @@ export function useLogRange(driverId: string | undefined, from: string, to: stri
 export function useLogEvents(driverId: string | undefined, date: string) {
   return useQuery({
     queryKey: qk.logEvents(driverId ?? '', date),
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       client.get<LogEventsResponse>(endpoints.logs.events(driverId as string), {
         params: { date },
+        signal,
       }),
     enabled: Boolean(driverId) && Boolean(date),
     ...typedCachePolicy<LogEventsResponse>('hosDay'),
@@ -296,8 +297,8 @@ export interface UnidentifiedListParams {
 export function useUnidentifiedSegments(params: UnidentifiedListParams, enabled = true) {
   return useQuery({
     queryKey: qk.unidentified(params),
-    queryFn: () =>
-      client.get<UnidentifiedListResponse>(endpoints.unidentified.list, { params }),
+    queryFn: ({ signal }) =>
+      client.get<UnidentifiedListResponse>(endpoints.unidentified.list, { params, signal }),
     enabled,
     ...typedCachePolicy<UnidentifiedListResponse>('list'),
   });
@@ -309,6 +310,39 @@ export type UnidentifiedAction =
   | { kind: 'reject'; id: string; reason: string };
 
 /**
+ * WB-063 — the actions are posted one by one, so a refusal part-way leaves the earlier ones already
+ * written server-side. The hook rethrows the refusal wrapped with the ids that DID succeed, so the
+ * modal can say so and never re-post them.
+ */
+export class UnidentifiedBatchError extends Error {
+  constructor(
+    readonly error: unknown,
+    readonly succeededIds: string[],
+    readonly failedId: string,
+  ) {
+    super(error instanceof Error ? error.message : 'Unidentified segment action failed');
+    this.name = 'UnidentifiedBatchError';
+  }
+}
+
+function postUnidentifiedAction(action: UnidentifiedAction): Promise<UnidentifiedSegment> {
+  if (action.kind === 'assign') {
+    return client.post<UnidentifiedSegment>(endpoints.unidentified.assign(action.id), {
+      driverId: action.driverId,
+      annotation: action.annotation,
+    });
+  }
+  if (action.kind === 'annotate') {
+    return client.post<UnidentifiedSegment>(endpoints.unidentified.annotate(action.id), {
+      annotation: action.annotation,
+    });
+  }
+  return client.post<UnidentifiedSegment>(endpoints.unidentified.reject(action.id), {
+    reason: action.reason,
+  });
+}
+
+/**
  * ⭐ After an assignment `recordOrigin` STAYS 1 (§7.4 / §23). Nothing in the UI may call the
  * result "driver entered" — the `ORIGIN` column keeps saying `ELD · automatic`.
  */
@@ -317,31 +351,21 @@ export function useResolveUnidentified() {
   return useMutation({
     mutationFn: async (actions: UnidentifiedAction[]) => {
       const results: UnidentifiedSegment[] = [];
-      for (const action of actions) {
-        if (action.kind === 'assign') {
-          results.push(
-            await client.post<UnidentifiedSegment>(endpoints.unidentified.assign(action.id), {
-              driverId: action.driverId,
-              annotation: action.annotation,
-            }),
-          );
-        } else if (action.kind === 'annotate') {
-          results.push(
-            await client.post<UnidentifiedSegment>(endpoints.unidentified.annotate(action.id), {
-              annotation: action.annotation,
-            }),
-          );
-        } else {
-          results.push(
-            await client.post<UnidentifiedSegment>(endpoints.unidentified.reject(action.id), {
-              reason: action.reason,
-            }),
+      for (const [index, action] of actions.entries()) {
+        try {
+          results.push(await postUnidentifiedAction(action));
+        } catch (error) {
+          throw new UnidentifiedBatchError(
+            error,
+            actions.slice(0, index).map((done) => done.id),
+            action.id,
           );
         }
       }
       return results;
     },
-    onSuccess: () => {
+    // WB-063 — settled, not success: after a partial batch the list must drop what was written.
+    onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: qkRoot.unidentified });
       void queryClient.invalidateQueries({ queryKey: qkRoot.logs });
     },

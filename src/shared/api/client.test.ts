@@ -7,7 +7,10 @@ import { endpoints } from './endpoints';
 import { ApiError, NetworkError } from './errors';
 import {
   buildUrl,
+  cancelRefresh,
   client,
+  isTransientRefreshFailure,
+  RefreshCancelledError,
   getAccessToken,
   REFRESH_SUBJECT_TYPE,
   refreshAccessToken,
@@ -130,6 +133,101 @@ describe('rule 2 · single-flight refresh on 401 TOKEN_EXPIRED', () => {
   });
 });
 
+describe('WB-086 · client.blob() obeys rules 2 and 7 like every other verb', () => {
+  const DOWNLOAD = url(endpoints.transfers.download('trf_1'));
+
+  it('refreshes an expired access token single-flight and replays the download', async () => {
+    let refreshes = 0;
+    let downloads = 0;
+    let accessToken = 'expired';
+    setAuthBridge({
+      getAccessToken: () => accessToken,
+      getRefreshToken: () => 'refresh-1',
+      onTokens: ({ accessToken: next }) => {
+        accessToken = next;
+      },
+    });
+    server.use(
+      http.post(url(endpoints.auth.refresh), () => {
+        refreshes += 1;
+        return ok({ accessToken: 'fresh', refreshToken: 'refresh-2', expiresIn: 900 });
+      }),
+      http.get(DOWNLOAD, ({ request }) => {
+        downloads += 1;
+        if (request.headers.get('authorization') !== 'Bearer fresh') {
+          return fail(401, 'TOKEN_EXPIRED', 'Token expired.');
+        }
+        return HttpResponse.text('rods,file');
+      }),
+      http.get(VEHICLES, ({ request }) =>
+        request.headers.get('authorization') === 'Bearer fresh'
+          ? ok({ items: [], page: 1, limit: 25, total: 0, totalPages: 0 })
+          : fail(401, 'TOKEN_EXPIRED', 'Token expired.'),
+      ),
+    );
+
+    // A download and a table refetch racing through the same expired window share one refresh.
+    const [file] = await Promise.all([
+      client.blob(endpoints.transfers.download('trf_1')),
+      client.get(endpoints.vehicles.list),
+    ]);
+
+    expect(file).toBeInstanceOf(Blob);
+    expect(await file.text()).toBe('rods,file');
+    expect(refreshes).toBe(1);
+    expect(downloads).toBe(2);
+  });
+
+  it('refreshes only once for the same download', async () => {
+    let refreshes = 0;
+    setAuthBridge({ getAccessToken: () => 'expired', getRefreshToken: () => 'r' });
+    server.use(
+      http.post(url(endpoints.auth.refresh), () => {
+        refreshes += 1;
+        return ok({ accessToken: 'still-bad' });
+      }),
+      http.get(DOWNLOAD, () => fail(401, 'TOKEN_EXPIRED', 'Token expired.')),
+    );
+
+    await expect(client.blob(endpoints.transfers.download('trf_1'))).rejects.toMatchObject({
+      status: 401,
+      code: 'TOKEN_EXPIRED',
+    });
+    expect(refreshes).toBe(1);
+  });
+
+  it('signs out when the refresh itself fails (rule 3)', async () => {
+    const onSignOut = vi.fn();
+    setAuthBridge({ getAccessToken: () => 'expired', getRefreshToken: () => 'r', onSignOut });
+    server.use(
+      http.post(url(endpoints.auth.refresh), () =>
+        fail(401, 'TOKEN_EXPIRED', 'Refresh token expired.'),
+      ),
+      http.get(DOWNLOAD, () => fail(401, 'TOKEN_EXPIRED', 'Token expired.')),
+    );
+
+    await expect(client.blob(endpoints.transfers.download('trf_1'))).rejects.toBeInstanceOf(ApiError);
+    expect(onSignOut).toHaveBeenCalledWith('expired');
+  });
+
+  it('retries a 5xx download like any GET', async () => {
+    vi.useFakeTimers();
+    let attempts = 0;
+    server.use(
+      http.get(DOWNLOAD, () => {
+        attempts += 1;
+        if (attempts < 3) return fail(503, 'SERVICE_UNAVAILABLE', 'Down.');
+        return HttpResponse.text('rods,file');
+      }),
+    );
+
+    const promise = client.blob(endpoints.transfers.download('trf_1'));
+    await vi.advanceTimersByTimeAsync(5_000);
+    await expect(promise).resolves.toBeInstanceOf(Blob);
+    expect(attempts).toBe(3);
+  });
+});
+
 describe('no access token yet, refresh token in hand → wait for the refresh (WD-073)', () => {
   it('parks parallel requests on one in-flight refresh and sends them with the new token', async () => {
     let token: string | null = null;
@@ -225,6 +323,139 @@ describe('rule 3 · a failed refresh signs out', () => {
 
     await expect(refreshAccessToken()).rejects.toBeInstanceOf(ApiError);
     expect(onSignOut).toHaveBeenCalledWith('revoked');
+  });
+});
+
+describe('WB-079 · a refresh in flight at sign-out never re-persists a token', () => {
+  /** A refresh handler that answers only when the test releases it. */
+  function heldRefresh(respond: () => Response) {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let calls = 0;
+    server.use(
+      http.post(url(endpoints.auth.refresh), async () => {
+        calls += 1;
+        await gate;
+        return respond();
+      }),
+    );
+    return { release, calls: () => calls };
+  }
+
+  it('drops a rotated pair that lands after cancelRefresh() and hands it back for revocation', async () => {
+    const onTokens = vi.fn();
+    const onSignOut = vi.fn();
+    const onTokensDiscarded = vi.fn();
+    setAuthBridge({ getRefreshToken: () => 'r-1', onTokens, onSignOut, onTokensDiscarded });
+    const held = heldRefresh(() => ok({ accessToken: 'a-2', refreshToken: 'r-2' }));
+
+    const pending = refreshAccessToken();
+    await vi.waitFor(() => expect(held.calls()).toBe(1));
+    cancelRefresh(); // sign-out
+    held.release();
+
+    await expect(pending).rejects.toBeInstanceOf(RefreshCancelledError);
+    expect(onTokens).not.toHaveBeenCalled();
+    expect(onSignOut).not.toHaveBeenCalled();
+    expect(onTokensDiscarded).toHaveBeenCalledWith({ accessToken: 'a-2', refreshToken: 'r-2' });
+    expect(getAccessToken()).toBeNull();
+  });
+
+  it('a rejection that lands after sign-out does not sign out a second time', async () => {
+    const onSignOut = vi.fn();
+    setAuthBridge({ getRefreshToken: () => 'r-1', onSignOut });
+    const held = heldRefresh(() => fail(401, 'TOKEN_EXPIRED', 'Refresh token expired.'));
+
+    const pending = refreshAccessToken();
+    await vi.waitFor(() => expect(held.calls()).toBe(1));
+    cancelRefresh();
+    held.release();
+
+    await expect(pending).rejects.toBeInstanceOf(RefreshCancelledError);
+    expect(onSignOut).not.toHaveBeenCalled();
+  });
+
+  it('the next session gets its own refresh; the stale one cannot clear its slot', async () => {
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => (releaseFirst = resolve));
+    let calls = 0;
+    server.use(
+      http.post(url(endpoints.auth.refresh), async () => {
+        calls += 1;
+        if (calls === 1) {
+          await firstGate;
+          return ok({ accessToken: 'stale', refreshToken: 'stale-rt' });
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return ok({ accessToken: 'fresh', refreshToken: 'fresh-rt' });
+      }),
+    );
+    const onTokens = vi.fn();
+    setAuthBridge({ getRefreshToken: () => 'r', onTokens });
+
+    const stale = refreshAccessToken();
+    await vi.waitFor(() => expect(calls).toBe(1));
+    cancelRefresh();
+    const fresh = refreshAccessToken();
+    releaseFirst();
+    await expect(stale).rejects.toBeInstanceOf(RefreshCancelledError);
+    // Still single-flight for the new session: a parallel caller joins the same request.
+    expect(refreshAccessToken()).toBe(fresh);
+    await expect(fresh).resolves.toBe('fresh');
+    expect(calls).toBe(2);
+    expect(onTokens).toHaveBeenCalledTimes(1);
+    expect(onTokens).toHaveBeenCalledWith(expect.objectContaining({ refreshToken: 'fresh-rt' }));
+  });
+});
+
+describe('WB-080 · a refresh that fails in transit is not a sign-out', () => {
+  it('a network failure rejects with NetworkError and keeps the session', async () => {
+    const onSignOut = vi.fn();
+    setAuthBridge({ getRefreshToken: () => 'r', onSignOut });
+    server.use(http.post(url(endpoints.auth.refresh), () => HttpResponse.error()));
+
+    const error = await refreshAccessToken().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(NetworkError);
+    expect(isTransientRefreshFailure(error)).toBe(true);
+    expect(onSignOut).not.toHaveBeenCalled();
+  });
+
+  it.each([500, 502, 503, 408, 429])('a %i keeps the session', async (statusCode) => {
+    const onSignOut = vi.fn();
+    setAuthBridge({ getRefreshToken: () => 'r', onSignOut });
+    server.use(
+      http.post(url(endpoints.auth.refresh), () => fail(statusCode, 'SERVICE_UNAVAILABLE', 'Down.')),
+    );
+
+    const error = await refreshAccessToken().catch((e: unknown) => e);
+    expect(isTransientRefreshFailure(error)).toBe(true);
+    expect(onSignOut).not.toHaveBeenCalled();
+  });
+
+  it('a 401 on the refresh is a verdict: not transient, signs out', async () => {
+    const onSignOut = vi.fn();
+    setAuthBridge({ getRefreshToken: () => 'r', onSignOut });
+    server.use(
+      http.post(url(endpoints.auth.refresh), () =>
+        fail(401, 'REFRESH_TOKEN_REUSED', 'Refresh token reuse detected.'),
+      ),
+    );
+
+    const error = await refreshAccessToken().catch((e: unknown) => e);
+    expect(isTransientRefreshFailure(error)).toBe(false);
+    expect(onSignOut).toHaveBeenCalledWith('expired');
+  });
+
+  it('a request replayed on a refresh that hit the network fails without signing out', async () => {
+    const onSignOut = vi.fn();
+    setAuthBridge({ getAccessToken: () => 'expired', getRefreshToken: () => 'r', onSignOut });
+    server.use(
+      http.post(url(endpoints.auth.refresh), () => HttpResponse.error()),
+      http.post(VEHICLES, () => fail(401, 'TOKEN_EXPIRED', 'Token expired.')),
+    );
+
+    await expect(client.post(endpoints.vehicles.list, {})).rejects.toBeInstanceOf(NetworkError);
+    expect(onSignOut).not.toHaveBeenCalled();
   });
 });
 

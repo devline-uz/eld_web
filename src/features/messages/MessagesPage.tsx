@@ -1,6 +1,6 @@
 // owner: web-dispatch-messaging — W-16 Messages (web/tz.md §10 W-16).
 // Design: web/roles and screens/admin panel/Three-pane driver messaging with context panel.jpg
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Phone, Plus, Search, Send, User } from 'lucide-react';
@@ -19,7 +19,7 @@ import { formatRelativeShort } from '@/shared/format/relative';
 import { formatLocal } from '@/shared/format/datetime';
 import { formatHosHours } from '@/shared/format/hos';
 import { formatSpeed } from '@/shared/format/numbers';
-import { useDriversList, useDriverHos } from '@/shared/api/drivers';
+import { useDriverHos } from '@/shared/api/drivers';
 import { useLiveFleet } from '@/shared/api/liveFleet';
 import { useActiveTrips } from '@/shared/api/trips';
 import {
@@ -28,6 +28,8 @@ import {
   useSendMessage,
   upsertMessage,
   bumpConversation,
+  setMessageStatus,
+  markConversationRead,
   type ConversationListItem,
   type MessageRow,
 } from '@/shared/api/messaging';
@@ -63,7 +65,6 @@ export default function MessagesPage() {
   const [newOpen, setNewOpen] = useState(false);
 
   const conversations = useConversationsList(user?.id);
-  const driversQuery = useDriversList({ limit: 500 });
 
   const filteredConversations = useMemo(() => {
     let rows = conversations.items;
@@ -97,9 +98,35 @@ export default function MessagesPage() {
     },
   });
 
+  /** WB-117 — there is no server mark-read endpoint (backend-gaps.md B-67); opening a still-unread
+   * conversation clears its badge locally, the honest thing the panel can do without one. */
+  useEffect(() => {
+    if (selected?.unread) {
+      markConversationRead(queryClient, selected.id, user?.id);
+    }
+  }, [selected?.id, selected?.unread, queryClient, user?.id]);
+
   const unreadCount = conversations.items.filter((c) => c.unread).length;
   const driverUnit = selected?.driver ? liveFleet.data?.items.find((u) => u.driverId === selected.driver!.id) : undefined;
   const currentTrip = selected?.driver ? trips.rows.find((t) => t.driverId === selected.driver!.id && (t.status === 'IN_PROGRESS' || t.status === 'ASSIGNED')) : undefined;
+
+  /** Sends `body` under `clientId` (a fresh one for a first send, the failed message's own for a
+   * retry — same idempotency key, per §16 rule 2). On failure the optimistic row is marked
+   * `'failed'` in place, never left looking delivered and never silently dropped (WB-116). */
+  function sendOrRetry(body: string, clientId: string) {
+    if (!selected) return;
+    const conversationId = selected.id;
+    setMessageStatus(queryClient, conversationId, clientId, 'sending');
+    sendMessage.mutate(
+      { body, clientId },
+      {
+        onError: () => {
+          setMessageStatus(queryClient, conversationId, clientId, 'failed');
+          toast({ kind: 'error', title: 'Could not send the message.' });
+        },
+      },
+    );
+  }
 
   function handleSend(body: string) {
     const trimmed = body.trim();
@@ -120,18 +147,20 @@ export default function MessagesPage() {
       sentAt: new Date().toISOString(),
       deliveredAt: null,
       readAt: null,
+      status: 'sending',
     };
     upsertMessage(queryClient, selected.id, optimistic);
     setDraft('');
-    sendMessage.mutate(
-      { body: trimmed, clientId },
-      {
-        onError: () => toast({ kind: 'error', title: 'Could not send the message.' }),
-      },
-    );
+    sendOrRetry(trimmed, clientId);
   }
 
-  if (conversations.isLoading || driversQuery.isLoading) {
+  function handleRetry(message: MessageRow) {
+    if (!message.clientId) return;
+    sendOrRetry(message.body, message.clientId);
+  }
+
+  // `conversations.isLoading` already waits for the driver lookup it joins against.
+  if (conversations.isLoading) {
     return (
       <div className="flex h-content-h overflow-hidden rounded-lg border border-border bg-bg-surface">
         <LoadingState className="p-4" />
@@ -279,18 +308,30 @@ export default function MessagesPage() {
                     .sort((a, b) => new Date(a.sentAt).getTime() - new Date(b.sentAt).getTime())
                     .map((message) => {
                       const outgoing = Boolean(message.senderUserId);
+                      const failed = message.status === 'failed';
+                      const sending = message.status === 'sending';
                       return (
-                        <div key={message.id} className={`flex ${outgoing ? 'justify-end' : 'justify-start'}`}>
+                        <div key={message.id} className={`flex flex-col ${outgoing ? 'items-end' : 'items-start'}`}>
                           <div
                             className={`max-w-[70%] rounded-lg px-3 py-2 text-body ${
                               outgoing ? 'bg-primary text-text-inverse' : 'border border-border bg-bg-surface text-text'
-                            }`}
+                            } ${failed ? 'border-2 border-danger' : ''}`}
                           >
                             <p>{message.body}</p>
                             <p className={`mt-1 text-right text-caption ${outgoing ? 'text-white/80' : 'text-text-muted'}`}>
-                              {formatLocal(message.sentAt, 'time')} {outgoing ? (message.readAt ? '✓✓' : '✓') : ''}
+                              {formatLocal(message.sentAt, 'time')}{' '}
+                              {outgoing && !sending && !failed ? (message.readAt ? '✓✓' : '✓') : ''}
+                              {outgoing && sending ? 'Sending…' : ''}
                             </p>
                           </div>
+                          {failed && (
+                            <div className="mt-1 flex items-center gap-2 text-caption text-danger">
+                              <span>Not delivered.</span>
+                              <Button variant="link" size="sm" onClick={() => handleRetry(message)}>
+                                Retry
+                              </Button>
+                            </div>
+                          )}
                         </div>
                       );
                     })}

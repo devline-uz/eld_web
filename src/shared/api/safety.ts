@@ -16,7 +16,7 @@ import { endpoints } from './endpoints';
 import { qk, qkRoot } from './queryKeys';
 import { typedCachePolicy } from './queryPolicy';
 import type { OffsetPage } from './types';
-import { useDriversList } from './drivers';
+import { useDriversLookup } from './lookups';
 import { useVehiclesPicker, type DriverRow, type VehicleRow } from './vehicles';
 
 export type SafetyEventType = 'HARSH_BRAKING' | 'HARSH_ACCEL' | 'HARSH_TURN' | 'SPEEDING' | 'SEATBELT';
@@ -79,10 +79,11 @@ export interface SafetyEventListParams {
 export function useSafetyEventsList(params: SafetyEventListParams) {
   const eventsQuery = useQuery({
     queryKey: qk.safetyEvents(params),
-    queryFn: () => client.list<SafetyEventRow>(endpoints.safety.events, params),
+    queryFn: ({ signal }) => client.list<SafetyEventRow>(endpoints.safety.events, params, { signal }),
     ...typedCachePolicy<OffsetPage<SafetyEventRow>>('list'),
   });
-  const driversQuery = useDriversList({ limit: 500 });
+  // The session-wide `reference` lookup, never the `list` policy on the same key (WB-087).
+  const driversQuery = useDriversLookup();
   const vehiclesQuery = useVehiclesPicker();
 
   const rows = useMemo((): SafetyEventTableRow[] => {
@@ -99,7 +100,11 @@ export function useSafetyEventsList(params: SafetyEventListParams) {
     rows,
     page: eventsQuery.data,
     isLoading: eventsQuery.isLoading || driversQuery.isLoading || vehiclesQuery.isLoading,
-    isError: eventsQuery.isError || driversQuery.isError || vehiclesQuery.isError,
+    // Same class as WB-038 (`paging.ts:91,109`) — the primary query drives the error state, and
+    // only when it has no cached data to fall back on. A transient `/drivers` or `/vehicles`
+    // join failure must not blank the events table when the primary rows are good; DRIVER/UNIT
+    // columns degrade to `—` via `driver`/`vehicle` staying `null` in the join above.
+    isError: eventsQuery.isError && !eventsQuery.data,
     refetch: eventsQuery.refetch,
   };
 }
@@ -119,10 +124,11 @@ export interface ScorecardResponse {
 export function useScorecard(params: ScorecardParams = {}) {
   const scorecardQuery = useQuery({
     queryKey: qk.scorecard(params),
-    queryFn: () => client.get<ScorecardResponse>(endpoints.safety.scorecard, { params }),
+    queryFn: ({ signal }) => client.get<ScorecardResponse>(endpoints.safety.scorecard, { params, signal }),
     ...typedCachePolicy<ScorecardResponse>('list'),
   });
-  const driversQuery = useDriversList({ limit: 500 });
+  // The session-wide `reference` lookup, never the `list` policy on the same key (WB-087).
+  const driversQuery = useDriversLookup();
 
   const rows = useMemo((): ScorecardTableRow[] => {
     const drivers = new Map((driversQuery.data?.items ?? []).map((d) => [d.id, d]));
@@ -136,7 +142,9 @@ export function useScorecard(params: ScorecardParams = {}) {
     periodStart: scorecardQuery.data?.periodStart,
     periodEnd: scorecardQuery.data?.periodEnd,
     isLoading: scorecardQuery.isLoading || driversQuery.isLoading,
-    isError: scorecardQuery.isError || driversQuery.isError,
+    // Same class as WB-038 — a transient `/drivers` join failure must not blank the scorecard
+    // when the primary scorecard rows are good; DRIVER degrades to `—` via `driver` staying null.
+    isError: scorecardQuery.isError && !scorecardQuery.data,
     refetch: scorecardQuery.refetch,
   };
 }

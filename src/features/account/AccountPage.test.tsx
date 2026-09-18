@@ -1,10 +1,10 @@
 // W-26 My profile — four states, profile save, sessions.
 // MSW against the real response shapes observed on the dev API (2026-09-13).
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { configure, render, screen, waitFor, within } from '@testing-library/react';
+import { configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { http } from 'msw';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useNavigate } from 'react-router-dom';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fail, ok, url } from '@/mocks/envelope';
 import { server } from '@/mocks/server';
@@ -214,6 +214,36 @@ describe('W-26 — section anchors (11.26 Account menu, Notifications panel)', (
       expect(scroll).toHaveBeenCalled();
     },
   );
+
+  it('scrolls again when navigated to the hash it is already on (WB-082)', async () => {
+    const scroll = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => undefined);
+    api();
+    function Relink() {
+      const navigate = useNavigate();
+      return (
+        <button type="button" onClick={() => navigate('/account#sessions')}>
+          relink
+        </button>
+      );
+    }
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <MemoryRouter initialEntries={['/account#sessions']}>
+            <Relink />
+            <AccountPage />
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+    await screen.findByLabelText(/First name/);
+    await waitFor(() => expect(scroll).toHaveBeenCalled());
+    const before = scroll.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: 'relink' }));
+    await waitFor(() => expect(scroll.mock.calls.length).toBeGreaterThan(before));
+    expect(scroll.mock.contexts.at(-1)).toBe(document.getElementById('sessions'));
+  });
 
   it('ignores a hash that names no section', async () => {
     const scroll = vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(() => undefined);

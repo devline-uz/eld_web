@@ -18,6 +18,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   useSyncExternalStore,
   type ReactNode,
@@ -42,6 +43,9 @@ const WS_NAMESPACE: string = import.meta.env.VITE_WS_NAMESPACE;
 /** §7.2 — a rejected token disconnects the socket; the server never auto-accepts a retry with the
  * same bad token, so this is the one `disconnect` reason that must not be retried. */
 const SERVER_REJECTED_REASON = 'io server disconnect';
+
+/** The reason socket.io reports for our own `socket.disconnect()` (the token cycle, WB-119). */
+const CLIENT_DISCONNECT_REASON = 'io client disconnect';
 
 /** How often we compare the in-memory access token against the one the socket handshook with.
  * There is no token-change event exposed by shared/auth, so polling is the documented seam. */
@@ -188,6 +192,15 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => () => store.dispose(), [store]);
 
+  /**
+   * web/bugs.md WB-119 — set by the token watcher right before it cycles the socket onto a rotated
+   * access token. That `disconnect → connect` is ours and routine (every ~14 min): nothing was
+   * missed, so it must not invalidate every query nor toast `Reconnected`. Cleared by the next
+   * `connect`, and by any failure in between — once the cycle fails, the connect that eventually
+   * follows is a genuine reconnect again.
+   */
+  const tokenCycle = useRef(false);
+
   /* --- connect once per authenticated session -------------------------------------------- */
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -208,7 +221,9 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
 
     socket.on('connect', () => {
       store.patch({ connected: true, failedAttempts: 0 });
-      if (everConnected) {
+      const rotatedToken = tokenCycle.current;
+      tokenCycle.current = false;
+      if (everConnected && !rotatedToken) {
         // §7.2 — no resume/seq: invalidate every currently-mounted query instead.
         void queryClient.invalidateQueries();
         toast({ kind: 'success', ...TOAST_COPY.reconnected });
@@ -218,6 +233,8 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
 
     socket.on('disconnect', (reason: string) => {
       store.patch({ connected: false });
+      // Only our own `socket.disconnect()` belongs to a token cycle; anything else is a real drop.
+      if (reason !== CLIENT_DISCONNECT_REASON) tokenCycle.current = false;
       if (reason === SERVER_REJECTED_REASON) {
         // A rejected/expired token — this is a sign-out path, not a retry loop.
         signOut();
@@ -225,6 +242,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     });
 
     socket.on('connect_error', () => {
+      tokenCycle.current = false;
       store.incrementFailedAttempts();
     });
 
@@ -236,6 +254,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       socket.disconnect();
       store.setSocket(null);
       store.patch({ connected: false });
+      tokenCycle.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reconnect is handled by the token watcher below, not by re-running this effect
   }, [isAuthenticated, store]);
@@ -250,6 +269,9 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       if (!socket || !current || current === lastToken) return;
       lastToken = current;
       socket.auth = { token: current };
+      // WB-119 — mark the cycle as ours before it starts; the `connect` it produces is not a
+      // reconnect after an outage.
+      tokenCycle.current = true;
       socket.disconnect().connect();
     }, TOKEN_WATCH_MS);
     return () => clearInterval(timer);

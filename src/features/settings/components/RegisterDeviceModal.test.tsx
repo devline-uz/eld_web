@@ -56,7 +56,7 @@ describe('RegisterDeviceModal — 11.20', () => {
     expect(switches[1]).toHaveAttribute('aria-checked', 'true');
   });
 
-  it('registers and pairs to a unit in one submit', async () => {
+  it('registers and pairs to a unit in one submit, sending the picker-selected vehicle id', async () => {
     const user = userEvent.setup();
     let paired: unknown = null;
     server.use(
@@ -71,11 +71,20 @@ describe('RegisterDeviceModal — 11.20', () => {
 
     renderModal();
     await user.type(screen.getByPlaceholderText('PT30_1C4F'), 'PT30_1C4F');
-    await user.type(screen.getByPlaceholderText('Unit 126'), 'veh_1');
+    // WB-109 — "Assign to unit" is a `useVehiclesPicker()`-sourced <select>, never free text; the
+    // option value is the vehicle's real id (`veh_1`), not whatever an admin might type.
+    const unitPicker = await screen.findByLabelText('Assign to unit');
+    expect(unitPicker.tagName).toBe('SELECT');
+    await user.selectOptions(unitPicker, await screen.findByRole('option', { name: '#101' }));
     await user.click(screen.getByRole('button', { name: 'Register device' }));
 
     await waitFor(() => expect(paired).toEqual({ vehicleId: 'veh_1' }));
     expect(await screen.findByText('Device PT30_1C4F registered')).toBeInTheDocument();
+  });
+
+  it('never renders a free-text input for the assigned unit', async () => {
+    renderModal();
+    expect(screen.queryByPlaceholderText('Unit 126')).not.toBeInTheDocument();
   });
 
   it('maps a 409 conflict onto the serial field', async () => {

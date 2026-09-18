@@ -15,7 +15,7 @@ import { Card, SectionHeader } from '@/shared/ui/Card';
 import { Button } from '@/shared/ui/Button';
 import { Badge } from '@/shared/ui/Badge';
 import { DriverPicker, type PickerOption } from '@/shared/ui/DriverPicker';
-import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
+import { EmptyState, ErrorState, ForbiddenState, LoadingState } from '@/shared/ui/states';
 import { EMPTY_STATE_COPY } from '@/shared/ui/copy';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
@@ -27,7 +27,6 @@ import { qk, qkRoot } from '@/shared/api/queryKeys';
 import { useDriversList } from '@/shared/api/drivers';
 import { useVehiclesPicker } from '@/shared/api/vehicles';
 import {
-  RECORD_ORIGIN,
   RECORD_STATUS,
   useLogDay,
   useLogEvents,
@@ -43,7 +42,7 @@ import { LogEventsCard } from './components/LogEventsCard';
 import { RequestLogEditModal } from './components/RequestLogEditModal';
 import { CertifyLogsModal } from './components/CertifyLogsModal';
 import { UnassignedDrivingModal } from './components/UnassignedDrivingModal';
-import { certificationNote, zoneLabel } from './grid';
+import { certificationNote, rodsDayStart, unassignedInDay, validDayKey, zoneLabel } from './grid';
 
 const DAY_MS = 86_400_000;
 
@@ -73,14 +72,25 @@ export default function HosLogsPage() {
   const zone = zoneLabel(timezone);
 
   const todayKey = dayKeyIn(timezone);
-  const date = params.get('date') ?? todayKey;
+  const date = validDayKey(params.get('date'), todayKey);
 
   const dayQuery = useLogDay(driverId || undefined, date);
   const eventsQuery = useLogEvents(driverId || undefined, date);
   const rangeQuery = useLogRange(driverId || undefined, shiftDay(date, -7), date);
+  // WB-057 — the window is the driver's RODS day ± one day, built from `rodsDayStart` (the helper
+  // the grid plots against), never from UTC midnights: for an Eastern terminal the old window
+  // ended at 20:00 ET and a 21:30 ET unidentified segment on the viewed day was never fetched.
+  // `+ 2 days` from the day start clears the end of every RODS day, 23-, 24- or 25-hour (§23).
+  const dayStartMs = rodsDayStart(date, timezone);
   const unassignedQuery = useUnidentifiedSegments(
-    { status: 'PENDING', from: `${shiftDay(date, -1)}T00:00:00.000Z`, to: `${shiftDay(date, 1)}T00:00:00.000Z`, limit: 200 },
-    Boolean(driverId),
+    {
+      status: 'PENDING',
+      from: new Date(dayStartMs - DAY_MS).toISOString(),
+      to: new Date(dayStartMs + 2 * DAY_MS).toISOString(),
+      limit: 200,
+    },
+    // Wait for the driver list, so the window is never first built in the `UTC` fallback zone.
+    Boolean(driverId) && (Boolean(driver) || driversQuery.isFetched),
   );
 
   const vehiclesQuery = useVehiclesPicker();
@@ -156,14 +166,6 @@ export default function HosLogsPage() {
     () => events.filter((event) => event.recordStatus === RECORD_STATUS.proposed).length,
     [events],
   );
-  const driverEditCount = useMemo(
-    () =>
-      events.filter(
-        (event) =>
-          event.recordStatus === RECORD_STATUS.active && event.recordOrigin === RECORD_ORIGIN.driver,
-      ).length,
-    [events],
-  );
 
   const locationAt = useCallback(
     (startAt: string) =>
@@ -182,10 +184,15 @@ export default function HosLogsPage() {
   const driverName = driver ? `${driver.firstName} ${driver.lastName}` : '';
   const unitNumber = driver?.assignedVehicleId ? unitLabel(driver.assignedVehicleId) : EMPTY.unassigned;
 
-  const unassignedSegments = unassignedQuery.data?.items ?? [];
+  // WB-058 — the request deliberately spans three days (WB-057), so everything that counts or
+  // renders a segment keeps only what overlaps `[dayStart, dayStart + dayLengthSec)`. Without this
+  // the chip and the 11.13 subtitle report yesterday's and tomorrow's segments on this day.
+  const dayLengthSec = day?.summary?.dayLengthSec ?? 86_400;
+  const unassignedSegments = unassignedInDay(unassignedQuery.data?.items ?? [], dayStartMs, dayLengthSec);
 
+  // WB-073 — the same full-page forbidden state as every other screen, not an error.
   if (!can('hos')) {
-    return <ErrorState title="You do not have access to this page" />;
+    return <ForbiddenState screenName="HOS Logs" />;
   }
 
   return (
@@ -277,7 +284,23 @@ export default function HosLogsPage() {
               title="24-hour graph grid"
               subtitle={`Recorded by ELD ${EMPTY.notAssigned} · all times ${zone}`}
               action={
-                unassignedSegments.length === 0 ? (
+                // Never claim "No unassigned segments" before the answer is in: while the query is
+                // pending the chip is a skeleton, and a failed query says the count is unknown.
+                unassignedQuery.isPending ? (
+                  <span
+                    aria-busy="true"
+                    data-testid="unassigned-chip-loading"
+                    className="inline-block h-5 w-40 animate-pulse rounded-full bg-bg-subtle"
+                  >
+                    <span className="sr-only">Checking for unassigned segments</span>
+                  </span>
+                ) : unassignedQuery.isError && !unassignedQuery.data ? (
+                  <button type="button" onClick={() => void unassignedQuery.refetch()}>
+                    <Badge tone="warning" dot>
+                      Unassigned segments unavailable · Retry
+                    </Badge>
+                  </button>
+                ) : unassignedSegments.length === 0 ? (
                   <Badge tone="success" dot>
                     No unassigned segments
                   </Badge>
@@ -359,7 +382,9 @@ export default function HosLogsPage() {
             onRetry={() => void eventsQuery.refetch()}
             showAllRecords={showAllRecords}
             onToggleShowAll={setShowAllRecords}
-            pendingEditCount={pendingEditCount + driverEditCount}
+            // WB-065 — only genuinely proposed records (recordStatus = 3) are pending review; an
+            // accepted driver edit (status 1, origin 2) is already applied and never counted here.
+            pendingEditCount={pendingEditCount}
             highlightedEventId={highlightedEventId}
             onRequestEdit={(event) => {
               setEditTarget(event);
@@ -390,6 +415,7 @@ export default function HosLogsPage() {
           signerName={auth.user?.fullName ?? 'Administrator'}
           timezone={timezone}
           days={rangeQuery.data?.days ?? []}
+          recertificationDates={certification?.recertificationRequired ? [date] : []}
           onClose={() => setCertifyOpen(false)}
         />
       )}

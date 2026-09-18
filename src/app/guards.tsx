@@ -11,7 +11,7 @@ export function RequireAuth() {
 
   if (status === 'loading') return <RouteFallback />;
   if (!isAuthenticated) {
-    return <Navigate to="/sign-in" replace state={{ from: location.pathname + location.search }} />;
+    return <Navigate to="/sign-in" replace state={{ from: location.pathname + location.search + location.hash }} />;
   }
   return <Outlet />;
 }

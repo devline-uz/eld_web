@@ -7,7 +7,7 @@ import { Button } from '@/shared/ui/Button';
 import { SeverityBadge } from '@/shared/ui/Badge';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
-import { useDvir, useMechanicSignoff, type DvirDetail } from '@/shared/api/dvir';
+import { useDvir, useMechanicSignoff, type DvirDetail, type RepairStatus } from '@/shared/api/dvir';
 import { LoadingState, ErrorState } from '@/shared/ui/states';
 import { formatLocal } from '@/shared/format/datetime';
 import { formatOdometer } from '@/shared/format/numbers';
@@ -20,6 +20,23 @@ const DVIR_TYPE_LABEL: Record<string, string> = {
   POST_TRIP: 'Post-trip',
   INTERMEDIATE: 'Intermediate',
 };
+
+const REPAIR_STATUS_LABEL: Record<RepairStatus, string> = {
+  NOT_REQUIRED: 'No repair required',
+  PENDING: 'Repair pending',
+  REPAIRED: 'Repaired',
+  DEFERRED: 'Deferred',
+};
+
+/** WB-076 — the sign-off box used to hardcode `repairStatus: 'REPAIRED'` for every DVIR, even
+ * ones with no defects or with defects still OPEN. Derive a truthful default from the DVIR's
+ * defect state and let the mechanic override it before submitting. */
+function deriveRepairStatus(defects: DvirDetail['defects']): RepairStatus {
+  if (defects.length === 0) return 'NOT_REQUIRED';
+  if (defects.some((d) => d.status === 'OPEN' || d.status === 'IN_PROGRESS')) return 'PENDING';
+  if (defects.every((d) => d.status === 'DEFERRED')) return 'DEFERRED';
+  return 'REPAIRED';
+}
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -45,11 +62,13 @@ export function DvirDrawer({
   const signoff = useMechanicSignoff(dvirId);
   const [signoffError, setSignoffError] = useState<string | null>(null);
   const [mechanicName, setMechanicName] = useState('');
+  const [repairStatus, setRepairStatus] = useState<RepairStatus | null>(null);
   const canFull = can('dvir', 'FULL');
 
   const dvir: DvirDetail | undefined = data;
   const openDefects = (dvir?.defects ?? []).filter((d) => d.status === 'OPEN');
   const unresolvedCritical = openDefects.some((d) => d.severity === 'CRITICAL');
+  const defaultRepairStatus = deriveRepairStatus(dvir?.defects ?? []);
 
   return (
     <Drawer
@@ -163,13 +182,24 @@ export function DvirDrawer({
                 {dvir.mechanicSignedAt ? formatLocal(dvir.mechanicSignedAt, 'dateTime') : 'Pending'}
               </p>
               {canFull && !dvir.mechanicSignedAt && (
-                <div className="mt-2 flex items-center gap-2">
+                <div className="mt-2 flex flex-col gap-2">
                   <input
                     value={mechanicName}
                     onChange={(e) => setMechanicName(e.target.value)}
                     placeholder="Mechanic name"
-                    className="h-8 flex-1 rounded-md border border-border bg-bg-surface px-2 text-body text-text"
+                    className="h-8 rounded-md border border-border bg-bg-surface px-2 text-body text-text"
                   />
+                  <select
+                    value={repairStatus ?? defaultRepairStatus}
+                    onChange={(e) => setRepairStatus(e.target.value as RepairStatus)}
+                    className="h-8 rounded-md border border-border bg-bg-surface px-2 text-body text-text"
+                  >
+                    {(Object.keys(REPAIR_STATUS_LABEL) as RepairStatus[]).map((status) => (
+                      <option key={status} value={status}>
+                        {REPAIR_STATUS_LABEL[status]}
+                      </option>
+                    ))}
+                  </select>
                   <Button
                     variant="secondary"
                     size="sm"
@@ -177,7 +207,7 @@ export function DvirDrawer({
                     loading={signoff.isPending}
                     onClick={() =>
                       signoff.mutate(
-                        { mechanicName: mechanicName.trim(), repairStatus: 'REPAIRED' },
+                        { mechanicName: mechanicName.trim(), repairStatus: repairStatus ?? defaultRepairStatus },
                         {
                           onSuccess: () => toast({ kind: 'success', title: 'Mechanic sign-off recorded' }),
                           onError: (error) =>

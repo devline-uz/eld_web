@@ -8,7 +8,7 @@
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { ColumnDef } from '@tanstack/react-table';
-import { Download, FileText, Fuel, Route, TrendingUp } from 'lucide-react';
+import { Download, FileText, Fuel, Route, TrendingUp, Upload } from 'lucide-react';
 import { useDynamicSubtitle } from '@/app/layouts/Topbar';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { Can } from '@/shared/auth/Can';
@@ -145,7 +145,7 @@ export default function IftaReportPage() {
         <div className="ml-auto flex items-center gap-2">
           <Button
             variant="secondary"
-            iconLeft={<Download size={16} strokeWidth={1.75} />}
+            iconLeft={<Upload size={16} strokeWidth={1.75} />}
             loading={exportCsv.isPending}
             disabled={exportCsv.isPending}
             onClick={() => exportCsv.start({ kind: 'ifta', params: { quarter } })}

@@ -78,4 +78,50 @@ describe('11.7 Import drivers', () => {
     expect(screen.getByText(/one-time sign-in code/)).toBeInTheDocument();
     expect(screen.queryByText(/SMS/)).not.toBeInTheDocument();
   });
+
+  it('WB-106 — does not shift columns on a quoted field containing a comma', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ImportDriversModal onClose={() => {}} />);
+
+    const file = new File(
+      ['username,email,address,cdlState\njdoe,jdoe@example.com,"123 Main St, Suite 4",OH'],
+      'drivers.csv',
+      { type: 'text/csv' },
+    );
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(input, file);
+
+    expect(await screen.findByText('drivers.csv')).toBeInTheDocument();
+    // The row is valid: no "missing CDL state" warning, because the comma inside the quoted
+    // address never bled into the cdlState column.
+    expect(screen.queryByText(/Missing CDL issuing state/)).not.toBeInTheDocument();
+  });
+
+  it('WB-107 — flags a duplicate (non-empty) email across rows', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ImportDriversModal onClose={() => {}} />);
+
+    const file = new File(
+      ['username,email,cdlState\njdoe,dup@example.com,OH\nasmith,dup@example.com,OH'],
+      'drivers.csv',
+      { type: 'text/csv' },
+    );
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(input, file);
+
+    expect(await screen.findByText('2 warnings')).toBeInTheDocument();
+  });
+
+  it('WB-108 — rejects a file over the advertised 500-row maximum', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ImportDriversModal onClose={() => {}} />);
+
+    const body = Array.from({ length: 501 }, (_, i) => `jdoe${i},jdoe${i}@example.com,OH`).join('\n');
+    const file = new File([`username,email,cdlState\n${body}`], 'drivers.csv', { type: 'text/csv' });
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(input, file);
+
+    expect(await screen.findByText(/File has 501 rows — 500 rows maximum\./)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Import drivers' })).toBeDisabled();
+  });
 });

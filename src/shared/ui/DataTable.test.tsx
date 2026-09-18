@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useCallback, useMemo, useState } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { DataTable } from './DataTable';
 import { Pagination } from './Pagination';
@@ -76,6 +77,47 @@ describe('<DataTable>', () => {
       />,
     );
     expect(screen.getAllByRole('button', { name: 'Row actions' })).toHaveLength(rows.length);
+  });
+
+  it('keeps an open row-actions menu open across a parent re-render (polling/live update)', async () => {
+    // A live-update tick that re-renders the parent without changing `data`/`columns`/`rowActions`
+    // identity — this is what a polling refetch or a socket event looks like from DataTable's
+    // point of view. Regression for the "DataTable rebuilds its columns every render" bug found
+    // alongside WB-121: an unstable internal `allColumns` used to give TanStack Table a new
+    // `columns` reference on every render, closing any open Radix dropdown mid-interaction.
+    function Harness() {
+      const [tick, setTick] = useState(0);
+      const stableColumns = useMemo<ColumnDef<Row, unknown>[]>(
+        () => [{ id: 'unitNumber', header: 'UNIT #', accessorKey: 'unitNumber' }],
+        [],
+      );
+      const stableRowActions = useCallback((row: Row) => <button>Delete {row.unitNumber}</button>, []);
+      return (
+        <div>
+          <button type="button" onClick={() => setTick((t) => t + 1)}>
+            Force re-render ({tick})
+          </button>
+          <DataTable data={rows} columns={stableColumns} caption="Vehicles" getRowId={(r) => r.id} rowActions={stableRowActions} />
+        </div>
+      );
+    }
+
+    const user = userEvent.setup();
+    render(<Harness />);
+
+    // Grabbed before the menu opens: Radix marks the rest of the document `aria-hidden` while a
+    // dropdown is open, so it is no longer reachable by an accessible-role query afterwards —
+    // that is correct a11y behaviour, not a reason to skip the regression check below.
+    const rerenderButton = screen.getByRole('button', { name: /Force re-render/ });
+
+    const menuTriggers = screen.getAllByRole('button', { name: 'Row actions' });
+    await user.click(menuTriggers[0]!);
+    expect(await screen.findByText('Delete #103')).toBeInTheDocument();
+
+    fireEvent.click(rerenderButton);
+    expect(rerenderButton).toHaveTextContent('Force re-render (1)');
+
+    expect(screen.getByText('Delete #103')).toBeInTheDocument();
   });
 });
 

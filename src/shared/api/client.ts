@@ -45,6 +45,12 @@ export interface AuthBridge {
   onTokens: (tokens: { accessToken: string; refreshToken?: string; expiresAt?: number }) => void;
   /** §6.2 rule 3 — refresh failed; drop everything and land on /sign-in?reason=expired. */
   onSignOut: (reason: 'expired' | 'revoked') => void;
+  /**
+   * A refresh that was already on the wire when the session ended (`cancelRefresh()`) came back
+   * with a freshly rotated pair. It is never persisted; shared/auth revokes it server-side so no
+   * live refresh token outlives a sign-out (web/bugs.md WB-079).
+   */
+  onTokensDiscarded?: (tokens: { accessToken: string; refreshToken?: string }) => void;
 }
 
 let accessToken: string | null = null;
@@ -60,6 +66,7 @@ const defaultBridge: AuthBridge = {
     accessToken = null;
     if (typeof window !== 'undefined') window.location.assign('/sign-in?reason=expired');
   },
+  onTokensDiscarded: () => undefined,
 };
 
 let bridge: AuthBridge = { ...defaultBridge };
@@ -71,7 +78,7 @@ export function setAuthBridge(next: Partial<AuthBridge>): void {
 export function resetAuthBridge(): void {
   bridge = { ...defaultBridge };
   accessToken = null;
-  refreshPromise = null;
+  cancelRefresh();
   if (refreshTimer) clearTimeout(refreshTimer);
   refreshTimer = null;
 }
@@ -145,6 +152,11 @@ interface InternalOptions extends RequestOptions {
   body?: unknown;
   /** Guards rule 2: a replayed request never refreshes again. */
   retriedAfterRefresh?: boolean;
+  /**
+   * Return the raw `Response` instead of unwrapping the JSON envelope, so a binary download goes
+   * through the one request pipeline (rules 2, 7, 9) instead of its own (web/bugs.md WB-086).
+   */
+  raw?: boolean;
 }
 
 const isJson = (res: Response) =>
@@ -204,12 +216,52 @@ async function fetchOnce(options: InternalOptions): Promise<Response> {
 /* ------------------------------------------------------------------ rule 2: single-flight */
 
 let refreshPromise: Promise<string> | null = null;
+/**
+ * Bumped by `cancelRefresh()`. A refresh remembers the generation it started in and, if the
+ * session ended while it was on the wire, neither persists what it got back nor signs out a
+ * second time (web/bugs.md WB-079).
+ */
+let refreshGeneration = 0;
+
+/** The in-flight refresh outlived the session it belonged to; its result was discarded. */
+export class RefreshCancelledError extends Error {
+  constructor() {
+    super('The session ended while the token refresh was in flight.');
+    this.name = 'RefreshCancelledError';
+  }
+}
+
+/**
+ * Sign-out calls this before it clears the tokens: the in-flight refresh (proactive timer or a 401
+ * replay) is detached, so its late response can never write a fresh refresh token back into
+ * `obk.rt` after the user has signed out (web/bugs.md WB-079).
+ */
+export function cancelRefresh(): void {
+  refreshGeneration += 1;
+  refreshPromise = null;
+}
+
+/**
+ * web/bugs.md WB-080 — a refresh that never reached a verdict: the request did not get through
+ * (`NetworkError`), timed out, was throttled, or the server failed (5xx). The refresh token is
+ * still good, so the session is kept and the refresh retried; only a real rejection
+ * (401/403/4xx, e.g. `REFRESH_TOKEN_REUSED`) ends it (§6.2 rule 3).
+ */
+export function isTransientRefreshFailure(error: unknown): boolean {
+  if (error instanceof NetworkError) return true;
+  return error instanceof ApiError && isTransientStatus(error.status);
+}
+
+const isTransientStatus = (status: number) => status >= 500 || status === 408 || status === 429;
 
 /** One refresh at a time; every parallel 401 awaits the same promise (§6.2 rule 2). */
 export function refreshAccessToken(): Promise<string> {
   if (refreshPromise) return refreshPromise;
 
-  refreshPromise = (async () => {
+  const generation = refreshGeneration;
+  const isCurrent = () => generation === refreshGeneration;
+
+  const tracked: Promise<string> = (async () => {
     const refreshToken = bridge.getRefreshToken();
 
     // Without a refresh token the DTO can never be satisfied (`refreshToken` is min 1), so the
@@ -223,6 +275,8 @@ export function refreshAccessToken(): Promise<string> {
       });
     }
 
+    // A `NetworkError` from here propagates untouched — it is not a verdict on the refresh token,
+    // so it never reaches `onSignOut` (WB-080).
     const res = await fetchOnce({
       method: 'POST',
       path: endpoints.auth.refresh,
@@ -231,10 +285,28 @@ export function refreshAccessToken(): Promise<string> {
     });
     const body = await readBody(res);
 
+    if (!isCurrent()) {
+      // Signed out while this was on the wire (WB-079): persist nothing, sign out nothing — but a
+      // pair the server did rotate is handed back for revocation, never dropped live.
+      if (res.ok) {
+        const late = unwrap<{ accessToken?: string; refreshToken?: string }>(body);
+        if (late?.accessToken) {
+          bridge.onTokensDiscarded?.({
+            accessToken: late.accessToken,
+            refreshToken: late.refreshToken,
+          });
+        }
+      }
+      throw new RefreshCancelledError();
+    }
+
     if (!res.ok) {
-      // §6.2 rule 3 — the refresh itself failed: sign out, land on /sign-in?reason=expired.
+      const error = toApiError(res.status, body);
+      // WB-080 — a 5xx/408/429 is the server failing to answer, not rejecting the token: keep it.
+      if (isTransientStatus(res.status)) throw error;
+      // §6.2 rule 3 — the refresh itself was rejected: sign out, land on /sign-in?reason=expired.
       bridge.onSignOut(res.status === 401 ? 'expired' : 'revoked');
-      throw toApiError(res.status, body);
+      throw error;
     }
 
     const data = unwrap<{ accessToken: string; refreshToken?: string; expiresIn?: number }>(body);
@@ -247,10 +319,12 @@ export function refreshAccessToken(): Promise<string> {
     });
     return data.accessToken;
   })().finally(() => {
-    refreshPromise = null;
+    // Only clear our own slot: after `cancelRefresh()` a new session may already own it.
+    if (refreshPromise === tracked) refreshPromise = null;
   });
 
-  return refreshPromise;
+  refreshPromise = tracked;
+  return tracked;
 }
 
 /**
@@ -287,7 +361,7 @@ async function send<T>(options: InternalOptions): Promise<T> {
       throw error;
     }
 
-    if (res.ok) return unwrap<T>(await readBody(res));
+    if (res.ok) return options.raw ? (res as T) : unwrap<T>(await readBody(res));
 
     const body = await readBody(res);
     const error = toApiError(res.status, body);
@@ -398,9 +472,9 @@ export const client = {
   },
   /** Presigned download — the URL is never logged or cached (§17). */
   async blob(path: string, options?: RequestOptions): Promise<Blob> {
-    await ensureAccessToken({ ...options, method: 'GET', path });
-    const res = await fetchOnce({ ...options, method: 'GET', path });
-    if (!res.ok) throw toApiError(res.status, await readBody(res));
+    // WB-086 — goes through `send` so an expired access token is refreshed single-flight and the
+    // download replayed (rule 2), and a 5xx/network blip retries like any other GET (rule 7).
+    const res = await send<Response>({ ...options, method: 'GET', path, raw: true });
     return await res.blob();
   },
 };

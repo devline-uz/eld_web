@@ -16,6 +16,7 @@ import type { Role } from '@/shared/auth/permissions';
 import { EMPTY_STATE_COPY } from '@/shared/ui/copy';
 import { ToastProvider } from '@/shared/ui/Toast';
 import ActivityReportPage from './ActivityReportPage';
+import { ACTIVITY_EXPORT_SCOPE } from './reportMeta';
 import { resetAnnouncedReports } from './useReportJobs';
 
 const mocks = vi.hoisted(() => ({ role: 'FLEET_MANAGER' as string }));
@@ -155,6 +156,44 @@ describe('W-13 Reports · Activity report', () => {
     expect(screen.queryByRole('row', { name: /John Smith/ })).toBeNull();
     expect(screen.getByText('1 drivers · showing 1')).toBeInTheDocument();
     expect(terminal).toBe('Dayton, OH');
+  });
+
+  it('takes rows and totals from the one server-filtered answer — the pager never disagrees (WB-098)', async () => {
+    // The drivers list says drv_1 is in Columbus; the server (the terminal filter's owner) lists it under Dayton.
+    server.use(
+      http.get(url(endpoints.reports.activitySummary), ({ request }) => {
+        const search = new URL(request.url).searchParams;
+        const all = activitySummaryFixture(new URLSearchParams({ page: '1', limit: '10' }));
+        return search.get('terminal') === 'Dayton, OH'
+          ? ok({ ...all, items: all.items.slice(0, 1), total: 1, totalPages: 1 })
+          : ok(all);
+      }),
+    );
+    renderPage(<ActivityReportPage />, `${ROUTE}&terminal=Dayton%2C+OH`);
+    expect(await screen.findByRole('row', { name: /John Smith/ })).toBeInTheDocument();
+    expect(screen.getByText('1 drivers · showing 1')).toBeInTheDocument();
+  });
+
+  it('states that the terminal filter does not reach the exported file (WB-097)', async () => {
+    let params: Record<string, string> = {};
+    server.use(
+      http.get(url(endpoints.reports.activity), ({ request }) => {
+        params = Object.fromEntries(new URL(request.url).searchParams);
+        return ok({ reportId: 'rpt_export_activity', status: 'QUEUED' }, 202);
+      }),
+    );
+    renderPage(<ActivityReportPage />, `${ROUTE}&terminal=Dayton%2C+OH`);
+    await screen.findByRole('row', { name: /William Bond/ });
+    const exportButton = screen.getByRole('button', { name: 'Export CSV' });
+    expect(exportButton).toHaveAccessibleDescription(ACTIVITY_EXPORT_SCOPE);
+    await userEvent.click(exportButton);
+    await waitFor(() => expect(params).toEqual({ from: '2026-09-01', to: '2026-09-12' }));
+  });
+
+  it('keeps a deep-linked terminal selectable when no loaded driver has it', async () => {
+    renderPage(<ActivityReportPage />, `${ROUTE}&terminal=Reno%2C+NV`);
+    expect(await screen.findByText(EMPTY_STATE_COPY.drivers.title)).toBeInTheDocument();
+    expect(screen.getByText('Reno, NV')).toBeInTheDocument();
   });
 
   it.each(['DISPATCHER', 'VIEWER'])('removes Schedule for %s, keeps Export CSV and Print', async (role) => {

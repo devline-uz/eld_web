@@ -9,7 +9,7 @@ import house from './eslint-rules/index.js';
 
 /** ESLint 9 flat config — web/tz.md §2.1 / §2.2. Formatting is Prettier's job (backend/.prettierrc). */
 export default tseslint.config(
-  { ignores: ['dist', 'coverage', 'node_modules', 'stats.html', 'playwright-report', 'test-results'] },
+  { ignores: ['dist', 'coverage', 'node_modules', 'stats.html', 'sourcemaps', 'playwright-report', 'test-results'] },
 
   js.configs.recommended,
   ...tseslint.configs.recommended,

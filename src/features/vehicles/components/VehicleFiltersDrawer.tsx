@@ -21,6 +21,9 @@ const STATUS_LABEL: Record<VehicleStatusFilter, string> = {
 
 const selectClass = 'h-input w-full rounded-md border border-border bg-bg-surface px-3 text-body text-text';
 
+/** Year filter bounds (11.23): no unit predates 1970; the ceiling tracks the current year. */
+const MIN_YEAR = 1970;
+
 export interface VehicleFiltersDrawerProps {
   open: boolean;
   onClose: () => void;
@@ -48,6 +51,14 @@ export function VehicleFiltersDrawer({
   // opens, so the draft always starts fresh from the last applied `filters` without setState in
   // an effect (react-hooks/set-state-in-effect).
   const [draft, setDraft] = useState<VehicleFilters>(filters);
+
+  // Computed fresh each render (not module-level) so a drawer left open across a year boundary
+  // still reads today's ceiling.
+  const currentYear = new Date().getFullYear();
+  const effectiveYearFrom = draft.yearFrom ?? MIN_YEAR;
+  const effectiveYearTo = draft.yearTo ?? currentYear;
+  const yearFromMax = Math.min(currentYear, effectiveYearTo);
+  const yearToMin = Math.max(MIN_YEAR, effectiveYearFrom);
 
   return (
     <FilterDrawer
@@ -105,8 +116,28 @@ export function VehicleFiltersDrawer({
             Year from
             <input
               type="number"
-              value={draft.yearFrom ?? ''}
-              onChange={(e) => setDraft((d) => ({ ...d, yearFrom: e.target.value ? Number(e.target.value) : null }))}
+              min={MIN_YEAR}
+              max={yearFromMax}
+              value={draft.yearFrom ?? MIN_YEAR}
+              onFocus={(e) => e.currentTarget.select()}
+              onChange={(e) => {
+                const raw = e.target.value;
+                if (raw === '') {
+                  setDraft((d) => ({ ...d, yearFrom: null }));
+                  return;
+                }
+                const parsed = Number(raw);
+                if (Number.isNaN(parsed)) return;
+                setDraft((d) => ({ ...d, yearFrom: parsed }));
+              }}
+              onBlur={() =>
+                setDraft((d) => {
+                  if (d.yearFrom == null) return d;
+                  const bound = Math.min(currentYear, d.yearTo ?? currentYear);
+                  const clamped = Math.min(Math.max(d.yearFrom, MIN_YEAR), bound);
+                  return clamped === d.yearFrom ? d : { ...d, yearFrom: clamped };
+                })
+              }
               className={selectClass}
             />
           </label>
@@ -114,8 +145,28 @@ export function VehicleFiltersDrawer({
             Year to
             <input
               type="number"
-              value={draft.yearTo ?? ''}
-              onChange={(e) => setDraft((d) => ({ ...d, yearTo: e.target.value ? Number(e.target.value) : null }))}
+              min={yearToMin}
+              max={currentYear}
+              value={draft.yearTo ?? currentYear}
+              onFocus={(e) => e.currentTarget.select()}
+              onChange={(e) => {
+                const raw = e.target.value;
+                if (raw === '') {
+                  setDraft((d) => ({ ...d, yearTo: null }));
+                  return;
+                }
+                const parsed = Number(raw);
+                if (Number.isNaN(parsed)) return;
+                setDraft((d) => ({ ...d, yearTo: parsed }));
+              }}
+              onBlur={() =>
+                setDraft((d) => {
+                  if (d.yearTo == null) return d;
+                  const bound = Math.max(MIN_YEAR, d.yearFrom ?? MIN_YEAR);
+                  const clamped = Math.max(Math.min(d.yearTo, currentYear), bound);
+                  return clamped === d.yearTo ? d : { ...d, yearTo: clamped };
+                })
+              }
               className={selectClass}
             />
           </label>

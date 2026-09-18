@@ -157,4 +157,33 @@ describe('11.6 Import vehicles', () => {
     expect(await screen.findByText('units.csv')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Import 1 units' })).toBeInTheDocument();
   });
+
+  it('WB-106 — parses quoted fields with embedded commas and strips a leading BOM', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ImportVehiclesModal onClose={() => {}} />);
+
+    const file = new File(
+      ['﻿unitNumber,vin,notes\n201,1FUJGLDR8LLLL0001,"Yard A, bay 3"'],
+      'units.csv',
+      { type: 'text/csv' },
+    );
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(input, file);
+
+    expect(await screen.findByText('units.csv')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Import 1 units' })).toBeInTheDocument();
+  });
+
+  it('WB-108 — rejects a file over the advertised 2,000-row maximum', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ImportVehiclesModal onClose={() => {}} />);
+
+    const body = Array.from({ length: 2001 }, (_, i) => `${200 + i},1FUJGLDR8LLLL${String(i).padStart(4, '0')}`).join('\n');
+    const file = new File([`unitNumber,vin\n${body}`], 'units.csv', { type: 'text/csv' });
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(input, file);
+
+    expect(await screen.findByText(/File has 2001 rows — 2,000 rows maximum\./)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Import units' })).toBeDisabled();
+  });
 });

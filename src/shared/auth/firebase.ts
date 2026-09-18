@@ -94,3 +94,18 @@ export async function consumeGoogleRedirectResult(): Promise<string | null> {
   const result = await authModule.getRedirectResult(auth);
   return result ? await result.user.getIdToken() : null;
 }
+
+/**
+ * WB-085 — end the Firebase (Google) session with the panel's. Firebase persists its user in
+ * IndexedDB, so it would otherwise outlive a sign-out on a shared machine. Best effort: a
+ * failure here never blocks the panel sign-out, and nothing is loaded when Google is off.
+ */
+export async function signOutOfGoogle(): Promise<void> {
+  if (!isGoogleSignInConfigured()) return;
+  try {
+    const { auth, authModule } = await getFirebaseAuth();
+    await authModule.signOut(auth);
+  } catch {
+    /* the panel session is already over; a stale Firebase user is not worth an error */
+  }
+}

@@ -33,6 +33,9 @@ describe('§8.1 units — group thousands, never convert, never round', () => {
     expect(formatMpg(6.4)).toBe('6.4');
     expect(formatEngineHours(1070.2)).toBe('1,070.2 h');
     expect(formatEngineHoursLong(1070.2)).toBe('1,070 h 12 m');
+    // WB-088: a fraction that rounds to 60 m carries into the hour.
+    expect(formatEngineHoursLong(1070.995)).toBe('1,071 h 00 m');
+    expect(formatEngineHoursLong(999.999)).toBe('1,000 h 00 m');
     expect(formatTemperature(79)).toBe('79 °C');
     expect(formatVoltage(13.9)).toBe('13.9 V');
     expect(formatPercent(78)).toBe('78%');

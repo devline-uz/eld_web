@@ -9,7 +9,7 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { ColumnDef } from '@tanstack/react-table';
-import { AlertTriangle, Calendar, ChevronRight, Clock, Download, Printer, Route, Users } from 'lucide-react';
+import { AlertTriangle, Calendar, ChevronRight, Clock, Printer, Route, Upload, Users } from 'lucide-react';
 import { useDynamicSubtitle } from '@/app/layouts/Topbar';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { Can } from '@/shared/auth/Can';
@@ -38,6 +38,7 @@ import { ActionAlert } from './components/ActionAlert';
 import { ScheduleReportModal } from './components/ScheduleReportModal';
 import { SelectMenu } from './components/SelectMenu';
 import {
+  ACTIVITY_EXPORT_SCOPE,
   CARRIER_TZ_FALLBACK,
   dateOfDayKey,
   dayKeyOf,
@@ -87,30 +88,26 @@ export default function ActivityReportPage() {
   // ACTIVE drivers only, as before; the backend otherwise includes every status with a log in range.
   const summary = useActivitySummary({ from, to, page, limit, sort: SORT, status: 'ACTIVE', ...(terminal ? { terminal } : {}) });
   const error = summary.error as ApiError | null;
-  // One drivers read (≤ 200 rows) for the terminal options and the filter safeguard below.
+  // One drivers read (≤ 200 rows) for names and the terminal options. The terminal FILTER is the
+  // server's (`GET /reports/activity/summary?terminal=`, B-46/D-078): rows, total and pages all come
+  // from that one filtered answer, so the pager and the table always agree (web/bugs.md WB-098).
   const drivers = useReportDrivers();
-  const terminalOf = useMemo(
-    () => new Map((drivers.data?.items ?? []).map((d) => [d.id, d.homeTerminalName])),
-    [drivers.data],
-  );
   const nameOf = useMemo(
     () => new Map((drivers.data?.items ?? []).map((d) => [d.id, `${d.firstName} ${d.lastName}`])),
     [drivers.data],
   );
-  const terminals = useMemo(
-    () =>
-      [...new Set((drivers.data?.items ?? []).filter((d) => d.status === 'ACTIVE').map((d) => d.homeTerminalName).filter((t): t is string => Boolean(t)))].sort(),
-    [drivers.data],
-  );
-  const rows = useMemo(() => {
-    const items = summary.data?.items ?? [];
-    if (!terminal) return items;
-    // A server that ignored `terminal` must not list another terminal's driver under this filter.
-    return items.filter((i) => {
-      const t = terminalOf.get(i.driverId);
-      return t === undefined || t === terminal;
-    });
-  }, [summary.data, terminal, terminalOf]);
+  const terminals = useMemo(() => {
+    const known = new Set(
+      (drivers.data?.items ?? [])
+        .filter((d) => d.status === 'ACTIVE')
+        .map((d) => d.homeTerminalName)
+        .filter((t): t is string => Boolean(t)),
+    );
+    // A deep-linked terminal outside the first 200 drivers still shows as the selected option.
+    if (terminal) known.add(terminal);
+    return [...known].sort();
+  }, [drivers.data, terminal]);
+  const rows = summary.data?.items ?? [];
   const total = summary.data?.total ?? 0;
   const totalPages = summary.data?.totalPages ?? 1;
   // The server can answer a page that no longer exists (drivers deactivated, the range narrowed
@@ -224,9 +221,10 @@ export default function ActivityReportPage() {
           </Can>
           <Button
             variant="secondary"
-            iconLeft={<Download size={16} strokeWidth={1.75} />}
+            iconLeft={<Upload size={16} strokeWidth={1.75} />}
             loading={exportCsv.isPending}
             disabled={exportCsv.isPending}
+            aria-describedby={terminal ? 'activity-export-scope' : undefined}
             onClick={() => exportCsv.start({ kind: 'activity', params: { from, to } })}
           >
             Export CSV
@@ -236,6 +234,14 @@ export default function ActivityReportPage() {
           </Button>
         </div>
       </div>
+
+      {terminal && (
+        // `GET /reports/activity` takes only `from`/`to`/`driverId`: the file cannot be narrowed to a
+        // terminal or to ACTIVE drivers, so say so instead of exporting something else (WB-097).
+        <p id="activity-export-scope" className="text-caption text-text-muted print:hidden">
+          {ACTIVITY_EXPORT_SCOPE}
+        </p>
+      )}
 
       <ActionAlert message={exportCsv.error} onDismiss={exportCsv.clearError} />
 

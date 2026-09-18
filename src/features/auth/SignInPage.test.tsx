@@ -2,11 +2,12 @@
 // The Firebase module is mocked: these tests are about what the card does with each outcome.
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/shared/api/errors';
 import { GoogleSignInError } from '@/shared/auth/firebase';
 import type * as FirebaseModuleNamespace from '@/shared/auth/firebase';
+import { RequireAuth } from '@/app/guards';
 import SignInPage from './SignInPage';
 
 // The dev block is decided when the module is evaluated — that is what makes it tree-shakeable
@@ -327,5 +328,71 @@ describe('W-00 · the Google path', () => {
     await waitFor(() =>
       expect(ctx.signInWithGoogleToken).toHaveBeenCalledWith('id-after-redirect'),
     );
+  });
+});
+
+describe('W-00 · back to the deep link after sign-in (WB-081)', () => {
+  beforeEach(() => window.sessionStorage.clear());
+
+  function Where() {
+    const location = useLocation();
+    return <p data-testid="where">{location.pathname + location.search + location.hash}</p>;
+  }
+  function tree(entry: string | { pathname: string; state?: unknown }) {
+    return (
+      <MemoryRouter initialEntries={[entry]}>
+        <Routes>
+          <Route path="/sign-in" element={<SignInPage />} />
+          <Route element={<RequireAuth />}>
+            <Route path="*" element={<Where />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>
+    );
+  }
+  const renderGuarded = (entry: string | { pathname: string; state?: unknown }) =>
+    render(tree(entry));
+
+  it('an emailed link opened while signed out lands there after sign-in', async () => {
+    const entry = '/hos-logs?driverId=d_1&date=2026-09-01#violations';
+    mockAuth({ status: 'unauthenticated' });
+    const view = renderGuarded(entry);
+    expect(screen.getByRole('heading', { name: 'Sign in to your account' })).toBeInTheDocument();
+
+    // Same element tree: the MemoryRouter keeps its history, only the session changes.
+    mockAuth({ status: 'authenticated', isAuthenticated: true });
+    view.rerender(tree(entry));
+    expect(await screen.findByTestId('where')).toHaveTextContent(entry);
+  });
+
+  it('follows the `from` the guard stored, including the hash', async () => {
+    mockAuth({ status: 'authenticated', isAuthenticated: true });
+    renderGuarded({ pathname: '/sign-in', state: { from: '/account#sessions' } });
+    expect(await screen.findByTestId('where')).toHaveTextContent('/account#sessions');
+  });
+
+  it.each(['//evil.example/phish', 'https://evil.example/', '/\\evil.example'])(
+    'refuses the off-origin `from` %s and goes to the dashboard',
+    async (from) => {
+      mockAuth({ status: 'authenticated', isAuthenticated: true });
+      renderGuarded({ pathname: '/sign-in', state: { from } });
+      expect(await screen.findByTestId('where')).toHaveTextContent(/^\/$/);
+    },
+  );
+
+  it('keeps the destination across the signInWithRedirect fallback', async () => {
+    signInWithGoogle.mockResolvedValue({ kind: 'redirecting' });
+    const user = userEvent.setup();
+    renderGuarded({ pathname: '/sign-in', state: { from: '/vehicles/v_9' } });
+    await user.click(screen.getByRole('button', { name: /Continue with Google/ }));
+    expect(window.sessionStorage.getItem('obk.returnTo')).toBe('/vehicles/v_9');
+  });
+
+  it('a popup sign-in leaves nothing behind in sessionStorage', async () => {
+    signInWithGoogle.mockResolvedValue({ kind: 'idToken', idToken: 'google-id-token' });
+    const user = userEvent.setup();
+    renderGuarded({ pathname: '/sign-in', state: { from: '/vehicles/v_9' } });
+    await user.click(screen.getByRole('button', { name: /Continue with Google/ }));
+    await waitFor(() => expect(window.sessionStorage.getItem('obk.returnTo')).toBeNull());
   });
 });

@@ -439,7 +439,11 @@ export function usePackRodsCounts(from: string, to: string, driverId: string | n
   const counts = useMemo((): PackRodsCounts => {
     if (driverId) {
       const days = single.data?.days ?? [];
-      const uncertified = days.filter((d) => !d.certified).length;
+      // WB-095 — the same definition as the fleet branch and the backend's `uncertifiedDayCount`:
+      // days in range − certified DailyLogs. A day with no persisted log is uncertified too, so
+      // counting only persisted-but-uncertified logs said `0` while `POST /transfers` refused.
+      const certifiedDays = days.filter((d) => d.certified).length;
+      const uncertified = single.data ? Math.max(0, rangeDays - certifiedDays) : 0;
       return { dailyLogs: days.length, drivers: single.data ? 1 : 0, uncertified, uncertifiedDrivers: uncertified > 0 ? 1 : 0 };
     }
     const items = fleet.data?.items ?? [];
@@ -481,23 +485,64 @@ export interface DvirReportRow extends DvirRow {
   defects: DefectRow[];
 }
 
+/** Pages of 200 walked back per list before the window is declared incomplete (≈ 2 000 DVIRs). */
+export const DVIR_REPORT_MAX_PAGES = 10;
+
+interface WindowPage<T> extends OffsetPage<T> {
+  /** `true` once the walk reached a row older than the window start or ran out of rows. */
+  complete: boolean;
+}
+
 /**
- * ⛔ Gap B-47 — `GET /dvir` takes no `from`/`to`, so the newest 200 inspections are read and the
- * range is applied to `submittedAt` in the carrier zone by the caller. The joins are the same ones
- * `shared/api/dvir.ts` does, read through `client.list()`.
+ * Walks a newest-first list 200 rows at a time until the oldest row read is older than `sinceMs`,
+ * the list ends, or `DVIR_REPORT_MAX_PAGES` is reached (then `complete: false`).
  */
-export function useDvirReportRows(vehicleId: string | undefined) {
-  const dvirParams = { limit: JOIN_ROWS, sort: 'submittedAt:desc', ...(vehicleId ? { vehicleId } : {}) };
+async function walkBackTo<T>(
+  path: string,
+  params: Record<string, string | number>,
+  timeOf: (row: T) => string,
+  sinceMs: number,
+  signal: AbortSignal,
+): Promise<WindowPage<T>> {
+  const items: T[] = [];
+  let total = 0;
+  for (let page = 1; page <= DVIR_REPORT_MAX_PAGES; page += 1) {
+    const chunk = await client.list<T>(path, { ...params, page, limit: JOIN_ROWS }, { signal });
+    items.push(...chunk.items);
+    total = chunk.total;
+    const oldest = chunk.items[chunk.items.length - 1];
+    if (!oldest || page >= chunk.totalPages || Date.parse(timeOf(oldest)) < sinceMs) {
+      return { items, total, page: 1, limit: items.length, totalPages: 1, complete: true };
+    }
+  }
+  return { items, total, page: 1, limit: items.length, totalPages: 1, complete: false };
+}
+
+/**
+ * ⛔ Gap B-47 — `GET /dvir` takes no `from`/`to`. The newest-first list is walked back page by page
+ * until it passes `from` (one day of slack for any carrier zone), so a range is never judged on the
+ * newest 200 alone (web/bugs.md WB-096); defects are walked back the same way for the join. Past
+ * `DVIR_REPORT_MAX_PAGES` the result says so (`complete: false`) and the caller labels the counts
+ * as a lower bound. The range itself is applied to `submittedAt` in the carrier zone by the caller.
+ */
+export function useDvirReportRows(vehicleId: string | undefined, from: string) {
+  const sinceMs = Date.parse(`${from}T00:00:00Z`) - 86_400_000;
+  const scope: Record<string, string> = vehicleId ? { vehicleId } : {};
+  const dvirParams = { sort: 'submittedAt:desc', ...scope };
+  const defectParams = { sort: 'createdAt:desc', ...scope };
   const dvirs = useQuery({
-    queryKey: qk.dvirs(dvirParams),
-    queryFn: ({ signal }) => client.list<DvirRow>(endpoints.dvir.list, dvirParams, { signal }),
-    ...typedCachePolicy<OffsetPage<DvirRow>>('list'),
+    queryKey: qk.dvirs({ ...dvirParams, reportSince: from }),
+    queryFn: ({ signal }) =>
+      walkBackTo<DvirRow>(endpoints.dvir.list, dvirParams, (r) => r.submittedAt, sinceMs, signal),
+    enabled: Number.isFinite(sinceMs),
+    ...typedCachePolicy<WindowPage<DvirRow>>('list'),
   });
   const defects = useQuery({
-    queryKey: qk.defects({ limit: JOIN_ROWS }),
+    queryKey: qk.defects({ ...defectParams, reportSince: from }),
     queryFn: ({ signal }) =>
-      client.list<DefectRow>(endpoints.defects.list, { limit: JOIN_ROWS }, { signal }),
-    ...typedCachePolicy<OffsetPage<DefectRow>>('list'),
+      walkBackTo<DefectRow>(endpoints.defects.list, defectParams, (d) => d.createdAt, sinceMs, signal),
+    enabled: Number.isFinite(sinceMs),
+    ...typedCachePolicy<WindowPage<DefectRow>>('list'),
   });
   const drivers = useReportDrivers();
   const vehicles = useReportVehicles();
@@ -521,6 +566,8 @@ export function useDvirReportRows(vehicleId: string | undefined) {
   return {
     rows,
     total: dvirs.data?.total ?? 0,
+    /** `false` when the walk stopped at `DVIR_REPORT_MAX_PAGES` before reaching `from`. */
+    complete: (dvirs.data?.complete ?? true) && (defects.data?.complete ?? true),
     isLoading: dvirs.isLoading || defects.isLoading || drivers.isLoading || vehicles.isLoading,
     isError: Boolean(error),
     error,

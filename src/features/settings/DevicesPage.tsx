@@ -12,8 +12,11 @@ import { KpiCard } from '@/shared/ui/KpiCard';
 import { DataTable } from '@/shared/ui/DataTable';
 import { Pagination } from '@/shared/ui/Pagination';
 import { Card } from '@/shared/ui/Card';
+import { ConfirmDelete } from '@/shared/ui/Modal';
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
 import { searchEmptyState } from '@/shared/ui/copy';
+import { useToast } from '@/shared/ui/Toast';
+import { ApiError } from '@/shared/api/errors';
 import { formatRelative } from '@/shared/format/relative';
 import { orDash, orNotAssigned } from '@/shared/format/empty';
 import { client } from '@/shared/api/client';
@@ -45,11 +48,13 @@ const BLE_LABEL: Record<BleState, string> = {
 export default function DevicesPage() {
   const { can } = usePermission();
   const canFull = can('devices', 'FULL');
+  const { toast } = useToast();
   const [segment, setSegment] = useState<Segment>('ALL');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(25);
   const [registerOpen, setRegisterOpen] = useState(false);
+  const [retireTarget, setRetireTarget] = useState<DeviceRow | null>(null);
 
   const statusFilter: DeviceStatus | undefined = segment === 'UNASSIGNED' ? 'UNASSIGNED' : undefined;
   // A new search term or segment re-pages the list from the start, and the page is clamped to the
@@ -247,7 +252,7 @@ export default function DevicesPage() {
                             disabled. */}
                         <DropdownMenu.Separator className="my-1 h-px bg-border" />
                         <DropdownMenu.Item
-                          onSelect={() => removeDevice.mutate(row.id)}
+                          onSelect={() => setRetireTarget(row)}
                           className="cursor-pointer rounded-md px-2 py-1.5 text-body text-danger outline-none hover:bg-danger-soft"
                         >
                           Retire device
@@ -274,6 +279,29 @@ export default function DevicesPage() {
       </Card>
 
       {registerOpen && <RegisterDeviceModal onClose={() => setRegisterOpen(false)} />}
+      <ConfirmDelete
+        open={Boolean(retireTarget)}
+        onClose={() => setRetireTarget(null)}
+        onConfirm={() => {
+          if (!retireTarget) return;
+          removeDevice.mutate(retireTarget.id, {
+            onSuccess: () => {
+              toast({ kind: 'success', title: `Device ${retireTarget.serial} retired` });
+              setRetireTarget(null);
+            },
+            onError: (error) => {
+              toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+              setRetireTarget(null);
+            },
+          });
+        }}
+        title={`Retire device ${retireTarget?.serial ?? ''}?`}
+        description={`Retiring this device removes it from the device inventory${
+          retireTarget?.vehicleId ? ` and unassigns it from ${unitNumberByVehicleId.get(retireTarget.vehicleId) ?? 'its unit'}` : ''
+        }. Historical HOS logs recorded by this device stay in place and remain available for audits. This cannot be undone.`}
+        confirmLabel="Retire device"
+        loading={removeDevice.isPending}
+      />
     </div>
   );
 }

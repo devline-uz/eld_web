@@ -100,7 +100,8 @@ export const qk = {
     ['conversations', id, 'messages', p(params)] as const,
   notifications: (params?: QueryParams) => ['notifications', p(params)] as const,
   preferences: ['me', 'preferences'] as const,
-  search: (q: string) => ['search', q] as const,
+  /** `scope` filters drivers/vehicles, so it is part of the key (web/bugs.md WB-090). */
+  search: (q: string, scope?: QueryParams) => ['search', q, p(scope)] as const,
 } as const;
 
 /** Root of a resource, for `invalidateQueries({ queryKey: qkRoot.vehicles })`. */

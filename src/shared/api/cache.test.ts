@@ -94,10 +94,18 @@ describe('§6.4 cache policies', () => {
     }
   });
 
-  it('matches the backend Prisma enums — an enum change must fail here, not poll forever', () => {
-    // Resolved from the Vitest project root (`web/`), not `import.meta.url`: under the jsdom
-    // environment that is not a file:// URL, so `fileURLToPath` throws before anything is compared.
-    const schemaPath = resolve(process.cwd(), '../backend/prisma/schema.prisma');
+  // Resolved from the Vitest project root (`web/`), not `import.meta.url`: under the jsdom
+  // environment that is not a file:// URL, so `fileURLToPath` throws before anything is compared.
+  // WB-056: the backend repo is a sibling checkout, absent in this repo's own CI and on a web-only
+  // clone — skip (reason in the test title) instead of failing. Set ELD_REQUIRE_BACKEND_SCHEMA=1
+  // wherever both repos are checked out to make a missing schema a hard failure again.
+  const schemaPath = resolve(process.cwd(), '../backend/prisma/schema.prisma');
+  const skipEnumGuard = !existsSync(schemaPath) && process.env.ELD_REQUIRE_BACKEND_SCHEMA !== '1';
+  const enumGuardTitle = skipEnumGuard
+    ? `matches the backend Prisma enums — skipped: ${schemaPath} not found (backend repo not checked out)`
+    : 'matches the backend Prisma enums — an enum change must fail here, not poll forever';
+
+  it.skipIf(skipEnumGuard)(enumGuardTitle, () => {
     if (!existsSync(schemaPath)) throw new Error(`backend Prisma schema not found at ${schemaPath}`);
     const schema = readFileSync(schemaPath, 'utf8');
     const members = (name: string) => {

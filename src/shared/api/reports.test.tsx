@@ -13,9 +13,11 @@ import { cachePolicy } from './cache';
 import { resetAuthBridge, setAccessToken, setAuthBridge } from './client';
 import { endpoints } from './endpoints';
 import {
+  DVIR_REPORT_MAX_PAGES,
   TRANSFER_FINAL_STATUSES,
   isReportPending,
   useActivitySummary,
+  useDvirReportRows,
   usePackRodsCounts,
   type TransferRow,
   type TransferStatus,
@@ -67,9 +69,49 @@ describe('usePackRodsCounts', () => {
     setup();
     const { result } = renderHook(() => usePackRodsCounts('2026-09-01', '2026-09-12', 'drv_1', 12), { wrapper: wrapper() });
     await waitFor(() => expect(result.current.counts.drivers).toBe(1));
-    expect(result.current.counts).toEqual({ dailyLogs: 3, drivers: 1, uncertified: 2, uncertifiedDrivers: 1 });
+    // WB-095 — days in range − certified days (12 − 1), exactly the fleet branch's drv_1 figure
+    // and the backend's `uncertifiedDayCount`; a day with no persisted log is uncertified too.
+    expect(result.current.counts).toEqual({ dailyLogs: 3, drivers: 1, uncertified: 11, uncertifiedDrivers: 1 });
     expect(seen.filter((u) => RANGE_RE.test(u))).toEqual([expect.stringContaining('/logs/drv_1/range')]);
     expect(seen.filter((u) => SUMMARY_RE.test(u))).toHaveLength(0);
+  });
+});
+
+describe('usePackRodsCounts · one definition of "uncertified" (WB-095)', () => {
+  it('a driver with every persisted log certified still counts the days with no log', async () => {
+    setAuthBridge({ getAccessToken: () => 'test-token' });
+    setAccessToken('test-token');
+    server.use(
+      http.get(url(endpoints.logs.range(':driverId')), ({ params }) =>
+        ok({
+          driverId: params.driverId,
+          from: '2026-09-01',
+          to: '2026-09-30',
+          days: ['2026-09-02', '2026-09-03', '2026-09-04', '2026-09-05'].map((date) => ({ date, certified: true })),
+        }),
+      ),
+    );
+    const { result } = renderHook(() => usePackRodsCounts('2026-09-01', '2026-09-30', 'drv_x', 30), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.counts.drivers).toBe(1));
+    expect(result.current.counts).toEqual({ dailyLogs: 4, drivers: 1, uncertified: 26, uncertifiedDrivers: 1 });
+  });
+
+  it('never goes negative and reports a clean driver as zero', async () => {
+    setAuthBridge({ getAccessToken: () => 'test-token' });
+    setAccessToken('test-token');
+    server.use(
+      http.get(url(endpoints.logs.range(':driverId')), ({ params }) =>
+        ok({
+          driverId: params.driverId,
+          from: '2026-09-01',
+          to: '2026-09-02',
+          days: ['2026-09-01', '2026-09-02'].map((date) => ({ date, certified: true })),
+        }),
+      ),
+    );
+    const { result } = renderHook(() => usePackRodsCounts('2026-09-01', '2026-09-02', 'drv_y', 2), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.counts.drivers).toBe(1));
+    expect(result.current.counts).toEqual({ dailyLogs: 2, drivers: 1, uncertified: 0, uncertifiedDrivers: 0 });
   });
 });
 
@@ -104,6 +146,57 @@ describe('cancel on unmount (client.ts rule 9, WB-048)', () => {
     const params = { from: '2026-09-01', to: '2026-09-12', page: 1, limit: 10 };
     const { result } = renderHook(() => useActivitySummary(params), { wrapper: wrapper() });
     await waitFor(() => expect(result.current.data?.total).toBe(2));
+  });
+});
+
+describe('useDvirReportRows — walks back to the range start (WB-096 · gap B-47)', () => {
+  /** A newest-first fleet of `count` DVIRs, one per hour back from 2026-09-18T12:00Z. */
+  const serveDvirs = (count: number, pages: number[]) =>
+    http.get(url(endpoints.dvir.list), ({ request }) => {
+      const search = new URL(request.url).searchParams;
+      const page = Number(search.get('page'));
+      const limit = Number(search.get('limit'));
+      pages.push(page);
+      const items = Array.from({ length: Math.max(0, Math.min(limit, count - (page - 1) * limit)) }, (_, i) => {
+        const n = (page - 1) * limit + i;
+        return {
+          id: `dvir_${n}`,
+          driverId: 'drv_1',
+          vehicleId: 'veh_101',
+          type: 'PRE_TRIP',
+          vehicleCondition: 'SATISFACTORY',
+          submittedAt: new Date(Date.parse('2026-09-18T12:00:00Z') - n * 3_600_000).toISOString(),
+        };
+      });
+      return ok({ items, page, limit, total: count, totalPages: Math.ceil(count / limit) });
+    });
+
+  const setup = () => {
+    setAuthBridge({ getAccessToken: () => 'test-token' });
+    setAccessToken('test-token');
+    server.use(...reportScreenHandlers);
+  };
+
+  it('reads past the newest 200 until a row is older than `from`, then stops', async () => {
+    setup();
+    const pages: number[] = [];
+    server.use(serveDvirs(2_000, pages));
+    // 200 rows = 200 h ≈ 8.3 days per page; Sep 1 needs ~17.5 days (+1 day of zone slack) → 3 pages.
+    const { result } = renderHook(() => useDvirReportRows(undefined, '2026-09-01'), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(pages).toEqual([1, 2, 3]);
+    expect(result.current.rows).toHaveLength(600);
+    expect(result.current.complete).toBe(true);
+  });
+
+  it('says the window is incomplete when the page cap is hit before `from`', async () => {
+    setup();
+    const pages: number[] = [];
+    server.use(serveDvirs(5_000, pages));
+    const { result } = renderHook(() => useDvirReportRows(undefined, '2025-01-01'), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(pages).toHaveLength(DVIR_REPORT_MAX_PAGES);
+    expect(result.current.complete).toBe(false);
   });
 });
 

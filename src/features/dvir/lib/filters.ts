@@ -72,3 +72,14 @@ export function matchesDvirFilters(row: DvirTableRow, filters: DvirFilters): boo
   if (filters.repairStatus.length && !filters.repairStatus.includes(row.repairStatus)) return false;
   return true;
 }
+
+/** WB-078 — a DVIR whose defects sit outside the loaded window (`defectsKnown: false`, B-66) has
+ * an empty `defects` array, so an active severity filter drops it from every bucket with no
+ * indication its true severity is merely unknown rather than absent. Counts, among the rows that
+ * already pass every non-severity group, how many are excluded *only* because their severity is
+ * unknown — so the screen can say so instead of understating the result silently. */
+export function countUnknownSeverityExcluded(rows: DvirTableRow[], filters: DvirFilters): number {
+  if (filters.severity.length === 0) return 0;
+  const withoutSeverity: DvirFilters = { ...filters, severity: [] };
+  return rows.filter((row) => !row.defectsKnown && matchesDvirFilters(row, withoutSeverity)).length;
+}

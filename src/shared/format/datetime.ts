@@ -75,15 +75,36 @@ export function formatCarrier(
   return formatInTz(value, carrierTimezone, format);
 }
 
-/** `ET` / `CT` — the abbreviation a company-context subtitle ends with. */
+/** The `en-US` short zone name (`EDT`, `MST`, `HST`, `GMT+5`) in force at `date`. */
+function shortZoneName(date: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'short' })
+    .formatToParts(date)
+    .filter((part) => part.type === 'timeZoneName')
+    .map((part) => part.value)
+    .join('');
+}
+
+/**
+ * `ET` / `CT` — the abbreviation a company-context subtitle ends with.
+ *
+ * Read from `Intl` for the actual instant; the daylight letter is dropped (`EDT` → `ET`,
+ * `AKST` → `AKT`) only when the zone really alternates between a `…ST` and a `…DT` name that
+ * year. A zone that never observes DST keeps its real label (`America/Phoenix` → `MST`,
+ * `Pacific/Honolulu` → `HST`), and anything else (`GMT+5`) passes through (web/bugs.md WB-092).
+ */
 export function timezoneAbbreviation(timeZone: string, at: DateInput = new Date()): string {
   const date = toDate(at) ?? new Date();
-  const long = formatInTimeZone(date, timeZone, 'zzz');
-  // `EDT` → `ET`: the panel shows the zone, not whether it is daylight time.
-  if (/^[A-Z]{3}$/.test(long) && (long[1] === 'S' || long[1] === 'D')) {
-    return `${long[0]}${long[2]}`;
-  }
-  return long;
+  const current = shortZoneName(date, timeZone);
+  const year = date.getUTCFullYear();
+  // January and July straddle DST in both hemispheres.
+  const [first, second] = [
+    shortZoneName(new Date(Date.UTC(year, 0, 15)), timeZone),
+    shortZoneName(new Date(Date.UTC(year, 6, 15)), timeZone),
+  ].sort() as [string, string];
+  const daylight = /^([A-Z]+)DT$/.exec(first);
+  const standard = /^([A-Z]+)ST$/.exec(second);
+  if (daylight && standard && daylight[1] === standard[1]) return `${standard[1]}T`;
+  return current;
 }
 
 /** `Sep 01 – Sep 10, 2025` — en dash, year once. Zone-explicit, never the browser's. */

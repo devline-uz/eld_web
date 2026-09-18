@@ -160,7 +160,7 @@ export interface DvirsPageParams {
 
 export const dvirsPageQuery = (params: DvirsPageParams): PageQueryOptions<DvirRow> => ({
   queryKey: qk.dvirs(compactParams(params)),
-  queryFn: () => client.list<DvirRow>(endpoints.dvir.list, compactParams(params)),
+  queryFn: ({ signal }) => client.list<DvirRow>(endpoints.dvir.list, compactParams(params), { signal }),
   ...pagePolicy('list'),
 });
 
@@ -229,7 +229,7 @@ export function useRecentDvirs() {
 export function useDvir(id: string | undefined) {
   const dvirQuery = useQuery({
     queryKey: qk.dvir(id ?? ''),
-    queryFn: () => client.get<DvirDetail>(endpoints.dvir.detail(id as string)),
+    queryFn: ({ signal }) => client.get<DvirDetail>(endpoints.dvir.detail(id as string), { signal }),
     enabled: Boolean(id),
     ...typedCachePolicy<DvirDetail>('reference'),
   });
@@ -269,7 +269,7 @@ export interface DefectListParams {
 
 export const defectsPageQuery = (params: DefectListParams): PageQueryOptions<DefectRow> => ({
   queryKey: qk.defects(compactParams(params)),
-  queryFn: () => client.list<DefectRow>(endpoints.defects.list, compactParams(params)),
+  queryFn: ({ signal }) => client.list<DefectRow>(endpoints.defects.list, compactParams(params), { signal }),
   ...pagePolicy('list'),
 });
 
@@ -336,7 +336,7 @@ export function useOpenDefects({ page, limit, search }: OpenDefectsInput) {
 export function useDefect(id: string | undefined) {
   return useQuery({
     queryKey: qk.defect(id ?? ''),
-    queryFn: () => client.get<DefectRow>(endpoints.defects.detail(id as string)),
+    queryFn: ({ signal }) => client.get<DefectRow>(endpoints.defects.detail(id as string), { signal }),
     enabled: Boolean(id),
     ...typedCachePolicy<DefectRow>('reference'),
   });
@@ -383,7 +383,7 @@ export interface WorkOrderListParams {
 
 export const workOrdersPageQuery = (params: WorkOrderListParams): PageQueryOptions<WorkOrderRow> => ({
   queryKey: qk.workOrders(compactParams(params)),
-  queryFn: () => client.list<WorkOrderRow>(endpoints.workOrders.list, compactParams(params)),
+  queryFn: ({ signal }) => client.list<WorkOrderRow>(endpoints.workOrders.list, compactParams(params), { signal }),
   ...pagePolicy('list'),
 });
 
@@ -453,6 +453,22 @@ export function useCancelWorkOrder(id: string) {
   });
 }
 
+/** WB-074 — the `…` `Edit` item on the Work orders tab. `PATCH /work-orders/:id` is a real
+ * endpoint (`endpoints.workOrders.update`); the vehicle and attached defects are not editable
+ * here, only the fields `CreateWorkOrderModal` also collects. */
+export type UpdateWorkOrderPayload = Partial<Omit<CreateWorkOrderPayload, 'vehicleId' | 'defectIds'>>;
+
+export function useUpdateWorkOrder(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: UpdateWorkOrderPayload) => client.patch<WorkOrderRow>(endpoints.workOrders.update(id), payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: qkRoot.workOrders });
+      void queryClient.invalidateQueries({ queryKey: qk.workOrder(id) });
+    },
+  });
+}
+
 /* --------------------------------------------------------------------- Maintenance schedules */
 
 export interface ScheduleListParams {
@@ -466,7 +482,7 @@ export interface ScheduleListParams {
 
 export const schedulesPageQuery = (params: ScheduleListParams): PageQueryOptions<MaintenanceScheduleRow> => ({
   queryKey: qk.schedules(compactParams(params)),
-  queryFn: () => client.list<MaintenanceScheduleRow>(endpoints.maintenanceSchedules.list, compactParams(params)),
+  queryFn: ({ signal }) => client.list<MaintenanceScheduleRow>(endpoints.maintenanceSchedules.list, compactParams(params), { signal }),
   ...pagePolicy('list'),
 });
 
@@ -549,6 +565,21 @@ export function useCreateSchedule() {
   return useMutation({
     mutationFn: (payload: CreateSchedulePayload) =>
       client.post<MaintenanceScheduleRow>(endpoints.maintenanceSchedules.create, payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: qk.schedules() });
+    },
+  });
+}
+
+/** WB-074 — the `…` `Edit` item on the Schedules tab. `PATCH /maintenance-schedules/:id` is a
+ * real endpoint (`endpoints.maintenanceSchedules.update`). */
+export type UpdateSchedulePayload = Partial<CreateSchedulePayload>;
+
+export function useUpdateSchedule(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: UpdateSchedulePayload) =>
+      client.patch<MaintenanceScheduleRow>(endpoints.maintenanceSchedules.update(id), payload),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qk.schedules() });
     },

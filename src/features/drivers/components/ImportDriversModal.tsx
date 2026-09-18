@@ -8,8 +8,10 @@ import { Badge } from '@/shared/ui/Badge';
 import { useToast } from '@/shared/ui/Toast';
 import { useImportDrivers } from '@/shared/api/drivers';
 import { ApiError } from '@/shared/api/errors';
+import { parseCsv } from '@/shared/lib/csv';
 
 const MAX_BYTES = 5 * 1024 * 1024;
+const MAX_ROWS = 500;
 
 export function ImportDriversModal({ onClose }: { onClose: () => void }) {
   const { toast } = useToast();
@@ -22,14 +24,6 @@ export function ImportDriversModal({ onClose }: { onClose: () => void }) {
   const [applyDefaultExemptions, setApplyDefaultExemptions] = useState(true);
   const mutation = useImportDrivers();
 
-  function parseCsv(text: string): Array<Record<string, unknown>> {
-    const [headerLine, ...lines] = text.trim().split(/\r?\n/);
-    const headers = (headerLine ?? '').split(',').map((h) => h.trim());
-    return lines
-      .filter(Boolean)
-      .map((line) => Object.fromEntries(headers.map((h, i) => [h, line.split(',')[i]?.trim()])));
-  }
-
   function handleFile(selected: File) {
     setError(null);
     if (selected.size > MAX_BYTES) {
@@ -38,9 +32,25 @@ export function ImportDriversModal({ onClose }: { onClose: () => void }) {
     }
     selected.text().then((text) => {
       const parsed = parseCsv(text);
+      if (parsed.length > MAX_ROWS) {
+        setError(`File has ${parsed.length} rows — 500 rows maximum.`);
+        setFile(null);
+        setRows([]);
+        setWarnings([]);
+        return;
+      }
       const rowWarnings: string[] = [];
+      const emailCounts = new Map<string, number>();
+      parsed.forEach((row) => {
+        const email = typeof row.email === 'string' ? row.email.trim().toLowerCase() : '';
+        if (email) emailCounts.set(email, (emailCounts.get(email) ?? 0) + 1);
+      });
       parsed.forEach((row, index) => {
-        if (!row.email) rowWarnings.push(`Row ${index + 2}  Missing or duplicate email — driver cannot sign in`);
+        const email = typeof row.email === 'string' ? row.email.trim().toLowerCase() : '';
+        const isDuplicate = email !== '' && (emailCounts.get(email) ?? 0) > 1;
+        if (!email || isDuplicate) {
+          rowWarnings.push(`Row ${index + 2}  Missing or duplicate email — driver cannot sign in`);
+        }
         if (!row.cdlState) rowWarnings.push(`Row ${index + 2}  Missing CDL issuing state — driver will be created as incomplete`);
       });
       setRows(parsed);

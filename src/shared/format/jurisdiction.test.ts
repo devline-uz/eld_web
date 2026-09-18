@@ -4,6 +4,7 @@ import { formatJurisdiction } from './jurisdiction';
 describe('formatJurisdiction', () => {
   it('names a US state from its IFTA code, as the W-12 design draws it', () => {
     expect(formatJurisdiction('OH')).toBe('Ohio');
+    expect(formatJurisdiction('AK')).toBe('Alaska'); // WB-091
     expect(formatJurisdiction('DC')).toBe('District of Columbia');
     expect(formatJurisdiction(' ky ')).toBe('Kentucky');
   });

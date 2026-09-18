@@ -15,7 +15,8 @@ import type { OffsetPage } from './types';
 /** Plain, serialisable query options — usable by `useQuery`, `prefetchQuery` and this hook alike. */
 export interface PageQueryOptions<T> {
   queryKey: readonly unknown[];
-  queryFn: () => Promise<OffsetPage<T>>;
+  /** Receives TanStack's `signal` — client.ts rule 9, aborted when the last observer unmounts. */
+  queryFn: (context: { signal: AbortSignal }) => Promise<OffsetPage<T>>;
   staleTime?: number;
   refetchOnWindowFocus?: boolean;
   refetchOnReconnect?: boolean;

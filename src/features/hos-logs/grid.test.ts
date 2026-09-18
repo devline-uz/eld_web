@@ -23,6 +23,7 @@ import {
   rowTop,
   rowTotals,
   segmentTooltip,
+  unassignedInDay,
   zoneLabel,
 } from './grid';
 import type { HosViolation, RodsGraphSegment, UnidentifiedSegment } from '@/shared/api/hosLogs';
@@ -144,7 +145,12 @@ describe('DST — 23/25-hour days keep 24 columns', () => {
     expect(fractionOf(noon, start, 82_800)).toBeCloseTo(11 / 23, 6);
     // The last instant of a 25-hour day is still the right-hand edge of column 24.
     const fallStart = rodsDayStart('2026-11-01', TZ);
-    expect(fractionOf(fallStart + 89_600 * 1000, fallStart, 89_600)).toBe(1);
+    expect(fractionOf(fallStart + 90_000 * 1000, fallStart, 90_000)).toBe(1);
+  });
+
+  it('WB-072 — a fall-back day is 25 h = 90 000 s, a spring-forward day 23 h = 82 800 s', () => {
+    expect((rodsDayStart('2026-11-02', TZ) - rodsDayStart('2026-11-01', TZ)) / 1000).toBe(90_000);
+    expect((rodsDayStart('2026-03-09', TZ) - rodsDayStart('2026-03-08', TZ)) / 1000).toBe(82_800);
   });
 
   it('clamps anything outside the day to [0, 1]', () => {
@@ -228,6 +234,20 @@ describe('violations and unassigned segments', () => {
     expect(plotted.title).toBe('11-hour driving limit');
     expect(plotted.at).toBeCloseTo(plotted.to, 10);
     expect(plotted.to - plotted.from).toBeCloseTo(1560 / 86_400, 8);
+    expect(plotted.open).toBe(true);
+  });
+
+  it('WB-061 — keeps a resolved violation on the grid, flagged not-open and titled Resolved', () => {
+    const [resolved, cleared] = plotViolations(
+      [
+        { ...violation, id: 'v2', status: 'RESOLVED' },
+        { ...violation, id: 'v3', status: 'AUTO_CLEARED' },
+      ],
+      dayStart,
+      86_400,
+    );
+    expect(resolved).toMatchObject({ id: 'v2', open: false, title: '11-hour driving limit · Resolved' });
+    expect(cleared).toMatchObject({ id: 'v3', open: false });
   });
 
   it('keeps only the unassigned segments that overlap the day', () => {
@@ -317,5 +337,40 @@ describe('zone label and certification note', () => {
       ),
     ).toBe('Driver signature required for Sep 9 and Sep 10.');
     expect(certificationNote([{ date: '2026-09-08', certified: true }], TZ)).toBeNull();
+  });
+});
+
+describe('unassignedInDay (WB-057 / WB-058)', () => {
+  const seg = (startAt: string, endAt: string) => ({ startAt, endAt });
+
+  it('keeps a 21:30 ET segment on the viewed day and drops the neighbouring days', () => {
+    const start = rodsDayStart('2026-09-10', TZ); // 04:00Z
+    const late = seg('2026-09-11T01:30:00.000Z', '2026-09-11T01:50:00.000Z'); // 21:30 ET Sep 10
+    const prev = seg('2026-09-10T03:00:00.000Z', '2026-09-10T03:30:00.000Z'); // 23:00 ET Sep 9
+    const next = seg('2026-09-11T04:30:00.000Z', '2026-09-11T05:00:00.000Z'); // 00:30 ET Sep 11
+    expect(unassignedInDay([prev, late, next], start, 86_400)).toEqual([late]);
+    // The old UTC-midnight window ended at 2026-09-11T00:00Z — before the segment started.
+    expect(Date.parse(late.startAt)).toBeGreaterThan(Date.parse('2026-09-11T00:00:00.000Z'));
+  });
+
+  it('keeps a segment straddling either edge, drops one ending exactly at the day start', () => {
+    const start = rodsDayStart('2026-09-10', TZ);
+    const iso = (ms: number) => new Date(ms).toISOString();
+    const straddleStart = seg(iso(start - 600_000), iso(start + 600_000));
+    const straddleEnd = seg(iso(start + 86_400_000 - 600_000), iso(start + 86_400_000 + 600_000));
+    const endsAtStart = seg(iso(start - 600_000), iso(start));
+    const startsAtEnd = seg(iso(start + 86_400_000), iso(start + 86_400_000 + 600_000));
+    expect(unassignedInDay([straddleStart, straddleEnd, endsAtStart, startsAtEnd], start, 86_400)).toEqual([
+      straddleStart,
+      straddleEnd,
+    ]);
+  });
+
+  it('uses the 25-hour DST day length, not 24 hours', () => {
+    const start = rodsDayStart('2026-11-01', TZ); // fall back: 25-hour RODS day
+    const iso = (ms: number) => new Date(ms).toISOString();
+    const lastHour = seg(iso(start + 24.5 * 3_600_000), iso(start + 24.75 * 3_600_000));
+    expect(unassignedInDay([lastHour], start, 90_000)).toEqual([lastHour]);
+    expect(unassignedInDay([lastHour], start, 86_400)).toEqual([]);
   });
 });

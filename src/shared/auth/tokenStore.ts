@@ -27,9 +27,22 @@ export function getAccessTokenExpiry(): number {
   return accessTokenExpiresAt;
 }
 
-export function setAccessToken(token: string | null, ttlMs: number = ACCESS_TOKEN_TTL_MS): void {
+/**
+ * `ttlMs` is the server's lifetime when it sent one (`expiresIn`, WB-083); a missing, non-finite
+ * or non-positive value falls back to the documented 15 minutes rather than arming a timer that
+ * fires immediately or never.
+ */
+export function setAccessToken(token: string | null, ttlMs?: number): void {
+  const ttl = ttlMs !== undefined && Number.isFinite(ttlMs) && ttlMs > 0 ? ttlMs : ACCESS_TOKEN_TTL_MS;
   accessToken = token;
-  accessTokenExpiresAt = token ? Date.now() + ttlMs : 0;
+  accessTokenExpiresAt = token ? Date.now() + ttl : 0;
+}
+
+/** Server `expiresIn` (seconds) → a lifetime in ms, or undefined when absent or unusable. */
+export function ttlFromExpiresIn(expiresIn: unknown): number | undefined {
+  return typeof expiresIn === 'number' && Number.isFinite(expiresIn) && expiresIn > 0
+    ? expiresIn * 1_000
+    : undefined;
 }
 
 export function getRefreshToken(): string | null {
@@ -118,9 +131,11 @@ export interface TokenPair {
   accessToken: string;
   refreshToken: string;
   tokenType?: string;
+  /** Access-token lifetime in seconds, when the server sends it (WB-083). */
+  expiresIn?: number;
 }
 
 export function storeTokenPair(pair: TokenPair): void {
-  setAccessToken(pair.accessToken);
+  setAccessToken(pair.accessToken, ttlFromExpiresIn(pair.expiresIn));
   setRefreshToken(pair.refreshToken);
 }

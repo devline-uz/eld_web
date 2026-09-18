@@ -13,6 +13,9 @@ import {
   useTripsBoard,
   useUnassignedLoads,
   useAutoAssignTrips,
+  tripsActiveSliceQuery,
+  tripsCountQuery,
+  tripsKpiQuery,
   type TripTableRow,
   type TripRow,
 } from '@/shared/api/trips';
@@ -115,8 +118,15 @@ export default function TripsPage() {
           items: prev.items.map((t) => (t.id === payload.tripId ? { ...t, status: payload.status as TripRow['status'], etaAt: payload.eta } : t)),
         };
       });
-      // §10 W-11 "invalidates the KPI cards" — the KPIs derive from these same cached pages, so
-      // the patch above recomputes them on the next render; nothing to refetch.
+      // The row patch above only rewrites `status`/`etaAt` in place — it cannot move a trip
+      // between the status-filtered KPI/count slices (ASSIGNED, IN_PROGRESS, PLANNED, the
+      // on-time DELIVERED window) or fix their `total`. Invalidate exactly those keys so the
+      // KPI cards and segment counts stay correct; the board's own list pages are left alone
+      // (§16.3 — never invalidate the whole list).
+      void queryClient.invalidateQueries({ queryKey: tripsActiveSliceQuery('ASSIGNED').queryKey });
+      void queryClient.invalidateQueries({ queryKey: tripsActiveSliceQuery('IN_PROGRESS').queryKey });
+      void queryClient.invalidateQueries({ queryKey: tripsCountQuery('PLANNED').queryKey });
+      void queryClient.invalidateQueries({ queryKey: tripsKpiQuery().queryKey });
     },
   });
 

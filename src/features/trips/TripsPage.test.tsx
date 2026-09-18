@@ -2,14 +2,14 @@
 // states, and `POST /trips/auto-assign`'s exact toast wording.
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
 import { ok, url } from '@/mocks/envelope';
 import { endpoints } from '@/shared/api/endpoints';
-import { tripsActiveSliceQuery } from '@/shared/api/trips';
+import { tripsActiveSliceQuery, tripsCountQuery, tripsKpiQuery } from '@/shared/api/trips';
 import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/client';
 import { ToastProvider } from '@/shared/ui/Toast';
 import * as RealtimeProviderModule from '@/shared/realtime/RealtimeProvider';
@@ -225,31 +225,59 @@ describe('W-11 Dispatch & Trips', () => {
     expect(await screen.findByText('1 loads assigned · 1 skipped (no driver with enough hours)')).toBeInTheDocument();
   });
 
-  it('a `trip.status_changed` event on the `fleet` room patches the row live (no full list refetch)', async () => {
-    usePopulatedTrips();
+  it('a `trip.status_changed` event on the `fleet` room patches the row immediately and invalidates the KPI/count queries so they settle correctly (WB-114)', async () => {
+    // A mutable mock — the backend's row has already moved to its new status by the time the
+    // event arrives, so a refetch of the invalidated slices must reflect that move too, not
+    // just the immediate client-side patch.
+    let currentStatus: string = TRIP.status;
+    server.use(
+      http.get(url(endpoints.trips.list), ({ request }) => {
+        const status = new URL(request.url).searchParams.get('status');
+        const items = !status || status === currentStatus ? [{ ...TRIP, status: currentStatus }] : [];
+        return ok({ items, page: 1, limit: 25, total: items.length, totalPages: 1 });
+      }),
+      http.get(url(endpoints.drivers.list), () => ok({ items: [DRIVER], page: 1, limit: 500, total: 1, totalPages: 1 })),
+      http.get(url(endpoints.vehicles.list), () => ok({ items: [VEHICLE], page: 1, limit: 500, total: 1, totalPages: 1 })),
+      http.get(url(endpoints.trips.unassignedLoads), () => ok({ items: [] })),
+    );
     const socket = fakeSocket();
-    let listCalls = 0;
-    server.events.on('request:start', ({ request }) => {
-      if (new URL(request.url).pathname === '/api/trips') listCalls += 1;
-    });
     const { queryClient } = renderPage(socket);
 
     await screen.findByText('TR-4821');
     expect(screen.getByText('Late')).toBeInTheDocument();
     expect(socket.emit).toHaveBeenCalledWith('subscribe', 'fleet', expect.any(Function));
-    const callsBeforeEvent = listCalls;
 
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
+    currentStatus = 'ASSIGNED';
     socket.trigger('trip.status_changed', { tripId: 'trp_1', status: 'ASSIGNED', eta: '2099-06-15T13:37:00.000Z' });
 
-    // The cache is patched via `setQueryData` — the row's fields update and no extra
-    // `GET /trips` round trip happens, per §10 W-11 ("patches the row … invalidates the KPI cards").
-    await screen.findByText('TR-4821');
-    const cached = queryClient.getQueryData<{ items: Array<{ id: string; status: string; etaAt: string }> }>(
+    // The row is patched in place via `setQueryData` — immediate, synchronous, no round trip.
+    const patchedImmediately = queryClient.getQueryData<{ items: Array<{ id: string; status: string; etaAt: string }> }>(
       tripsActiveSliceQuery('IN_PROGRESS').queryKey,
     );
-    expect(cached?.items.find((t) => t.id === 'trp_1')?.status).toBe('ASSIGNED');
-    expect(cached?.items.find((t) => t.id === 'trp_1')?.etaAt).toBe('2099-06-15T13:37:00.000Z');
-    expect(listCalls).toBe(callsBeforeEvent);
+    expect(patchedImmediately?.items.find((t) => t.id === 'trp_1')?.status).toBe('ASSIGNED');
+    expect(patchedImmediately?.items.find((t) => t.id === 'trp_1')?.etaAt).toBe('2099-06-15T13:37:00.000Z');
+
+    // A status change can move a trip between the status-filtered KPI/count slices, so those
+    // exact keys must be invalidated — never the whole `trips` list (§16.3).
+    const invalidatedKeys = invalidateSpy.mock.calls.map((call) => (call[0] as { queryKey: unknown }).queryKey);
+    expect(invalidatedKeys).toEqual(
+      expect.arrayContaining([
+        tripsActiveSliceQuery('ASSIGNED').queryKey,
+        tripsActiveSliceQuery('IN_PROGRESS').queryKey,
+        tripsCountQuery('PLANNED').queryKey,
+        tripsKpiQuery().queryKey,
+      ]),
+    );
+
+    // Once those queries refetch, the trip has moved slices entirely — the KPI/count numbers
+    // this fix protects are correct, not just the row's own fields.
+    await waitFor(() => {
+      const assigned = queryClient.getQueryData<{ items: Array<{ id: string }> }>(tripsActiveSliceQuery('ASSIGNED').queryKey);
+      expect(assigned?.items.some((t) => t.id === 'trp_1')).toBe(true);
+    });
+    const inProgressAfter = queryClient.getQueryData<{ items: Array<{ id: string }> }>(tripsActiveSliceQuery('IN_PROGRESS').queryKey);
+    expect(inProgressAfter?.items.some((t) => t.id === 'trp_1')).toBe(false);
   });
 
   it('opens the Create trip modal', async () => {

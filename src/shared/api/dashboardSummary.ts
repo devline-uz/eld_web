@@ -43,7 +43,7 @@ export interface DashboardSummaryResponse {
 export function useDashboardSummary() {
   return useQuery({
     queryKey: qk.dashboardSummary,
-    queryFn: () => client.get<DashboardSummaryResponse>(endpoints.dashboard.summary),
+    queryFn: ({ signal }) => client.get<DashboardSummaryResponse>(endpoints.dashboard.summary, { signal }),
     ...typedCachePolicy<DashboardSummaryResponse>('live'),
   });
 }

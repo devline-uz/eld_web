@@ -7,7 +7,7 @@ import {
   getSortedRowModel,
   useReactTable,
 } from '@tanstack/react-table';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { ChevronUp, ChevronDown, MoreHorizontal } from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
@@ -72,7 +72,12 @@ export function DataTable<T>({
     }
   }
 
-  const allColumns: ColumnDef<T, unknown>[] = [
+  // Rebuilt only when the inputs that actually change the column set change — an `allColumns`
+  // literal rebuilt on every render (e.g. from `sorting`/`internalSelection` state churn or a
+  // parent re-render from polling/a live update) gives TanStack Table a new `columns` reference
+  // each time, which regenerates every row/cell model and can close an open row-actions dropdown
+  // mid-interaction (NEW, found alongside WB-121).
+  const allColumns: ColumnDef<T, unknown>[] = useMemo(() => [
     ...(selectable
       ? [
           {
@@ -140,7 +145,7 @@ export function DataTable<T>({
           } satisfies ColumnDef<T, unknown>,
         ]
       : []),
-  ];
+  ], [selectable, columns, rowActions]);
 
   // TanStack Table's returned functions are stable by its own contract; the React Compiler
   // check is a false positive here.

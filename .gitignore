@@ -1,5 +1,6 @@
 node_modules
 dist
+sourcemaps
 coverage
 stats.html
 playwright-report

@@ -30,6 +30,24 @@ describe('field rules', () => {
     expect(firstError(f.inspectorEmail(), 'inspector@gmail.com')).toBe(M.inspectorEmail);
   });
 
+  it('rejects lookalike domains that merely end with fmcsa.dot.gov (WB-094)', () => {
+    expect(f.inspectorEmail().safeParse('Inspector@FMCSA.DOT.GOV').success).toBe(true);
+    expect(f.inspectorEmail().safeParse('agent@a.b.fmcsa.dot.gov').success).toBe(true);
+    for (const attack of [
+      'officer@evilfmcsa.dot.gov',
+      'officer@notfmcsa.dot.gov',
+      'officer@evil.notfmcsa.dot.gov',
+      'officer@fmcsa.dot.gov.evil.com',
+      'officer@fmcsa-dot.gov',
+      'officer@fmcsaxdot.gov',
+      'officer@.fmcsa.dot.gov',
+      'officer@fmcsa.dot.gov.',
+      'officer@evil.com#fmcsa.dot.gov',
+    ]) {
+      expect(firstError(f.inspectorEmail(), attack), attack).toBe(M.inspectorEmail);
+    }
+  });
+
   it('enforces the driver mobile password minimum', () => {
     expect(f.driverPassword().safeParse('Onebook2026').success).toBe(true);
     expect(firstError(f.driverPassword(), 'short')).toBe(M.password);
@@ -145,6 +163,15 @@ describe('form schemas', () => {
     );
   });
 
+  it('bounds the vehicle year to 1970 through the current year', () => {
+    const base = { unitNumber: '#101', vin: '1FUJA6CV88LW12345', make: 'Freightliner', model: 'Cascadia' };
+    const currentYear = new Date().getFullYear();
+    expect(vehicleSchema.safeParse({ ...base, year: 1970 }).success).toBe(true);
+    expect(vehicleSchema.safeParse({ ...base, year: currentYear }).success).toBe(true);
+    expect(firstError(vehicleSchema, { ...base, year: 1969 })).toBe(M.yearMin);
+    expect(firstError(vehicleSchema, { ...base, year: currentYear + 1 })).toBe(M.yearFuture);
+  });
+
   it('holds an FMCSA transfer to 8 days and a government address (11.14)', () => {
     const base = {
       method: 'EMAIL' as const,
@@ -158,6 +185,19 @@ describe('form schemas', () => {
     expect(firstError(transferSchema, { ...base, recipient: 'me@example.com' })).toBe(
       M.inspectorEmail,
     );
+  });
+
+  it('sends eRODS without a recipient and spells the method WEB_SERVICES (11.14 · WB-029)', () => {
+    const erods = {
+      method: 'WEB_SERVICES' as const,
+      outputFileComment: 'Roadside inspection 2026-09-12',
+      from: '2026-09-05',
+      to: '2026-09-12',
+    };
+    expect(transferSchema.safeParse(erods).success).toBe(true);
+    expect(transferSchema.safeParse({ ...erods, method: 'WEB_SERVICE' }).success).toBe(false);
+    const noAddress = transferSchema.safeParse({ ...erods, method: 'EMAIL' });
+    expect(noAddress.success ? [] : noAddress.error.issues.map((i) => i.path.join('.'))).toEqual(['recipient']);
   });
 
   it('registers a device with the CreateDeviceDto fields and no eldIdentifier (11.20 · WB-024)', () => {

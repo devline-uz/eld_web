@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   EMPTY_DVIR_FILTERS,
   countActiveDvirFilters,
+  countUnknownSeverityExcluded,
   matchesDvirFilters,
   parseDvirFilters,
   writeDvirFilters,
@@ -129,5 +130,28 @@ describe('matchesDvirFilters', () => {
     expect(
       matchesDvirFilters(row({ type: 'POST_TRIP', repairStatus: 'REPAIRED', defects: [defect({ severity: 'CRITICAL' })] }), filters),
     ).toBe(false);
+  });
+});
+
+describe('countUnknownSeverityExcluded (WB-078)', () => {
+  it('is zero when no severity filter is active, even with unknown-defect rows', () => {
+    const rows = [row({ defectsKnown: false, defects: [] })];
+    expect(countUnknownSeverityExcluded(rows, EMPTY_DVIR_FILTERS)).toBe(0);
+  });
+
+  it('counts rows whose defects are outside the loaded window when a severity filter is active', () => {
+    const filters = { ...EMPTY_DVIR_FILTERS, severity: ['CRITICAL'] as DvirFilters['severity'] };
+    const rows = [
+      row({ id: 'dvir_unknown', defectsKnown: false, defects: [] }),
+      row({ id: 'dvir_known_none', defectsKnown: true, defects: [] }),
+      row({ id: 'dvir_known_match', defectsKnown: true, defects: [defect({ severity: 'CRITICAL' })] }),
+    ];
+    expect(countUnknownSeverityExcluded(rows, filters)).toBe(1);
+  });
+
+  it('does not count an unknown-defect row that a non-severity group already excludes', () => {
+    const filters: DvirFilters = { type: ['POST_TRIP'], severity: ['CRITICAL'], repairStatus: [] };
+    const rows = [row({ id: 'dvir_unknown', type: 'PRE_TRIP', defectsKnown: false, defects: [] })];
+    expect(countUnknownSeverityExcluded(rows, filters)).toBe(0);
   });
 });

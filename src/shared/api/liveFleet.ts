@@ -40,7 +40,7 @@ export interface LiveFleetResponse {
 export function useLiveFleet() {
   return useQuery({
     queryKey: qk.liveFleet(),
-    queryFn: () => client.get<LiveFleetResponse>(endpoints.live.fleet),
+    queryFn: ({ signal }) => client.get<LiveFleetResponse>(endpoints.live.fleet, { signal }),
     ...typedCachePolicy<LiveFleetResponse>('live'),
   });
 }

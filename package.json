@@ -16,7 +16,7 @@
     "gen:types": "node scripts/generate-api-types.mjs",
     "gen:fixtures": "node scripts/generate-msw-fixtures.mjs",
     "test:contract": "vitest run --config vitest.contract.config.ts --passWithNoTests",
-    "build": "tsc --noEmit && vite build && node scripts/check-bundle-budget.mjs",
+    "build": "tsc --noEmit && vite build && node scripts/extract-sourcemaps.mjs && node scripts/check-bundle-budget.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -38,7 +38,7 @@
     "date-fns-tz": "^3.2.0",
     "firebase": "^12.19.0",
     "lucide-react": "^1.45.0",
-    "maplibre-gl": "^5.24.0",
+    "maplibre-gl": "^6.10.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "react-hook-form": "^7.88.0",

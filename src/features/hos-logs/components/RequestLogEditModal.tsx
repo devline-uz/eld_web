@@ -71,13 +71,16 @@ export function RequestLogEditModal({
   const startDefault = event ? formatInTimeZone(new Date(event.eventDateTime), timezone, 'HH:mm:ss') : '';
   const [startTime, setStartTime] = useState(startDefault);
   const [endTime, setEndTime] = useState('');
-  const [status, setStatus] = useState<RodsDutyStatus>(event?.status ?? 'ON');
-  const [location, setLocation] = useState(event?.locationName ?? '');
-  const [odometer, setOdometer] = useState(
+  const statusDefault: RodsDutyStatus = event?.status ?? 'ON';
+  const [status, setStatus] = useState<RodsDutyStatus>(statusDefault);
+  // WB-070 — shown for reference only: `CreateEditRequestDto.location` needs lat/lon (gap B-39),
+  // so the field is read-only and says it is not sent, instead of looking like a correction.
+  const locationDefault = event?.locationName ?? '';
+  const odometerDefault =
     event?.totalVehicleMiles === null || event?.totalVehicleMiles === undefined
       ? ''
-      : String(event.totalVehicleMiles),
-  );
+      : String(event.totalVehicleMiles);
+  const [odometer, setOdometer] = useState(odometerDefault);
   const [engineHours, setEngineHours] = useState('');
   const [reason, setReason] = useState('');
   // The backend's CreateEditRequestDto has no notify flag; the proposal always reaches the
@@ -96,7 +99,7 @@ export function RequestLogEditModal({
     [date, endTime, timezone],
   );
 
-  /** §395.30 — an automatic `D` record inside the interval makes `Driving` impossible. */
+  /** §395.30 — an automatic `D` record inside the interval can only stay `Driving` (WB-059). */
   const touchesAutomaticDriving = useMemo(() => {
     if (!startIso) return false;
     const from = Date.parse(startIso);
@@ -161,7 +164,26 @@ export function RequestLogEditModal({
     );
   }
 
-  const isDirty = reason.length > 0 || startTime !== startDefault || endTime.length > 0;
+  // WB-069 — every controlled field counts, so Esc on a changed status/odometer/engine-hours goes
+  // through 11.30 Discard changes instead of silently dropping the edit.
+  const isDirty =
+    reason.length > 0 ||
+    startTime !== startDefault ||
+    endTime.length > 0 ||
+    status !== statusDefault ||
+    odometer !== odometerDefault ||
+    engineHours.length > 0;
+
+  // WB-067 — `Before` is the ORIGINAL record: its status and start, and the end of the graph
+  // segment it opened. The typed `End time` belongs to `After` only.
+  const originalEnd = useMemo(() => {
+    if (!event) return null;
+    const at = Date.parse(event.eventDateTime);
+    const segment =
+      graph.find((candidate) => Date.parse(candidate.startAt) === at) ??
+      graph.find((candidate) => Date.parse(candidate.startAt) <= at && Date.parse(candidate.endAt) > at);
+    return segment ? formatInTimeZone(new Date(segment.endAt), timezone, 'HH:mm') : null;
+  }, [event, graph, timezone]);
 
   return (
     <Modal
@@ -232,11 +254,14 @@ export function RequestLogEditModal({
         <legend className="text-label text-text">Duty status</legend>
         <div className="mt-1 flex flex-wrap gap-2">
           {CHIPS.map((chip) => {
-            // `D` is refused while the interval covers automatic driving time; `YM`/`PC` have no
-            // representation in CreateEditRequestDto at all (gap B-39) — both render disabled
-            // rather than silently sending something else.
-            const disabled =
-              (chip.value === 'D' && touchesAutomaticDriving) || chip.value === 'YM' || chip.value === 'PC';
+            // WB-059 — §395.30: automatic driving time can never be shortened, deleted or
+            // restatused, so while the interval covers it every NON-driving status (`OFF`/`SB`/`ON`)
+            // is refused and `D` stays the one selectable chip. `YM`/`PC` have no representation in
+            // CreateEditRequestDto at all (gap B-39, WB-021) — always disabled rather than silently
+            // sending something else. The server's `DRIVING_TIME_IMMUTABLE` stays the final word.
+            const restatesDriving =
+              touchesAutomaticDriving && (chip.value === 'OFF' || chip.value === 'SB' || chip.value === 'ON');
+            const disabled = restatesDriving || chip.value === 'YM' || chip.value === 'PC';
             const selected = chip.value === status;
             return (
               <button
@@ -265,8 +290,8 @@ export function RequestLogEditModal({
       </fieldset>
 
       <div className="mt-4 grid grid-cols-3 gap-4">
-        <Field label="Location">
-          <input value={location} onChange={(e) => setLocation(e.target.value)} className={inputClass} />
+        <Field label="Location" hint="Not sent with the request — a location correction needs coordinates.">
+          <input readOnly value={locationDefault} className={cn(inputClass, 'bg-bg-subtle')} />
         </Field>
         <Field label="Odometer" suffix="mi" error={fieldErrors.odometerMi}>
           <input
@@ -305,8 +330,7 @@ export function RequestLogEditModal({
         <div className="rounded-md bg-bg-subtle p-3">
           <p className="text-table-head font-semibold uppercase tracking-wide text-text-muted">Before</p>
           <p className="tabular mt-1 text-body text-text">
-            {event?.status ?? '—'} {startDefault ? startDefault.slice(0, 5) : '—'} →{' '}
-            {endTime ? endTime.slice(0, 5) : '—'}
+            {event?.status ?? '—'} {startDefault ? startDefault.slice(0, 5) : '—'} → {originalEnd ?? '—'}
           </p>
         </div>
         <div className="rounded-md bg-bg-subtle p-3">
@@ -327,12 +351,14 @@ function Field({
   label,
   required,
   suffix,
+  hint,
   error,
   children,
 }: {
   label: string;
   required?: boolean;
   suffix?: string;
+  hint?: string;
   error?: string;
   children: React.ReactNode;
 }) {
@@ -349,6 +375,7 @@ function Field({
           </span>
         )}
       </span>
+      {hint && <span className="text-caption text-text-muted">{hint}</span>}
       {error && <span className="text-caption text-danger">{error}</span>}
     </label>
   );

@@ -61,6 +61,20 @@ describe('§8.2 date and time formats', () => {
     expect(timezoneAbbreviation(ET)).toBe('ET');
     expect(timezoneAbbreviation(ET, 'nonsense')).toBe('ET');
   });
+
+  it('keeps the real label for zones that never observe DST (WB-092)', () => {
+    const winter = '2025-01-10T19:12:00.000Z';
+    expect(timezoneAbbreviation('America/Phoenix', NOON_UTC)).toBe('MST');
+    expect(timezoneAbbreviation('America/Phoenix', winter)).toBe('MST');
+    expect(timezoneAbbreviation('Pacific/Honolulu', NOON_UTC)).toBe('HST');
+    expect(timezoneAbbreviation('Pacific/Honolulu', winter)).toBe('HST');
+    // Four-letter DST pair collapses like the three-letter ones.
+    expect(timezoneAbbreviation('America/Anchorage', NOON_UTC)).toBe('AKT');
+    expect(timezoneAbbreviation('America/Anchorage', winter)).toBe('AKT');
+    expect(timezoneAbbreviation('America/Denver', NOON_UTC)).toBe('MT');
+    // A zone that switches between offsets with no named pair passes through.
+    expect(timezoneAbbreviation('Europe/London', NOON_UTC)).toMatch(/GMT/);
+  });
 });
 
 describe('ranges and due-by strings', () => {

@@ -20,6 +20,8 @@ import {
 } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
+  cancelRefresh,
+  isTransientRefreshFailure,
   refreshAccessToken as clientRefreshAccessToken,
   setAccessToken as setClientAccessToken,
   setAuthBridge,
@@ -37,6 +39,7 @@ import {
   registerTokenRefresher,
 } from './authEvents';
 import { AuthBootSkeleton } from './AuthBootSkeleton';
+import { signOutOfGoogle } from './firebase';
 import { IdleWarningModal } from './IdleWarningModal';
 import {
   NO_PERMISSIONS,
@@ -62,6 +65,19 @@ import {
 /** §17 — 30 minutes idle, then a 60 second countdown before the session ends. */
 export const IDLE_TIMEOUT_MS = 30 * 60_000;
 export const IDLE_WARNING_MS = 60_000;
+
+/**
+ * web/bugs.md WB-080 — backoff between refresh attempts that failed in transit (network drop,
+ * 5xx, 408/429). The last step repeats until the network is back or the server gives a verdict.
+ */
+export const REFRESH_RETRY_DELAYS_MS = [2_000, 5_000, 15_000, 30_000] as const;
+
+/**
+ * How a refresh attempt settled. `rejected` — the server refused the refresh token (the session
+ * is over); `stale` — the session this attempt belonged to has already ended or been replaced,
+ * so the caller must do nothing at all (WB-079).
+ */
+type RefreshOutcome = { token: string } | { failure: 'rejected' | 'stale' };
 
 export interface AuthUser {
   id: string;
@@ -154,6 +170,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [tokenEpoch, setTokenEpoch] = useState(0);
 
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * Session generation (WB-079). Every `resetSession` bumps it; the bridge and every refresh
+   * loop compare against the value they started with, so nothing that was in flight when the
+   * session ended can write a token back or end the *next* session.
+   */
+  const sessionGeneration = useRef(0);
 
   /** GET /auth/me — the only permission source. `/me/profile` only decorates the display. */
   const loadSession = useCallback(async (token: string) => {
@@ -170,6 +192,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const resetSession = useCallback(
     (reason: 'expired' | 'idle' | null = null) => {
+      // First, before any token is cleared: detach the in-flight refresh so its late response
+      // cannot re-persist a rotated refresh token (WB-079).
+      sessionGeneration.current += 1;
+      cancelRefresh();
       setSessionEndedReason(reason);
       clearTokens(); // access token, `obk.rt` and the `obk.session` snapshot
       setClientAccessToken(null);
@@ -179,6 +205,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setStatus('unauthenticated');
       disconnectSockets();
       queryClient.clear();
+      // WB-085 — the Google session ends with the panel's (fire-and-forget, never throws).
+      void signOutOfGoogle();
     },
     [queryClient],
   );
@@ -189,19 +217,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * its own. A *layout* effect, not a passive one: with a session snapshot `children` render on
    * the very first pass and their queries fire from passive effects, which React runs only after
    * every layout effect — including this one — has committed (WD-072). The proactive-refresh
-   * timer is owned here, so the client gets no `expiresAt` and never arms a competing timer.
+   * timer is owned here: the client reports the server's `expiresAt` through `onTokens`, and only
+   * this provider arms a timer from it (the client's own `setAccessToken` gets no expiry).
    */
   useLayoutEffect(() => {
     setAuthBridge({
       getAccessToken,
       getRefreshToken,
       // Every rotated pair — boot, proactive, or a 401 replay — lands in the same two places.
-      onTokens: ({ accessToken, refreshToken }) => {
-        setAccessToken(accessToken);
+      // The client already drops a refresh that outlived its session (`cancelRefresh`); a signed-
+      // out provider refusing the write as well keeps `obk.rt` empty whatever the caller (WB-079).
+      onTokens: ({ accessToken, refreshToken, expiresAt }) => {
+        if (!getRefreshToken()) return;
+        // WB-083 — the server's lifetime, not the 15-minute assumption, drives the §17 timer.
+        setAccessToken(accessToken, expiresAt ? expiresAt - Date.now() : undefined);
         if (refreshToken) setRefreshToken(refreshToken);
         setClientAccessToken(accessToken);
+        // Re-arm the proactive timer from the fresh expiry, whichever path refreshed.
+        setTokenEpoch((n) => n + 1);
       },
-      // §6.2 rule 3 — refresh failed: full sign-out, RequireAuth lands on /sign-in (WD-015).
+      // WB-079 — a pair rotated by a refresh that was in flight at sign-out: revoke it, never store it.
+      onTokensDiscarded: ({ accessToken, refreshToken }) => {
+        if (refreshToken) void logoutSession(refreshToken, accessToken).catch(() => undefined);
+      },
+      // §6.2 rule 3 — refresh rejected: full sign-out, RequireAuth lands on /sign-in (WD-015).
       onSignOut: () => resetSession('expired'),
     });
   }, [resetSession]);
@@ -214,17 +253,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * §6.2 rule 2 — THE single in-flight refresh, shared with `shared/api/client.ts`. The backend
    * rotates refresh tokens and treats a second use as theft (`REFRESH_TOKEN_REUSED` revokes every
    * session), so the boot refresh, the proactive timer and a data request parked in `send()` must
-   * all await the same `POST /auth/refresh`. Resolves `null` when the session is over.
+   * all await the same `POST /auth/refresh`. Resolves `null` when no token came back.
    */
   const runRefresh = useCallback((): Promise<string | null> => {
     if (!getRefreshToken()) return Promise.resolve(null);
-    return clientRefreshAccessToken()
-      .then((token) => {
-        setTokenEpoch((n) => n + 1);
-        return token;
-      })
-      .catch(() => null);
+    return clientRefreshAccessToken().catch(() => null);
   }, []);
+
+  /**
+   * web/bugs.md WB-080 — the boot refresh and the proactive timer go through this. A failure in
+   * transit (network, 5xx, 408/429) is not the server rejecting the refresh token: the session and
+   * `obk.rt` are kept and the refresh is retried with backoff. Only a real rejection comes back as
+   * `rejected` (and the client has already called `onSignOut` for it). `isCancelled` lets the
+   * calling effect stop the loop when it is torn down.
+   */
+  const refreshUntilSettled = useCallback(
+    async (isCancelled: () => boolean): Promise<RefreshOutcome> => {
+      const generation = sessionGeneration.current;
+      const isStale = () => isCancelled() || generation !== sessionGeneration.current;
+      for (let attempt = 0; ; attempt += 1) {
+        if (!getRefreshToken()) return { failure: isStale() ? 'stale' : 'rejected' };
+        try {
+          const token = await clientRefreshAccessToken();
+          return isStale() ? { failure: 'stale' } : { token };
+        } catch (error) {
+          if (isStale()) return { failure: 'stale' };
+          if (!isTransientRefreshFailure(error)) return { failure: 'rejected' };
+        }
+        const wait =
+          REFRESH_RETRY_DELAYS_MS[Math.min(attempt, REFRESH_RETRY_DELAYS_MS.length - 1)] ?? 0;
+        await new Promise((resolve) => setTimeout(resolve, wait));
+        if (isStale()) return { failure: 'stale' };
+      }
+    },
+    [],
+  );
 
   const signOut = useCallback(
     (reason: 'expired' | 'idle' | null = null) => {
@@ -247,14 +310,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!cancelled) setStatus('unauthenticated');
         return;
       }
-      const token = await runRefresh();
+      const outcome = await refreshUntilSettled(() => cancelled);
       if (cancelled) return;
-      if (!token) {
-        resetSession('expired');
+      if ('failure' in outcome) {
+        // `stale` → the session already ended (a rejected refresh runs `onSignOut` →
+        // `resetSession('expired')` before it throws); `rejected` → nobody has ended it yet.
+        if (outcome.failure === 'rejected') resetSession('expired');
         return;
       }
       try {
-        await loadSession(token);
+        await loadSession(outcome.token);
       } catch {
         if (cancelled) return;
         resetSession();
@@ -263,7 +328,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [loadSession, resetSession, runRefresh]);
+  }, [loadSession, resetSession, refreshUntilSettled]);
 
   /* --- proactive refresh, 60 s before expiry (§6.8) ---------------------------------------- */
   // Re-armed by `tokenEpoch`: every token that lands (boot, sign-in, 401 replay, this timer)
@@ -271,16 +336,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // still in flight after a snapshot boot there is no token yet — the timer waits for the epoch.
   useEffect(() => {
     if (status !== 'authenticated' || !getAccessToken()) return;
+    let cancelled = false;
     const delay = Math.max(getAccessTokenExpiry() - Date.now() - REFRESH_LEAD_MS, 5_000);
     refreshTimer.current = setTimeout(() => {
-      void runRefresh().then((token) => {
-        if (!token) resetSession('expired');
+      // A network blip here retries with backoff and keeps the session (WB-080); success bumps
+      // `tokenEpoch` through the bridge, which tears this effect down and re-arms it.
+      void refreshUntilSettled(() => cancelled).then((outcome) => {
+        if (!cancelled && 'failure' in outcome && outcome.failure === 'rejected') {
+          resetSession('expired');
+        }
       });
     }, delay);
     return () => {
+      cancelled = true;
       if (refreshTimer.current) clearTimeout(refreshTimer.current);
     };
-  }, [status, tokenEpoch, runRefresh, resetSession]);
+  }, [status, tokenEpoch, refreshUntilSettled, resetSession]);
 
   /* --- the seam shared/auth/authEvents.ts and shared/realtime plug into -------------------- */
   useEffect(() => {

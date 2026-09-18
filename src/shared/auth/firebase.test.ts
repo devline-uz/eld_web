@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const signInWithPopup = vi.fn();
 const signInWithRedirect = vi.fn();
 const getRedirectResult = vi.fn();
+const firebaseSignOut = vi.fn();
 const initializeApp = vi.fn(() => ({ name: 'test-app' }));
 const getApps = vi.fn(() => [] as unknown[]);
 
@@ -23,6 +24,7 @@ vi.mock('firebase/auth', () => ({
   signInWithPopup: (...args: unknown[]) => signInWithPopup(...args),
   signInWithRedirect: (...args: unknown[]) => signInWithRedirect(...args),
   getRedirectResult: (...args: unknown[]) => getRedirectResult(...args),
+  signOut: (...args: unknown[]) => firebaseSignOut(...args),
 }));
 
 /** Re-imports firebase.ts with the given env so `isGoogleSignInConfigured()` is re-evaluated. */
@@ -38,6 +40,7 @@ beforeEach(() => {
   signInWithPopup.mockReset();
   signInWithRedirect.mockReset();
   getRedirectResult.mockReset();
+  firebaseSignOut.mockReset();
 });
 
 afterEach(() => {
@@ -153,5 +156,26 @@ describe('consumeGoogleRedirectResult', () => {
     const mod = await loadModule(true);
     getRedirectResult.mockResolvedValue(null);
     await expect(mod.consumeGoogleRedirectResult()).resolves.toBeNull();
+  });
+});
+
+describe('signOutOfGoogle (WB-085)', () => {
+  it('ends the Firebase session so the Google user does not outlive the panel session', async () => {
+    const mod = await loadModule(true);
+    firebaseSignOut.mockResolvedValue(undefined);
+    await mod.signOutOfGoogle();
+    expect(firebaseSignOut).toHaveBeenCalledTimes(1);
+  });
+
+  it('never throws, even when Firebase fails', async () => {
+    const mod = await loadModule(true);
+    firebaseSignOut.mockRejectedValue(new Error('indexeddb gone'));
+    await expect(mod.signOutOfGoogle()).resolves.toBeUndefined();
+  });
+
+  it('loads nothing when Google sign-in is not configured', async () => {
+    const mod = await loadModule(false);
+    await mod.signOutOfGoogle();
+    expect(firebaseSignOut).not.toHaveBeenCalled();
   });
 });

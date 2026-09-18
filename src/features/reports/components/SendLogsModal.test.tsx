@@ -84,7 +84,8 @@ describe('11.14 Send logs to a safety official', () => {
     expect(d.getByText('—')).toBeInTheDocument(); // file name: never built client-side
     expect(await d.findByText('UNRESOLVED_UNIDENTIFIED')).toBeInTheDocument();
     expect(d.getByText('UNCERTIFIED_LOGS')).toBeInTheDocument();
-    expect(d.getByText('8 daily logs · — events · 3 unassigned')).toBeInTheDocument();
+    // WB-101 — 3 RODS days exist in the 8-day range; calendar days are not daily logs.
+    expect(await d.findByText('3 daily logs · — events · 3 unassigned')).toBeInTheDocument();
     expect(d.getByRole('button', { name: 'Download a copy' })).toBeDisabled();
     expect(await d.findByText('John Smith')).toBeInTheDocument();
   });
@@ -112,7 +113,7 @@ describe('11.14 Send logs to a safety official', () => {
     ]);
     const d = within(dialog());
     expect(d.getByText('SMITH38018.csv')).toBeInTheDocument();
-    expect(d.getByText('8 daily logs · 42 events · 3 unassigned')).toBeInTheDocument();
+    expect(await d.findByText('3 daily logs · 42 events · 3 unassigned')).toBeInTheDocument();
     expect(d.getByText('ERODS_TEST_MODE')).toBeInTheDocument();
     expect(d.getByText('eRODS is in test mode — the file will not reach FMCSA.', { exact: false })).toBeInTheDocument();
     expect(await d.findByText('Test only')).toBeInTheDocument();

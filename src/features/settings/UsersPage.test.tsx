@@ -17,6 +17,11 @@ let canFull = true;
 vi.mock('@/shared/auth/usePermission', () => ({
   usePermission: () => ({ can: (_key: string, level?: string) => (level === 'FULL' ? canFull : true) }),
 }));
+// WB-113 — the signed-in caller's id, used only by the self-disable/last-admin guard. Distinct
+// from every row id used below unless a test names it explicitly.
+vi.mock('@/shared/auth/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: 'current_caller_id', email: 'sarah.chen@example.com' } }),
+}));
 
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -280,6 +285,68 @@ describe('UsersPage — W-18', () => {
     // Chip clear-all resets the filter and both rows return.
     await user.click(screen.getByText('Clear all'));
     expect(await screen.findByText('Anna Weiss')).toBeInTheDocument();
+  });
+
+  it('WB-113 — refuses to disable the signed-in caller\'s own account', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(url(endpoints.users.list), () =>
+        ok([
+          { id: 'current_caller_id', email: 'sarah.chen@example.com', firstName: 'Sarah', lastName: 'Chen', status: 'ACTIVE', role: { key: 'ADMIN', name: 'Admin' } },
+          { id: 'usr_2', email: 'mike.torres@example.com', firstName: 'Mike', lastName: 'Torres', status: 'ACTIVE', role: { key: 'ADMIN', name: 'Admin' } },
+        ]),
+      ),
+    );
+    let patched = false;
+    server.use(
+      http.patch(url(endpoints.users.update('current_caller_id')), () => {
+        patched = true;
+        return ok({ id: 'current_caller_id', status: 'DISABLED' });
+      }),
+    );
+
+    renderPage();
+    await screen.findByText('Sarah Chen');
+    const rows = screen.getAllByRole('button', { name: 'Row actions' });
+    await user.click(rows[0]!);
+    await user.click(screen.getByText('Disable user'));
+
+    expect(await screen.findByText("Can't disable this user")).toBeInTheDocument();
+    expect(screen.getByText('You cannot disable your own account. Ask another admin to do this.')).toBeInTheDocument();
+    await user.click(screen.getAllByRole('button', { name: 'Close' }).at(-1)!);
+    expect(patched).toBe(false);
+  });
+
+  it('WB-113 — refuses to disable the last active admin', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(url(endpoints.users.list), () =>
+        ok([
+          { id: 'usr_2', email: 'mike.torres@example.com', firstName: 'Mike', lastName: 'Torres', status: 'ACTIVE', role: { key: 'ADMIN', name: 'Admin' } },
+          { id: 'usr_3', email: 'dana.ford@example.com', firstName: 'Dana', lastName: 'Ford', status: 'ACTIVE', role: { key: 'FLEET_MANAGER', name: 'Fleet manager' } },
+        ]),
+      ),
+    );
+    let patched = false;
+    server.use(
+      http.patch(url(endpoints.users.update('usr_2')), () => {
+        patched = true;
+        return ok({ id: 'usr_2', status: 'DISABLED' });
+      }),
+    );
+
+    renderPage();
+    await screen.findByText('Mike Torres');
+    const rows = screen.getAllByRole('button', { name: 'Row actions' });
+    await user.click(rows[0]!);
+    await user.click(screen.getByText('Disable user'));
+
+    expect(await screen.findByText("Can't disable this user")).toBeInTheDocument();
+    expect(
+      screen.getByText('This is the last active admin. Promote another user to Admin before disabling this account.'),
+    ).toBeInTheDocument();
+    await user.click(screen.getAllByRole('button', { name: 'Close' }).at(-1)!);
+    expect(patched).toBe(false);
   });
 
   it('WB-042 — a filter that matches nothing shows the search/filter empty state with a Clear filters action', async () => {

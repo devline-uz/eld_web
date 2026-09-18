@@ -5,14 +5,25 @@ import { monthStartKey, todayKey } from './reportMeta';
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
+/**
+ * A half-specified deep link keeps the half it names (web/bugs.md WB-102): `?from=` alone runs to
+ * today, `?to=` alone starts on that month's first day. Only a missing/invalid pair falls back to
+ * month to date.
+ */
+export function resolveRange(rawFrom: string, rawTo: string, today: string): { from: string; to: string } {
+  const hasFrom = DAY_RE.test(rawFrom);
+  const hasTo = DAY_RE.test(rawTo);
+  const from = hasFrom ? rawFrom : hasTo ? monthStartKey(rawTo) : monthStartKey(today);
+  const to = hasTo ? rawTo : hasFrom && rawFrom > today ? rawFrom : today;
+  return from <= to ? { from, to } : { from: monthStartKey(today), to: today };
+}
+
 export function useReportRange(timezone: string) {
   const [params, setParams] = useSearchParams();
   const today = todayKey(timezone);
   const rawFrom = params.get('from') ?? '';
   const rawTo = params.get('to') ?? '';
-  const valid = DAY_RE.test(rawFrom) && DAY_RE.test(rawTo) && rawFrom <= rawTo;
-  const from = valid ? rawFrom : monthStartKey(today);
-  const to = valid ? rawTo : today;
+  const { from, to } = resolveRange(rawFrom, rawTo, today);
 
   const update = (patch: Record<string, string | null>) => {
     const next = new URLSearchParams(params);

@@ -305,14 +305,21 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
       <Card>
         <SectionHeader title="eRODS" subtitle="FMCSA electronic data transfer identity" className="mb-4" />
         <div className="grid grid-cols-3 gap-4">
-          <Field label="ELD identifier" error={eldError ?? undefined}>
+          <Field
+            label="ELD identifier"
+            error={eldError ?? undefined}
+            hint="Exactly 4 characters, uppercase letters and digits only (A-Z, 0-9). Entered as typed — never auto-corrected."
+          >
             <input
               className={inputClass}
               maxLength={4}
               value={form.eldIdentifier ?? ''}
               readOnly={!canFull}
               onChange={(e) => {
-                const v = e.target.value.toUpperCase();
+                // WB-112 — §14.2: `eldIdentifier` is validated exactly as typed, never rewritten
+                // (no silent `.toUpperCase()`); a lowercase or mixed-case value is flagged by
+                // `validateEldIdentifier` instead of being corrected out from under the carrier.
+                const v = e.target.value;
                 set('eldIdentifier', v);
                 validateEldIdentifier(v);
               }}

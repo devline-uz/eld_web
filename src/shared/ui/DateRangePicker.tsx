@@ -1,8 +1,9 @@
 import * as Popover from '@radix-ui/react-popover';
 import { useState } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import {
   addDays,
+  addMonths,
   endOfMonth,
   format,
   isAfter,
@@ -86,12 +87,15 @@ export function DateRangePicker({ value, preset = 'custom', onChange }: DateRang
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<DateRange>(value);
   const [draftPreset, setDraftPreset] = useState<DateRangePreset>(preset);
+  const [viewMonth, setViewMonth] = useState<Date>(startOfMonth(value.from));
 
   const daysSelected = Math.round((draft.to.getTime() - draft.from.getTime()) / 86_400_000) + 1;
 
   function selectPreset(p: DateRangePreset) {
     setDraftPreset(p);
-    setDraft(resolvePreset(p));
+    const range = resolvePreset(p);
+    setDraft(range);
+    setViewMonth(startOfMonth(range.from));
   }
 
   const triggerLabel =
@@ -106,6 +110,10 @@ export function DateRangePicker({ value, preset = 'custom', onChange }: DateRang
         if (next) {
           setDraft(value);
           setDraftPreset(preset);
+          // Re-anchor the visible month to the current selection each time the popover
+          // opens, but never move it again just because a day is picked — that is what
+          // stranded the calendar inside a single month (WB-120).
+          setViewMonth(startOfMonth(value.from));
         }
         setOpen(next);
       }}
@@ -136,7 +144,13 @@ export function DateRangePicker({ value, preset = 'custom', onChange }: DateRang
               ))}
           </div>
           <div className="flex flex-1 flex-col p-4">
-            <MonthCalendar month={draft.from} range={draft} onPickDay={(day) => pickDay(day)} />
+            <MonthCalendar
+              month={viewMonth}
+              range={draft}
+              onPickDay={(day) => pickDay(day)}
+              onPrevMonth={() => setViewMonth((m) => subMonths(m, 1))}
+              onNextMonth={() => setViewMonth((m) => addMonths(m, 1))}
+            />
             <div className="mt-3 flex items-center justify-between border-t border-border pt-3">
               <span className="text-caption text-text-muted">{daysSelected} days selected</span>
               <div className="flex gap-2">
@@ -176,10 +190,14 @@ function MonthCalendar({
   month,
   range,
   onPickDay,
+  onPrevMonth,
+  onNextMonth,
 }: {
   month: Date;
   range: DateRange;
   onPickDay: (day: Date) => void;
+  onPrevMonth: () => void;
+  onNextMonth: () => void;
 }) {
   const start = startOfMonth(month);
   const days: Date[] = [];
@@ -189,7 +207,25 @@ function MonthCalendar({
 
   return (
     <div>
-      <p className="mb-2 text-body-strong text-text">{format(month, 'MMMM yyyy')}</p>
+      <div className="mb-2 flex items-center justify-between">
+        <button
+          type="button"
+          aria-label="Previous month"
+          onClick={onPrevMonth}
+          className="flex size-7 items-center justify-center rounded-md text-text-secondary hover:bg-bg-subtle"
+        >
+          <ChevronLeft size={16} strokeWidth={1.75} />
+        </button>
+        <p className="text-body-strong text-text">{format(month, 'MMMM yyyy')}</p>
+        <button
+          type="button"
+          aria-label="Next month"
+          onClick={onNextMonth}
+          className="flex size-7 items-center justify-center rounded-md text-text-secondary hover:bg-bg-subtle"
+        >
+          <ChevronRight size={16} strokeWidth={1.75} />
+        </button>
+      </div>
       <div className="grid grid-cols-7 gap-1 text-center text-caption text-text-muted">
         {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
           <span key={i}>{d}</span>

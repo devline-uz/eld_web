@@ -18,6 +18,7 @@ import {
   quarterSpanLabel,
   rangeLabel,
   refusalText,
+  reportLabel,
   saveFile,
   shiftDayKey,
   todayKey,
@@ -117,10 +118,23 @@ describe('refusalText — server refusals verbatim', () => {
   });
 });
 
+describe('reportLabel (WB-099 · B-14)', () => {
+  it('names stored-only RODS / IDLE_FUEL rows and never returns undefined', () => {
+    expect(reportLabel('IFTA')).toBe('IFTA mileage report');
+    expect(reportLabel('RODS')).toBe('Driver logs (RODS)');
+    expect(reportLabel('IDLE_FUEL')).toBe('Idle & fuel report');
+    expect(reportLabel('SOMETHING_NEW')).toBe('SOMETHING_NEW');
+  });
+});
+
 describe('saveFile', () => {
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
 
   it('clicks a temporary link for a presigned URL and for a Blob', () => {
+    vi.useFakeTimers();
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
     const create = vi.fn(() => 'blob:local');
     const revoke = vi.fn();
@@ -131,6 +145,9 @@ describe('saveFile', () => {
 
     expect(click).toHaveBeenCalledTimes(2);
     expect(create).toHaveBeenCalledTimes(1);
+    // WB-100 — never revoked on the click's own tick.
+    expect(revoke).not.toHaveBeenCalled();
+    vi.runAllTimers();
     expect(revoke).toHaveBeenCalledWith('blob:local');
     expect(document.querySelector('a[download]')).toBeNull();
   });

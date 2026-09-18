@@ -39,6 +39,7 @@ const inputClass = 'h-input rounded-md border border-border bg-bg-surface px-3 t
 export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; onClose: () => void }) {
   const { toast } = useToast();
   const isEdit = Boolean(vehicle);
+  const currentYear = new Date().getFullYear();
   const [fuelType, setFuelType] = useState<string>(vehicle?.fuelType ?? 'DIESEL');
   const [sleeperBerth, setSleeperBerth] = useState(vehicle?.sleeperBerth ?? false);
   const [notes, setNotes] = useState(vehicle?.notes ?? '');
@@ -56,7 +57,7 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
       vin: vehicle?.vin ?? '',
       make: vehicle?.make ?? '',
       model: vehicle?.model ?? '',
-      year: vehicle?.year ?? new Date().getFullYear(),
+      year: vehicle?.year ?? currentYear,
       licensePlate: vehicle?.licensePlate ?? '',
       licenseState: vehicle?.plateState ?? '',
       odometer: vehicle?.odometerMi,
@@ -146,6 +147,8 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
           <Field label="Year" required error={errors.year?.message}>
             <input
               type="number"
+              min={1970}
+              max={currentYear}
               {...register('year', { valueAsNumber: true })}
               disabled={isSubmitting}
               className={inputClass}

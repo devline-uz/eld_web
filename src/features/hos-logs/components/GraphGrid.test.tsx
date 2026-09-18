@@ -175,8 +175,12 @@ describe('W-08 · 24-hour graph grid', () => {
       name: '24-hour graph grid for Wed, Sep 10, 2026. Off duty 07:30, Sleeper 02:00, Driving 11:26, On duty 03:04. All times Eastern.',
     });
     expect(figure).toBeInTheDocument();
-    expect(screen.getByRole('table', { name: /Duty status segments, all times Eastern/ })).toBeInTheDocument();
+    const table = screen.getByRole('table', { name: /Duty status segments, all times Eastern/ });
+    expect(table).toBeInTheDocument();
     expect(screen.getAllByRole('row').length).toBeGreaterThan(graph.length);
+    // WB-068 — children of role="img" are presentational; the audit table must be a sibling.
+    expect(figure).not.toContainElement(table);
+    expect(figure.querySelector('svg')).not.toBeNull();
   });
 
   it('shows the hover indicator and the documented tooltip, and clicking calls back', async () => {

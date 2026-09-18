@@ -4,12 +4,13 @@
 //
 // Rows are the real DVIR, defect, driver and unit lists joined client-side (as W-09 does). Two
 // things the backend cannot answer yet are left out, not faked (gap B-47): the `from`/`to` filter on
-// `GET /dvir` (the newest 200 are read and the range applied to `submittedAt` in the carrier zone),
+// `GET /dvir` (the list is walked back page by page past `from`, capped, and the range applied to
+// `submittedAt` in the carrier zone — a capped walk is labelled, never shown as a complete count),
 // and the expected-inspection schedule behind `Missing pre-trip`, `Not submitted` and `98% compliance`.
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { ColumnDef } from '@tanstack/react-table';
-import { AlertTriangle, Calendar, ClipboardCheck, Clock, Download, Wrench } from 'lucide-react';
+import { AlertTriangle, Calendar, ClipboardCheck, Clock, Download, Upload, Wrench } from 'lucide-react';
 import { useDynamicSubtitle } from '@/app/layouts/Topbar';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { Can } from '@/shared/auth/Can';
@@ -40,6 +41,8 @@ import { ScheduleReportModal } from './components/ScheduleReportModal';
 import { SelectMenu } from './components/SelectMenu';
 import {
   CARRIER_TZ_FALLBACK,
+  DVIR_EXPORT_SCOPE,
+  DVIR_WINDOW_NOTE,
   dateOfDayKey,
   dayKeyOf,
   rangeLabel,
@@ -76,7 +79,7 @@ export default function DvirReportPage() {
   const unit = params.get('unit') ?? undefined;
   const defectType = params.get('defect');
 
-  const data = useDvirReportRows(unit);
+  const data = useDvirReportRows(unit, from);
   const vehicles = useReportVehicles();
   const generate = useGenerateReport();
   const exportCsv = useExportWhenReady();
@@ -121,7 +124,10 @@ export default function DvirReportPage() {
     return { withDefects, critical, avgDays };
   }, [rows]);
 
-  useDynamicSubtitle(`${rangeLabel(from, to)} · ${rows.length} inspections · ${kpi.withDefects} with defects`);
+  // A capped walk (WB-096) makes every count a lower bound: `1,999+`, never a silent short number.
+  const atLeast = (n: number) => `${formatNumber(n)}${data.complete ? '' : '+'}`;
+
+  useDynamicSubtitle(`${rangeLabel(from, to)} · ${atLeast(rows.length)} inspections · ${atLeast(kpi.withDefects)} with defects`);
 
   const columns = useMemo<ColumnDef<DvirReportRow, unknown>[]>(
     () => [
@@ -246,9 +252,10 @@ export default function DvirReportPage() {
           </Can>
           <Button
             variant="secondary"
-            iconLeft={<Download size={16} strokeWidth={1.75} />}
+            iconLeft={<Upload size={16} strokeWidth={1.75} />}
             loading={exportCsv.isPending}
             disabled={exportCsv.isPending}
+            aria-describedby={defectType ? 'dvir-export-scope' : undefined}
             onClick={() => exportCsv.start({ kind: 'dvir', params: { from, to, ...(unit ? { vehicleId: unit } : {}) } })}
           >
             Export CSV
@@ -271,6 +278,13 @@ export default function DvirReportPage() {
         </div>
       </div>
 
+      {defectType && (
+        // The DVIR shortcuts take `from`/`to`/`vehicleId` only; the defect filter cannot reach the file (WB-097).
+        <p id="dvir-export-scope" className="text-caption text-text-muted">
+          {DVIR_EXPORT_SCOPE}
+        </p>
+      )}
+
       <ActionAlert
         message={pdfError ?? exportCsv.error}
         onDismiss={() => {
@@ -283,10 +297,10 @@ export default function DvirReportPage() {
         <KpiRowSkeleton />
       ) : (
         <div className="grid grid-cols-4 gap-card-gap">
-          <KpiCard label="Inspections submitted" value={data.isError ? EMPTY.dash : formatNumber(rows.length)} icon={ClipboardCheck} iconTone="info" />
+          <KpiCard label="Inspections submitted" value={data.isError ? EMPTY.dash : atLeast(rows.length)} icon={ClipboardCheck} iconTone="info" />
           <KpiCard
             label="With defects"
-            value={data.isError ? EMPTY.dash : formatNumber(kpi.withDefects)}
+            value={data.isError ? EMPTY.dash : atLeast(kpi.withDefects)}
             chip={!data.isError && kpi.critical > 0 ? { text: `${kpi.critical} critical`, tone: 'danger' } : undefined}
             icon={Wrench}
             iconTone="warning"
@@ -308,11 +322,16 @@ export default function DvirReportPage() {
             subtitle="Driver and mechanic signatures are attached to every record"
             action={
               !data.isLoading && !data.isError ? (
-                <Badge tone="neutral" className="tabular-nums">{`${rows.length} records · showing ${pageRows.length}`}</Badge>
+                <Badge tone="neutral" className="tabular-nums">{`${atLeast(rows.length)} records · showing ${pageRows.length}`}</Badge>
               ) : undefined
             }
           />
         </div>
+        {!data.isLoading && !data.isError && !data.complete && (
+          <p className="px-card pb-3 text-caption text-warning" role="status">
+            {DVIR_WINDOW_NOTE}
+          </p>
+        )}
         {data.isError ? (
           <ErrorState title="Could not load inspections" description={refusalText(data.error)} onRetry={data.refetch} />
         ) : (

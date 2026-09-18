@@ -33,14 +33,14 @@ function documentedQueryParams(path: string): Set<string> {
 }
 
 /** Runs a page query through the real client + MSW and records the query string it sent. */
-async function sentParams(query: { queryFn: () => Promise<unknown> }): Promise<{ path: string; keys: string[]; page: OffsetPage<unknown> }> {
+async function sentParams(query: { queryFn: (context: { signal: AbortSignal }) => Promise<unknown> }): Promise<{ path: string; keys: string[]; page: OffsetPage<unknown> }> {
   let seen: URL | null = null;
   const listener = ({ request }: { request: Request }) => {
     seen = new URL(request.url);
   };
   server.events.on('request:start', listener);
   try {
-    const page = (await query.queryFn()) as OffsetPage<unknown>;
+    const page = (await query.queryFn({ signal: new AbortController().signal })) as OffsetPage<unknown>;
     if (!seen) throw new Error('no request was sent');
     const sent = seen as URL;
     return { path: sent.pathname, keys: Array.from(sent.searchParams.keys()), page };
@@ -49,7 +49,7 @@ async function sentParams(query: { queryFn: () => Promise<unknown> }): Promise<{
   }
 }
 
-const CASES: Array<[string, { queryFn: () => Promise<unknown> }]> = [
+const CASES: Array<[string, { queryFn: (context: { signal: AbortSignal }) => Promise<unknown> }]> = [
   ['/api/vehicles', vehiclesPageQuery({ ...VEHICLES_DEFAULT_PAGE, q: '101', status: 'ACTIVE' })],
   ['/api/vehicles', vehiclesCountQuery('INACTIVE')],
   ['/api/vehicles', vehiclesLookupQuery()],
@@ -85,7 +85,7 @@ describe('server-paged list queries send only documented query params (WD-073)',
       if (Number(new URL(request.url).searchParams.get('limit')) > 200) over = true;
     };
     server.events.on('request:start', listener);
-    await vehiclesLookupQuery().queryFn();
+    await vehiclesLookupQuery().queryFn({ signal: new AbortController().signal });
     server.events.removeListener('request:start', listener);
     expect(over).toBe(false);
   });

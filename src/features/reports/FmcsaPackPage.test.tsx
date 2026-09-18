@@ -99,7 +99,9 @@ describe('W-15 Reports · FMCSA / DOT audit pack', () => {
     });
     renderPage(<FmcsaPackPage />, `${ROUTE}&driver=drv_1`);
     await waitFor(() => expect(kpi('Daily logs included').getByText('3')).toBeInTheDocument());
-    expect(kpi('Uncertified logs').getByText('2')).toBeInTheDocument();
+    // WB-095 — the same count the fleet view shows for drv_1 and the backend's pre-send check:
+    // 12 days in range − 1 certified = 11, not the 2 persisted-but-uncertified logs.
+    expect(kpi('Uncertified logs').getByText('11')).toBeInTheDocument();
     expect(new Set(ranges.map((u) => new URL(u).pathname))).toEqual(new Set(['/api/logs/drv_1/range']));
     server.events.removeAllListeners('request:start');
   });

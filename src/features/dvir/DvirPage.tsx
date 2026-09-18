@@ -17,8 +17,11 @@ import { DataTable } from '@/shared/ui/DataTable';
 import { Pagination } from '@/shared/ui/Pagination';
 import { KpiCard, KpiRowSkeleton } from '@/shared/ui/KpiCard';
 import { ProgressBar } from '@/shared/ui/ProgressBar';
+import { Modal } from '@/shared/ui/Modal';
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
-import { EMPTY_STATE_COPY, searchEmptyState } from '@/shared/ui/copy';
+import { EMPTY_STATE_COPY, searchEmptyState, TOAST_COPY } from '@/shared/ui/copy';
+import { useToast } from '@/shared/ui/Toast';
+import { ApiError } from '@/shared/api/errors';
 import { formatLocal } from '@/shared/format/datetime';
 import { useNowTick } from '@/shared/format/useRelativeTime';
 import { formatOdometer } from '@/shared/format/numbers';
@@ -29,6 +32,10 @@ import {
   useWorkOrdersList,
   useSchedulesList,
   useDueSchedules,
+  useCloseWorkOrder,
+  useCancelWorkOrder,
+  useCompleteSchedule,
+  useDeleteSchedule,
   type DvirTableRow,
   type DefectTableRow,
   type WorkOrderTableRow,
@@ -38,9 +45,18 @@ import { useVehiclesLookup } from '@/shared/api/lookups';
 import { useDebouncedValue } from '@/shared/hooks/useDebouncedValue';
 import { DvirDrawer } from './components/DvirDrawer';
 import { CreateWorkOrderModal } from './components/CreateWorkOrderModal';
+import { EditWorkOrderModal } from './components/EditWorkOrderModal';
+import { EditScheduleModal } from './components/EditScheduleModal';
 import { ResolveDefectModal } from './components/ResolveDefectModal';
 import { DvirFiltersDrawer, DvirFilterChips } from './components/DvirFiltersDrawer';
-import { parseDvirFilters, writeDvirFilters, matchesDvirFilters, EMPTY_DVIR_FILTERS, countActiveDvirFilters } from './lib/filters';
+import {
+  parseDvirFilters,
+  writeDvirFilters,
+  matchesDvirFilters,
+  countUnknownSeverityExcluded,
+  EMPTY_DVIR_FILTERS,
+  countActiveDvirFilters,
+} from './lib/filters';
 
 type Tab = 'dvirs' | 'defects' | 'workOrders' | 'schedules';
 
@@ -140,19 +156,32 @@ export default function DvirPage() {
   const [workOrderVehicleId, setWorkOrderVehicleId] = useState<string | null>(null);
   const [createWoOpen, setCreateWoOpen] = useState(false);
 
-  const recentDvirs = useMemo(() => {
+  // The 48 h + search window, before the severity/type/repair-status filters and the 10-row
+  // slice — WB-078 needs this to know how many of the DVIRs a severity filter *could* match are
+  // being silently dropped because their defects sit outside the loaded window (B-66).
+  const recentDvirsWindow = useMemo(() => {
     const cutoff = nowTick - 48 * 60 * 60 * 1000;
-    return dvirs.rows
-      .filter(
-        (d) =>
-          new Date(d.submittedAt).getTime() >= cutoff &&
-          matchesSearch(d.vehicle?.unitNumber, ...d.defects.map((x) => x.category)) &&
-          matchesDvirFilters(d, filters),
-      )
-      .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime())
-      .slice(0, 10);
+    return dvirs.rows.filter(
+      (d) =>
+        new Date(d.submittedAt).getTime() >= cutoff &&
+        matchesSearch(d.vehicle?.unitNumber, ...d.defects.map((x) => x.category)),
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dvirs.rows, needle, nowTick, filters]);
+  }, [dvirs.rows, needle, nowTick]);
+
+  const recentDvirs = useMemo(
+    () =>
+      recentDvirsWindow
+        .filter((d) => matchesDvirFilters(d, filters))
+        .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime())
+        .slice(0, 10),
+    [recentDvirsWindow, filters],
+  );
+
+  const unknownSeverityExcluded = useMemo(
+    () => countUnknownSeverityExcluded(recentDvirsWindow, filters),
+    [recentDvirsWindow, filters],
+  );
 
   const upcomingSchedules = useMemo(
     () =>
@@ -287,6 +316,12 @@ export default function DvirPage() {
           <Card padded={false}>
             <div className="p-card pb-0">
               <SectionHeader title="Recent DVIRs" subtitle="Last 48 hours" />
+              {unknownSeverityExcluded > 0 && (
+                <p className="mt-1 text-caption text-text-muted">
+                  {unknownSeverityExcluded} DVIR{unknownSeverityExcluded === 1 ? '' : 's'} with unknown defect severity
+                  (outside the loaded window) {unknownSeverityExcluded === 1 ? 'is' : 'are'} excluded from this filter.
+                </p>
+              )}
             </div>
             <div className="p-card">
               {dvirs.isLoading ? (
@@ -600,6 +635,11 @@ function WorkOrdersTab({ search }: { search: string }) {
   const currentPage = isLoading ? requestedPage : Math.min(requestedPage, Math.max(1, totalPages));
   if (currentPage !== page) setPage(currentPage);
   const onRetry = () => void refetch();
+  // WB-074 — the `…` menu's three actions; each opens its own confirm/edit overlay so the
+  // mutation-bearing hooks (`useCloseWorkOrder(id)` etc.) only mount once the target is known.
+  const [closeTarget, setCloseTarget] = useState<WorkOrderTableRow | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<WorkOrderTableRow | null>(null);
+  const [editTarget, setEditTarget] = useState<WorkOrderTableRow | null>(null);
   return (
     <Card padded={false}>
       <div className="p-card pb-0">
@@ -620,19 +660,33 @@ function WorkOrdersTab({ search }: { search: string }) {
             getRowId={(r) => r.id}
             rowActions={
               canFull
-                ? () => (
-                    <>
-                      <DropdownMenu.Item className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
-                        Close
-                      </DropdownMenu.Item>
-                      <DropdownMenu.Item className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
-                        Cancel
-                      </DropdownMenu.Item>
-                      <DropdownMenu.Item className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
-                        Edit
-                      </DropdownMenu.Item>
-                    </>
-                  )
+                ? (row: WorkOrderTableRow) => {
+                    const closed = row.status === 'DONE' || row.status === 'CANCELLED';
+                    return (
+                      <>
+                        <DropdownMenu.Item
+                          disabled={closed}
+                          onSelect={() => setCloseTarget(row)}
+                          className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
+                        >
+                          Close
+                        </DropdownMenu.Item>
+                        <DropdownMenu.Item
+                          disabled={closed}
+                          onSelect={() => setCancelTarget(row)}
+                          className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
+                        >
+                          Cancel
+                        </DropdownMenu.Item>
+                        <DropdownMenu.Item
+                          onSelect={() => setEditTarget(row)}
+                          className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle"
+                        >
+                          Edit
+                        </DropdownMenu.Item>
+                      </>
+                    );
+                  }
                 : undefined
             }
             columns={
@@ -669,7 +723,101 @@ function WorkOrdersTab({ search }: { search: string }) {
           </>
         )}
       </div>
+      {closeTarget && <WorkOrderCloseModal workOrder={closeTarget} onClose={() => setCloseTarget(null)} />}
+      {cancelTarget && <WorkOrderCancelModal workOrder={cancelTarget} onClose={() => setCancelTarget(null)} />}
+      {editTarget && <EditWorkOrderModal workOrder={editTarget} onClose={() => setEditTarget(null)} />}
     </Card>
+  );
+}
+
+/** WB-074 — Work orders `…` `Close`. `POST /work-orders/:id/close`. */
+function WorkOrderCloseModal({ workOrder, onClose }: { workOrder: WorkOrderTableRow; onClose: () => void }) {
+  const { toast } = useToast();
+  const mutation = useCloseWorkOrder(workOrder.id);
+  const [serverError, setServerError] = useState<string | null>(null);
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Close work order ${workOrder.number}?`}
+      subtitle={`Unit ${workOrder.vehicle?.unitNumber ?? '—'} · ${workOrder.title}`}
+      size="sm"
+      footer={
+        <>
+          <Button variant="secondary" size="lg" onClick={onClose} disabled={mutation.isPending}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            size="lg"
+            loading={mutation.isPending}
+            onClick={() =>
+              mutation.mutate(undefined, {
+                onSuccess: () => {
+                  toast({ kind: 'success', ...TOAST_COPY.workOrderClosed(workOrder.number) });
+                  onClose();
+                },
+                onError: (error) => setServerError(error instanceof ApiError ? error.userMessage : 'Something went wrong.'),
+              })
+            }
+          >
+            Close work order
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-3">
+        <p className="text-body text-text-secondary">Marks the repair as done and clears it from open work.</p>
+        {serverError && <p className="text-body text-danger">{serverError}</p>}
+      </div>
+    </Modal>
+  );
+}
+
+/** WB-074 — Work orders `…` `Cancel`. `POST /work-orders/:id/cancel`. */
+function WorkOrderCancelModal({ workOrder, onClose }: { workOrder: WorkOrderTableRow; onClose: () => void }) {
+  const { toast } = useToast();
+  const mutation = useCancelWorkOrder(workOrder.id);
+  const [serverError, setServerError] = useState<string | null>(null);
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Cancel work order ${workOrder.number}?`}
+      subtitle="This cannot be undone."
+      size="sm"
+      footer={
+        <>
+          <Button variant="secondary" size="lg" onClick={onClose} disabled={mutation.isPending}>
+            Keep work order
+          </Button>
+          <Button
+            variant="danger"
+            size="lg"
+            loading={mutation.isPending}
+            onClick={() =>
+              mutation.mutate(undefined, {
+                onSuccess: () => {
+                  toast({ kind: 'success', ...TOAST_COPY.workOrderCancelled(workOrder.number) });
+                  onClose();
+                },
+                onError: (error) => setServerError(error instanceof ApiError ? error.userMessage : 'Something went wrong.'),
+              })
+            }
+          >
+            Cancel work order
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-3">
+        <p className="text-body text-text-secondary">
+          Unit {workOrder.vehicle?.unitNumber ?? '—'} · {workOrder.title}. No further work will be tracked against it; any
+          linked defects stay open.
+        </p>
+        {serverError && <p className="text-body text-danger">{serverError}</p>}
+      </div>
+    </Modal>
   );
 }
 
@@ -688,6 +836,10 @@ function SchedulesTab({ search }: { search: string }) {
   const currentPage = isLoading ? requestedPage : Math.min(requestedPage, Math.max(1, totalPages));
   if (currentPage !== page) setPage(currentPage);
   const onRetry = () => refetch();
+  // WB-074 — same one-target-at-a-time pattern as the Work orders tab.
+  const [completeTarget, setCompleteTarget] = useState<ScheduleTableRow | null>(null);
+  const [editTarget, setEditTarget] = useState<ScheduleTableRow | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ScheduleTableRow | null>(null);
   return (
     <Card padded={false}>
       <div className="p-card pb-0">
@@ -708,15 +860,24 @@ function SchedulesTab({ search }: { search: string }) {
             getRowId={(r) => r.id}
             rowActions={
               canFull
-                ? () => (
+                ? (row: ScheduleTableRow) => (
                     <>
-                      <DropdownMenu.Item className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                      <DropdownMenu.Item
+                        onSelect={() => setCompleteTarget(row)}
+                        className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle"
+                      >
                         Complete
                       </DropdownMenu.Item>
-                      <DropdownMenu.Item className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                      <DropdownMenu.Item
+                        onSelect={() => setEditTarget(row)}
+                        className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle"
+                      >
                         Edit
                       </DropdownMenu.Item>
-                      <DropdownMenu.Item className="cursor-pointer rounded-md px-2 py-1.5 text-body text-danger outline-none hover:bg-danger-soft">
+                      <DropdownMenu.Item
+                        onSelect={() => setDeleteTarget(row)}
+                        className="cursor-pointer rounded-md px-2 py-1.5 text-body text-danger outline-none hover:bg-danger-soft"
+                      >
                         Delete
                       </DropdownMenu.Item>
                     </>
@@ -770,6 +931,120 @@ function SchedulesTab({ search }: { search: string }) {
           </>
         )}
       </div>
+      {completeTarget && <ScheduleCompleteModal schedule={completeTarget} onClose={() => setCompleteTarget(null)} />}
+      {editTarget && <EditScheduleModal schedule={editTarget} onClose={() => setEditTarget(null)} />}
+      {deleteTarget && <ScheduleDeleteModal schedule={deleteTarget} onClose={() => setDeleteTarget(null)} />}
     </Card>
+  );
+}
+
+/** WB-074 — Schedules `…` `Complete`. `POST /maintenance-schedules/:id/complete` — recalculates
+ * `nextDueMi`/`nextDueAt` from the optional odometer/date given here (server default: now). */
+function ScheduleCompleteModal({ schedule, onClose }: { schedule: ScheduleTableRow; onClose: () => void }) {
+  const { toast } = useToast();
+  const mutation = useCompleteSchedule(schedule.id);
+  const [odometer, setOdometer] = useState('');
+  const [serviceDate, setServiceDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [serverError, setServerError] = useState<string | null>(null);
+  const inputClass = 'h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text';
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Complete ${schedule.name}?`}
+      subtitle={`Unit ${schedule.vehicle?.unitNumber ?? '—'}`}
+      size="sm"
+      footer={
+        <>
+          <Button variant="secondary" size="lg" onClick={onClose} disabled={mutation.isPending}>
+            Cancel
+          </Button>
+          <Button
+            variant="primary"
+            size="lg"
+            loading={mutation.isPending}
+            onClick={() =>
+              mutation.mutate(
+                {
+                  serviceOdometerMi: odometer ? Number(odometer) : undefined,
+                  serviceAt: serviceDate ? new Date(serviceDate).toISOString() : undefined,
+                },
+                {
+                  onSuccess: () => {
+                    toast({ kind: 'success', ...TOAST_COPY.scheduleCompleted(schedule.name) });
+                    onClose();
+                  },
+                  onError: (error) => setServerError(error instanceof ApiError ? error.userMessage : 'Something went wrong.'),
+                },
+              )
+            }
+          >
+            Mark complete
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        <label className="flex flex-col gap-1">
+          <span className="text-label text-text">Service date</span>
+          <input type="date" value={serviceDate} onChange={(e) => setServiceDate(e.target.value)} className={inputClass} />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-label text-text">Odometer at service</span>
+          <div className="flex items-center gap-2">
+            <input type="number" value={odometer} onChange={(e) => setOdometer(e.target.value)} className={inputClass} />
+            <span className="text-body text-text-muted">mi</span>
+          </div>
+        </label>
+        {serverError && <p className="text-body text-danger">{serverError}</p>}
+      </div>
+    </Modal>
+  );
+}
+
+/** WB-074 — Schedules `…` `Delete`. `DELETE /maintenance-schedules/:id`. */
+function ScheduleDeleteModal({ schedule, onClose }: { schedule: ScheduleTableRow; onClose: () => void }) {
+  const { toast } = useToast();
+  const mutation = useDeleteSchedule();
+  const [serverError, setServerError] = useState<string | null>(null);
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={`Delete ${schedule.name}?`}
+      subtitle="This cannot be undone."
+      size="sm"
+      footer={
+        <>
+          <Button variant="secondary" size="lg" onClick={onClose} disabled={mutation.isPending}>
+            Cancel
+          </Button>
+          <Button
+            variant="danger"
+            size="lg"
+            loading={mutation.isPending}
+            onClick={() =>
+              mutation.mutate(schedule.id, {
+                onSuccess: () => {
+                  toast({ kind: 'success', ...TOAST_COPY.scheduleDeleted(schedule.name) });
+                  onClose();
+                },
+                onError: (error) => setServerError(error instanceof ApiError ? error.userMessage : 'Something went wrong.'),
+              })
+            }
+          >
+            Delete schedule
+          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-3">
+        <p className="text-body text-text-secondary">
+          Unit {schedule.vehicle?.unitNumber ?? '—'} · {schedule.name} stops tracking due dates. Historical service records
+          stay in place for audits.
+        </p>
+        {serverError && <p className="text-body text-danger">{serverError}</p>}
+      </div>
+    </Modal>
   );
 }

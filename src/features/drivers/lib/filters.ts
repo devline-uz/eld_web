@@ -1,12 +1,14 @@
 // owner: web-vehicles-drivers — W-06 Drivers, 11.23 Filters (web/tz.md §11.23:
 // "Drivers: status, terminal, violations, exemptions").
 //
-// `GET /drivers` (and the mocked `GET /drivers/roster`, gap B-1) only accept `page`/`limit`/
-// `sort`/`q`/`status` server-side (backend/src/modules/drivers/drivers.controller.ts) — none of
-// terminal/violations/exemptions are query params there. The roster page already loads every
-// entry client-side (58 drivers is one page per web/tz.md), so these filters run in-memory
-// against that same set. Recorded as a gap (web/backend-gaps.md B-55) in case the roster grows
-// past one page.
+// `GET /drivers/roster` (B-1) ships real server params for `terminal` (exact name),
+// `hasOpenViolation` and `exempt` (= `driver.eldExempt`) — B-55, shipped 2026-09-14
+// (web/backend-gaps.md). `DriversPage` forwards those three straight to the server, and the
+// VIOLATIONS segment tab reuses `hasOpenViolation` too. The `status` field here is duty status
+// (DRIVING/ON_DUTY/SLEEPER/OFF_DUTY), not `Driver.status`, and the four exemption flags besides
+// `eldExempt` still have no server param — extends B-55. While either is active, `DriversPage`
+// switches to the reference-cached roster window (`useDriverRosterWindow`) instead of narrowing
+// only the loaded server page (WB-103): `matchesDriverFilters` below then runs against the window.
 import type { DriverRosterEntry } from '@/shared/api/drivers';
 
 export const DRIVER_STATUS_OPTIONS = ['DRIVING', 'ON_DUTY', 'SLEEPER', 'OFF_DUTY'] as const;

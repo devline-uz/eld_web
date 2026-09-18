@@ -141,6 +141,41 @@ describe('AuditLogPage — W-23', () => {
     await waitFor(() => expect(createObjectURL).toHaveBeenCalled());
   });
 
+  it('WB-111 — CSV export honours the active action filter and forwards the server-side params', async () => {
+    const user = userEvent.setup();
+    const exportRequests: URLSearchParams[] = [];
+    server.use(
+      http.get(url(endpoints.auditLog.list), ({ request }) => {
+        const search = new URL(request.url).searchParams;
+        if (search.get('limit') === '200') exportRequests.push(search);
+        return ok({
+          items: [entry('1', 'UPDATE', 'Role · Dispatcher'), entry('2', 'CREATE', 'User · Anna Weiss')],
+          nextCursor: null,
+        });
+      }),
+    );
+    let capturedBlob: Blob | null = null;
+    URL.createObjectURL = vi.fn((blob: Blob) => {
+      capturedBlob = blob;
+      return 'blob:mock';
+    });
+    URL.revokeObjectURL = vi.fn();
+
+    renderPage();
+    await screen.findByText('Role · Dispatcher');
+
+    await user.selectOptions(screen.getByLabelText('Filter by action'), 'CREATE');
+    expect(screen.queryByText('Role · Dispatcher')).not.toBeInTheDocument();
+    expect(screen.getByText('User · Anna Weiss')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /export csv/i }));
+    await waitFor(() => expect(exportRequests.length).toBe(1));
+
+    const text = await capturedBlob!.text();
+    expect(text).toContain('User · Anna Weiss');
+    expect(text).not.toContain('Role · Dispatcher');
+  });
+
   it('gates Export CSV on the auditLog permission', async () => {
     server.use(http.get(url(endpoints.auditLog.list), () => ok({ items: [], nextCursor: null })));
     const { rerender } = renderPage();

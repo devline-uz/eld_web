@@ -8,7 +8,7 @@
 // file called `Sign in — split brand panel with SSO.jpg` actually draws 11.1 Create a geofence
 // (§11 warns the names are scrambled). Every string below therefore comes from §10 W-00 prose.
 import { useCallback, useEffect, useState } from 'react';
-import { Navigate, useSearchParams } from 'react-router-dom';
+import { Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import { errorMessage } from '@/shared/api/errors';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import {
@@ -16,6 +16,12 @@ import {
   consumeGoogleRedirectResult,
   signInWithGoogle,
 } from '@/shared/auth/firebase';
+import {
+  forgetReturnPath,
+  readRememberedReturnPath,
+  rememberReturnPath,
+  safeReturnPath,
+} from '@/shared/auth/returnTo';
 import { Button } from '@/shared/ui/Button';
 import { DeveloperSignIn } from './DeveloperSignIn';
 import { GoogleLogo } from './GoogleLogo';
@@ -76,6 +82,17 @@ const REASON_BANNER: Record<string, string> = {
 export default function SignInPage() {
   const { isAuthenticated, signInWithGoogleToken, sessionEndedReason } = useAuth();
   const [params] = useSearchParams();
+  const location = useLocation();
+  // WB-081 — where RequireAuth was sending the user; validated, never an off-origin URL. A
+  // Google redirect round trip loses history state, so the stored copy is the fallback.
+  const [returnTo] = useState(
+    () =>
+      safeReturnPath((location.state as { from?: unknown } | null)?.from) ??
+      readRememberedReturnPath(),
+  );
+  // Consumed: the stored copy has done its job once it is in state (an effect, not the
+  // initializer, so StrictMode's double initializer call cannot lose it).
+  useEffect(() => forgetReturnPath(), []);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<'google' | 'password' | null>(null);
 
@@ -111,21 +128,30 @@ export default function SignInPage() {
     };
   }, [exchange]);
 
-  if (isAuthenticated) return <Navigate to="/" replace />;
+  if (isAuthenticated) return <Navigate to={returnTo ?? '/'} replace />;
 
   async function onGoogle() {
     setError(null);
     setBusy('google');
+    // Stored before the call: a `signInWithRedirect` fallback navigates away and never returns
+    // control here, so this is the only moment to keep the destination (WB-081).
+    rememberReturnPath(returnTo);
+    let redirecting = false;
     try {
       const outcome = await signInWithGoogle();
       // The popup was closed by the user: W-00 says show no banner at all.
       if (outcome.kind === 'cancelled') return;
       // signInWithRedirect took over — the page is navigating away.
-      if (outcome.kind === 'redirecting') return;
+      if (outcome.kind === 'redirecting') {
+        redirecting = true;
+        return;
+      }
       await exchange(outcome.idToken);
     } catch (cause) {
       setError(signInErrorMessage(cause));
     } finally {
+      // The popup path never left the page: drop the stored copy so it cannot resurface later.
+      if (!redirecting) forgetReturnPath();
       setBusy(null);
     }
   }

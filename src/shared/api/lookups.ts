@@ -25,19 +25,19 @@ export const FILTER_WINDOW = 1000;
 
 export const driversLookupQuery = (): PageQueryOptions<DriverRow> => ({
   queryKey: qk.drivers({ limit: LOOKUP_LIMIT }),
-  queryFn: () => client.list<DriverRow>(endpoints.drivers.list, { limit: LOOKUP_LIMIT }),
+  queryFn: ({ signal }) => client.list<DriverRow>(endpoints.drivers.list, { limit: LOOKUP_LIMIT }, { signal }),
   ...pagePolicy('reference'),
 });
 
 export const vehiclesLookupQuery = (): PageQueryOptions<VehicleRow> => ({
   queryKey: qk.vehicles({ limit: LOOKUP_LIMIT }),
-  queryFn: () => client.list<VehicleRow>(endpoints.vehicles.list, { limit: LOOKUP_LIMIT }),
+  queryFn: ({ signal }) => client.list<VehicleRow>(endpoints.vehicles.list, { limit: LOOKUP_LIMIT }, { signal }),
   ...pagePolicy('reference'),
 });
 
 export const devicesLookupQuery = (): PageQueryOptions<DeviceRow> => ({
   queryKey: qk.devices({ limit: LOOKUP_LIMIT }),
-  queryFn: () => client.list<DeviceRow>(endpoints.devices.list, { limit: LOOKUP_LIMIT }),
+  queryFn: ({ signal }) => client.list<DeviceRow>(endpoints.devices.list, { limit: LOOKUP_LIMIT }, { signal }),
   ...pagePolicy('reference'),
 });
 

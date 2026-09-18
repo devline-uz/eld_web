@@ -53,7 +53,7 @@ export interface CarrierRow {
 export function useCarrier() {
   return useQuery({
     queryKey: qk.carrier,
-    queryFn: () => client.get<CarrierRow>(endpoints.carrier.root),
+    queryFn: ({ signal }) => client.get<CarrierRow>(endpoints.carrier.root, { signal }),
     ...typedCachePolicy<CarrierRow>('reference'),
   });
 }
@@ -90,7 +90,7 @@ export interface UserRow {
 export function useUsersList() {
   const query = useQuery({
     queryKey: qk.users(),
-    queryFn: () => client.get<UserRow[]>(endpoints.users.list),
+    queryFn: ({ signal }) => client.get<UserRow[]>(endpoints.users.list, { signal }),
     ...typedCachePolicy<UserRow[]>('list'),
   });
   return { ...query, rows: query.data ?? [] };
@@ -147,7 +147,7 @@ export interface RoleRow {
 export function useRolesList() {
   const query = useQuery({
     queryKey: qk.roles,
-    queryFn: () => client.get<RoleRow[]>(endpoints.roles.list),
+    queryFn: ({ signal }) => client.get<RoleRow[]>(endpoints.roles.list, { signal }),
     ...typedCachePolicy<RoleRow[]>('reference'),
   });
   return { ...query, rows: query.data ?? [] };
@@ -216,7 +216,7 @@ export interface DeviceListParams {
 export function useDevicesList(params: DeviceListParams = {}) {
   return useQuery({
     queryKey: qk.devices(params),
-    queryFn: () => client.get<OffsetPage<DeviceRow>>(endpoints.devices.list, { params }),
+    queryFn: ({ signal }) => client.get<OffsetPage<DeviceRow>>(endpoints.devices.list, { params, signal }),
     ...typedCachePolicy<OffsetPage<DeviceRow>>('list'),
   });
 }
@@ -317,7 +317,7 @@ export interface AlertRuleRow {
 export function useAlertRulesList() {
   const query = useQuery({
     queryKey: qk.alertRules(),
-    queryFn: () => client.get<{ items: AlertRuleRow[] } | AlertRuleRow[]>(endpoints.alertRules.list),
+    queryFn: ({ signal }) => client.get<{ items: AlertRuleRow[] } | AlertRuleRow[]>(endpoints.alertRules.list, { signal }),
     ...typedCachePolicy<{ items: AlertRuleRow[] } | AlertRuleRow[]>('list'),
   });
   const data = query.data;
@@ -387,7 +387,7 @@ export interface IntegrationRow {
 export function useIntegrationsList() {
   const query = useQuery({
     queryKey: qk.integrations,
-    queryFn: () => client.get<IntegrationRow[]>(endpoints.integrations.list),
+    queryFn: ({ signal }) => client.get<IntegrationRow[]>(endpoints.integrations.list, { signal }),
     ...typedCachePolicy<IntegrationRow[]>('reference'),
   });
   return { ...query, rows: query.data ?? [] };
@@ -424,7 +424,7 @@ export interface ApiKeyRow {
 export function useApiKeysList() {
   const query = useQuery({
     queryKey: qk.apiKeys,
-    queryFn: () => client.get<ApiKeyRow[]>(endpoints.apiKeys.list),
+    queryFn: ({ signal }) => client.get<ApiKeyRow[]>(endpoints.apiKeys.list, { signal }),
     ...typedCachePolicy<ApiKeyRow[]>('reference'),
   });
   return { ...query, rows: query.data ?? [] };
@@ -488,7 +488,7 @@ export interface AuditListParams {
 export function useAuditLog(params: AuditListParams = {}) {
   return useQuery({
     queryKey: qk.audit(params),
-    queryFn: () => client.get<{ items: AuditEntry[]; nextCursor: string | null }>(endpoints.auditLog.list, { params }),
+    queryFn: ({ signal }) => client.get<{ items: AuditEntry[]; nextCursor: string | null }>(endpoints.auditLog.list, { params, signal }),
     ...typedCachePolicy<{ items: AuditEntry[]; nextCursor: string | null }>('slowList'),
   });
 }
@@ -525,7 +525,7 @@ export interface TicketListParams {
 export function useTicketsList(params: TicketListParams = {}) {
   return useQuery({
     queryKey: qk.tickets(params),
-    queryFn: () => client.get<OffsetPage<TicketRow>>(endpoints.support.tickets, { params }),
+    queryFn: ({ signal }) => client.get<OffsetPage<TicketRow>>(endpoints.support.tickets, { params, signal }),
     ...typedCachePolicy<OffsetPage<TicketRow>>('list'),
   });
 }

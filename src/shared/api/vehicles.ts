@@ -115,14 +115,14 @@ export const VEHICLES_DEFAULT_PAGE: VehiclesPageParams = { page: 1, limit: 10 };
 /** One `GET /vehicles` page — shared by the W-03 table and the sidebar prefetch (WD-073). */
 export const vehiclesPageQuery = (params: VehiclesPageParams): PageQueryOptions<VehicleRow> => ({
   queryKey: qk.vehicles(compactParams(params)),
-  queryFn: () => client.list<VehicleRow>(endpoints.vehicles.list, compactParams(params)),
+  queryFn: ({ signal }) => client.list<VehicleRow>(endpoints.vehicles.list, compactParams(params), { signal }),
   ...pagePolicy('list'),
 });
 
 /** `total` of a status slice via `limit: 1` — the same keys the Dashboard KPI tiles use. */
 export const vehiclesCountQuery = (status?: 'ACTIVE' | 'INACTIVE' | 'OUT_OF_SERVICE'): PageQueryOptions<VehicleRow> => ({
   queryKey: qk.vehicles(compactParams({ status, limit: 1 })),
-  queryFn: () => client.list<VehicleRow>(endpoints.vehicles.list, compactParams({ status, limit: 1 })),
+  queryFn: ({ signal }) => client.list<VehicleRow>(endpoints.vehicles.list, compactParams({ status, limit: 1 }), { signal }),
   ...pagePolicy('list'),
 });
 
@@ -226,7 +226,7 @@ export function useVehicleCounts() {
 export function useVehicle(id: string | undefined) {
   return useQuery({
     queryKey: qk.vehicle(id ?? ''),
-    queryFn: () => client.get<VehicleRow>(endpoints.vehicles.detail(id as string)),
+    queryFn: ({ signal }) => client.get<VehicleRow>(endpoints.vehicles.detail(id as string), { signal }),
     enabled: Boolean(id),
     ...typedCachePolicy<VehicleRow>('reference'),
   });
@@ -269,7 +269,7 @@ export interface DtcItem {
 export function useVehicleDtc(vehicleId: string | undefined) {
   return useQuery({
     queryKey: qk.vehicleDtc(vehicleId ?? ''),
-    queryFn: () => client.get<{ items: DtcItem[] }>(endpoints.vehicles.dtc(vehicleId as string)),
+    queryFn: ({ signal }) => client.get<{ items: DtcItem[] }>(endpoints.vehicles.dtc(vehicleId as string), { signal }),
     enabled: Boolean(vehicleId),
     ...typedCachePolicy<{ items: DtcItem[] }>('list'),
   });
@@ -288,7 +288,7 @@ export interface VehicleActivityItem {
 export function useVehicleActivities(vehicleId: string | undefined) {
   return useQuery({
     queryKey: qk.vehicleActivities(vehicleId ?? ''),
-    queryFn: () => client.get<{ items: VehicleActivityItem[] }>(endpoints.vehicles.activities(vehicleId as string)),
+    queryFn: ({ signal }) => client.get<{ items: VehicleActivityItem[] }>(endpoints.vehicles.activities(vehicleId as string), { signal }),
     enabled: Boolean(vehicleId),
     ...typedCachePolicy<{ items: VehicleActivityItem[] }>('list'),
   });
@@ -336,7 +336,7 @@ export interface VehicleHistoriesResponse {
 export function useVehicleHistories(vehicleId: string | undefined, date: string) {
   return useQuery({
     queryKey: qk.vehicleHistories(vehicleId ?? '', date),
-    queryFn: () => client.get<VehicleHistoriesResponse>(endpoints.vehicles.histories(vehicleId as string), { params: { date } }),
+    queryFn: ({ signal }) => client.get<VehicleHistoriesResponse>(endpoints.vehicles.histories(vehicleId as string), { params: { date }, signal }),
     enabled: Boolean(vehicleId && date),
     ...typedCachePolicy<VehicleHistoriesResponse>('list'),
   });

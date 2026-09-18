@@ -6,7 +6,8 @@
 // transfer range, the Appendix A file) is a driver home-terminal day and is handled by the backend.
 import { format } from 'date-fns';
 import { ApiError, ERROR_MESSAGES } from '@/shared/api/errors';
-import type { ReportRow, ReportType, TransferStatus } from '@/shared/api/reports';
+import { DVIR_REPORT_MAX_PAGES, type ReportRow, type ReportType, type TransferStatus } from '@/shared/api/reports';
+import { formatNumber } from '@/shared/format/numbers';
 import type { PermissionKey, Role } from '@/shared/auth/permissions';
 import type { BadgeTone } from '@/shared/ui/Badge';
 import { formatDateRange, formatInTz } from '@/shared/format/datetime';
@@ -27,6 +28,20 @@ export const REPORT_LABEL: Record<ReportType, string> = {
   UNIDENTIFIED: 'Unidentified driving report',
   SAFETY: 'Safety report',
 };
+
+/**
+ * ⛔ Gap B-14 — the backend can still store `RODS` / `IDLE_FUEL` rows although `ReportType` omits
+ * them; they carry their W-12 library names. Any other unknown type shows its raw value, never
+ * `undefined` (web/bugs.md WB-099).
+ */
+const STORED_ONLY_LABEL: Record<string, string> = {
+  RODS: 'Driver logs (RODS)',
+  IDLE_FUEL: 'Idle & fuel report',
+};
+
+export function reportLabel(type: string): string {
+  return (REPORT_LABEL as Record<string, string | undefined>)[type] ?? STORED_ONLY_LABEL[type] ?? type;
+}
 
 /* ------------------------------------------------------------------ selector */
 
@@ -152,6 +167,23 @@ export const TRANSFER_METHOD_LABEL = {
   EMAIL: 'Email to inspector',
 } as const;
 
+/* ------------------------------------------------------------------ export scope (WB-097) */
+
+/**
+ * The CSV/PDF shortcuts take only `from`/`to` plus `driverId` (Activity) or `vehicleId` (DVIR). A
+ * filter they cannot carry is never dropped silently: the screen states what the file holds.
+ */
+export const ACTIVITY_EXPORT_SCOPE =
+  'Export CSV covers every home terminal and driver status — the terminal filter applies to this screen only.';
+export const DVIR_EXPORT_SCOPE =
+  'Export CSV and Download PDF include every defect type — the defect filter applies to this screen only.';
+
+/**
+ * WB-096 · gap B-47 — `GET /dvir` has no date filter, so the list is walked back from the newest
+ * inspection; when the walk is capped before the range start, the counts are a lower bound.
+ */
+export const DVIR_WINDOW_NOTE = `Only the newest ${formatNumber(DVIR_REPORT_MAX_PAGES * 200)} inspections could be read — earlier inspections in this range are not counted.`;
+
 /* ------------------------------------------------------------------ misc */
 
 /** `2.4 MB` — the size in the `Report ready` toast. */
@@ -188,5 +220,6 @@ export function saveFile(source: Blob | string, fileName: string): void {
   document.body.appendChild(link);
   link.click();
   link.remove();
-  if (typeof source !== 'string') URL.revokeObjectURL(href);
+  // Revoking on the click's own tick can abort the download in Firefox/Safari (WB-100).
+  if (typeof source !== 'string') setTimeout(() => URL.revokeObjectURL(href), 0);
 }
