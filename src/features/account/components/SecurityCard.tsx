@@ -49,7 +49,7 @@ function SignInMethod({ profile }: { profile: MyProfile }) {
 export function SecurityCard({ query }: { query: UseQueryResult<MyProfile, Error> }) {
   return (
     <section
-      id="security"
+      id="account-section-security"
       tabIndex={-1}
       aria-labelledby="account-security-title"
       className="scroll-mt-page focus-visible:ring-2 focus-visible:ring-primary"

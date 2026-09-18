@@ -1,4 +1,4 @@
-// owner: web-auth-rbac — the raw auth calls (web/tz.md §6.5).
+  // owner: web-auth-rbac — the raw auth calls (web/tz.md §6.5).
 //
 // These five endpoints deliberately do NOT go through `shared/api/client.ts`: the client's job
 // is to refresh a 401 and replay it, and the refresh call itself must never be caught by that
