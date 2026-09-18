@@ -3213,7 +3213,7 @@ Kelajak kunlar disabled. `Last 8 days (HOS)` tanlanganda **aynan 8 kun** (bugun 
 - Ajratkich: `Switch organisation` (o'ngda `3`) — **disabled, `v2` chipi** ·
   `Language` (`English`) · `Appearance` (`Light`)
   > `Appearance` v1 da faqat `Light` (dark mode yo'q) — disabled.
-- Ajratkich: `Help centre` · `Keyboard shortcuts` (o'ngda `?`) · `What is new`
+- Ajratkich: `Help center` · `Keyboard shortcuts` (o'ngda `?`) · `What is new`
 - Ajratkich: **`Sign out`** (danger)
 
 ---

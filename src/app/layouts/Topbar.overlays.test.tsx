@@ -339,7 +339,7 @@ describe('11.26 Account menu', () => {
     ['Account security', '/account#security'],
     ['Notification preferences', '/account#notifications'],
     ['Language', '/account#language'],
-    ['Help centre', '/settings/support'],
+    ['Help center', '/settings/support'],
   ])('%s navigates to %s', async (label, to) => {
     const { user } = renderTopbar('VIEWER');
     await user.click(screen.getByRole('button', { name: 'Account menu' }));
