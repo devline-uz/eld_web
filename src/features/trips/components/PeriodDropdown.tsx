@@ -14,6 +14,7 @@ import { endOfMonth, endOfWeek, format, startOfMonth, startOfWeek } from 'date-f
 import { Button } from '@/shared/ui/Button';
 import { cn } from '@/shared/ui/cn';
 import type { TripFilters } from '../lib/filters';
+import { customFromBounds, customToBounds, validateCustomFrom, validateCustomTo } from '../lib/periodRange';
 
 export type TripPeriodPreset = 'today' | 'thisWeek' | 'thisMonth' | 'custom';
 
@@ -66,6 +67,15 @@ export function PeriodDropdown({ filters, onApply }: PeriodDropdownProps) {
   const [open, setOpen] = useState(false);
   const [customFrom, setCustomFrom] = useState(filters.departFrom ?? '');
   const [customTo, setCustomTo] = useState(filters.departTo ?? '');
+  // Recomputed each time the popover opens (never a module-load constant) so "yesterday"/"today"
+  // always reflect the browser's clock at the moment the user is picking a range.
+  const [today, setToday] = useState(() => new Date());
+
+  const fromBounds = customFromBounds(today);
+  const toBounds = customToBounds(customFrom, today);
+  const fromError = validateCustomFrom(customFrom, today);
+  const toError = validateCustomTo(customTo, customFrom, today);
+  const canApply = (Boolean(customFrom) || Boolean(customTo)) && !fromError && !toError;
 
   const active = matchingPreset(filters);
   const triggerLabel = active
@@ -90,6 +100,7 @@ export function PeriodDropdown({ filters, onApply }: PeriodDropdownProps) {
         if (next) {
           setCustomFrom(filters.departFrom ?? '');
           setCustomTo(filters.departTo ?? '');
+          setToday(new Date());
         }
         setOpen(next);
       }}
@@ -100,7 +111,7 @@ export function PeriodDropdown({ filters, onApply }: PeriodDropdownProps) {
         </Button>
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Content align="start" sideOffset={8} className="z-50 w-64 rounded-lg border border-border bg-bg-surface p-2 shadow-pop">
+        <Popover.Content align="start" sideOffset={8} className="z-50 w-[266px] rounded-lg border border-border bg-bg-surface p-2 shadow-pop">
           <div className="flex flex-col gap-1">
             {(['today', 'thisWeek', 'thisMonth'] as const).map((preset) => (
               <button
@@ -125,8 +136,16 @@ export function PeriodDropdown({ filters, onApply }: PeriodDropdownProps) {
                   type="date"
                   value={customFrom}
                   onChange={(e) => setCustomFrom(e.target.value)}
-                  className="h-input rounded-md border border-border bg-bg-surface px-2 text-body text-text"
+                  min={fromBounds.min}
+                  max={fromBounds.max}
+                  aria-invalid={Boolean(fromError) || undefined}
+                  className={cn(
+                    'h-input w-full min-w-0 rounded-md border bg-bg-surface px-1 text-body text-text',
+                    '[&::-webkit-calendar-picker-indicator]:m-0 [&::-webkit-calendar-picker-indicator]:ml-0.5 [&::-webkit-calendar-picker-indicator]:p-0',
+                    fromError ? 'border-danger' : 'border-border',
+                  )}
                 />
+                {fromError ? <span className="text-caption text-danger">{fromError}</span> : null}
               </label>
               <label className="flex flex-col gap-1 text-caption text-text-muted">
                 To
@@ -134,8 +153,16 @@ export function PeriodDropdown({ filters, onApply }: PeriodDropdownProps) {
                   type="date"
                   value={customTo}
                   onChange={(e) => setCustomTo(e.target.value)}
-                  className="h-input rounded-md border border-border bg-bg-surface px-2 text-body text-text"
+                  min={toBounds.min}
+                  max={toBounds.max}
+                  aria-invalid={Boolean(toError) || undefined}
+                  className={cn(
+                    'h-input w-full min-w-0 rounded-md border bg-bg-surface px-1 text-body text-text',
+                    '[&::-webkit-calendar-picker-indicator]:m-0 [&::-webkit-calendar-picker-indicator]:ml-0.5 [&::-webkit-calendar-picker-indicator]:p-0',
+                    toError ? 'border-danger' : 'border-border',
+                  )}
                 />
+                {toError ? <span className="text-caption text-danger">{toError}</span> : null}
               </label>
             </div>
             <div className="mt-2 flex justify-between px-2">
@@ -152,7 +179,7 @@ export function PeriodDropdown({ filters, onApply }: PeriodDropdownProps) {
               <Button
                 variant="primary"
                 size="sm"
-                disabled={!customFrom && !customTo}
+                disabled={!canApply}
                 onClick={() => {
                   onApply({ departFrom: customFrom || null, departTo: customTo || null });
                   setOpen(false);
