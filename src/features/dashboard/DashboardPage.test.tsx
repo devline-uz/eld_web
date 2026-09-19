@@ -2,17 +2,27 @@
 // per-card error state for the still-missing `GET /violations` (gap B-6).
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { http } from 'msw';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
 import { ok, url } from '@/mocks/envelope';
 import { endpoints } from '@/shared/api/endpoints';
 import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/client';
+import { ToastProvider } from '@/shared/ui/Toast';
 import DashboardPage from './DashboardPage';
 
-vi.mock('@/shared/auth/usePermission', () => ({ usePermission: () => ({ can: () => true }) }));
+// Mutable per test: `granted` is the set of `key:level` pairs `can()` answers true for (null = all).
+const perms = vi.hoisted(() => ({ granted: null as Set<string> | null }));
+vi.mock('@/shared/auth/usePermission', () => ({
+  usePermission: () => ({
+    can: (key: string, level: 'READ' | 'FULL' = 'READ') =>
+      perms.granted === null ||
+      perms.granted.has(`${key}:FULL`) ||
+      (level === 'READ' && perms.granted.has(`${key}:READ`)),
+  }),
+}));
 vi.mock('@/shared/realtime/useRoom', () => ({ useRoom: () => ({ joined: false }) }));
 
 // `maplibre-gl` calls `window.URL.createObjectURL` as a module-load side effect (web/bugs.md
@@ -21,19 +31,30 @@ if (!window.URL.createObjectURL) {
   window.URL.createObjectURL = () => 'blob:mock';
 }
 
+/** Renders the current router location so navigation can be asserted without a route tree. */
+function LocationProbe() {
+  const location = useLocation();
+  return <output data-testid="location">{`${location.pathname}${location.search}`}</output>;
+}
+
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const utils = render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
-        <DashboardPage />
-      </MemoryRouter>
+      <ToastProvider>
+        <MemoryRouter>
+          <DashboardPage />
+          <LocationProbe />
+        </MemoryRouter>
+      </ToastProvider>
     </QueryClientProvider>,
   );
+  return { ...utils, queryClient };
 }
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'bypass' }));
 afterEach(() => {
+  perms.granted = null;
   server.resetHandlers();
   resetAuthBridge();
 });
@@ -232,5 +253,144 @@ describe('W-01 Fleet Dashboard', () => {
     // the second row has no driverId — its menu carries the extra "Assign to driver" item.
     await user.click(rowMenus[1]!);
     expect(await screen.findByText('Assign to driver', {}, { timeout: 8000 })).toBeInTheDocument();
+  });
+
+  describe('HOS violations & alerts · row menu', () => {
+    const assigned = {
+      id: 'vio_1',
+      severity: 'VIOLATION',
+      driverId: 'drv_1',
+      driverName: 'John Smith',
+      vehicleId: 'v1',
+      unitNumber: '#101',
+      event: '11-hour driving limit exceeded',
+      locationLabel: '1.04 mi W of Harrisburg, OH',
+      occurredAt: new Date().toISOString(),
+      date: '2026-09-12',
+    };
+    const unassigned = {
+      id: 'vio_2',
+      severity: 'WARNING',
+      driverId: null,
+      driverName: null,
+      vehicleId: 'v2',
+      unitNumber: '#102',
+      event: 'Unassigned driving · 1h 12m',
+      locationLabel: null,
+      occurredAt: new Date().toISOString(),
+      date: '2026-09-13',
+    };
+
+    function useRows() {
+      server.use(http.get(url(endpoints.dashboard.summary), () => ok(buildSummary())), violationsPage([assigned, unassigned]));
+    }
+
+    async function openMenu(user: ReturnType<typeof userEvent.setup>, rowIndex: number) {
+      await screen.findByText(assigned.event, {}, { timeout: 8000 });
+      await user.click(screen.getAllByRole('button', { name: 'Row actions' })[rowIndex]!);
+      return screen.findByRole('menu');
+    }
+
+    it('lists Open HOS logs · Send message · Resolve for a driver row, and Assign to driver only for an unassigned one', async () => {
+      useRows();
+      const user = userEvent.setup();
+      renderPage();
+
+      const menu = await openMenu(user, 0);
+      expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
+        'Open HOS logs',
+        'Send message',
+        'Resolve',
+      ]);
+      await user.keyboard('{Escape}');
+
+      const unassignedMenu = await openMenu(user, 1);
+      expect(within(unassignedMenu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
+        'Resolve',
+        'Assign to driver',
+      ]);
+    });
+
+    it('Open HOS logs navigates to the driver log day, without also firing the row click', async () => {
+      useRows();
+      const user = userEvent.setup();
+      renderPage();
+
+      const menu = await openMenu(user, 0);
+      await user.click(within(menu).getByRole('menuitem', { name: 'Open HOS logs' }));
+      expect(screen.getByTestId('location')).toHaveTextContent('/hos-logs?driverId=drv_1&date=2026-09-12');
+    });
+
+    it("Send message deep-links to the driver's conversation in Messages", async () => {
+      useRows();
+      const user = userEvent.setup();
+      renderPage();
+
+      const menu = await openMenu(user, 0);
+      await user.click(within(menu).getByRole('menuitem', { name: 'Send message' }));
+      expect(screen.getByTestId('location')).toHaveTextContent(/^\/messages\?driverId=drv_1$/);
+    });
+
+    it('Assign to driver deep-links to 11.13 Unassigned driving on the violation day', async () => {
+      useRows();
+      const user = userEvent.setup();
+      renderPage();
+
+      const menu = await openMenu(user, 1);
+      await user.click(within(menu).getByRole('menuitem', { name: 'Assign to driver' }));
+      expect(screen.getByTestId('location')).toHaveTextContent('/hos-logs?unassigned=1&date=2026-09-13');
+    });
+
+    it('Resolve opens the modal, posts the note, toasts and refetches the table', async () => {
+      useRows();
+      let sent: { id: string; body: unknown } | null = null;
+      let listCalls = 0;
+      server.use(
+        http.get(url(endpoints.violations.list), () => {
+          listCalls += 1;
+          return ok({ items: [assigned, unassigned], total: 2, page: 1, limit: 10, totalPages: 1 });
+        }),
+        http.post(url(endpoints.violations.resolve(':id')), async ({ request, params }) => {
+          sent = { id: String(params.id), body: await request.json() };
+          return ok({ id: String(params.id), status: 'RESOLVED', resolvedAt: new Date().toISOString(), resolutionNote: 'Detour' });
+        }),
+      );
+      const user = userEvent.setup();
+      renderPage();
+
+      const menu = await openMenu(user, 0);
+      const callsBefore = listCalls;
+      await user.click(within(menu).getByRole('menuitem', { name: 'Resolve' }));
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).getByText('Resolve violation')).toBeInTheDocument();
+      expect(within(dialog).getByText(assigned.event)).toBeInTheDocument();
+      // opening the modal did not navigate through the row click.
+      expect(screen.getByTestId('location')).toHaveTextContent(/^\/$/);
+
+      await user.type(within(dialog).getByRole('textbox'), 'Adverse weather detour.');
+      await user.click(within(dialog).getByRole('button', { name: 'Resolve' }));
+
+      await waitFor(() => expect(sent).toEqual({ id: 'vio_1', body: { resolutionNote: 'Adverse weather detour.' } }));
+      expect(await screen.findByText('Violation resolved')).toBeInTheDocument();
+      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+      await waitFor(() => expect(listCalls).toBeGreaterThan(callsBefore));
+    });
+
+    it('hides Send message without messaging access, and the whole column below hosEdit FULL', async () => {
+      useRows();
+      perms.granted = new Set(['dashboard:READ', 'hos:READ', 'hosEdit:FULL']);
+      const user = userEvent.setup();
+      const { unmount } = renderPage();
+
+      const menu = await openMenu(user, 0);
+      expect(within(menu).queryByRole('menuitem', { name: 'Send message' })).not.toBeInTheDocument();
+      expect(within(menu).getByRole('menuitem', { name: 'Open HOS logs' })).toBeInTheDocument();
+      unmount();
+
+      perms.granted = new Set(['dashboard:READ', 'hos:READ', 'hosEdit:READ', 'messaging:FULL']);
+      renderPage();
+      await screen.findByText(assigned.event, {}, { timeout: 8000 });
+      expect(screen.queryByRole('button', { name: 'Row actions' })).not.toBeInTheDocument();
+    });
   });
 });

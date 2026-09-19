@@ -1,7 +1,7 @@
 // owner: web-dispatch-messaging — W-16 Messages (web/tz.md §10 W-16).
 // Design: web/roles and screens/admin panel/Three-pane driver messaging with context panel.jpg
-import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Phone, Plus, Search, Send, User } from 'lucide-react';
 import { Can } from '@/shared/auth/Can';
@@ -19,13 +19,16 @@ import { formatRelativeShort } from '@/shared/format/relative';
 import { formatLocal } from '@/shared/format/datetime';
 import { formatHosHours } from '@/shared/format/hos';
 import { formatSpeed } from '@/shared/format/numbers';
-import { useDriverHos } from '@/shared/api/drivers';
+import { useDriver, useDriverHos } from '@/shared/api/drivers';
+import { useDriverMap } from '@/shared/api/lookups';
+import { errorMessage, toUserMessage } from '@/shared/api/errors';
 import { useLiveFleet } from '@/shared/api/liveFleet';
 import { useActiveTrips } from '@/shared/api/trips';
 import {
   useConversationsList,
   useMessages,
   useSendMessage,
+  useCreateConversation,
   upsertMessage,
   bumpConversation,
   setMessageStatus,
@@ -65,6 +68,79 @@ export default function MessagesPage() {
   const [newOpen, setNewOpen] = useState(false);
 
   const conversations = useConversationsList(user?.id);
+
+  // Deep link `/messages?driverId=` (`messagesHref`, every "Send message" entry point): open the
+  // driver's existing DIRECT conversation, else start one via `POST /conversations` — the same
+  // call the `+ New` → `Message a driver` flow makes. `handledDeepLink` makes it one-shot per
+  // driverId (re-renders, StrictMode's double effect, the list refetch after create), and the
+  // param is then dropped with `replace` so Back/refresh never re-run it.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const deepLinkDriverId = searchParams.get('driverId');
+  const handledDeepLink = useRef<string | null>(null);
+  const createConversation = useCreateConversation();
+  const { map: driverById } = useDriverMap();
+  const lookupDriver = deepLinkDriverId ? driverById.get(deepLinkDriverId) : undefined;
+  // Only when the driver is outside the cached reference list (or the id is bogus) — confirms it.
+  const driverDetail = useDriver(deepLinkDriverId && !conversations.isLoading && !lookupDriver ? deepLinkDriverId : undefined);
+
+  useEffect(() => {
+    if (!deepLinkDriverId) {
+      handledDeepLink.current = null; // param consumed — a later deep link to the same driver runs again
+      return;
+    }
+    if (conversations.isLoading || conversations.isError) return;
+    if (handledDeepLink.current === deepLinkDriverId) return;
+    const driverId = deepLinkDriverId;
+    const finish = () => {
+      handledDeepLink.current = driverId;
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete('driverId');
+          return next;
+        },
+        { replace: true },
+      );
+    };
+
+    const existing = conversations.items.find((c) => c.type === 'DIRECT' && c.participants.some((p) => p.driverId === driverId));
+    if (existing) {
+      setSelectedId(existing.id);
+      finish();
+      return;
+    }
+    if (!lookupDriver && !driverDetail.data) {
+      if (!driverDetail.isError) return; // still confirming the driver
+      toast({ kind: 'error', title: errorMessage('DRIVER_NOT_FOUND') });
+      finish();
+      return;
+    }
+    if (!can('messaging', 'FULL')) {
+      toast({ kind: 'warning', title: 'No conversation with this driver yet.' });
+      finish();
+      return;
+    }
+    finish();
+    createConversation.mutate(
+      { type: 'DIRECT', driverIds: [driverId] },
+      {
+        onSuccess: (conversation) => setSelectedId(conversation.id),
+        onError: (error) => toast({ kind: 'error', title: toUserMessage(error) }),
+      },
+    );
+  }, [
+    deepLinkDriverId,
+    conversations.isLoading,
+    conversations.isError,
+    conversations.items,
+    lookupDriver,
+    driverDetail.data,
+    driverDetail.isError,
+    can,
+    createConversation,
+    setSearchParams,
+    toast,
+  ]);
 
   const filteredConversations = useMemo(() => {
     let rows = conversations.items;
@@ -266,7 +342,9 @@ export default function MessagesPage() {
 
       {/* Middle panel — thread */}
       <div className="flex min-w-0 flex-1 flex-col">
-        {!selected ? (
+        {!selected && createConversation.isPending ? (
+          <LoadingState className="p-4" />
+        ) : !selected ? (
           <div className="flex flex-1 items-center justify-center">
             <EmptyState title="Select a conversation" description="Choose a driver from the list to see the thread." />
           </div>

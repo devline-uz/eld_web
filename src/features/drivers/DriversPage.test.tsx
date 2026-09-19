@@ -4,7 +4,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { http, HttpResponse } from 'msw';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
 import { ok, url } from '@/mocks/envelope';
@@ -40,6 +40,12 @@ function rosterEntry(id: string, firstName: string, dutyStatus: 'DRIVING' | 'ON_
   };
 }
 
+/** Renders the current router location so navigation can be asserted without a route tree. */
+function LocationProbe() {
+  const location = useLocation();
+  return <output data-testid="location">{`${location.pathname}${location.search}`}</output>;
+}
+
 function renderPage(initialEntries: string[] = ['/drivers']) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -47,6 +53,7 @@ function renderPage(initialEntries: string[] = ['/drivers']) {
       <ToastProvider>
         <MemoryRouter initialEntries={initialEntries}>
           <DriversPage />
+          <LocationProbe />
         </MemoryRouter>
       </ToastProvider>
     </QueryClientProvider>,
@@ -145,6 +152,16 @@ describe('W-06 Drivers', () => {
 
     await user.click(screen.getAllByRole('button', { name: 'Row actions' })[0]!);
     await user.click(await screen.findByText('View driver profile'));
+  });
+
+  it("row menu Send message deep-links to that driver's conversation (WB-139)", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('John Smith');
+
+    await user.click(screen.getAllByRole('button', { name: 'Row actions' })[0]!);
+    await user.click(await screen.findByText('Send message'));
+    expect(screen.getByTestId('location')).toHaveTextContent(/^\/messages\?driverId=drv_1$/);
   });
 
   it('11.23 Filters — "open violations only" narrows the roster, shows a chip and Clear all resets it', async () => {

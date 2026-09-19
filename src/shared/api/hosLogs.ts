@@ -385,15 +385,19 @@ export interface ResolveViolationResult {
   resolutionNote: string;
 }
 
-export function useResolveViolation(driverId: string, date: string) {
+/** `driverId`/`date` name the log day to refresh; W-01 passes none for an unassigned row. */
+export function useResolveViolation(driverId?: string, date?: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, resolutionNote }: { id: string; resolutionNote: string }) =>
       client.post<ResolveViolationResult>(endpoints.violations.resolve(id), { resolutionNote }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: qk.logDay(driverId, date) });
-      // The fleet list (W-01, default status=OPEN) must drop the row too.
+      if (driverId && date) {
+        void queryClient.invalidateQueries({ queryKey: qk.logDay(driverId, date) });
+      }
+      // The fleet list (W-01, default status=OPEN) must drop the row, and its KPI recount.
       void queryClient.invalidateQueries({ queryKey: qk.violations() });
+      void queryClient.invalidateQueries({ queryKey: qk.dashboardSummary });
     },
   });
 }

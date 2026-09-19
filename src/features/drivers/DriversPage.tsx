@@ -27,6 +27,7 @@ import { AddDriverModal } from './components/AddDriverModal';
 import { ImportDriversModal } from './components/ImportDriversModal';
 import { DriverFiltersDrawer, DriverFilterChips } from './components/DriverFiltersDrawer';
 import { parseDriverFilters, writeDriverFilters, matchesDriverFilters, EMPTY_DRIVER_FILTERS, countActiveDriverFilters } from './lib/filters';
+import { messagesHref } from '@/shared/lib/messagesHref';
 
 type Segment = 'ALL' | 'ON_DUTY' | 'OFF_DUTY' | 'VIOLATIONS';
 const LIMIT_SEC = { drive: 39600, shift: 50400, cycle: 252000 };
@@ -347,7 +348,7 @@ export default function DriversPage() {
                             Open HOS logs
                           </DropdownMenu.Item>
                           <Can perm="messaging">
-                            <DropdownMenu.Item onSelect={() => navigate('/messages')} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                            <DropdownMenu.Item onSelect={() => navigate(messagesHref(row.driver.id))} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
                               Send message
                             </DropdownMenu.Item>
                           </Can>

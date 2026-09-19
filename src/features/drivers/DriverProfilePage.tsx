@@ -21,6 +21,7 @@ import { ErrorState, LoadingState, ForbiddenState } from '@/shared/ui/states';
 import { formatLocal } from '@/shared/format/datetime';
 import { orNone } from '@/shared/format/empty';
 import { qk } from '@/shared/api/queryKeys';
+import { messagesHref } from '@/shared/lib/messagesHref';
 
 const TABS = ['overview', 'hos', 'dvirs', 'trips', 'documents', 'activity'] as const;
 type Tab = (typeof TABS)[number];
@@ -128,7 +129,7 @@ export default function DriverProfilePage() {
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {canMessage && (
-              <Button variant="secondary" iconLeft={<MessageSquare size={16} strokeWidth={1.75} />} onClick={() => navigate('/messages')}>
+              <Button variant="secondary" iconLeft={<MessageSquare size={16} strokeWidth={1.75} />} onClick={() => navigate(messagesHref(driver.id))}>
                 Message
               </Button>
             )}

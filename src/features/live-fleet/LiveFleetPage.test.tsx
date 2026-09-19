@@ -4,7 +4,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { http, HttpResponse } from 'msw';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
 import { ok, url } from '@/mocks/envelope';
@@ -16,6 +16,12 @@ import LiveFleetPage from './LiveFleetPage';
 vi.mock('@/shared/auth/usePermission', () => ({ usePermission: () => ({ can: () => true }) }));
 vi.mock('@/shared/realtime/useRoom', () => ({ useRoom: () => ({ joined: false }) }));
 
+/** Renders the current router location so navigation can be asserted without a route tree. */
+function LocationProbe() {
+  const location = useLocation();
+  return <output data-testid="location">{`${location.pathname}${location.search}`}</output>;
+}
+
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -23,6 +29,7 @@ function renderPage() {
       <ToastProvider>
         <MemoryRouter>
           <LiveFleetPage />
+          <LocationProbe />
         </MemoryRouter>
       </ToastProvider>
     </QueryClientProvider>,
@@ -92,6 +99,10 @@ describe('W-02 Live Fleet', () => {
     // Selecting the row keyboard-only surfaces the same detail data the map's hover card shows.
     expect(await screen.findByText('View logs', {}, { timeout: 8000 })).toBeInTheDocument();
     expect(screen.getByText('John Smith · +1 334 765 4888')).toBeInTheDocument();
+
+    // `Message` deep-links to this driver's conversation (WB-139), not the bare Messages page.
+    await user.click(screen.getByRole('button', { name: 'Message' }));
+    expect(screen.getByTestId('location')).toHaveTextContent(/^\/messages\?driverId=drv_1$/);
   });
 
   it('search, segments, layer toggles, closing the detail card and opening the geofence modal all work', async () => {

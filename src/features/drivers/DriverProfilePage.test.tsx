@@ -7,7 +7,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { http, HttpResponse } from 'msw';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
 import { ok, url } from '@/mocks/envelope';
@@ -47,6 +47,12 @@ const DRIVER = {
   registeredAt: '2025-04-18T00:00:00.000Z',
 };
 
+/** Renders the current router location so navigation can be asserted without a route tree. */
+function LocationProbe() {
+  const location = useLocation();
+  return <output data-testid="location">{`${location.pathname}${location.search}`}</output>;
+}
+
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -56,6 +62,7 @@ function renderPage() {
           <Routes>
             <Route path="/drivers/:id" element={<DriverProfilePage />} />
           </Routes>
+          <LocationProbe />
         </MemoryRouter>
       </ToastProvider>
     </QueryClientProvider>,
@@ -91,6 +98,15 @@ beforeEach(() => {
 });
 
 describe('W-07 Driver profile — four states', () => {
+  it("header Message deep-links to the driver's conversation (WB-139)", async () => {
+    server.use(http.get(url(endpoints.drivers.detail('drv_1')), () => ok(DRIVER)));
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByRole('heading', { name: 'John Smith' });
+    await user.click(screen.getByRole('button', { name: 'Message' }));
+    expect(screen.getByTestId('location')).toHaveTextContent(/^\/messages\?driverId=drv_1$/);
+  });
+
   it('forbidden: renders <ForbiddenState> and never fetches the driver without `drivers`', async () => {
     permission = false;
     server.use(http.get(url(endpoints.drivers.detail('drv_1')), () => ok(DRIVER)));

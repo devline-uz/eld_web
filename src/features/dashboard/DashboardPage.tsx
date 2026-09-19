@@ -4,6 +4,7 @@ import { lazy, Suspense, useState } from 'react';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Clock, MapPin, Truck, Users } from 'lucide-react';
 import type { ColumnDef } from '@tanstack/react-table';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { useNavigate } from 'react-router-dom';
 import { client } from '@/shared/api/client';
 import { endpoints } from '@/shared/api/endpoints';
@@ -32,9 +33,30 @@ import { formatDuration } from '@/shared/format/duration';
 import { formatNumber } from '@/shared/format/numbers';
 import { formatTimeWithAge } from '@/shared/format/relative';
 import type { DashboardViolation } from '@/shared/api/dashboardSummary';
+import { ResolveViolationModal } from '@/shared/violations/ResolveViolationModal';
+import { messagesHref } from '@/shared/lib/messagesHref';
 
 const DutyDonut = lazy(() => import('./components/DutyDonut'));
 
+
+const MENU_ITEM_CLASS = 'cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle';
+
+/** `/hos-logs?driverId=&date=` for a violation row — a missing driver/date is omitted, never
+ * written as the string `null`/`undefined` (W-08 then falls back to its own defaults). */
+function hosLogsHref(row: DashboardViolation): string {
+  const params = new URLSearchParams();
+  if (row.driverId) params.set('driverId', row.driverId);
+  if (row.date) params.set('date', row.date);
+  const query = params.toString();
+  return query ? `/hos-logs?${query}` : '/hos-logs';
+}
+
+/** WD-037 deep link — `?unassigned=1` opens 11.13 Unassigned driving on the violation's day. */
+function assignDriverHref(row: DashboardViolation): string {
+  const params = new URLSearchParams({ unassigned: '1' });
+  if (row.date) params.set('date', row.date);
+  return `/hos-logs?${params.toString()}`;
+}
 
 /** Rows per page the violations table opens with — the first option of the shared select. */
 const VIOLATIONS_PAGE_SIZE = 10;
@@ -65,6 +87,7 @@ export default function DashboardPage() {
   const [violationsPage, setViolationsPage] = useState(1);
   const [violationsLimit, setViolationsLimit] = useState(VIOLATIONS_PAGE_SIZE);
   const violations = useDashboardViolations(violationsPage, violationsLimit);
+  const [resolving, setResolving] = useState<DashboardViolation | null>(null);
   const violationsTotal = violations.data?.total ?? 0;
   const violationsTotalPages =
     violations.data?.totalPages ?? Math.max(1, Math.ceil(violationsTotal / violationsLimit));
@@ -291,18 +314,34 @@ export default function DashboardPage() {
               columns={columns}
               caption="HOS violations and alerts"
               getRowId={(row) => row.id}
-              onRowClick={(row) => navigate(`/hos-logs?driverId=${row.driverId}&date=${row.date ?? ''}`)}
+              onRowClick={(row) => navigate(hosLogsHref(row))}
+              // §10 W-01: the `…` column exists only for `hosEdit` FULL (absent for a viewer).
+              // Items are Radix `DropdownMenu.Item`s with `onSelect` — plain buttons here had no
+              // handler at all, so every action was a no-op. A driverless (unassigned) row has no
+              // log or conversation to open; it gets `Assign to driver` instead.
               rowActions={
                 can('hosEdit', 'FULL')
                   ? (row) => (
-                      <div className="flex flex-col text-body">
-                        <button className="rounded px-2 py-1.5 text-left hover:bg-bg-subtle">Open HOS logs</button>
-                        <button className="rounded px-2 py-1.5 text-left hover:bg-bg-subtle">Send message</button>
-                        <button className="rounded px-2 py-1.5 text-left hover:bg-bg-subtle">Resolve</button>
-                        {!row.driverId && (
-                          <button className="rounded px-2 py-1.5 text-left hover:bg-bg-subtle">Assign to driver</button>
+                      <>
+                        {row.driverId && can('hos') && (
+                          <DropdownMenu.Item onSelect={() => navigate(hosLogsHref(row))} className={MENU_ITEM_CLASS}>
+                            Open HOS logs
+                          </DropdownMenu.Item>
                         )}
-                      </div>
+                        {row.driverId && can('messaging') && (
+                          <DropdownMenu.Item onSelect={() => navigate(messagesHref(row.driverId))} className={MENU_ITEM_CLASS}>
+                            Send message
+                          </DropdownMenu.Item>
+                        )}
+                        <DropdownMenu.Item onSelect={() => setResolving(row)} className={MENU_ITEM_CLASS}>
+                          Resolve
+                        </DropdownMenu.Item>
+                        {!row.driverId && (
+                          <DropdownMenu.Item onSelect={() => navigate(assignDriverHref(row))} className={MENU_ITEM_CLASS}>
+                            Assign to driver
+                          </DropdownMenu.Item>
+                        )}
+                      </>
                     )
                   : undefined
               }
@@ -323,6 +362,15 @@ export default function DashboardPage() {
         )}
       </Card>
 
+      {resolving && (
+        <ResolveViolationModal
+          violationId={resolving.id}
+          subtitle={resolving.event}
+          driverId={resolving.driverId}
+          date={resolving.date}
+          onClose={() => setResolving(null)}
+        />
+      )}
     </div>
   );
 }

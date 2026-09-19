@@ -213,7 +213,13 @@ export function useCreateConversation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (payload: CreateConversationPayload) => client.post<ConversationRow>(endpoints.conversations.create, payload),
-    onSuccess: () => {
+    onSuccess: (conversation) => {
+      // Put the server's own row into the list right away so the caller can select it without
+      // waiting for the refetch below (which then replaces it with the canonical list).
+      queryClient.setQueryData<{ items: ConversationRow[] } | undefined>(qk.conversations(), (prev) => {
+        if (!prev || prev.items.some((c) => c.id === conversation.id)) return prev;
+        return { items: [{ ...conversation, participants: conversation.participants ?? [] }, ...prev.items] };
+      });
       void queryClient.invalidateQueries({ queryKey: qkRoot.conversations });
     },
   });

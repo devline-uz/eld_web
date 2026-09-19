@@ -2189,3 +2189,14 @@ demo akkauntlar va ishga tushirish skriptlari hujjatlashtirildi.
 **Hozir:** brauzer lokaliga qarab AM/PM yoki 24 soat — ilovaning qolgan qismi bilan nomuvofiq.
 **Kutilgan:** yagona format (past ustuvorlik).
 **Izoh:** past ustuvorlik, hozircha tuzatilmadi.
+
+## WB-138 · Dashboard `HOS violations & alerts` qator menyusi hech narsa qilmaydi — ✅ tuzatildi
+**Fayl:** `src/features/dashboard/DashboardPage.tsx` (rowActions).
+**Sabab:** menyu elementlari `onClick`/`onSelect`siz oddiy `<button>` edi (no-op); qator bosilishi `driverId=null` qatorlarida `?driverId=null` yozardi.
+**Tuzatish:** Radix `DropdownMenu.Item` + `onSelect`: `Open HOS logs` → `/hos-logs?driverId&date` · `Send message` → `/messages` (`messaging`) · `Resolve` → umumiy `ResolveViolationModal` (B-6, `src/shared/violations/`, W-08 bilan bir xil) · `Assign to driver` → `/hos-logs?unassigned=1&date` (WD-037, 11.13). Haydovchisiz qatorda `Open HOS logs`/`Send message` yo'q. Testlar: `DashboardPage.test.tsx`.
+
+## WB-139 · "Send message" haydovchi suhbatini ochmaydi — faqat bo'sh `/messages` — ✅ tuzatildi (commit qilinmagan)
+**Fayl:** `src/features/messages/MessagesPage.tsx:72–143`, `:345`, `src/shared/lib/messagesHref.ts:5`, `src/shared/api/messaging.ts` (`useCreateConversation`); kirish nuqtalari: `DashboardPage.tsx` (HOS violations & alerts qator menyusi), `DriversPage.tsx` (qator menyusi), `DriverProfilePage.tsx` (header `Message`), `LiveFleetPage.tsx` (detail karta `Message`).
+**Hozir (edi):** barcha "Send message"/"Message" tugmalari oddiy `/messages` ga o'tardi — foydalanuvchi haydovchini qo'lda qidirib topishi kerak edi; W-16 URL'dan haydovchini qabul qilmasdi.
+**Qilindi:** umumiy `messagesHref(driverId)` → `/messages?driverId=<id>` (`/hos-logs?driverId=` bilan bir xil nom). W-16 ro'yxat yuklangach: shu haydovchi bilan DIRECT suhbat bo'lsa — o'sha tanlanadi; bo'lmasa — `+ New` → `Message a driver` bilan bir xil `POST /conversations { type: 'DIRECT', driverIds: [id] }` chaqiriladi (bir marta — `useRef` guard) va yangi suhbat tanlanadi (`useCreateConversation` endi serverdan qaytgan qatorni ro'yxat keshiga darhol qo'shadi). Noma'lum `driverId` (lookup'da yo'q va `GET /drivers/:id` xato) → `Driver not found.` toast, hech narsa yaratilmaydi. `messaging` FULL bo'lmasa yaratilmaydi (warning toast). Ishlov berilgach `driverId` URL'dan `replace` bilan olib tashlanadi. RBAC (`messaging`) o'zgarmadi. Testlar: `MessagesPage.test.tsx` (mavjud suhbat / bir martalik yaratish / noma'lum id), `messagesHref.test.ts`, Dashboard/Drivers/Driver profile/Live Fleet testlari `/messages?driverId=drv_1` ni tekshiradi.
+**Izoh:** backend `POST /conversations` DIRECT uchun mavjud suhbatni qaytaradimi (idempotentlik) — lokal backend kodi yo'q, tekshirib bo'lmadi; frontend avval mavjud suhbatni ro'yxatdan qidiradi, shuning uchun takroriy yaratish faqat ro'yxatda ko'rinmagan suhbat uchun mumkin.

@@ -19,6 +19,7 @@ import { formatSpeed, formatOdometer } from '@/shared/format/numbers';
 import { useRelativeTime } from '@/shared/format/useRelativeTime';
 import { useCountdown, useCountdownFromSeconds, formatCountdown } from '@/shared/hooks/useCountdown';
 import { CreateGeofenceModal } from './components/CreateGeofenceModal';
+import { messagesHref } from '@/shared/lib/messagesHref';
 
 const FleetMap = lazy(() => import('@/shared/map/FleetMap'));
 
@@ -159,7 +160,7 @@ function DetailCard({
           View logs
         </Button>
         {canMessage && (
-          <Button variant="secondary" iconLeft={<MessageSquare size={16} strokeWidth={1.75} />} onClick={() => navigate('/messages')}>
+          <Button variant="secondary" iconLeft={<MessageSquare size={16} strokeWidth={1.75} />} onClick={() => navigate(messagesHref(unit.driverId))}>
             Message
           </Button>
         )}

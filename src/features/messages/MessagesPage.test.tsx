@@ -2,9 +2,10 @@
 // and `message.new` patching the open thread via `useRoom` (no polling, `staleTime: 0`).
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
+import { StrictMode } from 'react';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
 import { ok, url } from '@/mocks/envelope';
@@ -39,7 +40,13 @@ function fakeSocket() {
   };
 }
 
-function renderPage(socket: ReturnType<typeof fakeSocket> | null = null) {
+/** Renders the current router location so the `?driverId=` clean-up can be asserted. */
+function LocationProbe() {
+  const location = useLocation();
+  return <output data-testid="location">{`${location.pathname}${location.search}`}</output>;
+}
+
+function renderPage(socket: ReturnType<typeof fakeSocket> | null = null, initialEntries: string[] = ['/messages']) {
   vi.spyOn(RealtimeProviderModule, 'useRealtime').mockReturnValue({
     getSocket: () => socket as never,
     connected: Boolean(socket),
@@ -49,8 +56,11 @@ function renderPage(socket: ReturnType<typeof fakeSocket> | null = null) {
   return render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
-        <MemoryRouter>
-          <MessagesPage />
+        <MemoryRouter initialEntries={initialEntries}>
+          <StrictMode>
+            <MessagesPage />
+          </StrictMode>
+          <LocationProbe />
         </MemoryRouter>
       </ToastProvider>
     </QueryClientProvider>,
@@ -287,6 +297,79 @@ describe('W-16 Messages', () => {
 
     await waitFor(() => expect(screen.queryByLabelText('Unread')).not.toBeInTheDocument());
     expect(screen.getByRole('button', { name: 'Unread 0' })).toBeInTheDocument();
+  });
+
+  describe('deep link ?driverId= (WB-139, every "Send message" entry point)', () => {
+    const DRIVER_2 = { ...DRIVER, id: 'drv_2', username: 'mariagarcia', firstName: 'Maria', lastName: 'Garcia' };
+    const CREATED = {
+      id: 'cnv_new',
+      type: 'DIRECT',
+      title: null,
+      lastMessageAt: null,
+      createdById: 'usr_1',
+      createdAt: '2026-09-12T16:00:00.000Z',
+      participants: [
+        { id: 'cp_9', conversationId: 'cnv_new', userId: 'usr_1', driverId: null, lastReadAt: null, mutedUntil: null },
+        { id: 'cp_10', conversationId: 'cnv_new', userId: null, driverId: 'drv_2', lastReadAt: null, mutedUntil: null },
+      ],
+    };
+
+    it('opens the existing conversation with that driver, creates nothing and drops the param', async () => {
+      usePopulatedConversations();
+      let creates = 0;
+      server.use(
+        http.post(url(endpoints.conversations.create), () => {
+          creates += 1;
+          return ok(CREATED, 201);
+        }),
+      );
+      renderPage(null, ['/messages?driverId=drv_1']);
+
+      expect(await screen.findByText('On schedule.')).toBeInTheDocument();
+      expect(screen.getByPlaceholderText('Write a message to John Smith…')).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(/^\/messages$/));
+      expect(creates).toBe(0);
+    });
+
+    it('starts a new DIRECT conversation exactly once (StrictMode) when none exists, and selects it', async () => {
+      let created = false;
+      const bodies: unknown[] = [];
+      server.use(
+        http.get(url(endpoints.conversations.list), () => ok({ items: created ? [CREATED, CONVERSATION] : [CONVERSATION] })),
+        http.get(url(endpoints.drivers.list), () => ok({ items: [DRIVER, DRIVER_2], page: 1, limit: 500, total: 2, totalPages: 1 })),
+        http.get(url(endpoints.conversations.messages(':id')), () => ok({ items: [], page: 1, limit: 100, total: 0, totalPages: 1 })),
+        http.post(url(endpoints.conversations.create), async ({ request }) => {
+          bodies.push(await request.json());
+          created = true;
+          return ok(CREATED, 201);
+        }),
+      );
+      renderPage(null, ['/messages?driverId=drv_2']);
+
+      expect(await screen.findByPlaceholderText('Write a message to Maria Garcia…')).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(/^\/messages$/));
+      expect(bodies).toEqual([{ type: 'DIRECT', driverIds: ['drv_2'] }]);
+    });
+
+    it('an unknown driverId shows "Driver not found." and creates nothing', async () => {
+      usePopulatedConversations();
+      let creates = 0;
+      server.use(
+        http.get(url(endpoints.drivers.detail(':id')), () =>
+          HttpResponse.json({ statusCode: 404, code: 'DRIVER_NOT_FOUND', message: 'Driver not found' }, { status: 404 }),
+        ),
+        http.post(url(endpoints.conversations.create), () => {
+          creates += 1;
+          return ok(CREATED, 201);
+        }),
+      );
+      renderPage(null, ['/messages?driverId=drv_nope']);
+
+      expect(await screen.findByText('Driver not found.')).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(/^\/messages$/));
+      expect(screen.getByText('Select a conversation')).toBeInTheDocument();
+      expect(creates).toBe(0);
+    });
   });
 
   it('error: renders <ErrorState> with Retry when the list fails', async () => {
