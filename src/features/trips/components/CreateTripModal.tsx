@@ -1,7 +1,7 @@
 // owner: web-dispatch-messaging — 11.10 Create trip (web/tz.md §11.10). `trips` FULL, size `lg`.
 import { useMemo, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Controller, useForm, useWatch } from 'react-hook-form';
+import { useForm, useWatch } from 'react-hook-form';
 import { z } from 'zod';
 import { addYears, endOfDay, format, startOfToday } from 'date-fns';
 import { AlertTriangle } from 'lucide-react';
@@ -9,7 +9,6 @@ import { Modal } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { DriverPicker, UnitPicker, type PickerOption } from '@/shared/ui/DriverPicker';
 import { useToast } from '@/shared/ui/Toast';
-import { cn } from '@/shared/ui/cn';
 import { useDriversList } from '@/shared/api/drivers';
 import { useVehiclesPicker } from '@/shared/api/vehicles';
 import { useDriverHos } from '@/shared/api/drivers';
@@ -54,133 +53,6 @@ function pickupRange(): { min: Date; max: Date } {
 }
 
 const toLocalInput = (d: Date) => format(d, "yyyy-MM-dd'T'HH:mm");
-
-type Meridiem = 'AM' | 'PM';
-const HOURS_12 = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0'));
-const MINUTES = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
-
-/** `12:00 AM` → `00`, `12:00 PM` → `12`, `01 PM` → `13`. */
-function to24Hour(hour12: string, meridiem: Meridiem): string {
-  const h = Number(hour12) % 12;
-  return String(meridiem === 'PM' ? h + 12 : h).padStart(2, '0');
-}
-
-/** `00` → `12 AM`, `12` → `12 PM`, `13` → `01 PM`. */
-function to12Hour(hour24: string): { hour: string; meridiem: Meridiem } {
-  const h = Number(hour24);
-  return { hour: String(h % 12 || 12).padStart(2, '0'), meridiem: h < 12 ? 'AM' : 'PM' };
-}
-
-/**
- * Date + 12-hour time (hour · minute · AM/PM). A native `datetime-local` follows the browser locale
- * and can't be forced into AM/PM, so the time half is three selects. The form value is unchanged —
- * the same zone-less `YYYY-MM-DDTHH:mm` (24-hour) the `datetime-local` used to emit, so validation
- * and the ISO payload don't move. A half-filled entry reports `BAD_DATE` ("Enter a valid date and time.").
- */
-function DateTime12Input({
-  label,
-  value,
-  onChange,
-  onBlur,
-  min,
-  max,
-  invalid,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  onBlur: () => void;
-  min: string;
-  max: string;
-  invalid: boolean;
-}) {
-  const [parts, setParts] = useState(() => {
-    const m = LOCAL_DATETIME_RE.exec(value);
-    if (!m) return { date: '', hour: '', minute: '', meridiem: 'AM' as Meridiem };
-    const { hour, meridiem } = to12Hour(m[4]!);
-    return { date: `${m[1]}-${m[2]}-${m[3]}`, hour, minute: m[5]!, meridiem };
-  });
-
-  function update(next: Partial<typeof parts>) {
-    const p = { ...parts, ...next };
-    setParts(p);
-    if (!p.date && !p.hour && !p.minute) onChange('');
-    else if (p.date === BAD_DATE || !p.date || !p.hour || !p.minute) onChange(BAD_DATE);
-    else onChange(`${p.date}T${to24Hour(p.hour, p.meridiem)}:${p.minute}`);
-  }
-
-  // A browser-rejected date (Feb 30, a 5-digit year) reports `value === ''` with `validity.badInput`.
-  const readDate = (e: React.SyntheticEvent<HTMLInputElement>) =>
-    e.currentTarget.validity?.badInput ? BAD_DATE : e.currentTarget.value;
-  const selectClass = cn(inputClass, 'min-w-0 flex-1 px-2 tabular-nums');
-
-  return (
-    <div
-      // Date first, the time selects as one group: when the column is too narrow for both (the
-      // two-column Stops grid), the group wraps under the date instead of squeezing it.
-      className="flex flex-wrap gap-2"
-      // Validate once focus leaves the whole group, not between the date and the hour.
-      onBlur={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) onBlur();
-      }}
-    >
-      <input
-        type="date"
-        aria-label={`${label} date`}
-        aria-invalid={invalid || undefined}
-        min={min}
-        max={max}
-        value={parts.date === BAD_DATE ? '' : parts.date}
-        onChange={(e) => update({ date: readDate(e) })}
-        onBlur={(e) => {
-          const date = readDate(e);
-          if (date !== parts.date) update({ date });
-        }}
-        className={cn(inputClass, 'min-w-40 flex-1 basis-40 tabular-nums')}
-      />
-      <div className="flex grow gap-2">
-        <select
-          aria-label={`${label} hour`}
-          aria-invalid={invalid || undefined}
-          value={parts.hour}
-          onChange={(e) => update({ hour: e.target.value })}
-          className={selectClass}
-        >
-          <option value="">hh</option>
-          {HOURS_12.map((h) => (
-            <option key={h} value={h}>
-              {h}
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label={`${label} minute`}
-          aria-invalid={invalid || undefined}
-          value={parts.minute}
-          onChange={(e) => update({ minute: e.target.value })}
-          className={selectClass}
-        >
-          <option value="">mm</option>
-          {MINUTES.map((m) => (
-            <option key={m} value={m}>
-              {m}
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label={`${label} AM/PM`}
-          aria-invalid={invalid || undefined}
-          value={parts.meridiem}
-          onChange={(e) => update({ meridiem: e.target.value as Meridiem })}
-          className={selectClass}
-        >
-          <option value="AM">AM</option>
-          <option value="PM">PM</option>
-        </select>
-      </div>
-    </div>
-  );
-}
 
 const createTripSchema = tripSchema
   .extend({
@@ -324,26 +196,21 @@ export function CreateTripModal({ onClose }: { onClose: () => void }) {
   const deliveryMinInput =
     scheduledStart && parseLocalDateTime(scheduledStart) ? scheduledStart : pickupMinInput;
 
-  /** The stop window's date + 12-hour time; a browser-rejected date submits the `BAD_DATE` sentinel
-   * so zod says "invalid date", not "required" (or nothing, for the optional delivery). */
-  function renderWindow(name: 'scheduledStart' | 'scheduledEnd', label: string, min: string) {
-    return (
-      <Controller
-        name={name}
-        control={control}
-        render={({ field, fieldState }) => (
-          <DateTime12Input
-            label={label}
-            value={field.value ?? ''}
-            onChange={field.onChange}
-            onBlur={field.onBlur}
-            min={min.slice(0, 10)}
-            max={pickupMaxInput.slice(0, 10)}
-            invalid={!!fieldState.error}
-          />
-        )}
-      />
-    );
+  /** `register` for the stop windows: a browser-rejected date (Feb 30, a 5-digit year) reports
+   * `value === ''` with `validity.badInput` — submit the `BAD_DATE` sentinel instead so zod says
+   * "invalid date", not "required" (or nothing, for the optional delivery). */
+  function registerDate(name: 'scheduledStart' | 'scheduledEnd') {
+    const field = register(name);
+    // RHF reads a non-DOM event's `target.value` as-is, so the sentinel reaches the form without
+    // writing it back into the input (which would wipe what the user typed).
+    const withBadInput =
+      (handler: typeof field.onChange) => (e: React.SyntheticEvent<HTMLInputElement>) =>
+        handler(
+          e.currentTarget.validity?.badInput
+            ? { type: e.type, target: { name, value: BAD_DATE } }
+            : e,
+        );
+    return { ...field, onChange: withBadInput(field.onChange), onBlur: withBadInput(field.onBlur) };
   }
 
   const createMutation = useCreateTrip();
@@ -503,13 +370,25 @@ export function CreateTripModal({ onClose }: { onClose: () => void }) {
               <input {...register('origin')} className={inputClass} />
             </Field>
             <Field label="Pickup window" required error={errors.scheduledStart?.message}>
-              {renderWindow('scheduledStart', 'Pickup', pickupMinInput)}
+              <input
+                {...registerDate('scheduledStart')}
+                type="datetime-local"
+                min={pickupMinInput}
+                max={pickupMaxInput}
+                className={`${inputClass} w-full min-w-0 tabular-nums`}
+              />
             </Field>
             <Field label="Delivery location" required error={errors.destination?.message}>
               <input {...register('destination')} className={inputClass} />
             </Field>
             <Field label="Delivery window" error={errors.scheduledEnd?.message}>
-              {renderWindow('scheduledEnd', 'Delivery', deliveryMinInput)}
+              <input
+                {...registerDate('scheduledEnd')}
+                type="datetime-local"
+                min={deliveryMinInput}
+                max={pickupMaxInput}
+                className={`${inputClass} w-full min-w-0 tabular-nums`}
+              />
             </Field>
           </div>
           <button

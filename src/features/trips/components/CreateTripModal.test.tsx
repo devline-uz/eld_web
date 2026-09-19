@@ -69,14 +69,9 @@ async function selectDriver(name: string) {
   await user.click(await screen.findByText(name));
 }
 
-/** Fills a stop window the way a dispatcher does: date, then hour · minute · AM/PM — `'2026-09-20 02:30 PM'`. */
-async function enterWindow(user: ReturnType<typeof userEvent.setup>, label: 'Pickup' | 'Delivery', value: string) {
-  const [date, time, meridiem] = value.split(' ') as [string, string, string];
-  const [hour, minute] = time.split(':') as [string, string];
-  await user.type(screen.getByLabelText(`${label} date`), date);
-  await user.selectOptions(screen.getByLabelText(`${label} hour`), hour);
-  await user.selectOptions(screen.getByLabelText(`${label} minute`), minute);
-  await user.selectOptions(screen.getByLabelText(`${label} AM/PM`), meridiem);
+/** Fills a stop window's native `datetime-local` — `'2026-09-20T14:30'`. */
+function enterWindow(label: 'Pickup' | 'Delivery', value: string) {
+  fireEvent.change(screen.getByLabelText(new RegExp(`^${label} window`)), { target: { value } });
 }
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'bypass' }));
@@ -136,8 +131,8 @@ describe('CreateTripModal — submit', () => {
     await user.type(reference!, 'TR-1');
     await user.type(origin!, 'Columbus, OH');
     await user.type(destination!, 'Dayton, OH');
-    await enterWindow(user, 'Pickup', pickup);
-    await enterWindow(user, 'Delivery', delivery);
+    enterWindow('Pickup', pickup);
+    enterWindow('Delivery', delivery);
     await user.type(screen.getByPlaceholderText('mi'), '120.5');
     await selectDriver('Vera Verified');
     const unitLabel = screen
@@ -157,7 +152,7 @@ describe('CreateTripModal — submit', () => {
   const tomorrow = format(addDays(new Date(), 1), 'yyyy-MM-dd');
 
   it('submits once with a blank (optional) weight, ISO dates and the delivery window', async () => {
-    const posts = await fillRequiredAndSubmit(`${tomorrow} 08:00 AM`, `${tomorrow} 02:00 PM`, { twice: true });
+    const posts = await fillRequiredAndSubmit(`${tomorrow}T08:00`, `${tomorrow}T14:00`, { twice: true });
 
     expect(posts[0]).toMatchObject({
       number: 'TR-1',
@@ -168,46 +163,14 @@ describe('CreateTripModal — submit', () => {
     });
     expect(posts[0]!.weightLbs).toBeUndefined();
   });
-
-  it('sends 12:00 AM as 00:00 and 12:00 PM as 12:00 — the payload stays 24-hour ISO', async () => {
-    const posts = await fillRequiredAndSubmit(`${tomorrow} 12:00 AM`, `${tomorrow} 12:00 PM`);
-
-    expect(posts[0]).toMatchObject({
-      plannedStartAt: new Date(`${tomorrow}T00:00`).toISOString(),
-      plannedEndAt: new Date(`${tomorrow}T12:00`).toISOString(),
-    });
-    const stops = posts[0]!.stops as { scheduledAt: string }[];
-    expect(stops.map((s) => s.scheduledAt)).toEqual([
-      new Date(`${tomorrow}T00:00`).toISOString(),
-      new Date(`${tomorrow}T12:00`).toISOString(),
-    ]);
-  });
-});
-
-describe('CreateTripModal — 12-hour stop window', () => {
-  it('offers hours 01–12 with AM/PM, never 13–23', () => {
-    renderModal();
-    const hours = within(screen.getByLabelText('Pickup hour')).getAllByRole('option').map((o) => o.textContent);
-    expect(hours).toEqual(['hh', '01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12']);
-    const meridiem = within(screen.getByLabelText('Pickup AM/PM')).getAllByRole('option').map((o) => o.textContent);
-    expect(meridiem).toEqual(['AM', 'PM']);
-  });
-
-  it('reports a date without a time as invalid, not blank', async () => {
-    renderModal();
-    const user = userEvent.setup();
-    await user.type(screen.getByLabelText('Pickup date'), format(addDays(new Date(), 1), 'yyyy-MM-dd'));
-    await user.click(screen.getByRole('button', { name: 'Create trip' }));
-    expect(await screen.findByText('Enter a valid date and time.')).toBeInTheDocument();
-  });
 });
 
 describe('CreateTripModal — date, distance and rate validation', () => {
   async function fillAndSubmit({ pickup, delivery, distance, rate }: { pickup: string; delivery?: string; distance?: string; rate?: string }) {
     renderModal();
     const user = userEvent.setup();
-    await enterWindow(user, 'Pickup', pickup);
-    if (delivery) await enterWindow(user, 'Delivery', delivery);
+    enterWindow('Pickup', pickup);
+    if (delivery) enterWindow('Delivery', delivery);
     if (distance) await user.type(screen.getByPlaceholderText('mi'), distance);
     if (rate) await user.type(screen.getByPlaceholderText('USD'), rate);
     await user.click(screen.getByRole('button', { name: 'Create trip' }));
@@ -215,18 +178,18 @@ describe('CreateTripModal — date, distance and rate validation', () => {
   const day = (offset: number) => format(addDays(new Date(), offset), 'yyyy-MM-dd');
 
   it('rejects a pickup before today', async () => {
-    await fillAndSubmit({ pickup: `${day(-1)} 08:00 AM` });
+    await fillAndSubmit({ pickup: `${day(-1)}T08:00` });
     expect(await screen.findByText('Pickup cannot be before today.')).toBeInTheDocument();
   });
 
   it('rejects a pickup more than a year out', async () => {
-    await fillAndSubmit({ pickup: `${day(367)} 08:00 AM` });
+    await fillAndSubmit({ pickup: `${day(367)}T08:00` });
     expect(await screen.findByText('Pickup must be within one year from today.')).toBeInTheDocument();
   });
 
   it('reports a browser-rejected date (Feb 29 of a non-leap year) as invalid, not blank', async () => {
     renderModal();
-    const pickup = screen.getByLabelText('Pickup date');
+    const pickup = screen.getByLabelText(/^Pickup window/);
     // A real browser leaves `value` empty and flags `badInput`; jsdom only does the former.
     Object.defineProperty(pickup, 'validity', { value: { badInput: true } });
     fireEvent.blur(pickup);
@@ -234,12 +197,12 @@ describe('CreateTripModal — date, distance and rate validation', () => {
   });
 
   it('rejects a delivery before pickup', async () => {
-    await fillAndSubmit({ pickup: `${day(2)} 08:00 AM`, delivery: `${day(1)} 08:00 AM` });
+    await fillAndSubmit({ pickup: `${day(2)}T08:00`, delivery: `${day(1)}T08:00` });
     expect(await screen.findByText('Delivery cannot be before pickup.')).toBeInTheDocument();
   });
 
   it('requires a distance greater than 0', async () => {
-    await fillAndSubmit({ pickup: `${day(1)} 08:00 AM`, distance: '0' });
+    await fillAndSubmit({ pickup: `${day(1)}T08:00`, distance: '0' });
     expect(await screen.findByText('Enter a distance greater than 0.')).toBeInTheDocument();
   });
 
@@ -251,17 +214,17 @@ describe('CreateTripModal — date, distance and rate validation', () => {
   });
 
   it('requires a rate greater than 0', async () => {
-    await fillAndSubmit({ pickup: `${day(1)} 08:00 AM`, rate: '0' });
+    await fillAndSubmit({ pickup: `${day(1)}T08:00`, rate: '0' });
     expect(await screen.findByText('Enter a rate greater than 0.')).toBeInTheDocument();
   });
 
   it('rejects a rate with more than 2 decimal places', async () => {
-    await fillAndSubmit({ pickup: `${day(1)} 08:00 AM`, rate: '1240.505' });
+    await fillAndSubmit({ pickup: `${day(1)}T08:00`, rate: '1240.505' });
     expect(await screen.findByText('Use at most 2 decimal places.')).toBeInTheDocument();
   });
 
   it('accepts a cents-precise rate', async () => {
-    await fillAndSubmit({ pickup: `${day(1)} 08:00 AM`, rate: '1240.05' });
+    await fillAndSubmit({ pickup: `${day(1)}T08:00`, rate: '1240.05' });
     // The rest of the form is blank, so submit stops on the required fields — but not on the rate.
     expect((await screen.findAllByText(VALIDATION_REQUIRED)).length).toBeGreaterThan(0);
     expect(screen.queryByText('Enter a rate greater than 0.')).not.toBeInTheDocument();
