@@ -1,13 +1,14 @@
-// owner: web-dispatch-messaging — W-11 Dispatch & Trips, the `PeriodDropdown` "Date range" custom
-// inputs. Pure date-math helpers so the From/To bounds and error copy are unit-testable without
-// mounting the popover, and so `today` is always caller-supplied (never a module-load constant —
-// the two are "yesterday"/"today" of the *browser's* clock at the moment the popover is open).
-import { addDays, format, isValid, parse, startOfDay, subDays } from 'date-fns';
+// owner: web-dispatch-messaging — W-11 Dispatch & Trips, the depart-date range shared by the
+// `PeriodDropdown` custom inputs and the Filters drawer "Depart" group. Pure date-math helpers so
+// the bounds and error copy are unit-testable without mounting either, and so `today` is always
+// caller-supplied (never a module-load constant). The bounds only keep out nonsense years
+// (1000, 5000, …) — past and future trips are both legitimate to filter on.
+import { addYears, endOfYear, format, isValid, parse } from 'date-fns';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const DAY_FORMAT = 'yyyy-MM-dd';
 
-/** Earliest date the custom range will ever accept. */
+/** Earliest depart date the range will ever accept. */
 export const CUSTOM_RANGE_MIN = '1970-01-01';
 
 /** True only for a real, existing calendar date written as canonical `yyyy-MM-dd` — rejects
@@ -23,38 +24,29 @@ function toDay(d: Date): string {
   return format(d, DAY_FORMAT);
 }
 
-/** From: real date only, `[1970-01-01, yesterday]` — the max always leaves at least one valid
- * To date (today). */
-export function customFromBounds(today: Date): { min: string; max: string } {
-  return { min: CUSTOM_RANGE_MIN, max: toDay(subDays(startOfDay(today), 1)) };
+/** Latest depart date the range accepts — the end of next year, so planned trips a dispatcher
+ * looks ahead to (and the future To the `This week`/`This month` presets write) stay reachable. */
+export function departRangeMax(today: Date): string {
+  return toDay(endOfYear(addYears(today, 1)));
 }
 
-/** To: real date only, `[From + 1 day, today]`. With no (or no valid) From yet, the min falls
- * back to the day after the absolute floor, `1970-01-02`. */
-export function customToBounds(from: string | null, today: Date): { min: string; max: string } {
-  const min = from && isRealCalendarDate(from) ? toDay(addDays(parse(from, DAY_FORMAT, new Date()), 1)) : '1970-01-02';
-  return { min, max: toDay(startOfDay(today)) };
-}
-
-/** `null` = valid (or empty — emptiness is allowed, the caller decides whether that's enough to
- * apply). Non-null = the inline error to show under the From field. */
-export function validateCustomFrom(value: string, today: Date): string | null {
-  if (!value) return null;
-  if (!isRealCalendarDate(value)) return 'Enter a real date.';
-  const { min, max } = customFromBounds(today);
-  if (value < min) return `Must be on or after ${min}.`;
-  if (value > max) return `Must be on or before ${max}.`;
-  return null;
-}
-
-/** `null` = valid (or empty). Non-null = the inline error to show under the To field. `from` is
- * the raw (possibly empty/invalid) From field value, so To stays reactive to whatever the user
- * has currently typed there. */
-export function validateCustomTo(value: string, from: string, today: Date): string | null {
-  if (!value) return null;
-  if (!isRealCalendarDate(value)) return 'Enter a real date.';
-  const { min, max } = customToBounds(from || null, today);
-  if (value < min) return from ? 'Must be later than the From date.' : `Must be on or after ${min}.`;
-  if (value > max) return `Must be on or before ${max}.`;
-  return null;
+/** From/To: each a real date within `[1970-01-01, departRangeMax]`, and From on or before To
+ * (a single-day range is fine). Empty is allowed. Returns the inline error for each field, `null` = valid. */
+export function validateDepartRange(
+  from: string | null,
+  to: string | null,
+  today: Date,
+): { fromError: string | null; toError: string | null } {
+  const max = departRangeMax(today);
+  const check = (value: string | null): string | null => {
+    if (!value) return null;
+    if (!isRealCalendarDate(value)) return 'Enter a real date.';
+    if (value < CUSTOM_RANGE_MIN) return `Must be on or after ${CUSTOM_RANGE_MIN}.`;
+    if (value > max) return `Must be on or before ${max}.`;
+    return null;
+  };
+  const fromError = check(from);
+  let toError = check(to);
+  if (!fromError && !toError && from && to && to < from) toError = 'Must be on or after the From date.';
+  return { fromError, toError };
 }

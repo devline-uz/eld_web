@@ -10,8 +10,11 @@ import {
   countActiveTripFilters,
   type TripFilters,
 } from '../lib/filters';
+import { departRangeMax, CUSTOM_RANGE_MIN, validateDepartRange } from '../lib/periodRange';
+import { cn } from '@/shared/ui/cn';
 
 const selectClass = 'h-input w-full rounded-md border border-border bg-bg-surface px-3 text-body text-text';
+const dateClass = 'h-input w-full rounded-md border bg-bg-surface px-3 text-body text-text';
 
 function toggle<T>(list: T[], value: T): T[] {
   return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
@@ -40,6 +43,9 @@ export function TripFiltersDrawer({
   // opens, so the draft always starts fresh from the last applied `filters` without setState in
   // an effect (react-hooks/set-state-in-effect).
   const [draft, setDraft] = useState<TripFilters>(filters);
+  const [today] = useState(() => new Date());
+  const departMax = departRangeMax(today);
+  const { fromError, toError } = validateDepartRange(draft.departFrom, draft.departTo, today);
 
   return (
     <FilterDrawer
@@ -48,7 +54,9 @@ export function TripFiltersDrawer({
       screenName="Trips"
       appliedCount={countActiveTripFilters(draft)}
       onReset={() => setDraft(EMPTY_TRIP_FILTERS)}
+      applyDisabled={Boolean(fromError || toError)}
       onApply={() => {
+        if (fromError || toError) return;
         onApply(draft);
         onClose();
       }}
@@ -109,8 +117,12 @@ export function TripFiltersDrawer({
               type="date"
               value={draft.departFrom ?? ''}
               onChange={(e) => setDraft((d) => ({ ...d, departFrom: e.target.value || null }))}
-              className={selectClass}
+              min={CUSTOM_RANGE_MIN}
+              max={departMax}
+              aria-invalid={Boolean(fromError) || undefined}
+              className={cn(dateClass, fromError ? 'border-danger' : 'border-border')}
             />
+            {fromError ? <span className="text-caption text-danger">{fromError}</span> : null}
           </label>
           <label className="flex flex-col gap-1 text-caption text-text-muted">
             To
@@ -118,8 +130,12 @@ export function TripFiltersDrawer({
               type="date"
               value={draft.departTo ?? ''}
               onChange={(e) => setDraft((d) => ({ ...d, departTo: e.target.value || null }))}
-              className={selectClass}
+              min={CUSTOM_RANGE_MIN}
+              max={departMax}
+              aria-invalid={Boolean(toError) || undefined}
+              className={cn(dateClass, toError ? 'border-danger' : 'border-border')}
             />
+            {toError ? <span className="text-caption text-danger">{toError}</span> : null}
           </label>
         </div>
       </FilterGroup>
