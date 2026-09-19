@@ -34,6 +34,10 @@ export const VALIDATION_MESSAGES = {
   postalCodeCa: 'Enter a postal code like M5V 2T6.',
   city: 'Use letters, spaces, periods, apostrophes and hyphens only.',
   companyTextMax: 'Maximum 120 characters.',
+  time: 'Enter a time as HH:MM:SS.',
+  timeOrder: 'End time must be after the start time.',
+  engineHours: 'Enter engine hours, e.g. 1079.4.',
+  placePick: 'Pick a place from the suggestions so it can be located.',
 } as const;
 
 export const LIMITS = {
@@ -67,6 +71,10 @@ export const LIMITS = {
   companyTextMax: 120,
   dotNumberMax: 8,
   mcNumberMax: 8,
+  /** 11.11 Request a log edit — odometer 3,000,000 is 7 digits; engine hours to 0.1 h. */
+  odometerDigits: 7,
+  engineHoursIntDigits: 6,
+  engineHoursFracDigits: 1,
   /** Minutes / months — 3 digits is 999 at most. */
   smallCountDigits: 3,
   transferRangeDays: 8,

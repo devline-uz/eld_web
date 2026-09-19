@@ -13,6 +13,8 @@ export const qk = {
   /** W-26 — `GET /me/profile` (display fields only; permissions stay on `/auth/me`). */
   profile: ['me', 'profile'] as const,
   carrier: ['carrier'] as const,
+  /** Third-party geocoder results (`shared/map/geocode.ts`). */
+  places: (query: string) => ['places', query] as const,
   /** W-01 Fleet Dashboard aggregate (`GET /dashboard/summary`, WD-074) — no params, one caller. */
   dashboardSummary: ['dashboard', 'summary'] as const,
 

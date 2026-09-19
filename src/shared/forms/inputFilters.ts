@@ -58,3 +58,28 @@ export function city(value: string): string {
 export function email(value: string): string {
   return value.replace(/\s/g, '');
 }
+
+/** 24-hour `HH:MM:SS` — digits only, colons placed automatically, and each digit must fit its slot
+ * (no hour 25, no minute 60), so an impossible time can't be typed at all. */
+export function time24(value: string): string {
+  let d = '';
+  for (const ch of value.replace(/\D/g, '')) {
+    if (d.length === 6) break;
+    const n = Number(ch);
+    const slot = d.length;
+    const fits =
+      slot === 0 ? n <= 2 : slot === 1 ? d[0] !== '2' || n <= 3 : slot === 2 || slot === 4 ? n <= 5 : true;
+    if (fits) d += ch;
+  }
+  return d.replace(/^(\d{2})(\d{1,2})?(\d{1,2})?$/, (_, h: string, m?: string, sec?: string) =>
+    [h, m, sec].filter(Boolean).join(':'),
+  );
+}
+
+/** Non-negative decimal — digits and one `.`, at most `intDigits` before it and `fracDigits` after. */
+export function decimal(value: string, intDigits: number, fracDigits: number): string {
+  const [int = '', ...rest] = value.replace(/[^\d.]/g, '').split('.');
+  const whole = int.slice(0, intDigits);
+  if (rest.length === 0 || fracDigits === 0) return whole;
+  return `${whole}.${rest.join('').slice(0, fracDigits)}`;
+}
