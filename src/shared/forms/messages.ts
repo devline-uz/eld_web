@@ -27,6 +27,13 @@ export const VALIDATION_MESSAGES = {
   csvFile: 'Upload a CSV file up to 5 MB.',
   images: 'Up to 5 images, 5 MB each.',
   phone: 'Enter a valid phone number.',
+  dotNumber: 'A USDOT number is 1 to 8 digits.',
+  mcNumber: 'An MC number is 1 to 8 digits, optionally after MC-.',
+  ein: 'Enter the EIN as 12-3456789.',
+  zip: 'Enter a 5-digit ZIP or ZIP+4 (43215-1234).',
+  postalCodeCa: 'Enter a postal code like M5V 2T6.',
+  city: 'Use letters, spaces, periods, apostrophes and hyphens only.',
+  companyTextMax: 'Maximum 120 characters.',
 } as const;
 
 export const LIMITS = {
@@ -55,6 +62,13 @@ export const LIMITS = {
   /** CreateAlertRuleDto — `name` ≤ 200. */
   alertRuleNameMax: 200,
   eldIdentifierLength: 4,
+  /** W-17 Company profile. */
+  cityMax: 60,
+  companyTextMax: 120,
+  dotNumberMax: 8,
+  mcNumberMax: 8,
+  /** Minutes / months — 3 digits is 999 at most. */
+  smallCountDigits: 3,
   transferRangeDays: 8,
   logRangeDays: 62,
   fileBytesMax: 5 * 1024 * 1024,

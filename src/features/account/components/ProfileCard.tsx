@@ -8,7 +8,7 @@ import { useId, useState, type ReactNode } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { isApiError, toUserMessage } from '@/shared/api/errors';
-import { fields, profileSchema } from '@/shared/forms';
+import { fields, inputFilters, profileSchema } from '@/shared/forms';
 import { Avatar } from '@/shared/ui/Avatar';
 import { Button } from '@/shared/ui/Button';
 import { Card, SectionHeader } from '@/shared/ui/Card';
@@ -82,6 +82,7 @@ function ProfileForm({ profile }: { profile: MyProfile }) {
     reValidateMode: 'onChange',
     defaultValues: defaults,
   });
+  const phoneField = register('phone');
 
   const onSubmit = handleSubmit(async (values) => {
     setBanner(null);
@@ -191,8 +192,15 @@ function ProfileForm({ profile }: { profile: MyProfile }) {
                 autoComplete="tel"
                 aria-invalid={errors.phone ? true : undefined}
                 aria-describedby={describe('phone', Boolean(errors.phone))}
+                maxLength={inputFilters.PHONE_MAX_LENGTH}
                 className={cn(INPUT, 'tabular pl-9', errors.phone ? 'border-danger' : 'border-border')}
-                {...register('phone')}
+                {...phoneField}
+                onChange={(e) => {
+                  // Letters and other symbols are dropped as typed or pasted — only a phone number fits.
+                  const clean = inputFilters.phone(e.target.value);
+                  if (clean !== e.target.value) e.target.value = clean;
+                  return phoneField.onChange(e);
+                }}
               />
             </div>
           </Field>

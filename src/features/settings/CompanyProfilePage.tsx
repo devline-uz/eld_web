@@ -1,6 +1,7 @@
 // owner: web-settings-admin — W-17 Settings · Company profile (web/tz.md §10 W-17).
 // Design: web/roles and screens/admin panel/Settings — company profile and HOS ruleset.jpg
 import { useState } from 'react';
+import type { ZodTypeAny } from 'zod';
 import { Check } from 'lucide-react';
 import { Card, SectionHeader } from '@/shared/ui/Card';
 import { Button } from '@/shared/ui/Button';
@@ -12,6 +13,7 @@ import { usePermission } from '@/shared/auth/usePermission';
 import { ApiError } from '@/shared/api/errors';
 import { useCarrier, useUpdateCarrier, type CarrierRow, type HosRuleset } from '@/shared/api/settingsAdmin';
 import { Field, inputClass, ToggleRow } from './components/formKit';
+import { fields, inputFilters, LIMITS } from '@/shared/forms';
 import { ConfirmDelete } from '@/shared/ui/Modal';
 
 const HOS_RULESETS: { value: HosRuleset; label: string }[] = [
@@ -22,6 +24,36 @@ const HOS_RULESETS: { value: HosRuleset; label: string }[] = [
 ];
 
 const US_STATES = ['OH', 'NY', 'PA', 'MI', 'IN', 'IL', 'WV', 'KY', 'ON'];
+
+type TextKey = 'name' | 'dotNumber' | 'mcNumber' | 'ein' | 'phone' | 'complianceEmail' | 'addressLine1' | 'city' | 'zip';
+type TextErrors = Partial<Record<TextKey, string>>;
+
+/** Ontario is the one non-US entry in the state list — its ZIP field takes a Canadian postal code. */
+const isCanadian = (state: string | null | undefined) => state === 'ON';
+
+/** Save-time check of the free-typed fields. Empty optional fields are skipped; the keystroke
+ * filters already keep impossible characters out, this catches incomplete values (`4321`, `12-34`). */
+function companyErrors(form: Partial<CarrierRow>): TextErrors {
+  const rules: [TextKey, ZodTypeAny, boolean][] = [
+    ['name', fields.companyText(), true],
+    ['dotNumber', fields.dotNumber(), true],
+    ['mcNumber', fields.mcNumber(), false],
+    ['ein', fields.ein(), false],
+    ['phone', fields.phone(), false],
+    ['complianceEmail', fields.email(), false],
+    ['addressLine1', fields.companyText(), false],
+    ['city', fields.city(), false],
+    ['zip', fields.postalCode(isCanadian(form.state)), false],
+  ];
+  const errors: TextErrors = {};
+  for (const [key, rule, required] of rules) {
+    const value = (form[key] ?? '').trim();
+    if (!value && !required) continue;
+    const result = rule.safeParse(value);
+    if (!result.success) errors[key] = result.error.issues[0]?.message;
+  }
+  return errors;
+}
 
 export default function CompanyProfilePage() {
   const { data: carrier, isLoading, isError, refetch } = useCarrier();
@@ -58,10 +90,17 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const [confirmProduction, setConfirmProduction] = useState(false);
   const [eldError, setEldError] = useState<string | null>(null);
+  const [errors, setErrors] = useState<TextErrors>({});
 
   function set<K extends keyof CarrierRow>(key: K, value: CarrierRow[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
     setDirty(true);
+  }
+
+  /** A free-typed field: the value arrives already filtered, and its save error clears on edit. */
+  function setText(key: TextKey, value: string) {
+    set(key, value);
+    setErrors((prev) => ({ ...prev, [key]: undefined }));
   }
 
   function validateEldIdentifier(value: string | null | undefined): boolean {
@@ -72,7 +111,10 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
   }
 
   function doSave() {
-    if (!validateEldIdentifier(form.eldIdentifier)) return;
+    const textErrors = companyErrors(form);
+    setErrors(textErrors);
+    const eldOk = validateEldIdentifier(form.eldIdentifier);
+    if (!eldOk || Object.values(textErrors).some(Boolean)) return;
     updateMutation.mutate(form, {
       onSuccess: () => {
         setDirty(false);
@@ -116,68 +158,83 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
       <Card>
         <SectionHeader title="Company profile" className="mb-4" />
         <div className="grid grid-cols-3 gap-4">
-          <Field label="Company name" required>
+          <Field label="Company name" required error={errors.name}>
             <input
               className={inputClass}
               value={form.name ?? ''}
               readOnly={!canFull}
-              onChange={(e) => set('name', e.target.value)}
+              aria-invalid={errors.name ? true : undefined}
+              onChange={(e) => setText('name', e.target.value.slice(0, LIMITS.companyTextMax))}
             />
           </Field>
-          <Field label="US DOT number" required>
+          <Field label="US DOT number" required error={errors.dotNumber}>
             <input
               className={inputClass}
+              inputMode="numeric"
               value={form.dotNumber ?? ''}
               readOnly={!canFull}
-              onChange={(e) => set('dotNumber', e.target.value)}
+              aria-invalid={errors.dotNumber ? true : undefined}
+              onChange={(e) => setText('dotNumber', inputFilters.digits(e.target.value, LIMITS.dotNumberMax))}
             />
           </Field>
-          <Field label="MC number">
+          <Field label="MC number" error={errors.mcNumber}>
             <input
               className={inputClass}
               value={form.mcNumber ?? ''}
               readOnly={!canFull}
-              onChange={(e) => set('mcNumber', e.target.value)}
+              aria-invalid={errors.mcNumber ? true : undefined}
+              onChange={(e) => setText('mcNumber', inputFilters.mcNumber(e.target.value))}
             />
           </Field>
-          <Field label="EIN / Tax ID">
+          <Field label="EIN / Tax ID" error={errors.ein}>
             <input
               className={inputClass}
+              inputMode="numeric"
+              placeholder="12-3456789"
               value={form.ein ?? ''}
               readOnly={!canFull}
-              onChange={(e) => set('ein', e.target.value)}
+              aria-invalid={errors.ein ? true : undefined}
+              onChange={(e) => setText('ein', inputFilters.ein(e.target.value))}
             />
           </Field>
-          <Field label="Main phone">
+          <Field label="Main phone" error={errors.phone}>
             <input
               className={inputClass}
+              type="tel"
+              autoComplete="tel"
               value={form.phone ?? ''}
               readOnly={!canFull}
-              onChange={(e) => set('phone', e.target.value)}
+              aria-invalid={errors.phone ? true : undefined}
+              onChange={(e) => setText('phone', inputFilters.phone(e.target.value))}
             />
           </Field>
-          <Field label="Compliance email">
+          <Field label="Compliance email" error={errors.complianceEmail}>
             <input
               className={inputClass}
+              type="email"
+              autoComplete="email"
               value={form.complianceEmail ?? ''}
               readOnly={!canFull}
-              onChange={(e) => set('complianceEmail', e.target.value)}
+              aria-invalid={errors.complianceEmail ? true : undefined}
+              onChange={(e) => setText('complianceEmail', inputFilters.email(e.target.value))}
             />
           </Field>
-          <Field label="Street address" >
+          <Field label="Street address" error={errors.addressLine1}>
             <input
               className={inputClass}
               value={form.addressLine1 ?? ''}
               readOnly={!canFull}
-              onChange={(e) => set('addressLine1', e.target.value)}
+              aria-invalid={errors.addressLine1 ? true : undefined}
+              onChange={(e) => setText('addressLine1', e.target.value.slice(0, LIMITS.companyTextMax))}
             />
           </Field>
-          <Field label="City">
+          <Field label="City" error={errors.city}>
             <input
               className={inputClass}
               value={form.city ?? ''}
               readOnly={!canFull}
-              onChange={(e) => set('city', e.target.value)}
+              aria-invalid={errors.city ? true : undefined}
+              onChange={(e) => setText('city', inputFilters.city(e.target.value))}
             />
           </Field>
           <div className="grid grid-cols-2 gap-4">
@@ -186,7 +243,10 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
                 className={inputClass}
                 value={form.state ?? ''}
                 disabled={!canFull}
-                onChange={(e) => set('state', e.target.value)}
+                onChange={(e) => {
+                  set('state', e.target.value);
+                  setErrors((prev) => ({ ...prev, zip: undefined }));
+                }}
               >
                 <option value="">—</option>
                 {US_STATES.map((s) => (
@@ -196,12 +256,16 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
                 ))}
               </select>
             </Field>
-            <Field label="ZIP">
+            <Field label={isCanadian(form.state) ? 'Postal code' : 'ZIP'} error={errors.zip}>
               <input
                 className={inputClass}
+                inputMode={isCanadian(form.state) ? 'text' : 'numeric'}
                 value={form.zip ?? ''}
                 readOnly={!canFull}
-                onChange={(e) => set('zip', e.target.value)}
+                aria-invalid={errors.zip ? true : undefined}
+                onChange={(e) =>
+                  setText('zip', isCanadian(form.state) ? inputFilters.caPostal(e.target.value) : inputFilters.usZip(e.target.value))
+                }
               />
             </Field>
           </div>
@@ -266,20 +330,20 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
           </Field>
           <Field label="Unassigned driving threshold" hint="minutes">
             <input
-              type="number"
               className={inputClass}
-              value={form.unassignedThresholdMin ?? 0}
+              inputMode="numeric"
+              value={String(form.unassignedThresholdMin ?? 0)}
               readOnly={!canFull}
-              onChange={(e) => set('unassignedThresholdMin', Number(e.target.value))}
+              onChange={(e) => set('unassignedThresholdMin', Number(inputFilters.digits(e.target.value, LIMITS.smallCountDigits)))}
             />
           </Field>
           <Field label="DVIR retention" hint="months">
             <input
-              type="number"
               className={inputClass}
-              value={form.dvirRetentionMonths ?? 0}
+              inputMode="numeric"
+              value={String(form.dvirRetentionMonths ?? 0)}
               readOnly={!canFull}
-              onChange={(e) => set('dvirRetentionMonths', Number(e.target.value))}
+              onChange={(e) => set('dvirRetentionMonths', Number(inputFilters.digits(e.target.value, LIMITS.smallCountDigits)))}
             />
           </Field>
         </div>

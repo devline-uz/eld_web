@@ -102,7 +102,23 @@ describe('field rules', () => {
   it('validates phone numbers in E.164 and US form', () => {
     expect(f.phone().safeParse('+14155552671').success).toBe(true);
     expect(f.phone().safeParse('(614) 555-0188').success).toBe(true);
+    expect(f.phone().safeParse('+1 614 555 0104').success).toBe(true);
+    expect(firstError(f.phone(), '+1 abc 555 0104')).toBe(M.phone);
     expect(firstError(f.phone(), '12')).toBe(M.phone);
+  });
+
+  it('validates the W-17 company profile numbers', () => {
+    expect(f.dotNumber().safeParse('1234567').success).toBe(true);
+    expect(firstError(f.dotNumber(), '123456789')).toBe(M.dotNumber);
+    expect(f.mcNumber().safeParse('MC-892014').success).toBe(true);
+    expect(firstError(f.mcNumber(), 'MC 12x')).toBe(M.mcNumber);
+    expect(f.ein().safeParse('12-3456789').success).toBe(true);
+    expect(firstError(f.ein(), '123456789')).toBe(M.ein);
+    expect(f.postalCode().safeParse('43215-1234').success).toBe(true);
+    expect(firstError(f.postalCode(), '4321')).toBe(M.zip);
+    expect(f.postalCode(true).safeParse('M5V 2T6').success).toBe(true);
+    expect(f.city().safeParse("Coeur d'Alene").success).toBe(true);
+    expect(firstError(f.city(), 'Columbus 2')).toBe(M.city);
   });
 
   it('caps a transfer at 8 days and a log range at 62', () => {
