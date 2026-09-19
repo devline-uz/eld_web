@@ -7,8 +7,14 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const VIN_RE = /^[A-HJ-NPR-Z0-9]{17}$/;
 const USERNAME_RE = /^[a-z0-9._-]+$/;
 const ELD_ID_RE = /^[A-Z0-9]{4}$/;
-const PHONE_RE = /^(\+[1-9]\d{7,14}|\(?\d{3}\)?[ -]?\d{3}[ -]?\d{4})$/;
+const PHONE_RE = /^(\+[1-9]\d{7,14}|\d{10})$/;
 const ISO_DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+const DOT_NUMBER_RE = /^\d{1,8}$/;
+const MC_NUMBER_RE = /^(MC-)?\d{1,8}$/;
+const EIN_RE = /^\d{2}-\d{7}$/;
+const US_ZIP_RE = /^\d{5}(-\d{4})?$/;
+const CA_POSTAL_RE = /^[A-Z]\d[A-Z] \d[A-Z]\d$/;
+const PLACE_NAME_RE = /^\p{L}[\p{L} .'-]*$/u;
 
 export const requiredString = (message: string = M.required) =>
   z.string({ required_error: message }).trim().min(1, message);
@@ -89,7 +95,35 @@ export const ticketSubject = () =>
 export const eldIdentifier = () =>
   requiredString(M.eldIdentifier).toUpperCase().regex(ELD_ID_RE, M.eldIdentifier);
 
-export const phone = () => requiredString(M.phone).regex(PHONE_RE, M.phone);
+/** E.164 (`+14155552671`) or a 10-digit US number; spaces, `(`, `)` and `-` between the digits are
+ * formatting only (`+1 614 555 0104`, `(614) 555-0188`). */
+export const phone = () =>
+  requiredString(M.phone).refine((value) => PHONE_RE.test(value.replace(/[ ()-]/g, '')), M.phone);
+
+// W-17 Company profile. The matching keystroke filters live in `inputFilters.ts`.
+
+/** USDOT number — 1 to 8 digits. */
+export const dotNumber = () => requiredString(M.dotNumber).regex(DOT_NUMBER_RE, M.dotNumber);
+
+/** MC (operating authority) docket number — 1 to 8 digits, optionally written `MC-892014`. */
+export const mcNumber = () => requiredString(M.mcNumber).regex(MC_NUMBER_RE, M.mcNumber);
+
+/** Federal EIN — `12-3456789`. */
+export const ein = () => requiredString(M.ein).regex(EIN_RE, M.ein);
+
+/** US ZIP (`43215` / `43215-1234`), or a Canadian postal code (`M5V 2T6`) when `canadian`. */
+export const postalCode = (canadian = false) =>
+  canadian
+    ? requiredString(M.postalCodeCa).toUpperCase().regex(CA_POSTAL_RE, M.postalCodeCa)
+    : requiredString(M.zip).regex(US_ZIP_RE, M.zip);
+
+/** City — letters, spaces, `.`, `'` and `-` only. */
+export const city = () =>
+  requiredString(M.city).max(LIMITS.cityMax, M.city).regex(PLACE_NAME_RE, M.city);
+
+/** Company name / street address — free text, capped at `LIMITS.companyTextMax`. */
+export const companyText = () => requiredString().max(LIMITS.companyTextMax, M.companyTextMax);
+
 
 export const isoDay = () => requiredString(M.required).regex(ISO_DAY_RE, M.required);
 

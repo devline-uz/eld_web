@@ -301,7 +301,10 @@ describe('W-26 — Profile card', () => {
     expect(await screen.findByText('This field is required.')).toBeInTheDocument();
     expect(first).toHaveAttribute('aria-invalid', 'true');
 
-    await user.type(screen.getByLabelText('Mobile number'), 'abc');
+    const phone = screen.getByLabelText('Mobile number');
+    // Letters never reach the field; a too-short number still fails validation.
+    await user.type(phone, 'abc12');
+    expect(phone).toHaveValue('12');
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
     expect(await screen.findByText('Enter a valid phone number.')).toBeInTheDocument();
     expect(calls.patches).toEqual([]);

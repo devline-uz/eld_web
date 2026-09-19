@@ -166,6 +166,58 @@ describe('CompanyProfilePage — W-17', () => {
     expect(await screen.findByRole('button', { name: 'Save changes' })).toBeEnabled();
   });
 
+  it('each field only takes its own kind of data as typed', async () => {
+    const user = userEvent.setup();
+    server.use(http.get(url(endpoints.carrier.root), () => ok(CARRIER)));
+    renderPage();
+    await screen.findByDisplayValue('Universal Logistics Inc.');
+
+    async function typeInto(currentValue: string, typed: string) {
+      const field = screen.getByDisplayValue(currentValue);
+      await user.clear(field);
+      await user.type(field, typed);
+      return field;
+    }
+
+    expect(await typeInto('1234567', 'abc12x3')).toHaveValue('123');
+    expect(await typeInto('MC-892014', 'mc55z1')).toHaveValue('MC-551');
+    expect(await typeInto('88-4192055', 'ab123456789')).toHaveValue('12-3456789');
+    expect(await typeInto('+1 614 555 0104', '+1 six 614')).toHaveValue('+1  614');
+    expect(await typeInto('compliance@universal-logistics.example', 'ops @acme.com')).toHaveValue('ops@acme.com');
+    expect(await typeInto('Columbus', 'Dayton 45')).toHaveValue('Dayton ');
+    expect(await typeInto('43004', '4321a51234')).toHaveValue('43215-1234');
+    expect(await typeInto('24', '3x6')).toHaveValue('36');
+  });
+
+  it('never saves an incomplete value — the field shows why', async () => {
+    const user = userEvent.setup();
+    server.use(http.get(url(endpoints.carrier.root), () => ok(CARRIER)));
+    let patched = false;
+    server.use(
+      http.patch(url(endpoints.carrier.root), () => {
+        patched = true;
+        return ok(CARRIER);
+      }),
+    );
+    renderPage();
+    await screen.findByDisplayValue('Universal Logistics Inc.');
+
+    const email = screen.getByDisplayValue('compliance@universal-logistics.example');
+    await user.clear(email);
+    await user.type(email, 'ops@acme');
+    const zip = screen.getByDisplayValue('43004');
+    await user.clear(zip);
+    await user.type(zip, '4321');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(await screen.findByText('Enter a valid email address.')).toBeInTheDocument();
+    expect(screen.getByText('Enter a 5-digit ZIP or ZIP+4 (43215-1234).')).toBeInTheDocument();
+    expect(patched).toBe(false);
+
+    await user.type(zip, '5');
+    expect(screen.queryByText('Enter a 5-digit ZIP or ZIP+4 (43215-1234).')).toBeNull();
+  });
+
   it('confirms before switching eRODS to production, then saves', async () => {
     const user = userEvent.setup();
     server.use(http.get(url(endpoints.carrier.root), () => ok(CARRIER)));
