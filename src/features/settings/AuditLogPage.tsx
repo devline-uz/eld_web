@@ -16,6 +16,7 @@ import { Drawer } from '@/shared/ui/Modal';
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
 import { EMPTY_STATE_COPY } from '@/shared/ui/copy';
 import { formatCarrier } from '@/shared/format/datetime';
+import { toCsv } from '@/shared/lib/csv';
 import { client } from '@/shared/api/client';
 import { endpoints } from '@/shared/api/endpoints';
 import { qk } from '@/shared/api/queryKeys';
@@ -161,11 +162,13 @@ export default function AuditLogPage() {
       params: { limit: 200, actorId: actorId || undefined, objectType: objectType || undefined },
     });
     const rows = applyLocalFilters(data.items);
-    const header = 'timestamp,user,action,object,ip\n';
-    const body = rows
-      .map((e) => [formatCarrier(e.createdAt, timezone, 'dateTimeSeconds'), e.actorName ?? '', e.action, e.objectLabel ?? e.objectType, e.ipAddress ?? ''].join(','))
-      .join('\n');
-    const blob = new Blob([header + body], { type: 'text/csv' });
+    // WB-135 — every field goes through the RFC 4180 escaper: the 'MMM dd, HH:mm:ss' timestamp
+    // and actor/object names can contain commas, quotes or line breaks.
+    const csv = toCsv([
+      ['timestamp', 'user', 'action', 'object', 'ip'],
+      ...rows.map((e) => [formatCarrier(e.createdAt, timezone, 'dateTimeSeconds'), e.actorName, e.action, e.objectLabel ?? e.objectType, e.ipAddress]),
+    ]);
+    const blob = new Blob([csv], { type: 'text/csv' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
     link.download = 'audit-log.csv';

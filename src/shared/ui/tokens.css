@@ -148,6 +148,7 @@
   --spacing-palette-top: 90px; /* 11.28 offset from the viewport top */
   --spacing-palette-list: 420px; /* 11.28 results max height */
   --spacing-route-preview: 240px; /* W-05 route replay map height */
+  --spacing-period-popover: 266px; /* W-05 Trips period dropdown (Today / This week / This month / Custom range) width */
 
   /* ---- W-16 · Messages three-pane layout (web/tz.md §10 W-16) ------------ */
   --spacing-conversations-list: 280px; /* left panel */

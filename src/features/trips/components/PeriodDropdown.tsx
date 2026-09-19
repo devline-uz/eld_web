@@ -124,7 +124,7 @@ export function PeriodDropdown({ filters, onApply }: PeriodDropdownProps) {
         </Button>
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Content align="start" sideOffset={8} className="z-50 w-[266px] rounded-lg border border-border bg-bg-surface p-2 shadow-pop">
+        <Popover.Content align="start" sideOffset={8} className="z-50 w-period-popover rounded-lg border border-border bg-bg-surface p-2 shadow-pop">
           <div className="flex flex-col gap-1">
             {(['today', 'thisWeek', 'thisMonth'] as const).map((preset) => (
               <button

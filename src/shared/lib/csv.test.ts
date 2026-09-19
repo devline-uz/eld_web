@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseCsv, parseCsvRows } from './csv';
+import { escapeCsvField, parseCsv, parseCsvRows, toCsv } from './csv';
 
 describe('parseCsv (WB-106)', () => {
   it('splits plain comma-separated rows', () => {
@@ -43,5 +43,38 @@ describe('parseCsv (WB-106)', () => {
 
   it('returns an empty array for empty input', () => {
     expect(parseCsv('')).toEqual([]);
+  });
+});
+
+describe('toCsv / escapeCsvField (WB-135)', () => {
+  it('leaves plain fields unquoted', () => {
+    expect(escapeCsvField('Sarah Chen')).toBe('Sarah Chen');
+    expect(escapeCsvField(null)).toBe('');
+    expect(escapeCsvField(undefined)).toBe('');
+  });
+
+  it('quotes fields containing a comma', () => {
+    expect(escapeCsvField('Sep 19, 14:03:07')).toBe('"Sep 19, 14:03:07"');
+  });
+
+  it('quotes fields containing a double quote and doubles the inner quotes', () => {
+    expect(escapeCsvField('Truck "Big Blue"')).toBe('"Truck ""Big Blue"""');
+  });
+
+  it('quotes fields containing CR or LF', () => {
+    expect(escapeCsvField('line one\nline two')).toBe('"line one\nline two"');
+    expect(escapeCsvField('a\rb')).toBe('"a\rb"');
+  });
+
+  it('round-trips through parseCsvRows with columns intact', () => {
+    const rows = [
+      ['timestamp', 'user', 'action', 'object', 'ip'],
+      ['Sep 19, 14:03:07', 'Chen, Sarah', 'UPDATE', 'Truck "Big Blue"\nunit 12', '10.0.0.1'],
+    ];
+    const text = toCsv(rows);
+    expect(text).toBe(
+      'timestamp,user,action,object,ip\r\n"Sep 19, 14:03:07","Chen, Sarah",UPDATE,"Truck ""Big Blue""\nunit 12",10.0.0.1',
+    );
+    expect(parseCsvRows(text)).toEqual(rows);
   });
 });

@@ -82,3 +82,19 @@ export function parseCsv(text: string): Array<Record<string, string>> {
   const headers = headerRow.map((h) => h.trim());
   return dataRows.map((r) => Object.fromEntries(headers.map((h, idx) => [h, (r[idx] ?? '').trim()])));
 }
+
+// WB-135 — RFC 4180 serializer (the inverse of `parseCsvRows`), used by client-built exports
+// such as the Audit log (W-26). A field is wrapped in double quotes when it contains a comma,
+// a double quote, CR or LF; inner quotes are doubled.
+const NEEDS_QUOTING = /[",\r\n]/;
+
+/** Escapes one CSV field per RFC 4180. */
+export function escapeCsvField(value: string | number | null | undefined): string {
+  const text = value == null ? '' : String(value);
+  return NEEDS_QUOTING.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+}
+
+/** Serializes rows (header row included by the caller) to CSV text with CRLF line breaks. */
+export function toCsv(rows: ReadonlyArray<ReadonlyArray<string | number | null | undefined>>): string {
+  return rows.map((row) => row.map(escapeCsvField).join(',')).join('\r\n');
+}

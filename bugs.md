@@ -2109,3 +2109,83 @@ is a one-line window fix with a test, WB-053 is a dependency bump with a bundle 
 compliance and data-integrity highs — WB-059, WB-094, WB-095, WB-103 — then the session pair
 WB-079/WB-080, which are the ones most likely to be reported as "it logged me out" or "it did not
 log me out".
+
+---
+
+# 2026-09-19 — Create trip (W-11) va umumiy tekshiruv
+
+Yozuvlar oldingi `WB-0NN` raqamlashini davom ettiradi. Qatorlar `main` @ `85cd4a0` bo'yicha tekshirilgan.
+Eslatma: stop vaqtlari uchun AM/PM tanlagich va sarlavhadagi X tugmasi "discard" tasdig'ini chetlab o'tishi
+sinab ko'rildi, lekin foydalanuvchi so'rovi bilan qaytarildi (`85cd4a0`) — bular bug emas.
+
+## Tuzatilgan
+
+## WB-126 · Distance maydoni harflarni qabul qilardi — ✅ tuzatildi (`7c2723a`)
+**Fayl:** `src/features/trips/components/CreateTripModal.tsx:93` (`distanceMi` sxemasi), maydon `:443`.
+**Hozir (edi):** istalgan matn, jumladan harflar kiritilardi.
+**Qilindi:** faqat musbat son (o'nli kasr mumkin), majburiy; xato: `Enter a distance greater than 0.`
+
+## WB-127 · Pickup/delivery sanalari tekshirilmasdi — ✅ tuzatildi (`7c2723a`)
+**Fayl:** `CreateTripModal.tsx:22–115` (`parseLocalDateTime`, `pickupRange`, `createTripSchema`).
+**Hozir (edi):** pickup deliverydan keyin bo'lishi mumkin edi; mavjud bo'lmagan sanalar (30-fevral,
+kabisa bo'lmagan yildagi 29-fevral) va katta yillar (20004) qabul qilinardi.
+**Qilindi:** pickup — bugundan +1 yilgacha; faqat haqiqiy sanalar, 4 xonali yil; delivery >= pickup,
+delivery ham +1 yil bilan cheklangan. Brauzer rad etgan sana "required" emas,
+`Enter a valid date and time.` ko'rsatadi.
+
+## WB-128 · Rate maydoni harflarni qabul qilardi — ✅ tuzatildi (`7c2723a`)
+**Fayl:** `CreateTripModal.tsx:101` (`rateUsd`), maydon `:491`.
+**Qilindi:** musbat son, ko'pi bilan 2 ta kasr xonasi; maydon ixtiyoriyligicha qoldi.
+
+## WB-129 · Stops oynasidagi sana matni kesilib qolardi — ✅ tuzatildi (`85cd4a0`)
+**Fayl:** `CreateTripModal.tsx:375–390`.
+**Qilindi:** native `datetime-local` (24 soatlik), `w-full min-w-0` — matn to'liq ko'rinadi.
+
+## WB-130 · Testda qattiq yozilgan sana (2026-09-20) o'sha kundan keyin yiqilardi — ✅ tuzatildi (`7c2723a`)
+**Fayl:** `src/features/trips/components/CreateTripModal.test.tsx:152` — endi `tomorrow` (`addDays(new Date(), 1)`).
+(`:72` dagi `'2026-09-20T14:30'` faqat izohdagi misol, testga ta'sir qilmaydi.)
+
+## WB-131 · `tsc` xatosi: `geojson` moduli topilmaydi — ✅ tuzatildi (commit qilinmagan)
+**Fayl:** `src/shared/map/FleetMap.tsx:12`.
+**Hozir (edi):** `npx tsc --noEmit` → `TS2307: Cannot find module 'geojson'` (yagona xato).
+**Qilindi:** `@types/geojson@7946.0.16` devDependency sifatida o'rnatildi (`package.json:59`,
+`package-lock.json`); `npx tsc --noEmit` → 0 xato.
+
+## WB-132 · Lint xatosi: `w-[266px]` — ✅ tuzatildi (commit qilinmagan)
+**Fayl:** `src/features/trips/components/PeriodDropdown.tsx:127`, token `src/shared/ui/tokens.css:151`.
+**Hozir (edi):** `npm run lint` → `house/no-design-literal` (1 error, `--max-warnings=0` sabab CI yiqilardi).
+**Qilindi:** `--spacing-period-popover: 266px` tokeni qo'shildi; `w-[266px]` → `w-period-popover`;
+`npm run lint` o'tadi.
+
+## WB-133 · 24 ta vitest testi yiqilmoqda (dropdown / row-menu) — ✅ tuzatildi (commit qilinmagan)
+**Hozir (edi):** `npx vitest run` → 10 fayl, 24 test yiqilardi (Radix `DropdownMenu` menyulari chiqmasdi).
+**Sabab:** kod emas — lokal `node_modules` `package-lock.json` dan chetlashib ketgan edi.
+**Qilindi:** `npm install` bilan qayta o'rnatildi, kod o'zgartirilmadi. To'liq `npx vitest run`:
+1317 o'tdi, 1 skip, 0 yiqildi. Qaytalansa: `npm ci`.
+
+## WB-135 · Audit log CSV eksportida vaqt ustuni buziladi — ✅ tuzatildi (commit qilinmagan)
+**Fayl:** `src/features/settings/AuditLogPage.tsx:19`, `:164–171`; `src/shared/lib/csv.ts`.
+**Hozir (edi):** vergulli qiymatlar (`'MMM dd, HH:mm:ss'`, actor/object nomlari) qo'shtirnoqsiz
+`.join(',')` qilinardi → ustunlar bo'linib ketardi.
+**Qilindi:** `src/shared/lib/csv.ts` ga `escapeCsvField` / `toCsv` qo'shildi (RFC 4180, CRLF qator
+oxiri); `AuditLogPage` shundan foydalanadi. Testlar: `src/shared/lib/csv.test.ts`.
+
+## WB-136 · Developer sign-in yangi checkoutda ko'rinmaydi — ✅ tuzatildi (commit qilinmagan)
+**Fayl:** `src/features/auth/SignInPage.tsx:30` (`VITE_AUTH_MODE === 'dev'`).
+**Hozir (edi):** toza checkoutda faqat Google kirish ko'rinardi, README yo'q edi.
+**Qilindi:** yangi `eld_web/README.md` — `cp .env.example .env.local`, `VITE_AUTH_MODE=dev`,
+demo akkauntlar va ishga tushirish skriptlari hujjatlashtirildi.
+
+## Ochiq
+
+## WB-134 · Distance va Rate backendga yuborilmaydi — ⏳ ochiq (backend kerak)
+**Fayl:** `src/shared/api/trips.ts:318` (`CreateTripPayload`), izoh `CreateTripModal.tsx:100`.
+**Hozir:** ikkala maydon tekshiriladi, lekin payloadda ular uchun maydon yo'q — qiymat yo'qoladi.
+**Kutilgan:** backendda maydon qo'shilsin, so'ng payloadga ulansin.
+**Izoh:** avval backendda `CreateTripPayload` uchun maydon kerak — shungacha frontendda qilinadigan ish yo'q.
+
+## WB-137 · ResolveDefectModal: vaqt 12/24 soatlik ko'rinishi brauzer tiliga bog'liq — ⏳ ochiq (past)
+**Fayl:** `src/features/dvir/components/ResolveDefectModal.tsx:138` (native `datetime-local`).
+**Hozir:** brauzer lokaliga qarab AM/PM yoki 24 soat — ilovaning qolgan qismi bilan nomuvofiq.
+**Kutilgan:** yagona format (past ustuvorlik).
+**Izoh:** past ustuvorlik, hozircha tuzatilmadi.
