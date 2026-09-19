@@ -152,7 +152,20 @@ export function useActiveTrips() {
   return { rows, isLoading: assignedQuery.isLoading || inProgressQuery.isLoading };
 }
 
-export type TripSegment = 'ACTIVE' | 'SCHEDULED' | 'COMPLETED' | 'UNASSIGNED';
+/** The raw ASSIGNED ∪ IN_PROGRESS rows without the driver/vehicle name join — the W-02 `Trips`
+ * map layer only needs stops and `vehicleId`, so it skips the `/drivers` + `/vehicles` lookups.
+ * Shares its cache entries with `useActiveTrips()` and the W-11 board (same query keys). */
+export function useActiveTripRows({ enabled = true }: { enabled?: boolean } = {}) {
+  const assignedQuery = useQuery({ ...tripsActiveSliceQuery('ASSIGNED'), enabled });
+  const inProgressQuery = useQuery({ ...tripsActiveSliceQuery('IN_PROGRESS'), enabled });
+  const rows = useMemo(
+    () => [...(assignedQuery.data?.items ?? []), ...(inProgressQuery.data?.items ?? [])],
+    [assignedQuery.data, inProgressQuery.data],
+  );
+  return { rows, isLoading: assignedQuery.isLoading || inProgressQuery.isLoading };
+}
+
+export type TripSegment = 'ACTIVE'| 'SCHEDULED' | 'COMPLETED' | 'UNASSIGNED';
 const SEGMENT_STATUS: Record<Exclude<TripSegment, 'ACTIVE' | 'UNASSIGNED'>, TripStatus> = {
   SCHEDULED: 'PLANNED',
   COMPLETED: 'DELIVERED',

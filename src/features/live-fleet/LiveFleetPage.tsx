@@ -6,6 +6,15 @@ import { MessageSquare, Plus, Search, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { qk } from '@/shared/api/queryKeys';
 import { useLiveFleet, hasPosition, type LiveFleetUnit } from '@/shared/api/liveFleet';
+import { useGeofences } from '@/shared/api/geofences';
+import { useActiveTripRows } from '@/shared/api/trips';
+import {
+  MAP_LAYERS,
+  geofencesToGeoJSON,
+  trafficTilesUrl,
+  tripsToGeoJSON,
+  type MapLayer,
+} from '@/shared/map/overlays';
 import { usePermission } from '@/shared/auth/usePermission';
 import { Can } from '@/shared/auth/Can';
 import { useDynamicSubtitle } from '@/app/layouts/Topbar';
@@ -23,8 +32,10 @@ import { messagesHref } from '@/shared/lib/messagesHref';
 
 const FleetMap = lazy(() => import('@/shared/map/FleetMap'));
 
-const LAYERS = ['Vehicles', 'Trips', 'Geofences', 'Traffic'] as const;
-type Layer = (typeof LAYERS)[number];
+type Layer = MapLayer;
+
+const TRAFFIC_UNCONFIGURED_TITLE =
+  'Traffic is not configured for this environment (set VITE_TRAFFIC_TILES_URL to a traffic tile URL).';
 
 type Segment = 'ALL' | 'DRIVING' | 'IDLE';
 
@@ -195,6 +206,17 @@ export default function LiveFleetPage() {
 
   const units = useMemo(() => fleet.data?.items ?? [], [fleet.data]);
 
+  // Overlay data is fetched only while its chip is on — a dispatcher who never opens Trips or
+  // Geofences never pays for those requests.
+  const trafficAvailable = Boolean(trafficTilesUrl());
+  const geofencesQuery = useGeofences({ enabled: activeLayers.has('Geofences') });
+  const tripsQuery = useActiveTripRows({ enabled: activeLayers.has('Trips') });
+  const geofenceGeoJSON = useMemo(() => geofencesToGeoJSON(geofencesQuery.data?.items ?? []), [geofencesQuery.data]);
+  const tripGeoJSON = useMemo(() => {
+    const positions = new Map(units.filter(hasPosition).map((u): [string, [number, number]] => [u.vehicleId, [u.lon, u.lat]]));
+    return tripsToGeoJSON(tripsQuery.rows, positions);
+  }, [tripsQuery.rows, units]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return units.filter((u) => {
@@ -298,19 +320,30 @@ export default function LiveFleetPage() {
 
       <div className="relative flex-1 bg-bg-subtle">
         <div className="absolute left-4 top-4 z-10 flex h-9 overflow-hidden rounded-md bg-bg-surface shadow-card">
-          {LAYERS.map((layer) => (
-            <button
-              key={layer}
-              type="button"
-              aria-pressed={activeLayers.has(layer)}
-              onClick={() => toggleLayer(layer)}
-              className={`px-3 text-body ${
-                activeLayers.has(layer) ? 'bg-bg-inverse text-text-inverse' : 'text-text-secondary hover:bg-bg-subtle'
-              }`}
-            >
-              {layer}
-            </button>
-          ))}
+          {MAP_LAYERS.map((layer) => {
+            // No traffic tile source configured → the chip says so instead of silently doing nothing.
+            const unavailable = layer === 'Traffic' && !trafficAvailable;
+            const on = activeLayers.has(layer) && !unavailable;
+            return (
+              <button
+                key={layer}
+                type="button"
+                aria-pressed={on}
+                disabled={unavailable}
+                title={unavailable ? TRAFFIC_UNCONFIGURED_TITLE : undefined}
+                onClick={() => toggleLayer(layer)}
+                className={`px-3 text-body ${
+                  on
+                    ? 'bg-bg-inverse text-text-inverse'
+                    : unavailable
+                      ? 'cursor-not-allowed text-text-muted'
+                      : 'text-text-secondary hover:bg-bg-subtle'
+                }`}
+              >
+                {layer}
+              </button>
+            );
+          })}
         </div>
 
         <Can perm="liveFleet" level="FULL">
@@ -338,6 +371,9 @@ export default function LiveFleetPage() {
               selectedId={selectedId}
               onSelectUnit={setSelectedId}
               flashUnitId={flashId}
+              layers={activeLayers}
+              geofences={geofenceGeoJSON}
+              trips={tripGeoJSON}
               className="h-full w-full"
             />
           </Suspense>

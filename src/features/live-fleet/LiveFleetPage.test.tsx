@@ -1,6 +1,6 @@
 // web/tz.md §10 W-02 — the mandatory keyboard-operable left column (the map has no such
 // requirement of its own) and the exact `No units are reporting` empty state.
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -15,6 +15,22 @@ import LiveFleetPage from './LiveFleetPage';
 
 vi.mock('@/shared/auth/usePermission', () => ({ usePermission: () => ({ can: () => true }) }));
 vi.mock('@/shared/realtime/useRoom', () => ({ useRoom: () => ({ joined: false }) }));
+// The real map needs WebGL + `VITE_MAP_STYLE_URL` (FleetMap.withStyle.test.tsx covers it). Here
+// a probe renders the props the page hands the map, so the layer chips have something observable.
+vi.mock('@/shared/map/FleetMap', () => ({
+  default: (props: {
+    layers?: ReadonlySet<string>;
+    geofences?: { features: unknown[] };
+    trips?: { features: unknown[] };
+  }) => (
+    <div
+      data-testid="fleet-map"
+      data-layers={[...(props.layers ?? [])].sort().join(',')}
+      data-geofences={props.geofences?.features.length ?? 0}
+      data-trips={props.trips?.features.length ?? 0}
+    />
+  ),
+}));
 
 /** Renders the current router location so navigation can be asserted without a route tree. */
 function LocationProbe() {
@@ -40,6 +56,7 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'bypass' }));
 afterEach(() => {
   server.resetHandlers();
   resetAuthBridge();
+  vi.unstubAllEnvs();
 });
 afterAll(() => server.close());
 
@@ -163,8 +180,16 @@ describe('W-02 Live Fleet', () => {
     expect(screen.getByRole('button', { name: /Unit #101/ })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /All 2/ }));
 
+    // Layer chips drive the map's `layers` prop (not just their own styling).
+    const map = screen.getByTestId('fleet-map');
+    expect(map).toHaveAttribute('data-layers', 'Vehicles');
+    await user.click(screen.getByRole('button', { name: 'Trips' }));
+    expect(screen.getByRole('button', { name: 'Trips' })).toHaveAttribute('aria-pressed', 'true');
+    await user.click(screen.getByRole('button', { name: 'Geofences' }));
+    expect(map).toHaveAttribute('data-layers', 'Geofences,Trips,Vehicles');
     await user.click(screen.getByRole('button', { name: 'Trips' }));
     await user.click(screen.getByRole('button', { name: 'Geofences' }));
+    expect(map).toHaveAttribute('data-layers', 'Vehicles');
 
     await user.click(screen.getByRole('button', { name: /Unit #101/ }));
     expect(await screen.findByText('Shift ends in', {}, { timeout: 8000 })).toBeInTheDocument();
@@ -173,6 +198,60 @@ describe('W-02 Live Fleet', () => {
 
     await user.click(screen.getByRole('button', { name: /New geofence/ }));
     expect(await screen.findByText('Create a geofence', {}, { timeout: 8000 })).toBeInTheDocument();
+  });
+
+  it('layer chips: Vehicles hides units on the map only, Geofences loads and draws geofences, Traffic needs a tile URL', async () => {
+    let geofenceRequests = 0;
+    server.use(
+      http.get(url(endpoints.live.fleet), () => ok({ items: [], generatedAt: new Date().toISOString() })),
+      http.get(url(endpoints.geofences.list), () => {
+        geofenceRequests += 1;
+        return ok({
+          items: [
+            { id: 'gf_1', name: 'Columbus Terminal', type: 'CIRCLE', radiusMi: 1, alertOnEnter: true, centerLat: 39.96, centerLng: -82.99 },
+            // No geometry in the payload → not drawn (never a shape at 0,0).
+            { id: 'gf_2', name: 'Unknown', type: 'CIRCLE', radiusMi: 1, alertOnEnter: true },
+          ],
+        });
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderPage();
+    const map = await screen.findByTestId('fleet-map', {}, { timeout: 8000 });
+
+    // Traffic has no tile URL in this environment: disabled and says why.
+    const traffic = screen.getByRole('button', { name: 'Traffic' });
+    expect(traffic).toBeDisabled();
+    expect(traffic).toHaveAttribute('aria-pressed', 'false');
+    expect(traffic).toHaveAttribute('title', expect.stringMatching(/VITE_TRAFFIC_TILES_URL/));
+
+    await user.click(screen.getByRole('button', { name: 'Vehicles' }));
+    expect(screen.getByRole('button', { name: 'Vehicles' })).toHaveAttribute('aria-pressed', 'false');
+    expect(map).toHaveAttribute('data-layers', '');
+
+    // Geofences are fetched only once the layer is switched on.
+    expect(geofenceRequests).toBe(0);
+    await user.click(screen.getByRole('button', { name: 'Geofences' }));
+    await vi.waitFor(() => expect(map).toHaveAttribute('data-geofences', '1'), { timeout: 8000 });
+    expect(geofenceRequests).toBe(1);
+    expect(map).toHaveAttribute('data-layers', 'Geofences');
+  });
+
+  it('Traffic chip is enabled and toggles the layer once VITE_TRAFFIC_TILES_URL is set', async () => {
+    vi.stubEnv('VITE_TRAFFIC_TILES_URL', 'https://tiles.example.com/traffic/{z}/{x}/{y}.png');
+    server.use(http.get(url(endpoints.live.fleet), () => ok({ items: [], generatedAt: new Date().toISOString() })));
+
+    const user = userEvent.setup();
+    renderPage();
+    const map = await screen.findByTestId('fleet-map', {}, { timeout: 8000 });
+
+    const traffic = screen.getByRole('button', { name: 'Traffic' });
+    expect(traffic).toBeEnabled();
+    expect(traffic).not.toHaveAttribute('title');
+    await user.click(traffic);
+    expect(traffic).toHaveAttribute('aria-pressed', 'true');
+    expect(map).toHaveAttribute('data-layers', 'Traffic,Vehicles');
   });
 
   it('error: renders <ErrorState> with Retry when the fleet feed fails', async () => {

@@ -91,7 +91,25 @@ class FakeMap {
     return this.sources.get(id);
   }
 
-  addLayer = vi.fn();
+  layers = new Map<string, { id: string; layout?: Record<string, unknown> }>();
+  addLayer = vi.fn((layer: { id: string; layout?: Record<string, unknown> }) => {
+    this.layers.set(layer.id, { ...layer, layout: { ...layer.layout } });
+  });
+  getLayer(id: string) {
+    return this.layers.get(id);
+  }
+  setLayoutProperty = vi.fn((id: string, name: string, value: unknown) => {
+    const layer = this.layers.get(id);
+    if (layer) layer.layout = { ...layer.layout, [name]: value };
+  });
+  visibility(id: string) {
+    return this.layers.get(id)?.layout?.visibility;
+  }
+  /** What `setStyle()` does to a real map: every source and layer is gone. */
+  wipeStyle() {
+    this.sources.clear();
+    this.layers.clear();
+  }
   setFilter = vi.fn((layerId: string, filter: unknown) => {
     this.filters[layerId] = filter;
   });
@@ -199,6 +217,68 @@ describe('FleetMap — GeoJSON source + symbol layer (style configured)', () => 
     const map = FakeMap.instances[0]!;
     act(() => map.fire('error'));
     expect(getByText('Map preview unavailable')).toBeInTheDocument();
+  });
+
+  it('shows only the Vehicles layers by default and toggles visibility from the `layers` prop', () => {
+    const { rerender } = render(<FleetMap units={UNITS} />);
+    const map = FakeMap.instances[0]!;
+    act(() => map.fire('load'));
+
+    for (const id of ['fleet-clusters', 'fleet-cluster-count', 'fleet-unit-points', 'fleet-unit-flash']) {
+      expect(map.visibility(id)).toBe('visible');
+    }
+    expect(map.visibility('fleet-geofence-fill')).toBe('none');
+    expect(map.visibility('fleet-geofence-outline')).toBe('none');
+    expect(map.visibility('fleet-trip-lines')).toBe('none');
+    // No VITE_TRAFFIC_TILES_URL here → no traffic source or layer at all.
+    expect(map.sources.has('fleet-traffic')).toBe(false);
+
+    rerender(<FleetMap units={UNITS} layers={new Set(['Geofences', 'Trips'] as const)} />);
+    expect(map.visibility('fleet-unit-points')).toBe('none');
+    expect(map.visibility('fleet-clusters')).toBe('none');
+    expect(map.visibility('fleet-geofence-fill')).toBe('visible');
+    expect(map.visibility('fleet-trip-stops')).toBe('visible');
+  });
+
+  it('pushes geofence and trip GeoJSON into their sources', () => {
+    const { rerender } = render(<FleetMap units={UNITS} />);
+    const map = FakeMap.instances[0]!;
+    act(() => map.fire('load'));
+
+    const geofences = { type: 'FeatureCollection' as const, features: [] };
+    const trips = { type: 'FeatureCollection' as const, features: [] };
+    rerender(<FleetMap units={UNITS} geofences={geofences} trips={trips} />);
+    expect(map.sources.get('fleet-geofences')!.setData).toHaveBeenLastCalledWith(geofences);
+    expect(map.sources.get('fleet-trips')!.setData).toHaveBeenLastCalledWith(trips);
+  });
+
+  it('re-adds every source and layer, with the current visibility, after a style reload', () => {
+    const { rerender } = render(<FleetMap units={UNITS} />);
+    const map = FakeMap.instances[0]!;
+    act(() => map.fire('load'));
+    rerender(<FleetMap units={UNITS} layers={new Set(['Geofences'] as const)} />);
+
+    map.wipeStyle();
+    act(() => map.fire('style.load'));
+
+    expect(map.sources.has('fleet-units')).toBe(true);
+    expect(map.sources.has('fleet-geofences')).toBe(true);
+    expect(map.visibility('fleet-geofence-fill')).toBe('visible');
+    expect(map.visibility('fleet-unit-points')).toBe('none');
+  });
+
+  it('adds a raster traffic layer when VITE_TRAFFIC_TILES_URL is set', () => {
+    vi.stubEnv('VITE_TRAFFIC_TILES_URL', 'https://tiles.example.com/{z}/{x}/{y}.png');
+    const { rerender } = render(<FleetMap units={UNITS} />);
+    const map = FakeMap.instances[0]!;
+    act(() => map.fire('load'));
+
+    expect(map.sources.has('fleet-traffic')).toBe(true);
+    expect(map.addLayer).toHaveBeenCalledWith(expect.objectContaining({ id: 'fleet-traffic-flow', type: 'raster' }));
+    expect(map.visibility('fleet-traffic-flow')).toBe('none');
+
+    rerender(<FleetMap units={UNITS} layers={new Set(['Vehicles', 'Traffic'] as const)} />);
+    expect(map.visibility('fleet-traffic-flow')).toBe('visible');
   });
 
   it('removes the map instance on unmount', () => {

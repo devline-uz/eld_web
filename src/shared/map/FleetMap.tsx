@@ -17,6 +17,7 @@ import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&ur
 import { MapPin } from 'lucide-react';
 import type { Feature, FeatureCollection, Point } from 'geojson';
 import type { DutyStatus } from '@/shared/ui/Badge';
+import { EMPTY_COLLECTION, trafficTilesUrl, type MapLayer } from './overlays';
 
 const STYLE_URL: string = import.meta.env.VITE_MAP_STYLE_URL ?? '';
 
@@ -37,6 +38,12 @@ export interface FleetMapProps {
   className?: string;
   /** Briefly highlighted after a `geofence.transition` event (web/tz.md §7.3). */
   flashUnitId?: string | null;
+  /** Which overlay layers are visible (the W-02 layer chips). Defaults to `Vehicles` only. */
+  layers?: ReadonlySet<MapLayer>;
+  /** `geofencesToGeoJSON()` output — drawn as fill + outline while `Geofences` is on. */
+  geofences?: FeatureCollection;
+  /** `tripsToGeoJSON()` output — drawn as lines + stop dots while `Trips` is on. */
+  trips?: FeatureCollection;
 }
 
 const SOURCE_ID = 'fleet-units';
@@ -44,6 +51,25 @@ const CLUSTER_LAYER = 'fleet-clusters';
 const CLUSTER_COUNT_LAYER = 'fleet-cluster-count';
 const UNCLUSTERED_LAYER = 'fleet-unit-points';
 const FLASH_LAYER = 'fleet-unit-flash';
+
+const TRAFFIC_SOURCE = 'fleet-traffic';
+const TRAFFIC_LAYER = 'fleet-traffic-flow';
+const GEOFENCE_SOURCE = 'fleet-geofences';
+const GEOFENCE_FILL_LAYER = 'fleet-geofence-fill';
+const GEOFENCE_LINE_LAYER = 'fleet-geofence-outline';
+const TRIP_SOURCE = 'fleet-trips';
+const TRIP_LINE_LAYER = 'fleet-trip-lines';
+const TRIP_STOP_LAYER = 'fleet-trip-stops';
+
+/** Map layer ids owned by each W-02 layer chip. */
+const LAYER_IDS: Record<MapLayer, readonly string[]> = {
+  Vehicles: [CLUSTER_LAYER, CLUSTER_COUNT_LAYER, UNCLUSTERED_LAYER, FLASH_LAYER],
+  Trips: [TRIP_LINE_LAYER, TRIP_STOP_LAYER],
+  Geofences: [GEOFENCE_FILL_LAYER, GEOFENCE_LINE_LAYER],
+  Traffic: [TRAFFIC_LAYER],
+};
+
+const DEFAULT_LAYERS: ReadonlySet<MapLayer> = new Set<MapLayer>(['Vehicles']);
 
 /** Reads a design token at runtime instead of hardcoding a hex literal (web/tz.md §2.2 rule 4). */
 function token(name: string, fallback: string): string {
@@ -166,7 +192,164 @@ function fitToUnits(map: maplibregl.Map, units: MapUnitFeature[]) {
 
 const HAS_STYLE = Boolean(STYLE_URL);
 
-export default function FleetMap({ units, selectedId, onSelectUnit, className, flashUnitId }: FleetMapProps) {
+/** The latest props, read by `installLayers` whenever the style (re)loads. */
+interface OverlayState {
+  units: MapUnitFeature[];
+  layers: ReadonlySet<MapLayer>;
+  geofences: FeatureCollection;
+  trips: FeatureCollection;
+  flashUnitId: string | null;
+}
+
+/** Geofence colours from the 11.1 form (`BLUE`…`VIOLET`) resolved to design tokens. */
+function geofenceColourExpression(): maplibregl.ExpressionSpecification {
+  return [
+    'match',
+    ['get', 'colour'],
+    'GREEN', token('--color-success', 'green'),
+    'AMBER', token('--color-warning', 'orange'),
+    'RED', token('--color-danger', 'red'),
+    'VIOLET', token('--color-violet', 'purple'),
+    token('--color-primary', 'blue'),
+  ];
+}
+
+function applyVisibility(map: maplibregl.Map, layers: ReadonlySet<MapLayer>) {
+  for (const [layer, ids] of Object.entries(LAYER_IDS) as [MapLayer, readonly string[]][]) {
+    const visibility = layers.has(layer) ? 'visible' : 'none';
+    for (const id of ids) {
+      if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', visibility);
+    }
+  }
+}
+
+/** Adds every image, source and layer the fleet map owns — idempotent, so it is safe to call on
+ * both `style.load` and `load`, and again after a style swap has wiped them. Draw order, bottom to
+ * top: traffic → geofences → trips → units. */
+function installLayers(map: maplibregl.Map, state: OverlayState) {
+  if (map.getSource(SOURCE_ID)) return;
+
+  for (const status of Object.keys(DUTY_TOKEN) as DutyStatus[]) {
+    const id = `marker-${status}`;
+    if (map.hasImage(id)) continue;
+    const image = drawMarkerImageData(token(DUTY_TOKEN[status], 'gray'));
+    map.addImage(id, image, { pixelRatio: 2 });
+  }
+
+  const traffic = trafficTilesUrl();
+  if (traffic) {
+    map.addSource(TRAFFIC_SOURCE, { type: 'raster', tiles: [traffic], tileSize: 256 });
+    map.addLayer({ id: TRAFFIC_LAYER, type: 'raster', source: TRAFFIC_SOURCE, paint: { 'raster-opacity': 0.85 } });
+  }
+
+  map.addSource(GEOFENCE_SOURCE, { type: 'geojson', data: state.geofences });
+  map.addLayer({
+    id: GEOFENCE_FILL_LAYER,
+    type: 'fill',
+    source: GEOFENCE_SOURCE,
+    paint: { 'fill-color': geofenceColourExpression(), 'fill-opacity': 0.18 },
+  });
+  map.addLayer({
+    id: GEOFENCE_LINE_LAYER,
+    type: 'line',
+    source: GEOFENCE_SOURCE,
+    paint: { 'line-color': geofenceColourExpression(), 'line-width': 2 },
+  });
+
+  map.addSource(TRIP_SOURCE, { type: 'geojson', data: state.trips });
+  map.addLayer({
+    id: TRIP_LINE_LAYER,
+    type: 'line',
+    source: TRIP_SOURCE,
+    filter: ['==', ['geometry-type'], 'LineString'],
+    layout: { 'line-cap': 'round', 'line-join': 'round' },
+    paint: {
+      'line-color': token('--color-primary', 'blue'),
+      'line-width': 3,
+      'line-opacity': ['case', ['==', ['get', 'kind'], 'remaining'], 0.55, 0.9],
+      // Straight segments between stops, not road geometry — the dash says "planned", not "driven".
+      'line-dasharray': [2, 1.5],
+    },
+  });
+  map.addLayer({
+    id: TRIP_STOP_LAYER,
+    type: 'circle',
+    source: TRIP_SOURCE,
+    filter: ['==', ['geometry-type'], 'Point'],
+    paint: {
+      'circle-radius': 5,
+      'circle-color': token('--color-bg-surface', RING_COLOUR_FALLBACK),
+      'circle-stroke-color': token('--color-primary', 'blue'),
+      'circle-stroke-width': 2,
+    },
+  });
+
+  map.addSource(SOURCE_ID, {
+    type: 'geojson',
+    data: toFeatureCollection(state.units),
+    cluster: true,
+    clusterRadius: 44,
+    clusterMaxZoom: 12,
+  });
+
+  map.addLayer({
+    id: CLUSTER_LAYER,
+    type: 'circle',
+    source: SOURCE_ID,
+    filter: ['has', 'point_count'],
+    paint: {
+      'circle-color': token('--color-primary-active', 'navy'),
+      'circle-radius': 16,
+    },
+  });
+  map.addLayer({
+    id: CLUSTER_COUNT_LAYER,
+    type: 'symbol',
+    source: SOURCE_ID,
+    filter: ['has', 'point_count'],
+    layout: {
+      'text-field': '{point_count_abbreviated}',
+      'text-size': 12,
+      'text-font': ['Noto Sans Regular'],
+    },
+    paint: { 'text-color': token('--color-text-inverse', 'white') },
+  });
+  map.addLayer({
+    id: UNCLUSTERED_LAYER,
+    type: 'symbol',
+    source: SOURCE_ID,
+    filter: ['!', ['has', 'point_count']],
+    layout: {
+      'icon-image': ['get', 'icon'],
+      'icon-size': 0.5,
+      'icon-allow-overlap': true,
+    },
+  });
+  map.addLayer({
+    id: FLASH_LAYER,
+    type: 'circle',
+    source: SOURCE_ID,
+    filter: ['==', ['get', 'id'], state.flashUnitId ?? '__none__'],
+    paint: {
+      'circle-radius': 22,
+      'circle-color': token('--color-warning', 'orange'),
+      'circle-opacity': 0.35,
+    },
+  });
+
+  applyVisibility(map, state.layers);
+}
+
+export default function FleetMap({
+  units,
+  selectedId,
+  onSelectUnit,
+  className,
+  flashUnitId,
+  layers = DEFAULT_LAYERS,
+  geofences = EMPTY_COLLECTION,
+  trips = EMPTY_COLLECTION,
+}: FleetMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const [ready, setReady] = useState(false);
@@ -178,6 +361,11 @@ export default function FleetMap({ units, selectedId, onSelectUnit, className, f
   useEffect(() => {
     unitsRef.current = units;
   }, [units]);
+  // Everything `installLayers` needs when the style (re)loads — kept current without remounting.
+  const overlayRef = useRef<OverlayState>({ units, layers, geofences, trips, flashUnitId: flashUnitId ?? null });
+  useEffect(() => {
+    overlayRef.current = { units, layers, geofences, trips, flashUnitId: flashUnitId ?? null };
+  }, [units, layers, geofences, trips, flashUnitId]);
 
   // Every hook below runs unconditionally (rules-of-hooks); each effect bails out internally
   // when there is no style to render against, and the JSX branch is decided once, at the end.
@@ -196,77 +384,25 @@ export default function FleetMap({ units, selectedId, onSelectUnit, className, f
 
     map.on('error', () => setLoadError(true));
 
+    // `style.load` fires for the first style and again after any `setStyle()` swap, which wipes
+    // every source/layer — re-installing there keeps the overlays alive across style reloads.
+    // `installLayers` is idempotent, so its second run from `load` below is a no-op.
+    map.on('style.load', () => installLayers(map, overlayRef.current));
+
+    // Layer-bound listeners live on the map, not the style, so they are registered exactly once.
+    map.on('click', UNCLUSTERED_LAYER, (e) => {
+      const id = e.features?.[0]?.properties?.id as string | undefined;
+      if (id) onSelectUnit?.(id);
+    });
+    map.on('mouseenter', UNCLUSTERED_LAYER, () => {
+      map.getCanvas().style.cursor = 'pointer';
+    });
+    map.on('mouseleave', UNCLUSTERED_LAYER, () => {
+      map.getCanvas().style.cursor = '';
+    });
+
     map.on('load', () => {
-      for (const status of Object.keys(DUTY_TOKEN) as DutyStatus[]) {
-        const id = `marker-${status}`;
-        if (map.hasImage(id)) continue;
-        const image = drawMarkerImageData(token(DUTY_TOKEN[status], 'gray'));
-        map.addImage(id, image, { pixelRatio: 2 });
-      }
-
-      map.addSource(SOURCE_ID, {
-        type: 'geojson',
-        data: toFeatureCollection(units),
-        cluster: true,
-        clusterRadius: 44,
-        clusterMaxZoom: 12,
-      });
-
-      map.addLayer({
-        id: CLUSTER_LAYER,
-        type: 'circle',
-        source: SOURCE_ID,
-        filter: ['has', 'point_count'],
-        paint: {
-          'circle-color': token('--color-primary-active', 'navy'),
-          'circle-radius': 16,
-        },
-      });
-      map.addLayer({
-        id: CLUSTER_COUNT_LAYER,
-        type: 'symbol',
-        source: SOURCE_ID,
-        filter: ['has', 'point_count'],
-        layout: {
-          'text-field': '{point_count_abbreviated}',
-          'text-size': 12,
-          'text-font': ['Noto Sans Regular'],
-        },
-        paint: { 'text-color': token('--color-text-inverse', 'white') },
-      });
-      map.addLayer({
-        id: UNCLUSTERED_LAYER,
-        type: 'symbol',
-        source: SOURCE_ID,
-        filter: ['!', ['has', 'point_count']],
-        layout: {
-          'icon-image': ['get', 'icon'],
-          'icon-size': 0.5,
-          'icon-allow-overlap': true,
-        },
-      });
-      map.addLayer({
-        id: FLASH_LAYER,
-        type: 'circle',
-        source: SOURCE_ID,
-        filter: ['==', ['get', 'id'], '__none__'],
-        paint: {
-          'circle-radius': 22,
-          'circle-color': token('--color-warning', 'orange'),
-          'circle-opacity': 0.35,
-        },
-      });
-
-      map.on('click', UNCLUSTERED_LAYER, (e) => {
-        const id = e.features?.[0]?.properties?.id as string | undefined;
-        if (id) onSelectUnit?.(id);
-      });
-      map.on('mouseenter', UNCLUSTERED_LAYER, () => {
-        map.getCanvas().style.cursor = 'pointer';
-      });
-      map.on('mouseleave', UNCLUSTERED_LAYER, () => {
-        map.getCanvas().style.cursor = '';
-      });
+      installLayers(map, overlayRef.current);
 
       // The container can still be mid-layout (0×0, or its final flex size not yet settled) at
       // the moment `new maplibregl.Map()` read it — a stale canvas size is the other classic cause
@@ -315,6 +451,25 @@ export default function FleetMap({ units, selectedId, onSelectUnit, className, f
       hasFitToDataRef.current = true;
     }
   }, [units, ready]);
+
+  /** The W-02 layer chips — `visibility` only, so hiding a layer never drops its source data. */
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    applyVisibility(map, layers);
+  }, [layers, ready]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    (map.getSource(GEOFENCE_SOURCE) as maplibregl.GeoJSONSource | undefined)?.setData(geofences);
+  }, [geofences, ready]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    (map.getSource(TRIP_SOURCE) as maplibregl.GeoJSONSource | undefined)?.setData(trips);
+  }, [trips, ready]);
 
   useEffect(() => {
     const map = mapRef.current;

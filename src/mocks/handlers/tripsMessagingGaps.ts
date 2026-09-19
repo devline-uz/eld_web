@@ -7,11 +7,44 @@
 import { http } from 'msw';
 import { endpoints } from '@/shared/api/endpoints';
 import { ok, url, serverPage } from '../envelope';
-import type { TripRow } from '@/shared/api/trips';
+import type { StopStatus, StopType, TripRow, TripStopRow } from '@/shared/api/trips';
 import type { ConversationRow, MessageRow } from '@/shared/api/messaging';
 
+/** One trip stop. Coordinates are real places on the unit's corridor so the W-02 `Trips` layer
+ * draws them; the `[lat, lon]` pair lands in `latitude`/`longitude` exactly as the DTO carries them. */
+function stop(
+  tripId: string,
+  sequence: number,
+  type: StopType,
+  name: string,
+  address: string | null,
+  [latitude, longitude]: readonly [number, number],
+  status: StopStatus,
+  times: { scheduledAt?: string; arrivedAt?: string; departedAt?: string } = {},
+): TripStopRow {
+  return {
+    id: `stp_${tripId.slice(4)}_${sequence}`,
+    tripId,
+    sequence,
+    type,
+    name,
+    address,
+    latitude,
+    longitude,
+    scheduledAt: times.scheduledAt ?? null,
+    arrivedAt: times.arrivedAt ?? null,
+    departedAt: times.departedAt ?? null,
+    status,
+    note: null,
+  };
+}
+
+// Active trips (ASSIGNED ∪ IN_PROGRESS) — the W-02 `Trips` layer's data. Each IN_PROGRESS trip's
+// unit in `fleet.ts` LIVE_FLEET is reporting from a point between its last completed stop and its
+// next PENDING one, so the map draws the live-position → next-stop line too.
 const TRIPS: TripRow[] = [
   {
+    // I-80 westbound · unit #101 at the Iowa 80 Truckstop.
     id: 'trp_1001',
     number: 'TR-4821',
     driverId: 'drv_1',
@@ -22,64 +55,31 @@ const TRIPS: TripRow[] = [
     commodity: 'Palletized dry goods',
     weightLbs: 38500,
     pieces: null,
-    plannedStartAt: '2026-09-12T05:30:00.000Z',
+    plannedStartAt: '2026-09-12T08:45:00.000Z',
     plannedEndAt: null,
-    startedAt: '2026-09-12T05:30:00.000Z',
+    startedAt: '2026-09-12T08:40:00.000Z',
     completedAt: null,
-    etaAt: '2026-09-12T17:40:00.000Z',
+    etaAt: '2026-09-12T22:45:00.000Z',
     onTime: true,
     notes: null,
     createdById: 'usr_1',
     createdAt: '2026-09-11T18:09:14.598Z',
     stops: [
-      {
-        id: 'stp_1',
-        tripId: 'trp_1001',
-        sequence: 1,
-        type: 'PICKUP',
-        name: 'Columbus, OH',
-        address: 'Shipper #4821',
-        latitude: null,
-        longitude: null,
-        scheduledAt: '2026-09-12T05:30:00.000Z',
-        arrivedAt: '2026-09-12T05:30:00.000Z',
-        departedAt: '2026-09-12T05:41:00.000Z',
-        status: 'COMPLETED',
-        note: null,
-      },
-      {
-        id: 'stp_2',
-        tripId: 'trp_1001',
-        sequence: 2,
-        type: 'FUEL',
-        name: 'Pilot #482, Cincinnati, OH',
-        address: null,
-        latitude: null,
-        longitude: null,
-        scheduledAt: '2026-09-12T09:12:00.000Z',
-        arrivedAt: '2026-09-12T09:12:00.000Z',
-        departedAt: '2026-09-12T09:30:00.000Z',
-        status: 'COMPLETED',
-        note: null,
-      },
-      {
-        id: 'stp_3',
-        tripId: 'trp_1001',
-        sequence: 3,
-        type: 'DELIVERY',
-        name: 'Florence, KY',
-        address: 'Major Retail Co.',
-        latitude: null,
-        longitude: null,
-        scheduledAt: '2026-09-12T17:40:00.000Z',
-        arrivedAt: null,
-        departedAt: null,
-        status: 'PENDING',
-        note: null,
-      },
+      stop('trp_1001', 1, 'PICKUP', 'Bedford Park, IL', 'Shipper #4821, Bedford Park, IL 60638', [41.7684, -87.8134], 'COMPLETED', {
+        scheduledAt: '2026-09-12T08:45:00.000Z',
+        arrivedAt: '2026-09-12T08:40:00.000Z',
+        departedAt: '2026-09-12T09:05:00.000Z',
+      }),
+      stop('trp_1001', 2, 'FUEL', "Love's Travel Stop, Colfax, IA", 'I-80 exit 164, Colfax, IA', [41.6608, -93.2255], 'PENDING', {
+        scheduledAt: '2026-09-12T18:30:00.000Z',
+      }),
+      stop('trp_1001', 3, 'DELIVERY', 'Omaha, NE', 'Major Retail Co. DC, Omaha, NE 68137', [41.2067, -96.108], 'PENDING', {
+        scheduledAt: '2026-09-12T22:45:00.000Z',
+      }),
     ],
   },
   {
+    // I-40 eastbound · unit #102 driving past Alma, AR — running late.
     id: 'trp_1002',
     number: 'TR-4822',
     driverId: 'drv_2',
@@ -90,46 +90,128 @@ const TRIPS: TripRow[] = [
     commodity: 'Retail goods',
     weightLbs: 21000,
     pieces: null,
-    plannedStartAt: '2026-09-12T04:00:00.000Z',
+    plannedStartAt: '2026-09-12T08:00:00.000Z',
     plannedEndAt: null,
-    startedAt: '2026-09-12T04:00:00.000Z',
+    startedAt: '2026-09-12T10:00:00.000Z',
     completedAt: null,
-    etaAt: '2026-09-12T02:00:00.000Z',
+    etaAt: '2026-09-13T01:30:00.000Z',
     onTime: false,
     notes: null,
     createdById: 'usr_1',
     createdAt: '2026-09-11T12:00:00.000Z',
     stops: [
-      {
-        id: 'stp_4',
-        tripId: 'trp_1002',
-        sequence: 1,
-        type: 'PICKUP',
-        name: 'Toledo, OH',
-        address: 'Shipper Co.',
-        latitude: null,
-        longitude: null,
-        scheduledAt: '2026-09-12T04:00:00.000Z',
-        arrivedAt: '2026-09-12T04:00:00.000Z',
-        departedAt: '2026-09-12T04:12:00.000Z',
-        status: 'COMPLETED',
-        note: null,
-      },
-      {
-        id: 'stp_5',
-        tripId: 'trp_1002',
-        sequence: 2,
-        type: 'DELIVERY',
-        name: 'Dayton, OH',
-        address: null,
-        latitude: null,
-        longitude: null,
-        scheduledAt: '2026-09-12T02:00:00.000Z',
-        arrivedAt: null,
-        departedAt: null,
-        status: 'PENDING',
-        note: null,
-      },
+      stop('trp_1002', 1, 'PICKUP', 'Oklahoma City, OK', 'Shipper Co., Oklahoma City, OK 73129', [35.4676, -97.5164], 'COMPLETED', {
+        scheduledAt: '2026-09-12T08:00:00.000Z',
+        arrivedAt: '2026-09-12T10:00:00.000Z',
+        departedAt: '2026-09-12T10:40:00.000Z',
+      }),
+      stop('trp_1002', 2, 'FUEL', 'Pilot Travel Center, Russellville, AR', 'I-40 exit 84, Russellville, AR', [35.279, -93.135], 'PENDING', {
+        scheduledAt: '2026-09-12T16:30:00.000Z',
+      }),
+      stop('trp_1002', 3, 'DELIVERY', 'Memphis, TN', 'Memphis, TN 38118', [35.052, -89.942], 'PENDING', {
+        scheduledAt: '2026-09-13T00:00:00.000Z',
+      }),
+    ],
+  },
+  {
+    // I-95 northbound · unit #106 driving past Fredericksburg, VA.
+    id: 'trp_1005',
+    number: 'TR-4825',
+    driverId: 'drv_6',
+    vehicleId: 'veh_6',
+    trailerId: null,
+    status: 'IN_PROGRESS',
+    shippingDocument: 'BOL #4825-C',
+    commodity: 'Refrigerated produce',
+    weightLbs: 42000,
+    pieces: 24,
+    plannedStartAt: '2026-09-12T12:30:00.000Z',
+    plannedEndAt: null,
+    startedAt: '2026-09-12T12:30:00.000Z',
+    completedAt: null,
+    etaAt: '2026-09-12T20:45:00.000Z',
+    onTime: true,
+    notes: null,
+    createdById: 'usr_1',
+    createdAt: '2026-09-11T20:15:00.000Z',
+    stops: [
+      stop('trp_1005', 1, 'PICKUP', 'Richmond, VA', 'Richmond, VA 23234', [37.47, -77.46], 'COMPLETED', {
+        scheduledAt: '2026-09-12T12:30:00.000Z',
+        arrivedAt: '2026-09-12T12:25:00.000Z',
+        departedAt: '2026-09-12T13:10:00.000Z',
+      }),
+      stop('trp_1005', 2, 'FUEL', 'TA Travel Center, Jessup, MD', 'I-95 exit 41, Jessup, MD', [39.148, -76.79], 'PENDING', {
+        scheduledAt: '2026-09-12T17:30:00.000Z',
+      }),
+      stop('trp_1005', 3, 'DELIVERY', 'Port Newark, NJ', 'Port Newark, NJ 07114', [40.684, -74.1502], 'PENDING', {
+        scheduledAt: '2026-09-12T21:00:00.000Z',
+      }),
+    ],
+  },
+  {
+    // I-10 eastbound · unit #103 sleeping at the Ontario yard until pickup.
+    id: 'trp_1006',
+    number: 'TR-4826',
+    driverId: 'drv_3',
+    vehicleId: 'veh_3',
+    trailerId: null,
+    status: 'ASSIGNED',
+    shippingDocument: null,
+    commodity: 'Building materials',
+    weightLbs: 36800,
+    pieces: null,
+    plannedStartAt: '2026-09-13T05:00:00.000Z',
+    plannedEndAt: '2026-09-13T12:30:00.000Z',
+    startedAt: null,
+    completedAt: null,
+    etaAt: '2026-09-13T12:30:00.000Z',
+    onTime: null,
+    notes: null,
+    createdById: 'usr_1',
+    createdAt: '2026-09-12T09:00:00.000Z',
+    stops: [
+      stop('trp_1006', 1, 'PICKUP', 'Ontario, CA', 'Ontario, CA 91761', [34.045, -117.555], 'PENDING', {
+        scheduledAt: '2026-09-13T05:00:00.000Z',
+      }),
+      stop('trp_1006', 2, 'FUEL', "Love's Travel Stop, Blythe, CA", 'I-10 exit 240, Blythe, CA', [33.61, -114.596], 'PENDING', {
+        scheduledAt: '2026-09-13T08:30:00.000Z',
+      }),
+      stop('trp_1006', 3, 'DELIVERY', 'Phoenix, AZ', 'Phoenix, AZ 85043', [33.433, -112.17], 'PENDING', {
+        scheduledAt: '2026-09-13T12:30:00.000Z',
+      }),
+    ],
+  },
+  {
+    // I-10 eastbound · unit #104 (ELD offline) parked at the Houston yard.
+    id: 'trp_1007',
+    number: 'TR-4827',
+    driverId: 'drv_5',
+    vehicleId: 'veh_4',
+    trailerId: null,
+    status: 'ASSIGNED',
+    shippingDocument: null,
+    commodity: 'Chemicals (non-hazmat)',
+    weightLbs: 40100,
+    pieces: null,
+    plannedStartAt: '2026-09-13T13:00:00.000Z',
+    plannedEndAt: '2026-09-13T20:00:00.000Z',
+    startedAt: null,
+    completedAt: null,
+    etaAt: '2026-09-13T20:00:00.000Z',
+    onTime: null,
+    notes: null,
+    createdById: 'usr_1',
+    createdAt: '2026-09-12T11:30:00.000Z',
+    stops: [
+      stop('trp_1007', 1, 'PICKUP', 'Houston, TX', 'Houston, TX 77029', [29.765, -95.26], 'PENDING', {
+        scheduledAt: '2026-09-13T13:00:00.000Z',
+      }),
+      stop('trp_1007', 2, 'FUEL', 'Pilot Travel Center, Sulphur, LA', 'I-10 exit 20, Sulphur, LA', [30.235, -93.36], 'PENDING', {
+        scheduledAt: '2026-09-13T16:30:00.000Z',
+      }),
+      stop('trp_1007', 3, 'DELIVERY', 'Baton Rouge, LA', 'Baton Rouge, LA 70805', [30.48, -91.15], 'PENDING', {
+        scheduledAt: '2026-09-13T20:00:00.000Z',
+      }),
     ],
   },
   {
