@@ -268,3 +268,8 @@ export const endpoints = {
 } as const;
 
 export type Endpoints = typeof endpoints;
+
+/** Third-party, not the ELD API: MapTiler forward geocoding, `{base}/{query}.json?key=…`. MapTiler is
+ * the provisional map provider (tz §22 Q-2, WD CSP note) — the same host the CSP already allows for
+ * tiles, keyed by `VITE_MAP_API_KEY`. Called with plain `fetch`, never through `client.ts`. */
+export const GEOCODING_BASE_URL = 'https://api.maptiler.com/geocoding';

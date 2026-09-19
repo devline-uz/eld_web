@@ -41,4 +41,21 @@ describe('inputFilters', () => {
   it('email strips whitespace', () => {
     expect(filter.email(' ops @acme.com ')).toBe('ops@acme.com');
   });
+
+  it('time24 formats HH:MM:SS and refuses digits that cannot fit their slot', () => {
+    expect(filter.time24('142658')).toBe('14:26:58');
+    expect(filter.time24('14:26:58')).toBe('14:26:58');
+    expect(filter.time24('1')).toBe('1');
+    expect(filter.time24('143')).toBe('14:3');
+    expect(filter.time24('25:99')).toBe('2');
+    expect(filter.time24('2359599')).toBe('23:59:59');
+    expect(filter.time24('ab12cd')).toBe('12');
+  });
+
+  it('decimal keeps one point and caps both sides', () => {
+    expect(filter.decimal('1079.4', 6, 1)).toBe('1079.4');
+    expect(filter.decimal('1a0.7.9', 6, 1)).toBe('10.7');
+    expect(filter.decimal('12345678', 6, 1)).toBe('123456');
+    expect(filter.decimal('5.', 6, 1)).toBe('5.');
+  });
 });

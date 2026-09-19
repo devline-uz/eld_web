@@ -16,6 +16,8 @@ import { TOAST_COPY } from '@/shared/ui/copy';
 import { cn } from '@/shared/ui/cn';
 import { ApiError } from '@/shared/api/errors';
 import { LIMITS, VALIDATION_MESSAGES } from '@/shared/forms/messages';
+import * as inputFilters from '@/shared/forms/inputFilters';
+import { geocodingEnabled, PLACE_QUERY_MIN, usePlaceSearch, type Place } from '@/shared/map/geocode';
 import {
   useCreateEditRequest,
   type LogEventView,
@@ -73,9 +75,14 @@ export function RequestLogEditModal({
   const [endTime, setEndTime] = useState('');
   const statusDefault: RodsDutyStatus = event?.status ?? 'ON';
   const [status, setStatus] = useState<RodsDutyStatus>(statusDefault);
-  // WB-070 — shown for reference only: `CreateEditRequestDto.location` needs lat/lon (gap B-39),
-  // so the field is read-only and says it is not sent, instead of looking like a correction.
+  // WB-070 / B-39 — `CreateEditRequestDto.location` needs lat/lon, so a typed name is geocoded and
+  // only a place picked from the suggestions is sent. Without a geocoder key the field stays
+  // read-only and says it is not sent, instead of looking like a correction.
   const locationDefault = event?.locationName ?? '';
+  const [locationText, setLocationText] = useState(locationDefault);
+  const [place, setPlace] = useState<Place | null>(null);
+  const locationChanged = locationText.trim() !== locationDefault.trim();
+  const placeSearch = usePlaceSearch(locationText, locationChanged && !place);
   const odometerDefault =
     event?.totalVehicleMiles === null || event?.totalVehicleMiles === undefined
       ? ''
@@ -123,11 +130,28 @@ export function RequestLogEditModal({
       return;
     }
     if (!startIso) {
-      setFieldErrors({ startAt: 'Enter a time as HH:MM:SS.' });
+      setFieldErrors({ startAt: VALIDATION_MESSAGES.time });
       return;
     }
     if (endTime && !endIso) {
-      setFieldErrors({ endAt: 'Enter a time as HH:MM:SS.' });
+      setFieldErrors({ endAt: VALIDATION_MESSAGES.time });
+      return;
+    }
+    // Both times sit on the same RODS day, so an end at or before the start is never a real interval.
+    if (endIso && Date.parse(endIso) <= Date.parse(startIso)) {
+      setFieldErrors({ endAt: VALIDATION_MESSAGES.timeOrder });
+      return;
+    }
+    if (odometer && Number(odometer) > LIMITS.odometerMax) {
+      setFieldErrors({ odometerMi: VALIDATION_MESSAGES.odometer });
+      return;
+    }
+    if (engineHours && !Number.isFinite(Number(engineHours))) {
+      setFieldErrors({ engineHours: VALIDATION_MESSAGES.engineHours });
+      return;
+    }
+    if (locationChanged && locationText.trim() && !place) {
+      setFieldErrors({ location: VALIDATION_MESSAGES.placePick });
       return;
     }
     if (reasonTooShort) {
@@ -142,8 +166,9 @@ export function RequestLogEditModal({
         proposedEnd: endIso ?? undefined,
         odometerMi: odometer ? Number(odometer) : undefined,
         engineHours: engineHours ? Number(engineHours) : undefined,
-        // `LocationDto` needs lat/lon, and the free-text box only carries a name — sending a
-        // half-filled location would write a worse record than sending none (gap B-39).
+        // `LocationDto` needs lat/lon — only a geocoded place carries them; an untouched field
+        // sends nothing rather than a half-filled location (gap B-39).
+        location: place ? { lat: place.lat, lon: place.lon, name: place.name } : undefined,
         reason: reason.trim(),
       },
       {
@@ -172,7 +197,8 @@ export function RequestLogEditModal({
     endTime.length > 0 ||
     status !== statusDefault ||
     odometer !== odometerDefault ||
-    engineHours.length > 0;
+    engineHours.length > 0 ||
+    locationChanged;
 
   // WB-067 — `Before` is the ORIGINAL record: its status and start, and the end of the graph
   // segment it opened. The typed `End time` belongs to `After` only.
@@ -235,7 +261,8 @@ export function RequestLogEditModal({
         <Field label="Start time" error={fieldErrors.startAt}>
           <input
             value={startTime}
-            onChange={(e) => setStartTime(e.target.value)}
+            onChange={(e) => setStartTime(inputFilters.time24(e.target.value))}
+            inputMode="numeric"
             placeholder="14:26:58"
             className={cn(inputClass, 'tabular')}
           />
@@ -243,7 +270,8 @@ export function RequestLogEditModal({
         <Field label="End time" error={fieldErrors.endAt}>
           <input
             value={endTime}
-            onChange={(e) => setEndTime(e.target.value)}
+            onChange={(e) => setEndTime(inputFilters.time24(e.target.value))}
+            inputMode="numeric"
             placeholder="15:30:00"
             className={cn(inputClass, 'tabular')}
           />
@@ -290,13 +318,60 @@ export function RequestLogEditModal({
       </fieldset>
 
       <div className="mt-4 grid grid-cols-3 gap-4">
-        <Field label="Location" hint="Not sent with the request — a location correction needs coordinates.">
-          <input readOnly value={locationDefault} className={cn(inputClass, 'bg-bg-subtle')} />
-        </Field>
+        {geocodingEnabled ? (
+          <Field
+            label="Location"
+            hint={place ? undefined : `Type ${PLACE_QUERY_MIN}+ letters and pick a place from the list.`}
+            error={fieldErrors.location}
+          >
+            <input
+              value={locationText}
+              onChange={(e) => {
+                setLocationText(e.target.value);
+                setPlace(null);
+              }}
+              role="combobox"
+              aria-expanded={Boolean(placeSearch.data?.length) && !place}
+              aria-autocomplete="list"
+              aria-invalid={Boolean(fieldErrors.location)}
+              autoComplete="off"
+              className={inputClass}
+            />
+            {!place && locationChanged && (placeSearch.data?.length ?? 0) > 0 && (
+              <ul
+                role="listbox"
+                className="absolute top-full z-10 mt-1 w-full rounded-md border border-border bg-bg-surface py-1 shadow-pop"
+              >
+                {placeSearch.data!.map((candidate) => (
+                  <li key={`${candidate.lat},${candidate.lon}`} role="option" aria-selected={false}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPlace(candidate);
+                        setLocationText(candidate.name);
+                        setFieldErrors(({ location: _, ...rest }) => rest);
+                      }}
+                      className="w-full px-3 py-1.5 text-left text-body text-text hover:bg-bg-subtle"
+                    >
+                      {candidate.name}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {placeSearch.isError && !place && (
+              <span className="text-caption text-danger">Place search is unavailable right now.</span>
+            )}
+          </Field>
+        ) : (
+          <Field label="Location" hint="Not sent with the request — a location correction needs coordinates.">
+            <input readOnly value={locationDefault} className={cn(inputClass, 'bg-bg-subtle')} />
+          </Field>
+        )}
         <Field label="Odometer" suffix="mi" error={fieldErrors.odometerMi}>
           <input
             value={odometer}
-            onChange={(e) => setOdometer(e.target.value)}
+            onChange={(e) => setOdometer(inputFilters.digits(e.target.value, LIMITS.odometerDigits))}
             inputMode="numeric"
             className={cn(inputClass, 'tabular')}
           />
@@ -304,7 +379,11 @@ export function RequestLogEditModal({
         <Field label="Engine hours" suffix="h" error={fieldErrors.engineHours}>
           <input
             value={engineHours}
-            onChange={(e) => setEngineHours(e.target.value)}
+            onChange={(e) =>
+              setEngineHours(
+                inputFilters.decimal(e.target.value, LIMITS.engineHoursIntDigits, LIMITS.engineHoursFracDigits),
+              )
+            }
             inputMode="decimal"
             className={cn(inputClass, 'tabular')}
           />

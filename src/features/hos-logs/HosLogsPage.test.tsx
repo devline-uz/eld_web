@@ -828,6 +828,32 @@ describe('overlay controls actually drive the payload', () => {
     expect(await within(dialog).findByText('Enter a time as HH:MM:SS.')).toBeInTheDocument();
   });
 
+  it('11.11 fields only take what they ask for — time digits, whole miles, decimal hours', async () => {
+    renderPage();
+    await userEvent.click(await screen.findByRole('button', { name: /Add \/ edit event/ }));
+    const dialog = await screen.findByRole('dialog');
+    const end = within(dialog).getByPlaceholderText('15:30:00');
+    await userEvent.type(end, 'ab1530x00');
+    expect(end).toHaveValue('15:30:00');
+    const odometer = within(dialog).getByRole('textbox', { name: /Odometer/ });
+    await userEvent.clear(odometer);
+    await userEvent.type(odometer, '99a3.6-00');
+    expect(odometer).toHaveValue('993600');
+    const engineHours = within(dialog).getByRole('textbox', { name: /Engine hours/ });
+    await userEvent.type(engineHours, '10e79.45h');
+    expect(engineHours).toHaveValue('1079.4');
+  });
+
+  it('11.11 refuses an end time at or before the start time', async () => {
+    renderPage();
+    await userEvent.click(await screen.findByRole('button', { name: /Add \/ edit event/ }));
+    const dialog = await screen.findByRole('dialog');
+    await userEvent.type(within(dialog).getByPlaceholderText('15:30:00'), '14:00:00');
+    await userEvent.type(within(dialog).getByRole('textbox', { name: /Reason for the edit/ }), 'Valid reason.');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Send edit request' }));
+    expect(await within(dialog).findByText('End time must be after the start time.')).toBeInTheDocument();
+  });
+
   it('11.12 unticking the only uncertified day disables the submit button', async () => {
     renderPage();
     await userEvent.click(await screen.findByRole('button', { name: 'Certify all' }));
