@@ -108,9 +108,12 @@ class FakeLngLatBounds {
   }
 }
 
+const setWorkerUrlMock = vi.hoisted(() => vi.fn());
+
 vi.mock('maplibre-gl', () => ({
   Map: FakeMap,
   LngLatBounds: FakeLngLatBounds,
+  setWorkerUrl: setWorkerUrlMock,
 }));
 vi.mock('maplibre-gl/dist/maplibre-gl.css', () => ({}));
 
@@ -129,6 +132,11 @@ describe('FleetMap — GeoJSON source + symbol layer (style configured)', () => 
   });
   afterEach(() => {
     vi.unstubAllEnvs();
+  });
+
+  it('points MapLibre at the Vite-bundled tile worker (else vector layers — water, roads — never render)', () => {
+    expect(setWorkerUrlMock).toHaveBeenCalledTimes(1);
+    expect(setWorkerUrlMock.mock.calls[0]![0]).toMatch(/maplibre-gl-worker/);
   });
 
   it('builds a clustered GeoJSON source and a symbol layer, never DOM markers', () => {

@@ -8,11 +8,19 @@
 import { useEffect, useRef, useState } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+// MapLibre 6 locates its tile worker next to its own module via `import.meta.url`. Vite's dep
+// pre-bundling (dev) and the `maplibre` manual chunk (build) both move that module, so the derived
+// `…/maplibre-gl-worker.mjs` 404s, no vector tile is ever parsed, and only the style's background
+// and raster relief paint — water, roads and labels vanish and the map looks washed out. Vite
+// bundles the worker (with its shared chunk) and hands us its real URL instead.
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import { MapPin } from 'lucide-react';
 import type { Feature, FeatureCollection, Point } from 'geojson';
 import type { DutyStatus } from '@/shared/ui/Badge';
 
 const STYLE_URL: string = import.meta.env.VITE_MAP_STYLE_URL ?? '';
+
+maplibregl.setWorkerUrl(maplibreWorkerUrl);
 
 export interface MapUnitFeature {
   id: string;
