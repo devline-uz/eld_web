@@ -28,7 +28,16 @@ export interface ModalProps {
   children: ReactNode;
 }
 
-export function Modal({ open, onClose, title, subtitle, size = 'md', isDirty = false, footer, children }: ModalProps) {
+export function Modal({
+  open,
+  onClose,
+  title,
+  subtitle,
+  size = 'md',
+  isDirty = false,
+  footer,
+  children,
+}: ModalProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   function requestClose() {

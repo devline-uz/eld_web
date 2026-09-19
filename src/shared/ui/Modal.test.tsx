@@ -58,4 +58,13 @@ describe('<Modal> focus trap and dirty close (§5.9, 11.30)', () => {
     expect(screen.getByRole('dialog', { name: 'Add vehicle' })).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
   });
+
+  it('header X on a dirty form opens the confirm by default', async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(<Fixture isDirty={true} onClose={onClose} />);
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    expect(await screen.findByText('Discard changes?')).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+  });
 });
