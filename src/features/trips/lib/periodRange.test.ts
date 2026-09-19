@@ -1,8 +1,6 @@
-// web/tz.md W-11 — custom Date Range bounds/validation for the `PeriodDropdown` popover.
+// web/tz.md W-11 — depart-date range bounds/validation (`PeriodDropdown` + Filters drawer).
 import { describe, expect, it } from 'vitest';
-import { customFromBounds, customToBounds, isRealCalendarDate, validateCustomFrom, validateCustomTo } from './periodRange';
-
-const TODAY = new Date('2026-09-18T12:00:00.000Z');
+import { isRealCalendarDate, validateDepartRange } from './periodRange';
 
 describe('isRealCalendarDate', () => {
   it('accepts a real calendar date', () => {
@@ -25,71 +23,24 @@ describe('isRealCalendarDate', () => {
   });
 });
 
-describe('customFromBounds', () => {
-  it('is [1970-01-01, yesterday]', () => {
-    expect(customFromBounds(TODAY)).toEqual({ min: '1970-01-01', max: '2026-09-17' });
-  });
-});
+describe('validateDepartRange', () => {
+  const today = new Date(2026, 8, 19);
 
-describe('customToBounds', () => {
-  it('is [From + 1 day, today] when From is set', () => {
-    expect(customToBounds('2026-09-10', TODAY)).toEqual({ min: '2026-09-11', max: '2026-09-18' });
-  });
-
-  it('falls back to 1970-01-02 when From is empty', () => {
-    expect(customToBounds(null, TODAY)).toEqual({ min: '1970-01-02', max: '2026-09-18' });
+  it('accepts empty fields, past, future and single-day ranges', () => {
+    const ok = { fromError: null, toError: null };
+    expect(validateDepartRange(null, null, today)).toEqual(ok);
+    expect(validateDepartRange('2025-01-01', '2025-03-31', today)).toEqual(ok);
+    expect(validateDepartRange('2026-09-01', '2026-11-07', today)).toEqual(ok);
+    expect(validateDepartRange('2026-09-19', '2026-09-19', today)).toEqual(ok);
   });
 
-  it('falls back to 1970-01-02 when From is not a real date', () => {
-    expect(customToBounds('2026-02-31', TODAY)).toEqual({ min: '1970-01-02', max: '2026-09-18' });
-  });
-});
-
-describe('validateCustomFrom', () => {
-  it('allows empty (not required)', () => {
-    expect(validateCustomFrom('', TODAY)).toBeNull();
+  it('rejects years like 1000 and 5000', () => {
+    expect(validateDepartRange('1000-01-01', null, today).fromError).toBe('Must be on or after 1970-01-01.');
+    expect(validateDepartRange(null, '5000-01-01', today).toError).toBe('Must be on or before 2027-12-31.');
   });
 
-  it('allows yesterday', () => {
-    expect(validateCustomFrom('2026-09-17', TODAY)).toBeNull();
-  });
-
-  it('rejects today and future dates', () => {
-    expect(validateCustomFrom('2026-09-18', TODAY)).toMatch(/on or before/);
-    expect(validateCustomFrom('2026-12-25', TODAY)).toMatch(/on or before/);
-  });
-
-  it('rejects before the 1970 floor', () => {
-    expect(validateCustomFrom('1969-12-31', TODAY)).toMatch(/on or after/);
-  });
-
-  it('rejects a non-existent date', () => {
-    expect(validateCustomFrom('2026-02-31', TODAY)).toBe('Enter a real date.');
-  });
-});
-
-describe('validateCustomTo', () => {
-  it('allows empty (not required)', () => {
-    expect(validateCustomTo('', '2026-09-01', TODAY)).toBeNull();
-  });
-
-  it('allows today', () => {
-    expect(validateCustomTo('2026-09-18', '2026-09-01', TODAY)).toBeNull();
-  });
-
-  it('rejects a To equal to From', () => {
-    expect(validateCustomTo('2026-09-01', '2026-09-01', TODAY)).toMatch(/later than the From date/);
-  });
-
-  it('rejects a To before From', () => {
-    expect(validateCustomTo('2026-08-30', '2026-09-01', TODAY)).toMatch(/later than the From date/);
-  });
-
-  it('rejects a To after today', () => {
-    expect(validateCustomTo('2026-09-19', '2026-09-01', TODAY)).toMatch(/on or before/);
-  });
-
-  it('rejects a non-existent date', () => {
-    expect(validateCustomTo('2026-04-31', '2026-09-01', TODAY)).toBe('Enter a real date.');
+  it('rejects malformed dates and a To before From', () => {
+    expect(validateDepartRange('50000-01-01', null, today).fromError).toBe('Enter a real date.');
+    expect(validateDepartRange('2026-09-10', '2026-09-01', today).toError).toBe('Must be on or after the From date.');
   });
 });

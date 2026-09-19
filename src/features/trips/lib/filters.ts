@@ -9,6 +9,7 @@
 // `FILTER_WINDOW` rows only while one of these groups is active. UNIT (vehicleId) and the
 // depart-date range have no server param at all — recorded as web/backend-gaps.md B-59.
 import type { TripDisplayStatus, TripTableRow } from '@/shared/api/trips';
+import { isRealCalendarDate } from './periodRange';
 
 export const TRIP_STATUS_OPTIONS: TripDisplayStatus[] = ['On time', 'Late', 'Loading', 'Delivered', 'Cancelled', 'Planned'];
 
@@ -42,14 +43,19 @@ const PARAM = {
   noTrailerOnly: 'fNoTrailer',
 } as const;
 
+/** A hand-edited or stale URL (`fDepartFrom=5000-13-45`) is dropped rather than filtering on it. */
+function dateParam(value: string | null): string | null {
+  return value && isRealCalendarDate(value) ? value : null;
+}
+
 export function parseTripFilters(params: URLSearchParams): TripFilters {
   return {
     status: (params.get(PARAM.status)?.split(',').filter(Boolean) ?? []) as TripDisplayStatus[],
     driverId: params.get(PARAM.driverId)?.split(',').filter(Boolean) ?? [],
     vehicleId: params.get(PARAM.vehicleId)?.split(',').filter(Boolean) ?? [],
     terminal: params.get(PARAM.terminal) || null,
-    departFrom: params.get(PARAM.departFrom) || null,
-    departTo: params.get(PARAM.departTo) || null,
+    departFrom: dateParam(params.get(PARAM.departFrom)),
+    departTo: dateParam(params.get(PARAM.departTo)),
     noTrailerOnly: params.get(PARAM.noTrailerOnly) === '1',
   };
 }

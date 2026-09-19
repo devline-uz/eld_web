@@ -73,8 +73,8 @@ export function ToggleRow({
       >
         <span
           className={
-            'absolute top-0.5 size-5 rounded-full bg-bg-surface transition-transform ' +
-            (checked ? 'translate-x-4' : 'translate-x-0.5')
+            'absolute left-0.5 top-0.5 size-5 rounded-full bg-bg-surface transition-transform ' +
+            (checked ? 'translate-x-4' : 'translate-x-0')
           }
         />
       </button>

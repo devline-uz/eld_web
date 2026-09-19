@@ -13,10 +13,12 @@ export interface FilterDrawerProps {
   appliedCount: number;
   onReset: () => void;
   onApply: () => void;
+  /** Disables Apply while a filter field holds an invalid value. */
+  applyDisabled?: boolean;
   children: ReactNode;
 }
 
-export function FilterDrawer({ open, onClose, screenName, appliedCount, onReset, onApply, children }: FilterDrawerProps) {
+export function FilterDrawer({ open, onClose, screenName, appliedCount, onReset, onApply, applyDisabled, children }: FilterDrawerProps) {
   return (
     <Drawer
       open={open}
@@ -32,6 +34,7 @@ export function FilterDrawer({ open, onClose, screenName, appliedCount, onReset,
             variant="primary"
             className="flex-1"
             iconLeft={<Check size={16} strokeWidth={1.75} />}
+            disabled={applyDisabled}
             onClick={onApply}
           >
             Apply {appliedCount} filters

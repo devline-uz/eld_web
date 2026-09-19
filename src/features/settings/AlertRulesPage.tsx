@@ -180,7 +180,7 @@ export default function AlertRulesPage() {
                       onClick={() => toggleEnabled(rule)}
                       className={`relative h-6 w-10 rounded-full ${rule.enabled ? 'bg-primary' : 'bg-border'}`}
                     >
-                      <span className={`absolute top-0.5 size-5 rounded-full bg-bg-surface transition-transform ${rule.enabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                      <span className={`absolute left-0.5 top-0.5 size-5 rounded-full bg-bg-surface transition-transform ${rule.enabled ? 'translate-x-4' : 'translate-x-0'}`} />
                     </button>
                     <DropdownMenu.Root>
                       <DropdownMenu.Trigger asChild>
