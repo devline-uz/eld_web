@@ -44,6 +44,15 @@ export const EMPTY_STATE_COPY = {
     title: 'No safety events',
     description: 'Harsh braking, acceleration and speeding events appear here as they are detected.',
   },
+  // Not in §13.2 — W-10 `Coaching` / `Scorecards` tabs (WD-075).
+  safetyCoaching: {
+    title: 'No coaching sessions',
+    description: 'Events marked as coached in the last 30 days appear here.',
+  },
+  safetyScorecard: {
+    title: 'No scorecards yet',
+    description: 'Driver scores appear here once drivers have logged miles in the scoring period.',
+  },
   trips: {
     title: 'No active trips',
     description: 'Create a trip to dispatch a load to a driver.',
