@@ -1,5 +1,5 @@
 // web/tz.md §10 W-10 — smoke test: KPI row, safety-events empty state verbatim, and the
-// RBAC-gated `Assign coaching` control.
+// RBAC-gated `Assign coaching` control, and the Events / Coaching / Scorecards tabs.
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { render, screen, within } from '@testing-library/react';
@@ -136,6 +136,61 @@ describe('SafetyPage', () => {
     const eventsTable = await screen.findByRole('table', { name: 'Safety events' });
     expect(within(eventsTable).getAllByRole('row')).toHaveLength(4);
     expect(screen.getByRole('button', { name: '1' })).toHaveAttribute('aria-current', 'page');
+  });
+
+  describe('tabs', () => {
+    const hourAgo = () => new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const items = [
+      { id: 'evt_new', type: 'SPEEDING', status: 'NEW', occurredAt: hourAgo(), vehicleId: 'veh_1', driverId: null, locationName: 'I-80', coachedAt: null, coachingNote: null },
+      { id: 'evt_coached', type: 'HARSH_BRAKING', status: 'COACHED', occurredAt: hourAgo(), vehicleId: 'veh_1', driverId: null, locationName: 'I-75', coachedAt: hourAgo(), coachingNote: 'Keep distance' },
+      // Outside the 30-day window — must not count towards `Events`.
+      { id: 'evt_old', type: 'SPEEDING', status: 'NEW', occurredAt: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString(), vehicleId: 'veh_1', driverId: null, locationName: 'I-10', coachedAt: null, coachingNote: null },
+    ];
+
+    it('defaults to Events and counts the 30-day window, not the server total', async () => {
+      server.use(http.get(url(endpoints.safety.events), () => ok({ items, page: 1, limit: 500, total: 17440, totalPages: 1 })));
+      renderPage();
+      const events = await screen.findByRole('tab', { name: /^Events/ });
+      expect(events).toHaveAttribute('aria-selected', 'true');
+      await within(events).findByText('2');
+      expect(within(screen.getByRole('tab', { name: /^Coaching/ })).getByText('1')).toBeInTheDocument();
+      expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', 'safety-tab-events');
+      expect(await screen.findByText('2 events · 1 need review')).toBeInTheDocument();
+    });
+
+    it('switches to Coaching on click and lists only coached events', async () => {
+      const user = userEvent.setup();
+      server.use(http.get(url(endpoints.safety.events), () => ok({ items, page: 1, limit: 500, total: 3, totalPages: 1 })));
+      renderPage();
+      await user.click(await screen.findByRole('tab', { name: /^Coaching/ }));
+      expect(screen.getByRole('tab', { name: /^Coaching/ })).toHaveAttribute('aria-selected', 'true');
+      const table = await screen.findByRole('table', { name: 'Coaching sessions' });
+      expect(within(table).getAllByRole('row')).toHaveLength(2);
+      expect(within(table).getByText('Keep distance')).toBeInTheDocument();
+      expect(screen.queryByRole('table', { name: 'Safety events' })).not.toBeInTheDocument();
+    });
+
+    it('moves between tabs with the arrow keys', async () => {
+      const user = userEvent.setup();
+      renderPage();
+      const events = await screen.findByRole('tab', { name: /^Events/ });
+      events.focus();
+      await user.keyboard('{ArrowLeft}');
+      const scorecards = screen.getByRole('tab', { name: /^Scorecards/ });
+      expect(scorecards).toHaveAttribute('aria-selected', 'true');
+      expect(scorecards).toHaveFocus();
+      await user.keyboard('{ArrowRight}');
+      expect(screen.getByRole('tab', { name: /^Events/ })).toHaveFocus();
+    });
+
+    it('shows the scorecard empty state on the Scorecards tab', async () => {
+      const user = userEvent.setup();
+      server.use(http.get(url(endpoints.safety.scorecard), () => ok({ items: [], periodStart: '2026-08-12', periodEnd: '2026-09-11' })));
+      renderPage();
+      await user.click(await screen.findByRole('tab', { name: /^Scorecards/ }));
+      expect(await screen.findByText('No scorecards yet')).toBeInTheDocument();
+      expect(screen.queryByText('Harsh events')).not.toBeInTheDocument();
+    });
   });
 
   it('error: renders <ErrorState> with Retry when the list fails', async () => {
