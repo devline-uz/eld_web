@@ -20,9 +20,24 @@ const VARIANT_CLASSES: Record<ButtonVariant, string> = {
 };
 
 const SIZE_CLASSES: Record<ButtonSize, string> = {
-  sm: 'h-btn-sm px-3 text-body',
-  md: 'h-btn px-4 text-body',
-  lg: 'h-btn-lg px-5 text-body',
+  sm: 'h-btn-sm text-body',
+  md: 'h-btn text-body',
+  lg: 'h-btn-lg text-body',
+};
+
+// Kept apart from the height so icon-only buttons get no horizontal padding: `cn` is plain clsx
+// (no tailwind-merge), so a trailing `px-0` would lose to `px-N` by CSS order and squeeze the icon.
+const SIZE_PADDING: Record<ButtonSize, string> = {
+  sm: 'px-3',
+  md: 'px-4',
+  lg: 'px-5',
+};
+
+/** Icon-only buttons are square: width follows the size's height. */
+const ICON_ONLY_WIDTH: Record<ButtonSize, string> = {
+  sm: 'w-btn-sm',
+  md: 'w-btn',
+  lg: 'w-btn-lg',
 };
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -31,8 +46,10 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   loading?: boolean;
   iconLeft?: ReactNode;
   iconRight?: ReactNode;
-  /** Square icon-only button, 36×36 per §5.1. */
+  /** Square icon-only button (36×36 at `md`, per §5.1; width follows `size`). */
   iconOnly?: boolean;
+  /** Fully rounded (pill; a circle when `iconOnly`) — e.g. the Messages send button. */
+  round?: boolean;
 }
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
@@ -43,6 +60,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
     iconLeft,
     iconRight,
     iconOnly = false,
+    round = false,
     disabled,
     className,
     children,
@@ -58,11 +76,13 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       disabled={disabled || loading}
       aria-busy={loading || undefined}
       className={cn(
-        'inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-colors',
+        'inline-flex items-center justify-center gap-1.5 font-medium transition-colors',
+        round ? 'rounded-full' : 'rounded-md',
         'disabled:cursor-not-allowed disabled:opacity-50',
         variant !== 'link' && SIZE_CLASSES[size],
+        variant !== 'link' && !iconOnly && SIZE_PADDING[size],
         VARIANT_CLASSES[variant],
-        iconOnly && variant !== 'link' && 'w-btn px-0',
+        iconOnly && variant !== 'link' && [ICON_ONLY_WIDTH[size], 'shrink-0'],
         className,
       )}
       {...rest}

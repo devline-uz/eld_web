@@ -445,8 +445,16 @@ export default function MessagesPage() {
                     rows={1}
                     className="max-h-32 flex-1 resize-none rounded-md border border-border bg-bg-surface px-3 py-2 text-body text-text outline-none"
                   />
-                  <Button variant="primary" iconOnly aria-label="Send message" onClick={() => handleSend(draft)}>
-                    <Send size={16} strokeWidth={1.75} />
+                  <Button
+                    variant="primary"
+                    size="lg"
+                    iconOnly
+                    round
+                    aria-label="Send message"
+                    disabled={!draft.trim()}
+                    onClick={() => handleSend(draft)}
+                  >
+                    <Send aria-hidden size={18} strokeWidth={1.75} fill="currentColor" />
                   </Button>
                 </div>
               </div>
