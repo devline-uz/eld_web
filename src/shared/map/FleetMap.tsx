@@ -18,6 +18,7 @@ import { MapPin } from 'lucide-react';
 import type { Feature, FeatureCollection, Point } from 'geojson';
 import type { DutyStatus } from '@/shared/ui/Badge';
 import { EMPTY_COLLECTION, trafficTilesUrl, type MapLayer } from './overlays';
+import { createHeadingTracker, normalizeHeading } from './heading';
 
 const STYLE_URL: string = import.meta.env.VITE_MAP_STYLE_URL ?? '';
 
@@ -93,24 +94,74 @@ const DUTY_TOKEN: Record<DutyStatus, string> = {
 /** A CSS colour keyword, not a hex/rgb literal, so `house/no-design-literal` does not flag the
  * fallback used only when a `--color-*` custom property cannot be read (e.g. no stylesheet yet). */
 const RING_COLOUR_FALLBACK = 'white';
+/** Keyword, not a literal: the marker's outer halo and facet shadow, drawn at partial alpha. */
+const HALO_COLOUR = 'black';
 
-/** A 28px filled circle with a white ring — the §10 marker spec, minus the inline truck glyph
- * (recorded in web/decisions.md WD-016: the glyph needs an SDF icon pipeline this phase does not
- * have budget for). MapLibre's typed `addImage` wants raster data, not a canvas element —
- * `getImageData` is the bridge between the two. */
+/** Marker bitmap edge, in device pixels (drawn at 2x, registered with `pixelRatio: 2` → 32 CSS px). */
+const MARKER_IMAGE_SIZE = 64;
+/** Layer `icon-size` — the 32 CSS px bitmap drawn at ~29 px, the chevron itself ~22 px tall. The
+ * rear notch is a touch deeper than the reference render so the direction still reads at map size. */
+const MARKER_ICON_SIZE = 0.9;
+
+type Pt = readonly [number, number];
+/** The faceted navigation chevron from `photos/*_arrow_transparent.png`, pointing north (0°), in
+ * `MARKER_IMAGE_SIZE` coordinates: tip, the two rear corners, the rear notch, and the ridge point
+ * where the four facets meet. The layer rotates it by the unit's heading (WD-076). */
+const CHEVRON = {
+  tip: [32, 7],
+  left: [9, 55],
+  right: [55, 55],
+  notch: [32, 43],
+  ridge: [32, 31],
+} as const satisfies Record<string, Pt>;
+
+function tracePath(ctx: CanvasRenderingContext2D, points: readonly Pt[]) {
+  ctx.beginPath();
+  ctx.moveTo(points[0]![0], points[0]![1]);
+  for (const [x, y] of points.slice(1)) ctx.lineTo(x, y);
+  ctx.closePath();
+}
+
+/** One unit marker: the chevron filled with the duty colour, its four facets shaded like the
+ * reference render (left base, right lit, rear wedges in shadow), with a dark halo + light ring
+ * so it reads on both light and dark tiles. Shading is a translucent white/black wash over the
+ * token colour, so no colour is ever parsed or hardcoded. MapLibre's typed `addImage` wants raster
+ * data, not a canvas element — `getImageData` is the bridge between the two. */
 function drawMarkerImageData(color: string): ImageData {
-  const size = 56; // 2x for retina
+  const size = MARKER_IMAGE_SIZE;
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext('2d')!;
-  ctx.beginPath();
-  ctx.arc(size / 2, size / 2, size / 2 - 3, 0, Math.PI * 2);
-  ctx.fillStyle = color;
-  ctx.fill();
+  const { tip, left, right, notch, ridge } = CHEVRON;
+  const outline = [tip, right, notch, left] as const;
+  ctx.lineJoin = 'round';
+
+  // Halo (dark, soft) then ring (surface colour) — both drawn under the fill.
+  tracePath(ctx, outline);
+  ctx.globalAlpha = 0.35;
+  ctx.lineWidth = 7;
+  ctx.strokeStyle = HALO_COLOUR;
+  ctx.stroke();
+  ctx.globalAlpha = 1;
   ctx.lineWidth = 4;
   ctx.strokeStyle = token('--color-bg-surface', RING_COLOUR_FALLBACK);
   ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.fill();
+
+  const facets: [readonly Pt[], string, number][] = [
+    [[tip, ridge, right], RING_COLOUR_FALLBACK, 0.28],
+    [[left, ridge, notch], HALO_COLOUR, 0.28],
+    [[ridge, right, notch], HALO_COLOUR, 0.14],
+  ];
+  for (const [points, wash, alpha] of facets) {
+    tracePath(ctx, points);
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = wash;
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
   return ctx.getImageData(0, 0, size, size);
 }
 
@@ -151,17 +202,30 @@ function validUnits(units: MapUnitFeature[]): MapUnitFeature[] {
   return units.filter((u) => isValidCoord(u.lat, u.lon));
 }
 
-function toFeatureCollection(units: MapUnitFeature[]): FeatureCollection<Point> {
+/** `headings` is the tracker's resolved heading per unit id (reported `headingDeg`, else derived
+ * from movement, else last known). With neither, the chevron stays in its neutral north-up pose
+ * (`heading: 0`, `hasHeading: false`) — same shape for every unit, per WD-076. */
+function toFeatureCollection(
+  units: MapUnitFeature[],
+  headings: ReadonlyMap<string, number | null> = new Map(),
+): FeatureCollection<Point> {
   return {
     type: 'FeatureCollection',
-    features: validUnits(units).map(
-      (u): Feature<Point> => ({
+    features: validUnits(units).map((u): Feature<Point> => {
+      const heading = normalizeHeading(headings.get(u.id) ?? u.headingDeg);
+      return {
         type: 'Feature',
         id: u.id,
         geometry: { type: 'Point', coordinates: [u.lon, u.lat] },
-        properties: { id: u.id, dutyStatus: u.dutyStatus, icon: `marker-${u.dutyStatus}` },
-      }),
-    ),
+        properties: {
+          id: u.id,
+          dutyStatus: u.dutyStatus,
+          icon: `marker-${u.dutyStatus}`,
+          heading: heading ?? 0,
+          hasHeading: heading !== null,
+        },
+      };
+    }),
   };
 }
 
@@ -199,6 +263,7 @@ interface OverlayState {
   geofences: FeatureCollection;
   trips: FeatureCollection;
   flashUnitId: string | null;
+  headings: ReadonlyMap<string, number | null>;
 }
 
 /** Geofence colours from the 11.1 form (`BLUE`…`VIOLET`) resolved to design tokens. */
@@ -286,7 +351,7 @@ function installLayers(map: maplibregl.Map, state: OverlayState) {
 
   map.addSource(SOURCE_ID, {
     type: 'geojson',
-    data: toFeatureCollection(state.units),
+    data: toFeatureCollection(state.units, state.headings),
     cluster: true,
     clusterRadius: 44,
     clusterMaxZoom: 12,
@@ -321,8 +386,13 @@ function installLayers(map: maplibregl.Map, state: OverlayState) {
     filter: ['!', ['has', 'point_count']],
     layout: {
       'icon-image': ['get', 'icon'],
-      'icon-size': 0.5,
+      'icon-size': MARKER_ICON_SIZE,
       'icon-allow-overlap': true,
+      // Heading is degrees clockwise from north; aligning to the map (not the viewport) keeps the
+      // chevron pointing the right way when the map is rotated or pitched.
+      'icon-rotate': ['get', 'heading'],
+      'icon-rotation-alignment': 'map',
+      'icon-pitch-alignment': 'map',
     },
   });
   map.addLayer({
@@ -362,9 +432,27 @@ export default function FleetMap({
     unitsRef.current = units;
   }, [units]);
   // Everything `installLayers` needs when the style (re)loads — kept current without remounting.
-  const overlayRef = useRef<OverlayState>({ units, layers, geofences, trips, flashUnitId: flashUnitId ?? null });
+  // Per-unit anchor + last heading, kept across polls/patches so a unit without `headingDeg`
+  // still turns with its movement and keeps its heading when it stops.
+  const headingTrackerRef = useRef<ReturnType<typeof createHeadingTracker> | null>(null);
+  headingTrackerRef.current ??= createHeadingTracker();
+  const overlayRef = useRef<OverlayState>({
+    units,
+    layers,
+    geofences,
+    trips,
+    flashUnitId: flashUnitId ?? null,
+    headings: new Map(),
+  });
   useEffect(() => {
-    overlayRef.current = { units, layers, geofences, trips, flashUnitId: flashUnitId ?? null };
+    overlayRef.current = {
+      units,
+      layers,
+      geofences,
+      trips,
+      flashUnitId: flashUnitId ?? null,
+      headings: headingTrackerRef.current!.update(validUnits(units)),
+    };
   }, [units, layers, geofences, trips, flashUnitId]);
 
   // Every hook below runs unconditionally (rules-of-hooks); each effect bails out internally
@@ -443,7 +531,7 @@ export default function FleetMap({
     const map = mapRef.current;
     if (!map || !ready) return;
     const source = map.getSource(SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
-    source?.setData(toFeatureCollection(units));
+    source?.setData(toFeatureCollection(units, overlayRef.current.headings));
     // First data arrives after `load` (e.g. the initial fetch was still pending) — fit once, then
     // leave the camera alone for subsequent polls so a dispatcher's own pan/zoom is not undone.
     if (!hasFitToDataRef.current && validUnits(units).length > 0) {
