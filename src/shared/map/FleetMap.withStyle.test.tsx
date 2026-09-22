@@ -15,10 +15,19 @@ if (!window.URL.createObjectURL) {
 const fake2dContext = {
   beginPath: vi.fn(),
   arc: vi.fn(),
-  fill: vi.fn(),
+  moveTo: vi.fn(),
+  lineTo: vi.fn(),
+  closePath: vi.fn(),
+  /** Records the colour each fill was painted with, so marker colours can be asserted. */
+  fill: vi.fn(function (this: { fillStyle: string; filled: string[] }) {
+    this.filled.push(this.fillStyle);
+  }),
+  filled: [] as string[],
   stroke: vi.fn(),
   fillStyle: '',
   lineWidth: 0,
+  lineJoin: '',
+  globalAlpha: 1,
   strokeStyle: '',
   getImageData: vi.fn((_x: number, _y: number, width: number, height: number) => ({
     width,
@@ -31,6 +40,7 @@ HTMLCanvasElement.prototype.getContext = vi.fn(() => fake2dContext) as unknown a
 type Handler = (...args: unknown[]) => void;
 
 class FakeGeoJSONSource {
+  constructor(public spec?: { data?: unknown }) {}
   setData = vi.fn();
 }
 
@@ -83,8 +93,8 @@ class FakeMap {
     this.images.add(id);
   }
 
-  addSource(id: string) {
-    this.sources.set(id, new FakeGeoJSONSource());
+  addSource(id: string, spec?: { data?: unknown }) {
+    this.sources.set(id, new FakeGeoJSONSource(spec));
   }
 
   getSource(id: string) {
@@ -335,5 +345,83 @@ describe('FleetMap — GeoJSON source + symbol layer (style configured)', () => 
     const moved = [{ id: 'v1', lat: 45, lon: -90, dutyStatus: 'DRIVING' as const }];
     rerender(<FleetMap units={moved} />);
     expect(map.fitBounds).toHaveBeenCalledTimes(1); // not refit on a later poll
+  });
+
+  describe('direction marker (WD-076)', () => {
+    type UnitProps = { id: string; heading: number; hasHeading: boolean; icon: string };
+    const initialProps = (map: FakeMap) =>
+      (map.sources.get('fleet-units')!.spec!.data as { features: { properties: UnitProps }[] }).features.map(
+        (f) => f.properties,
+      );
+    const lastSetProps = (map: FakeMap) => {
+      const calls = map.sources.get('fleet-units')!.setData.mock.calls;
+      return (calls.at(-1)![0] as { features: { properties: UnitProps }[] }).features.map((f) => f.properties);
+    };
+
+    it('rotates the unit symbol by its heading, aligned to the map (not the viewport)', () => {
+      render(<FleetMap units={UNITS} />);
+      const map = FakeMap.instances[0]!;
+      act(() => map.fire('load'));
+      const layer = map.layers.get('fleet-unit-points')!;
+      expect(layer.layout).toMatchObject({
+        'icon-image': ['get', 'icon'],
+        'icon-rotate': ['get', 'heading'],
+        'icon-rotation-alignment': 'map',
+        'icon-pitch-alignment': 'map',
+      });
+    });
+
+    it('carries headingDeg into the feature, and a neutral north-up pose when it is unknown', () => {
+      render(
+        <FleetMap
+          units={[
+            { id: 'w', lat: 40, lon: -83, dutyStatus: 'DRIVING', headingDeg: 274 },
+            { id: 'n', lat: 41, lon: -84, dutyStatus: 'ELD_OFFLINE', headingDeg: null },
+          ]}
+        />,
+      );
+      const map = FakeMap.instances[0]!;
+      act(() => map.fire('load'));
+      expect(initialProps(map)).toEqual([
+        expect.objectContaining({ id: 'w', heading: 274, hasHeading: true, icon: 'marker-DRIVING' }),
+        expect.objectContaining({ id: 'n', heading: 0, hasHeading: false, icon: 'marker-ELD_OFFLINE' }),
+      ]);
+    });
+
+    it('turns a unit without headingDeg toward its movement and holds it once it stops', () => {
+      const at = (lon: number) => [{ id: 'v', lat: 40, lon, dutyStatus: 'DRIVING' as const, headingDeg: null }];
+      const { rerender } = render(<FleetMap units={at(-83)} />);
+      const map = FakeMap.instances[0]!;
+      act(() => map.fire('load'));
+
+      rerender(<FleetMap units={at(-83.01)} />); // ~850 m west
+      expect(lastSetProps(map)[0]).toMatchObject({ hasHeading: true });
+      expect(lastSetProps(map)[0]!.heading).toBeCloseTo(270, 0);
+
+      rerender(<FleetMap units={at(-83.01)} />); // parked
+      expect(lastSetProps(map)[0]!.heading).toBeCloseTo(270, 0);
+    });
+
+    it('registers one chevron image per status, filled with that status token colour', () => {
+      const root = document.documentElement.style;
+      root.setProperty('--color-success', 'green');
+      root.setProperty('--color-violet', 'purple');
+      fake2dContext.filled.length = 0;
+      try {
+        render(<FleetMap units={UNITS} />);
+        const map = FakeMap.instances[0]!;
+        act(() => map.fire('load'));
+        expect(map.images.has('marker-DRIVING')).toBe(true);
+        expect(map.images.has('marker-SLEEPER')).toBe(true);
+        expect(fake2dContext.filled).toContain('green');
+        expect(fake2dContext.filled).toContain('purple');
+        // drawn as a polygon path, not the old circle
+        expect(fake2dContext.lineTo).toHaveBeenCalled();
+        expect(fake2dContext.arc).not.toHaveBeenCalled();
+      } finally {
+        root.removeProperty('--color-success');
+        root.removeProperty('--color-violet');
+      }
+    });
   });
 });
