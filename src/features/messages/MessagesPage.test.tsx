@@ -207,6 +207,46 @@ describe('W-16 Messages', () => {
     expect(capturedClientId).toBeTruthy();
   });
 
+  it('round send button is disabled on an empty draft and sends on click', async () => {
+    usePopulatedConversations();
+    let posted: string | undefined;
+    server.use(
+      http.post(url(endpoints.conversations.sendMessage(':id')), async ({ request }) => {
+        const body = (await request.json()) as { body: string; clientId?: string };
+        posted = body.body;
+        return ok({
+          id: 'msg_3',
+          conversationId: 'cnv_1',
+          senderUserId: 'usr_1',
+          senderDriverId: null,
+          body: body.body,
+          attachmentId: null,
+          clientId: body.clientId ?? null,
+          sentAt: new Date().toISOString(),
+          deliveredAt: null,
+          readAt: null,
+        });
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByText('John Smith'));
+    await screen.findByText('On schedule.');
+
+    const send = screen.getByRole('button', { name: 'Send message' });
+    expect(send).toBeDisabled();
+    await user.type(screen.getByPlaceholderText('Write a message to John Smith…'), '   ');
+    expect(send).toBeDisabled();
+    await user.type(screen.getByPlaceholderText('Write a message to John Smith…'), 'Copy that');
+    expect(send).toBeEnabled();
+    await user.click(send);
+
+    expect(await screen.findByText('Copy that')).toBeInTheDocument();
+    await waitFor(() => expect(posted).toBe('Copy that'));
+    expect(send).toBeDisabled();
+  });
+
   it('subscribes to `conversation:{id}` on open and appends a `message.new` push instantly (no polling)', async () => {
     usePopulatedConversations();
     const socket = fakeSocket();
