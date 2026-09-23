@@ -15,14 +15,17 @@ export interface FilterDrawerProps {
   onApply: () => void;
   /** Disables Apply while a filter field holds an invalid value. */
   applyDisabled?: boolean;
+  /** True when the draft filters differ from the applied ones — routes closing through 11.30. */
+  isDirty?: boolean;
   children: ReactNode;
 }
 
-export function FilterDrawer({ open, onClose, screenName, appliedCount, onReset, onApply, applyDisabled, children }: FilterDrawerProps) {
+export function FilterDrawer({ open, onClose, screenName, appliedCount, onReset, onApply, applyDisabled, isDirty, children }: FilterDrawerProps) {
   return (
     <Drawer
       open={open}
       onClose={onClose}
+      isDirty={isDirty}
       title="Filters"
       subtitle={appliedCount > 0 ? `${screenName} · ${appliedCount} filters applied` : screenName}
       footer={
@@ -37,7 +40,8 @@ export function FilterDrawer({ open, onClose, screenName, appliedCount, onReset,
             disabled={applyDisabled}
             onClick={onApply}
           >
-            Apply {appliedCount} filters
+            {/* Stage 3 — `Apply 0 filters` read as a count of nothing; with none selected it is plain `Apply`. */}
+            {appliedCount > 0 ? `Apply ${appliedCount} filters` : 'Apply'}
           </Button>
         </div>
       }

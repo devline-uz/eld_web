@@ -2,7 +2,7 @@
 // Shared by W-08 `Violations · today` (hos-logs) and the W-01 `HOS violations & alerts` row menu
 // (dashboard) — moved out of `features/hos-logs` because features never import each other.
 import { useState } from 'react';
-import { Modal } from '@/shared/ui/Modal';
+import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
 import { ApiError } from '@/shared/api/errors';
@@ -61,9 +61,9 @@ export function ResolveViolationModal({
       isDirty={note.length > 0}
       footer={
         <>
-          <Button variant="secondary" size="lg" onClick={onClose}>
-            Cancel
-          </Button>
+          {/* WB-165 — `onClick={onClose}` walked past the 11.30 confirm even though `isDirty`
+              is set, so a typed reason was dropped silently. */}
+          <ModalCancelButton disabled={mutation.isPending} />
           <Button variant="primary" size="lg" onClick={submit} loading={mutation.isPending}>
             Resolve
           </Button>

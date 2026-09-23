@@ -1,11 +1,11 @@
 // owner: web-dispatch-messaging — 11.10 Create trip (web/tz.md §11.10). `trips` FULL, size `lg`.
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm, useWatch } from 'react-hook-form';
 import { z } from 'zod';
 import { addYears, endOfDay, format, startOfToday } from 'date-fns';
 import { AlertTriangle } from 'lucide-react';
-import { Modal } from '@/shared/ui/Modal';
+import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { DriverPicker, UnitPicker, type PickerOption } from '@/shared/ui/DriverPicker';
 import { useToast } from '@/shared/ui/Toast';
@@ -15,9 +15,9 @@ import { useDriverHos } from '@/shared/api/drivers';
 import { useCreateTrip, blocksAssignment, type CreateTripStopInput } from '@/shared/api/trips';
 import { tripSchema } from '@/shared/forms/schemas';
 import { requiredString } from '@/shared/forms/fields';
-import { VALIDATION_MESSAGES } from '@/shared/forms/messages';
 import { ApiError } from '@/shared/api/errors';
 import { formatHosHours } from '@/shared/format/hos';
+import { EST_DRIVE_TIME_HINT } from '../lib/copy';
 
 /** What `datetime-local` emits — `YYYY-MM-DDTHH:mm[:ss[.sss]]`, and never more than a 4-digit year. */
 const LOCAL_DATETIME_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?$/;
@@ -28,6 +28,8 @@ const INVALID_DATE_MESSAGE = 'Enter a valid date and time.';
 const DISTANCE_MESSAGE = 'Enter a distance greater than 0.';
 const RATE_MESSAGE = 'Enter a rate greater than 0.';
 const RATE_DECIMALS_MESSAGE = 'Use at most 2 decimal places.';
+/** B-73 — `POST /trips` has no draft state. */
+const DRAFT_REASON = 'Drafts are not available yet.';
 
 /** Parses a local `datetime-local` value, or `null` if that calendar date doesn't exist. */
 function parseLocalDateTime(value: string): Date | null {
@@ -89,15 +91,13 @@ const createTripSchema = tripSchema
       .min(0)
       .optional(),
     // Miles, like every `distanceMi` the API returns — fractional miles are allowed.
-    // Required via refine, not `required_error`: a type error aborts the object and would silently
-    // skip the delivery-vs-pickup check below until a distance was typed.
-    distanceMi: z
-      .number({ invalid_type_error: DISTANCE_MESSAGE })
-      .positive(DISTANCE_MESSAGE)
-      .optional()
-      .refine((v) => v !== undefined, VALIDATION_MESSAGES.required),
-    // USD, shown as `1,240.00` (formatMoney) — optional like the design, cents at most. Not in the
-    // create payload yet (CreateTripPayload has no rate field), so it is validated but not sent.
+    // WB-134 — `CreateTripPayload` (and `POST /trips`) has no distance field, so whatever is typed
+    // here is dropped. It is therefore no longer *required*: blocking a dispatch on a value the
+    // API never receives is worse than not collecting it. The field stays (the format check is
+    // still worth having) but says in the UI that it is not saved yet.
+    distanceMi: z.number({ invalid_type_error: DISTANCE_MESSAGE }).positive(DISTANCE_MESSAGE).optional(),
+    // USD, shown as `1,240.00` (formatMoney) — optional like the design, cents at most. Same
+    // WB-134 gap as Distance: `CreateTripPayload` has no rate field, so it is not sent either.
     rateUsd: z
       .number({ invalid_type_error: RATE_MESSAGE })
       .positive(RATE_MESSAGE)
@@ -130,18 +130,28 @@ const SERVER_FIELD_MAP: Record<string, keyof CreateTripValues> = {
   weightLbs: 'weightLbs',
   plannedStartAt: 'scheduledStart',
   plannedEndAt: 'scheduledEnd',
-  notes: 'notes',
+};
+
+/** Human labels for the payload fields this modal has no visible input for (`notes`, `stops`) —
+ * a 422 on one of them used to be `setError`-ed onto a field nothing renders, so it vanished. */
+const SERVER_FIELD_LABEL: Record<string, string> = {
+  notes: 'Notes',
+  stops: 'Stops',
+  commodity: 'Commodity',
+  trailerId: 'Trailer',
 };
 
 function Field({
   label,
   required,
   error,
+  hint,
   children,
 }: {
   label: string;
   required?: boolean;
   error?: string;
+  hint?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -150,16 +160,33 @@ function Field({
         {label} {required && <span className="text-danger">*</span>}
       </span>
       {children}
-      {error && <span className="text-caption text-danger">{error}</span>}
+      {hint && !error && <span className="text-caption text-text-muted">{hint}</span>}
+      {error && (
+        <span role="alert" className="text-caption text-danger">
+          {error}
+        </span>
+      )}
     </label>
   );
 }
 
 const inputClass = 'h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text';
 
+interface IntermediateStop {
+  key: number;
+  name: string;
+  scheduledAt: string;
+}
+
 export function CreateTripModal({ onClose }: { onClose: () => void }) {
   const { toast } = useToast();
   const [estimatedDriveHours, setEstimatedDriveHours] = useState<string>('');
+  // `+ Add an intermediate stop` had no handler at all. `CreateTripPayload.stops` is real, so the
+  // extra stops are collected here and sent between the pickup and the delivery.
+  const [intermediateStops, setIntermediateStops] = useState<IntermediateStop[]>([]);
+  const nextStopKey = useRef(1);
+  /** Rule 6 — a 422 detail with no visible input, and any other rejection, lands here. */
+  const [banner, setBanner] = useState<string | null>(null);
 
   const {
     register,
@@ -171,6 +198,9 @@ export function CreateTripModal({ onClose }: { onClose: () => void }) {
   } = useForm<CreateTripValues>({
     resolver: zodResolver(createTripSchema),
     mode: 'onBlur',
+    // Every registered field is listed: a field registered without a default reaches
+    // `_formValues` as a key that `_defaultValues` does not have, which made `isDirty` true at
+    // mount and popped "Discard changes?" on an untouched form.
     defaultValues: {
       reference: '',
       driverId: '',
@@ -180,6 +210,10 @@ export function CreateTripModal({ onClose }: { onClose: () => void }) {
       scheduledStart: '',
       scheduledEnd: '',
       shippingDocument: '',
+      notes: '',
+      distanceMi: undefined,
+      weightLbs: undefined,
+      rateUsd: undefined,
     },
   });
 
@@ -215,6 +249,10 @@ export function CreateTripModal({ onClose }: { onClose: () => void }) {
 
   const createMutation = useCreateTrip();
   const submitting = createMutation.isPending;
+
+  // `estimatedDriveHours` is the one editable value that lives outside react-hook-form, so it has
+  // to join `formState.isDirty` — otherwise a real edit closed without the 11.30 confirm.
+  const dirty = isDirty || estimatedDriveHours !== '' || intermediateStops.length > 0;
 
   const driversQuery = useDriversList({ limit: 200 });
   const vehiclesQuery = useVehiclesPicker();
@@ -262,11 +300,21 @@ export function CreateTripModal({ onClose }: { onClose: () => void }) {
     // mutate() returns immediately, so RHF's isSubmitting never covered the request — guard on the
     // mutation itself or a double click creates two trips.
     if (submitting || assignmentBlocked) return;
+    setBanner(null);
     const plannedStartAt = toIso(values.scheduledStart);
     const plannedEndAt = toIso(values.scheduledEnd);
+    const named = intermediateStops.filter((stop) => stop.name.trim() !== '');
     const stops: CreateTripStopInput[] = [
       { sequence: 1, type: 'PICKUP', name: values.origin, scheduledAt: plannedStartAt },
-      { sequence: 2, type: 'DELIVERY', name: values.destination, scheduledAt: plannedEndAt },
+      ...named.map((stop, index) => ({
+        sequence: index + 2,
+        // `StopType` has no INTERMEDIATE member; CHECKPOINT is the API's stop between the
+        // pickup and the delivery (WD — see decisions.md).
+        type: 'CHECKPOINT' as const,
+        name: stop.name.trim(),
+        scheduledAt: toIso(stop.scheduledAt),
+      })),
+      { sequence: named.length + 2, type: 'DELIVERY' as const, name: values.destination, scheduledAt: plannedEndAt },
     ];
     createMutation.mutate(
       {
@@ -290,18 +338,25 @@ export function CreateTripModal({ onClose }: { onClose: () => void }) {
             // `details` may be `{ fields: {...} }` or flat, and uses backend names (`number`,
             // `plannedStartAt`) — `fieldErrors` normalises the shape, the map renames.
             let mapped = 0;
+            const unmapped: string[] = [];
             for (const [field, message] of Object.entries(error.fieldErrors)) {
               const formField = SERVER_FIELD_MAP[field];
-              if (!formField) continue;
-              setError(formField, { message });
-              mapped += 1;
+              if (formField) {
+                setError(formField, { message });
+                mapped += 1;
+                continue;
+              }
+              // No input renders this field's error — rule 6 says it belongs in the banner.
+              const label = SERVER_FIELD_LABEL[field];
+              unmapped.push(label ? `${label}: ${message}` : message);
             }
-            if (mapped > 0) return;
+            if (unmapped.length > 0) setBanner(unmapped.join(' '));
+            if (mapped > 0 || unmapped.length > 0) return;
           }
-          toast({
-            kind: 'error',
-            title: error instanceof ApiError ? error.userMessage : 'Something went wrong.',
-          });
+          const message =
+            error instanceof ApiError ? error.userMessage : 'Something went wrong.';
+          setBanner(message);
+          toast({ kind: 'error', title: message });
         },
       },
     );
@@ -314,20 +369,15 @@ export function CreateTripModal({ onClose }: { onClose: () => void }) {
       title="Create trip"
       subtitle="Dispatch a load to a driver and unit"
       size="lg"
-      isDirty={isDirty}
+      isDirty={dirty}
       footer={
         <>
-          {/* The create endpoint has no draft / "send now" flag yet, so these can't do anything —
-              disabled rather than silently ignored (and the toast no longer claims "sent"). */}
-          <label
-            className="mr-auto flex items-center gap-2 text-body text-text-muted"
-            title="Not available yet"
-          >
-          </label>
-          <Button variant="secondary" size="lg" onClick={onClose} disabled={submitting}>
-            Cancel
-          </Button>
-          <Button variant="secondary" size="lg" disabled title="Not available yet">
+          {/* The create endpoint has no draft flag yet, so `Save as draft` can't do anything —
+              disabled, with the reason on screen rather than only in a hover tooltip. (The empty
+              `<label>` that used to sit here, left over from a removed control, is gone.) */}
+          <span className="mr-auto text-caption text-text-muted">{DRAFT_REASON}</span>
+          <ModalCancelButton disabled={submitting} />
+          <Button variant="secondary" size="lg" disabled title={DRAFT_REASON}>
             Save as draft
           </Button>
           <Button
@@ -349,12 +399,18 @@ export function CreateTripModal({ onClose }: { onClose: () => void }) {
         onSubmit={handleSubmit(onSubmit)}
         className="flex flex-col gap-4"
       >
+        {banner && (
+          <p role="alert" className="rounded-md bg-danger-soft p-3 text-body text-danger">
+            {banner}
+          </p>
+        )}
         <div className="grid grid-cols-3 gap-3">
           <Field label="Trip / load ID" required error={errors.reference?.message}>
             <input {...register('reference')} placeholder="TR-4834" className={inputClass} />
           </Field>
-          <Field label="Customer">
-            <input placeholder="Customer" className={inputClass} />
+          {/* `CreateTripPayload` has no customer field — disabled rather than silently dropped. */}
+          <Field label="Customer" hint="Not available yet">
+            <input placeholder="Customer" disabled title="Not available yet" className={inputClass} />
           </Field>
           <Field label="Reference / BOL" error={errors.shippingDocument?.message}>
             <input {...register('shippingDocument')} placeholder="4834-A" className={inputClass} />
@@ -391,8 +447,46 @@ export function CreateTripModal({ onClose }: { onClose: () => void }) {
               />
             </Field>
           </div>
+          {intermediateStops.map((stop, index) => (
+            <div key={stop.key} className="mt-2 grid grid-cols-[1fr_1fr_auto] items-end gap-3">
+              <Field label={`Stop ${index + 1} location`}>
+                <input
+                  value={stop.name}
+                  onChange={(e) =>
+                    setIntermediateStops((prev) => prev.map((s) => (s.key === stop.key ? { ...s, name: e.target.value } : s)))
+                  }
+                  className={inputClass}
+                />
+              </Field>
+              <Field label={`Stop ${index + 1} window`}>
+                <input
+                  type="datetime-local"
+                  value={stop.scheduledAt}
+                  min={pickupMinInput}
+                  max={pickupMaxInput}
+                  onChange={(e) =>
+                    setIntermediateStops((prev) =>
+                      prev.map((s) => (s.key === stop.key ? { ...s, scheduledAt: e.target.value } : s)),
+                    )
+                  }
+                  className={`${inputClass} w-full min-w-0 tabular-nums`}
+                />
+              </Field>
+              <Button
+                variant="secondary"
+                size="sm"
+                aria-label={`Remove stop ${index + 1}`}
+                onClick={() => setIntermediateStops((prev) => prev.filter((s) => s.key !== stop.key))}
+              >
+                Remove
+              </Button>
+            </div>
+          ))}
           <button
             type="button"
+            onClick={() =>
+              setIntermediateStops((prev) => [...prev, { key: nextStopKey.current++, name: '', scheduledAt: '' }])
+            }
             className="mt-2 w-full rounded-md border border-dashed border-border py-2 text-body text-text-secondary hover:bg-bg-subtle"
           >
             + Add an intermediate stop
@@ -433,14 +527,19 @@ export function CreateTripModal({ onClose }: { onClose: () => void }) {
                 placeholder="Select a unit"
               />
             </Field>
-            <Field label="Trailer">
-              <input placeholder="Not set" className={inputClass} />
+            {/* `trailerId` exists on the payload but there is no trailer picker endpoint yet. */}
+            <Field label="Trailer" hint="Not available yet">
+              <input placeholder="Not set" disabled title="Not available yet" className={inputClass} />
             </Field>
           </div>
         </div>
 
         <div className="grid grid-cols-4 gap-3">
-          <Field label="Distance" required error={errors.distanceMi?.message}>
+          <Field
+            label="Distance"
+            error={errors.distanceMi?.message}
+            hint="Not saved yet — the create-trip API has no distance field."
+          >
             <input
               type="number"
               min={0}
@@ -462,7 +561,7 @@ export function CreateTripModal({ onClose }: { onClose: () => void }) {
               className={inputClass}
             />
           </Field>
-          <Field label="Estimated drive time">
+          <Field label="Estimated drive time" hint={EST_DRIVE_TIME_HINT}>
             <input
               type="number"
               min={0}
@@ -488,7 +587,11 @@ export function CreateTripModal({ onClose }: { onClose: () => void }) {
               className={inputClass}
             />
           </Field>
-          <Field label="Rate" error={errors.rateUsd?.message}>
+          <Field
+            label="Rate"
+            error={errors.rateUsd?.message}
+            hint="Not saved yet — the create-trip API has no rate field."
+          >
             <input
               type="number"
               min={0}

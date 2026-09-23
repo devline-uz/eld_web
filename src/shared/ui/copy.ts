@@ -168,6 +168,17 @@ export const TOAST_COPY = {
     title: 'Reconnected',
     description: 'Live data resumed.',
   },
+  /** W-03 bulk action — not in §13.3's table; named consistently with `unitDeleted`. */
+  unitsSetInactive: (count: number): ToastCopy => ({
+    title: `${count} unit${count === 1 ? '' : 's'} set inactive`,
+    description: 'Historical logs and DVIRs are still available for audits.',
+  }),
+  /** W-03 bulk action, partial failure — the units that did change are named, the rest are not
+   * claimed as done. */
+  unitsSetInactiveFailed: (failed: number, total: number): ToastCopy => ({
+    title: `${failed} of ${total} unit${total === 1 ? '' : 's'} could not be set inactive`,
+    description: 'Those units are unchanged. Try again.',
+  }),
   /** 11.1 · Create a geofence — not in §13.3's table; named consistently with `unitCreated`. */
   geofenceCreated: (name: string): ToastCopy => ({
     title: 'Geofence created',

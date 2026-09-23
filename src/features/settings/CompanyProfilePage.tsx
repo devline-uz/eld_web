@@ -103,11 +103,28 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
     setErrors((prev) => ({ ...prev, [key]: undefined }));
   }
 
+  /** WB-202 — the message names the real fault: length/character set, or casing. */
   function validateEldIdentifier(value: string | null | undefined): boolean {
-    if (!value) return true;
-    const ok = /^[A-Z0-9]{4}$/.test(value);
-    setEldError(ok ? null : 'The ELD identifier is exactly 4 characters.');
-    return ok;
+    if (!value) {
+      setEldError(null);
+      return true;
+    }
+    if (!/^[A-Za-z0-9]{4}$/.test(value)) {
+      setEldError('The ELD identifier is exactly 4 characters, letters and digits only.');
+      return false;
+    }
+    if (value !== value.toUpperCase()) {
+      setEldError(`The ELD identifier must be uppercase — enter ${value.toUpperCase()}.`);
+      return false;
+    }
+    setEldError(null);
+    return true;
+  }
+
+  /** 11.30/§14.1 — free-typed fields are checked when the field is left, not only on Save. */
+  function validateField(key: TextKey) {
+    const all = companyErrors(form);
+    setErrors((prev) => ({ ...prev, [key]: all[key] }));
   }
 
   function doSave() {
@@ -164,6 +181,7 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
               value={form.name ?? ''}
               readOnly={!canFull}
               aria-invalid={errors.name ? true : undefined}
+              onBlur={() => validateField('name')}
               onChange={(e) => setText('name', e.target.value.slice(0, LIMITS.companyTextMax))}
             />
           </Field>
@@ -174,6 +192,7 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
               value={form.dotNumber ?? ''}
               readOnly={!canFull}
               aria-invalid={errors.dotNumber ? true : undefined}
+              onBlur={() => validateField('dotNumber')}
               onChange={(e) => setText('dotNumber', inputFilters.digits(e.target.value, LIMITS.dotNumberMax))}
             />
           </Field>
@@ -183,6 +202,7 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
               value={form.mcNumber ?? ''}
               readOnly={!canFull}
               aria-invalid={errors.mcNumber ? true : undefined}
+              onBlur={() => validateField('mcNumber')}
               onChange={(e) => setText('mcNumber', inputFilters.mcNumber(e.target.value))}
             />
           </Field>
@@ -194,6 +214,7 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
               value={form.ein ?? ''}
               readOnly={!canFull}
               aria-invalid={errors.ein ? true : undefined}
+              onBlur={() => validateField('ein')}
               onChange={(e) => setText('ein', inputFilters.ein(e.target.value))}
             />
           </Field>
@@ -205,6 +226,7 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
               value={form.phone ?? ''}
               readOnly={!canFull}
               aria-invalid={errors.phone ? true : undefined}
+              onBlur={() => validateField('phone')}
               onChange={(e) => setText('phone', inputFilters.phone(e.target.value))}
             />
           </Field>
@@ -216,6 +238,7 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
               value={form.complianceEmail ?? ''}
               readOnly={!canFull}
               aria-invalid={errors.complianceEmail ? true : undefined}
+              onBlur={() => validateField('complianceEmail')}
               onChange={(e) => setText('complianceEmail', inputFilters.email(e.target.value))}
             />
           </Field>
@@ -225,6 +248,7 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
               value={form.addressLine1 ?? ''}
               readOnly={!canFull}
               aria-invalid={errors.addressLine1 ? true : undefined}
+              onBlur={() => validateField('addressLine1')}
               onChange={(e) => setText('addressLine1', e.target.value.slice(0, LIMITS.companyTextMax))}
             />
           </Field>
@@ -234,6 +258,7 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
               value={form.city ?? ''}
               readOnly={!canFull}
               aria-invalid={errors.city ? true : undefined}
+              onBlur={() => validateField('city')}
               onChange={(e) => setText('city', inputFilters.city(e.target.value))}
             />
           </Field>
@@ -263,6 +288,7 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
                 value={form.zip ?? ''}
                 readOnly={!canFull}
                 aria-invalid={errors.zip ? true : undefined}
+                onBlur={() => validateField('zip')}
                 onChange={(e) =>
                   setText('zip', isCanadian(form.state) ? inputFilters.caPostal(e.target.value) : inputFilters.usZip(e.target.value))
                 }
@@ -379,13 +405,15 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
               maxLength={4}
               value={form.eldIdentifier ?? ''}
               readOnly={!canFull}
+              onBlur={(e) => validateEldIdentifier(e.target.value)}
               onChange={(e) => {
                 // WB-112 — §14.2: `eldIdentifier` is validated exactly as typed, never rewritten
                 // (no silent `.toUpperCase()`); a lowercase or mixed-case value is flagged by
                 // `validateEldIdentifier` instead of being corrected out from under the carrier.
-                const v = e.target.value;
-                set('eldIdentifier', v);
-                validateEldIdentifier(v);
+                // WB-202 — the check runs on blur, not on every keystroke, so a half-typed value
+                // is not flagged as wrong while it is being typed.
+                set('eldIdentifier', e.target.value);
+                setEldError(null);
               }}
               placeholder="OBK1"
             />

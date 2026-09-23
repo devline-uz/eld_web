@@ -38,12 +38,12 @@ function LocationProbe() {
   return <output data-testid="location">{`${location.pathname}${location.search}`}</output>;
 }
 
-function renderPage() {
+function renderPage(initialEntry = '/live-fleet') {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
-        <MemoryRouter>
+        <MemoryRouter initialEntries={[initialEntry]}>
           <LiveFleetPage />
           <LocationProbe />
         </MemoryRouter>
@@ -266,5 +266,65 @@ describe('W-02 Live Fleet', () => {
     // independent Retry buttons is expected, not a leak.
     const retries = await screen.findAllByRole('button', { name: /retry/i }, { timeout: 8000 });
     expect(retries.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// Stage 3 — search name, detail-card close target, `View logs` for a driverless unit, and the
+// `?unit=` deep link Vehicles → `Track on map` uses.
+describe('W-02 Live Fleet — stage 3', () => {
+  const unitRow = (vehicleId: string, unitNumber: string, driverId: string | null) => ({
+    vehicleId,
+    unitNumber,
+    driverId,
+    driverName: driverId ? 'John Smith' : null,
+    dutyStatus: driverId ? 'DRIVING' : 'INACTIVE',
+    speedMph: 0,
+    lat: 39.96,
+    lon: -82.99,
+    locationLabel: 'Columbus, OH',
+    lastSeenAt: new Date().toISOString(),
+    driveRemainingSec: null,
+    shiftEndsAt: null,
+    eldSerial: 'PT30_1',
+    bleState: 'CONNECTED',
+  });
+
+  beforeEach(() => {
+    server.use(
+      http.get(url(endpoints.live.fleet), () =>
+        ok({
+          items: [unitRow('veh_1', '#101', 'drv_1'), unitRow('veh_2', '#104', null)],
+          generatedAt: new Date().toISOString(),
+        }),
+      ),
+    );
+  });
+
+  it('names the unit search box', async () => {
+    renderPage();
+    expect(await screen.findByRole('searchbox', { name: 'Search units' })).toBeInTheDocument();
+  });
+
+  it('`?unit=` opens that unit; a driverless unit disables View logs with the reason; Close is a 32px target and drops the param', async () => {
+    const user = userEvent.setup();
+    renderPage('/live-fleet?unit=veh_2');
+
+    expect(await screen.findByRole('heading', { name: 'Unit #104' }, { timeout: 8000 })).toBeInTheDocument();
+    const viewLogs = screen.getByRole('button', { name: 'View logs' });
+    expect(viewLogs).toBeDisabled();
+    expect(viewLogs).toHaveAccessibleDescription('No driver assigned — there are no logs to open.');
+
+    const close = screen.getByRole('button', { name: 'Close' });
+    expect(close.className).toContain('size-btn-sm');
+    await user.click(close);
+    expect(screen.queryByRole('heading', { name: 'Unit #104' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('location')).toHaveTextContent(/^\/live-fleet$/);
+  });
+
+  it('View logs for a unit with a driver opens that driver\'s logs', async () => {
+    const user = userEvent.setup();
+    renderPage('/live-fleet?unit=veh_1');
+    await user.click(await screen.findByRole('button', { name: 'View logs' }, { timeout: 8000 }));
+    expect(screen.getByTestId('location')).toHaveTextContent('/hos-logs?driverId=drv_1');
   });
 });

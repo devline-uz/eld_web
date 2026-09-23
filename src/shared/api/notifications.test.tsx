@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { http } from 'msw';
 import type { ReactNode } from 'react';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { fail, server, url } from '@/mocks/server';
 import { resetShellGapState } from '@/mocks/handlers/shellGaps';
 import { endpoints } from './endpoints';
@@ -10,7 +10,9 @@ import {
   UNREAD_COUNT_PARAMS,
   applyNotificationNew,
   applyNotificationRead,
+  isSingleMarkReadAvailable,
   notificationTarget,
+  resetSingleMarkReadAvailability,
   toNotificationItem,
   useMarkAllNotificationsRead,
   useMarkNotificationRead,
@@ -24,6 +26,7 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'bypass' }));
 afterEach(() => {
   server.resetHandlers();
   resetShellGapState();
+  resetSingleMarkReadAvailability();
 });
 afterAll(() => server.close());
 
@@ -147,5 +150,28 @@ describe('notification hooks (MSW)', () => {
     act(() => result.current.markOne.mutate('ntf_1'));
     await waitFor(() => expect(result.current.markOne.isError).toBe(true));
     expect(result.current.list.data?.items.find((i) => i.id === 'ntf_1')?.readAt).toBeNull();
+  });
+
+  // WB-244 — a 404/405 is remembered for the session; other failures are not; every failure
+  // reaches `onFailure`.
+  it.each([404, 405])('remembers a %i as "route missing" and reports the failure', async (status) => {
+    server.use(http.post(url(endpoints.notificationItem.markRead(':id')), () => fail(status, 'NOT_FOUND', 'Cannot POST')));
+    const onFailure = vi.fn();
+    const { result } = renderHook(() => useMarkNotificationRead({ onFailure }), { wrapper: wrapperFor(newClient()) });
+    expect(isSingleMarkReadAvailable()).toBe(true);
+    act(() => result.current.mutate('ntf_1'));
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(isSingleMarkReadAvailable()).toBe(false);
+    expect(onFailure).toHaveBeenCalledTimes(1);
+  });
+
+  it('a 500 is reported but does not mark the route missing', async () => {
+    server.use(http.post(url(endpoints.notificationItem.markRead(':id')), () => fail(500, 'INTERNAL', 'boom')));
+    const onFailure = vi.fn();
+    const { result } = renderHook(() => useMarkNotificationRead({ onFailure }), { wrapper: wrapperFor(newClient()) });
+    act(() => result.current.mutate('ntf_1'));
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(isSingleMarkReadAvailable()).toBe(true);
+    expect(onFailure).toHaveBeenCalledTimes(1);
   });
 });

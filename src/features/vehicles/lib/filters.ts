@@ -33,6 +33,28 @@ export const EMPTY_VEHICLE_FILTERS: VehicleFilters = {
   firmwareOutdatedOnly: false,
 };
 
+/** Order-insensitive comparison of two de-duplicated option lists. */
+function sameList(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && new Set([...a, ...b]).size === new Set(a).size;
+}
+
+/** True when two filter sets select the same thing — the drawer's "has the draft changed?" test
+ * (WB — the drawer never told `FilterDrawer` it was dirty, so edited filters were dropped on
+ * close without the 11.30 confirm). Group order is irrelevant: toggling an option off and back on
+ * is not an edit. */
+export function sameVehicleFilters(a: VehicleFilters, b: VehicleFilters): boolean {
+  return (
+    sameList(a.status, b.status) &&
+    sameList(a.eldDevice, b.eldDevice) &&
+    sameList(a.make, b.make) &&
+    a.yearFrom === b.yearFrom &&
+    a.yearTo === b.yearTo &&
+    a.terminal === b.terminal &&
+    a.openDefectsOnly === b.openDefectsOnly &&
+    a.firmwareOutdatedOnly === b.firmwareOutdatedOnly
+  );
+}
+
 const PARAM = {
   status: 'fStatus',
   eldDevice: 'fDevice',

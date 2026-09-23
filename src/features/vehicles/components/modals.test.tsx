@@ -1,6 +1,6 @@
 // Smoke coverage for the vehicles overlays (11.2–11.6) — each renders, shows its title/labels,
 // and its primary action reaches the network in the expected shape.
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http } from 'msw';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -110,6 +110,14 @@ describe('11.4 Assign driver', () => {
     expect(screen.getByRole('button', { name: 'Assign driver' })).toBeDisabled();
   });
 
+  // WB-158 / B-74 — the tick was kept in local state and never sent.
+  it('the "Notify the driver" checkbox is disabled with a visible reason', () => {
+    renderWithProviders(<AssignDriverModal vehicle={VEHICLE} onClose={() => {}} />);
+    const notify = screen.getByRole('checkbox', { name: /Notify the driver in the app/ });
+    expect(notify).toBeDisabled();
+    expect(screen.getByText(/the assign endpoint sends no notification/)).toBeInTheDocument();
+  });
+
   it('assigns the selected driver', async () => {
     server.use(
       http.get(url(endpoints.drivers.list), () =>
@@ -124,6 +132,35 @@ describe('11.4 Assign driver', () => {
     await user.click(screen.getByRole('button', { name: 'Assign driver' }));
 
     expect(await screen.findByText('Driver assigned')).toBeInTheDocument();
+  });
+});
+
+describe('11.2 Add vehicle — double submit', () => {
+  // WB-162 — the guard was RHF's `isSubmitting`, which clears before `mutate()`'s request lands.
+  it('two fast clicks create one unit', async () => {
+    let posts = 0;
+    server.use(
+      http.post(url(endpoints.vehicles.create), async () => {
+        posts += 1;
+        await new Promise((r) => setTimeout(r, 40));
+        return ok({ ...VEHICLE, id: 'veh_new' });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<AddVehicleModal onClose={() => {}} />);
+
+    await user.type(screen.getByPlaceholderText('e.g. 126'), '126');
+    await user.type(screen.getByLabelText(/^VIN/), '1FUJGLDR8LLLL9999');
+    const [make, model] = screen.getAllByRole('textbox').slice(2);
+    await user.type(make!, 'Freightliner');
+    await user.type(model!, 'Cascadia');
+
+    const save = screen.getByRole('button', { name: 'Save unit' });
+    await user.click(save);
+    await user.click(save);
+
+    await vi.waitFor(() => expect(posts).toBeGreaterThan(0));
+    expect(posts).toBe(1);
   });
 });
 
@@ -185,5 +222,156 @@ describe('11.6 Import vehicles', () => {
 
     expect(await screen.findByText(/File has 2001 rows — 2,000 rows maximum\./)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Import units' })).toBeDisabled();
+  });
+});
+
+// WB — 11.30 Discard changes. Two defects met here: `Cancel` called `onClose` directly and walked
+// straight past the confirm that Esc and X honour, and `AddVehicleModal` reported itself dirty at
+// mount (react-hook-form's `isDirty` against `defaultValues`), so an untouched form asked to
+// discard changes that did not exist.
+describe('11.30 Discard changes — vehicles overlays', () => {
+  it('an untouched Add vehicle form closes on Cancel with no confirm', async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    renderWithProviders(<AddVehicleModal onClose={onClose} />);
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByText('Discard changes?')).not.toBeInTheDocument();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('an untouched Edit unit form closes on Cancel with no confirm', async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    renderWithProviders(<AddVehicleModal vehicle={VEHICLE} onClose={onClose} />);
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByText('Discard changes?')).not.toBeInTheDocument();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('an edited form confirms on Cancel, exactly as on Esc, and Keep editing keeps it open', async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    renderWithProviders(<AddVehicleModal onClose={onClose} />);
+
+    await user.type(screen.getByLabelText(/Unit number/), '126');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(await screen.findByText('Discard changes?')).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'Keep editing' }));
+    expect(onClose).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await user.click(await screen.findByRole('button', { name: 'Discard' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('Esc on an edited form confirms too (unchanged behaviour, guarded)', async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    renderWithProviders(<AddVehicleModal onClose={onClose} />);
+
+    await user.type(screen.getByLabelText(/Unit number/), '126');
+    await user.keyboard('{Escape}');
+
+    expect(await screen.findByText('Discard changes?')).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('a change made outside react-hook-form (notes) also counts as dirty', async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    renderWithProviders(<AddVehicleModal onClose={onClose} />);
+
+    await user.type(screen.getByLabelText(/Notes/), 'Yard A');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(await screen.findByText('Discard changes?')).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('Cancel on a half-typed Delete confirmation asks before throwing the text away', async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    renderWithProviders(<DeleteUnitModal vehicle={VEHICLE} eldSerial={null} onClose={onClose} />);
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    onClose.mockClear();
+
+    await user.type(screen.getByPlaceholderText('UNIT-101'), 'UNIT');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(await screen.findByText('Discard changes?')).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+// WB — the >5,000 mi extra confirmation used to fail OPEN: a unit with no ELD odometer reading
+// produced `NaN`, `NaN > 5000` is false, and the checkbox never appeared, so any value at all
+// could be saved unchallenged. It now fails closed.
+describe('11.5 Calibrate odometer — the large-delta guard fails closed', () => {
+  const NO_DEVICE_READING = { ...VEHICLE, deviceOdometerMi: null };
+
+  it('demands the extra confirmation when the device odometer is unknown', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<CalibrateOdometerModal vehicle={NO_DEVICE_READING} onClose={() => {}} />);
+
+    await user.type(screen.getByLabelText(/Dashboard odometer/), '993611');
+
+    const confirmation = await screen.findByText(/no ELD odometer reading/);
+    expect(confirmation).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save calibration' })).toBeDisabled();
+
+    await user.click(screen.getByRole('checkbox'));
+    expect(screen.getByRole('button', { name: 'Save calibration' })).toBeEnabled();
+  });
+
+  it('still demands it for a > 5,000 mi jump against a known reading', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<CalibrateOdometerModal vehicle={VEHICLE} onClose={() => {}} />);
+
+    await user.type(screen.getByLabelText(/Dashboard odometer/), '1200000');
+
+    expect(await screen.findByText(/more than 5,000 mi/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save calibration' })).toBeDisabled();
+  });
+
+  it('asks for nothing extra on a small correction against a known reading', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<CalibrateOdometerModal vehicle={VEHICLE} onClose={() => {}} />);
+
+    await user.type(screen.getByLabelText(/Dashboard odometer/), '993611');
+
+    expect(screen.queryByText(/I confirm this value is correct/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save calibration' })).toBeEnabled();
+  });
+});
+
+// WB — the import options had no counterpart in `POST /vehicles/import`, and the file card printed
+// a hardcoded "N valid, 0 errors" that no validation had produced.
+describe('11.6 Import vehicles — no invented state', () => {
+  it('makes no validity claim about the parsed rows', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ImportVehiclesModal onClose={() => {}} />);
+
+    const file = new File(['unitNumber,vin\n201,1FUJGLDR8LLLL0001'], 'units.csv', { type: 'text/csv' });
+    await user.upload(document.querySelector('input[type="file"]') as HTMLInputElement, file);
+
+    expect(await screen.findByText('units.csv')).toBeInTheDocument();
+    expect(screen.queryByText(/valid, 0 errors/)).not.toBeInTheDocument();
+    expect(screen.getByText(/1 rows detected/)).toBeInTheDocument();
+  });
+
+  it('disables the options the import endpoint cannot accept, with the reason on screen', () => {
+    renderWithProviders(<ImportVehiclesModal onClose={() => {}} />);
+
+    expect(screen.getByText(/the import endpoint does not accept this option/)).toBeInTheDocument();
+    for (const box of screen.getAllByRole('checkbox')) expect(box).toBeDisabled();
+    for (const select of screen.getAllByRole('combobox')) expect(select).toBeDisabled();
   });
 });

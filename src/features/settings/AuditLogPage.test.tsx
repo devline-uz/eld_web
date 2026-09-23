@@ -192,3 +192,127 @@ describe('AuditLogPage — W-23', () => {
     await waitFor(() => expect(screen.queryByRole('button', { name: /export csv/i })).not.toBeInTheDocument());
   });
 });
+
+/* ------------------------------------------------------------------ stage-2 */
+
+describe('AuditLogPage — stage-2', () => {
+  it('gives the search box an accessible name and shows an audit-specific error card', async () => {
+    server.use(http.get(url(endpoints.auditLog.list), () => fail(500, 'INTERNAL_ERROR', 'Boom')));
+    renderPage();
+    expect(await screen.findByText('Could not load the audit log')).toBeInTheDocument();
+    expect(screen.queryByText('Could not load the fleet')).not.toBeInTheDocument();
+    expect(screen.getByRole('searchbox', { name: 'Search action, object or user' })).toBeInTheDocument();
+  });
+
+  it('says the local filters only cover the loaded entries while older pages exist (B-64)', async () => {
+    server.use(
+      http.get(url(endpoints.auditLog.list), () =>
+        ok({ items: [entry('a1', 'UPDATE', 'Dispatcher role')], nextCursor: 'a1' }),
+      ),
+    );
+    renderPage();
+    expect(await screen.findByText(/apply to the 1 entries loaded so far/)).toBeInTheDocument();
+  });
+
+  it('drops the hint once every page is loaded', async () => {
+    server.use(
+      http.get(url(endpoints.auditLog.list), () => ok({ items: [entry('a1', 'UPDATE', 'Dispatcher role')], nextCursor: null })),
+    );
+    renderPage();
+    await screen.findByText('Dispatcher role');
+    expect(screen.queryByText(/entries loaded so far/)).not.toBeInTheDocument();
+  });
+
+  // B-64 web side — while a local filter is active, older pages are fetched automatically.
+  it('fetches older pages automatically while searching, without Load more', async () => {
+    const user = userEvent.setup();
+    const cursors: (string | null)[] = [];
+    server.use(
+      http.get(url(endpoints.auditLog.list), ({ request }) => {
+        const cursor = new URL(request.url).searchParams.get('cursor');
+        cursors.push(cursor);
+        if (!cursor) return ok({ items: [entry('1', 'UPDATE', 'Role · Dispatcher')], nextCursor: 'c2' });
+        if (cursor === 'c2') return ok({ items: [entry('2', 'CREATE', 'Role · Auditor')], nextCursor: 'c3' });
+        return ok({ items: [entry('3', 'DELETE', 'User · Anna Weiss')], nextCursor: null });
+      }),
+    );
+    renderPage();
+    await screen.findByText('Role · Dispatcher');
+    expect(cursors).toEqual([null]);
+    await user.type(screen.getByPlaceholderText('Search action, object or user…'), 'anna');
+    expect(await screen.findByText('User · Anna Weiss')).toBeInTheDocument();
+    expect(cursors).toEqual([null, 'c2', 'c3']);
+    expect(screen.queryByText(/entries loaded so far/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
+    // Clearing the search keeps the pages already fetched.
+    await user.clear(screen.getByPlaceholderText('Search action, object or user…'));
+    expect(screen.getByText('Role · Auditor')).toBeInTheDocument();
+  });
+
+  it('stops at the automatic-search cap and says older entries are not covered', async () => {
+    const user = userEvent.setup();
+    let calls = 0;
+    server.use(
+      http.get(url(endpoints.auditLog.list), ({ request }) => {
+        calls += 1;
+        const cursor = new URL(request.url).searchParams.get('cursor') ?? 'p0';
+        const n = Number(cursor.slice(1));
+        return ok({ items: [entry(`e${n}`, 'UPDATE', `Entry ${n}`)], nextCursor: `p${n + 1}` });
+      }),
+    );
+    renderPage();
+    await screen.findByText('Entry 0');
+    await user.selectOptions(screen.getByLabelText('Filter by action'), 'DELETE');
+    expect(
+      await screen.findByText(/Searched the 20 most recent entries \(the automatic search limit\)/, {}, { timeout: 15000 }),
+    ).toBeInTheDocument();
+    // 1000 entries / 50 per page = 20 pages, never more.
+    expect(calls).toBe(20);
+    expect(screen.getByRole('button', { name: 'Load more' })).toBeInTheDocument();
+  }, 20000);
+
+  it('shows a live count with Stop, and Stop ends the automatic search', async () => {
+    const user = userEvent.setup();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    let calls = 0;
+    server.use(
+      http.get(url(endpoints.auditLog.list), async ({ request }) => {
+        calls += 1;
+        const cursor = new URL(request.url).searchParams.get('cursor');
+        if (!cursor) return ok({ items: [entry('1', 'UPDATE', 'Role · Dispatcher')], nextCursor: 'c2' });
+        await gate;
+        return ok({ items: [entry('2', 'CREATE', 'Role · Auditor')], nextCursor: 'c3' });
+      }),
+    );
+    renderPage();
+    await screen.findByText('Role · Dispatcher');
+    await user.type(screen.getByPlaceholderText('Search action, object or user…'), 'zzz');
+    expect(await screen.findByText('Searching older entries… 1 entries searched so far.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Stop' }));
+    expect(await screen.findByText(/Search stopped after 1 entries/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument();
+    release();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(calls).toBe(2);
+  });
+
+  it('stops fetching once the loaded pages reach past the start of the date range', async () => {
+    const user = userEvent.setup();
+    const old = { ...entry('2', 'DELETE', 'Role · Ancient'), createdAt: new Date(Date.now() - 60 * 86_400_000).toISOString() };
+    const cursors: (string | null)[] = [];
+    server.use(
+      http.get(url(endpoints.auditLog.list), ({ request }) => {
+        const cursor = new URL(request.url).searchParams.get('cursor');
+        cursors.push(cursor);
+        if (!cursor) return ok({ items: [entry('1', 'UPDATE', 'Role · Dispatcher')], nextCursor: 'c2' });
+        return ok({ items: [old], nextCursor: 'c3' });
+      }),
+    );
+    renderPage();
+    await screen.findByText('Role · Dispatcher');
+    await user.selectOptions(screen.getByLabelText('Filter by action'), 'DELETE');
+    expect(await screen.findByText('Searched every entry in the selected date range (2 loaded).')).toBeInTheDocument();
+    expect(cursors).toEqual([null, 'c2']);
+  });
+});

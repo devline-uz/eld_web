@@ -2,7 +2,7 @@
 // states what survives: historical logs, DVIRs and IFTA records stay in place for audits.
 import { useState } from 'react';
 import { Trash2 } from 'lucide-react';
-import { Modal } from '@/shared/ui/Modal';
+import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
 import { TOAST_COPY } from '@/shared/ui/copy';
@@ -13,10 +13,15 @@ export function DeleteUnitModal({
   vehicle,
   eldSerial,
   onClose,
+  onDeleted,
 }: {
   vehicle: VehicleRow;
   eldSerial: string | null;
   onClose: () => void;
+  /** Fired only after the server confirms the delete — the Unit profile navigates away on it.
+   * `onClose` alone cannot carry that meaning: Cancel, Esc and X call it too (WB — cancelling the
+   * modal used to leave the unit profile anyway). */
+  onDeleted?: () => void;
 }) {
   const { toast } = useToast();
   const [confirmText, setConfirmText] = useState('');
@@ -31,11 +36,11 @@ export function DeleteUnitModal({
       title={`Delete Unit ${vehicle.unitNumber}?`}
       subtitle="This cannot be undone"
       size="sm"
+      // A half-typed confirmation phrase is a real edit — Cancel / Esc / X all confirm first.
+      isDirty={confirmText !== ''}
       footer={
         <>
-          <Button variant="secondary" size="lg" onClick={onClose} disabled={mutation.isPending}>
-            Cancel
-          </Button>
+          <ModalCancelButton disabled={mutation.isPending} />
           <Button
             variant="danger"
             size="lg"
@@ -46,6 +51,7 @@ export function DeleteUnitModal({
                 onSuccess: () => {
                   toast({ kind: 'success', ...TOAST_COPY.unitDeleted(vehicle.unitNumber.replace(/^#/, '')) });
                   onClose();
+                  onDeleted?.();
                 },
                 onError: (error) => {
                   toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });

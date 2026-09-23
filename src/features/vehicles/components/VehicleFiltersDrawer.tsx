@@ -7,6 +7,7 @@ import {
   EMPTY_VEHICLE_FILTERS,
   VEHICLE_STATUS_OPTIONS,
   countActiveVehicleFilters,
+  sameVehicleFilters,
   type VehicleFilters,
   type VehicleStatusFilter,
 } from '../lib/filters';
@@ -66,6 +67,7 @@ export function VehicleFiltersDrawer({
       onClose={onClose}
       screenName="Vehicles"
       appliedCount={countActiveVehicleFilters(draft)}
+      isDirty={!sameVehicleFilters(draft, filters)}
       onReset={() => setDraft(EMPTY_VEHICLE_FILTERS)}
       onApply={() => {
         onApply(draft);

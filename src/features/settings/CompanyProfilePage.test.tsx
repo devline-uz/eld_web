@@ -106,8 +106,13 @@ describe('CompanyProfilePage — W-17', () => {
     const eldInput = eldInputs[0]!;
     await user.clear(eldInput);
     await user.type(eldInput, 'AB');
+    // WB — validated on blur (11.30), not on every keystroke.
+    expect(screen.queryByText(/The ELD identifier/)).not.toBeInTheDocument();
+    await user.tab();
 
-    expect(await screen.findByText('The ELD identifier is exactly 4 characters.')).toBeInTheDocument();
+    expect(
+      await screen.findByText('The ELD identifier is exactly 4 characters, letters and digits only.'),
+    ).toBeInTheDocument();
   });
 
   it('WB-112 — a lowercase ELD identifier is kept exactly as typed, never auto-corrected to uppercase', async () => {
@@ -119,9 +124,11 @@ describe('CompanyProfilePage — W-17', () => {
     const eldInput = eldInputs[0]!;
     await user.clear(eldInput);
     await user.type(eldInput, 'obk1');
+    await user.tab();
 
     expect(eldInput).toHaveValue('obk1');
-    expect(await screen.findByText('The ELD identifier is exactly 4 characters.')).toBeInTheDocument();
+    // WB — the message names the real fault (casing), not a wrong length.
+    expect(await screen.findByText('The ELD identifier must be uppercase — enter OBK1.')).toBeInTheDocument();
   });
 
   it('touches every remaining field once', async () => {
@@ -267,5 +274,36 @@ describe('CompanyProfilePage — W-17', () => {
 
     const pcToggle = screen.getByText('Allow personal conveyance').closest('div')!.parentElement!.querySelector('button')!;
     expect(pcToggle).toBeDisabled();
+  });
+});
+
+/* ------------------------------------------------------------------ stage-2 */
+
+describe('CompanyProfilePage — onBlur validation', () => {
+  it('flags a bad DOT number when the field is left, not only on Save', async () => {
+    const user = userEvent.setup();
+    server.use(http.get(url(endpoints.carrier.root), () => ok(CARRIER)));
+    renderPage();
+
+    const dot = await screen.findByDisplayValue('1234567');
+    await user.clear(dot);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+
+    await user.tab();
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+  });
+
+  it('clears the field error as soon as the value is corrected', async () => {
+    const user = userEvent.setup();
+    server.use(http.get(url(endpoints.carrier.root), () => ok(CARRIER)));
+    renderPage();
+
+    const dot = await screen.findByDisplayValue('1234567');
+    await user.clear(dot);
+    await user.tab();
+    await screen.findByRole('alert');
+
+    await user.type(dot, '7654321');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });

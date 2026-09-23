@@ -1,27 +1,34 @@
 // owner: web-vehicles-drivers — W-07 Driver profile (web/tz.md §10 W-07).
 // Design: web/roles and screens/admin panel/Driver profile — HOS clocks, violations, logs.jpg
+import { useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronRight, MoreHorizontal, Pencil, MessageSquare, UserPlus } from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
 import { useDynamicSubtitle } from '@/app/layouts/Topbar';
 import { useRoom } from '@/shared/realtime/useRoom';
-import { useDriver, useDriverHos } from '@/shared/api/drivers';
+import { useDeactivateDriver, useDriver, useDriverHos } from '@/shared/api/drivers';
 import { useVehicle } from '@/shared/api/vehicles';
 import { client } from '@/shared/api/client';
 import { endpoints } from '@/shared/api/endpoints';
+import { ApiError } from '@/shared/api/errors';
 import { Avatar } from '@/shared/ui/Avatar';
 import { Badge } from '@/shared/ui/Badge';
 import { Button } from '@/shared/ui/Button';
 import { Card, SectionHeader } from '@/shared/ui/Card';
+import { ConfirmDelete } from '@/shared/ui/Modal';
 import { HosMeter } from '@/shared/ui/HosMeter';
+import { useToast } from '@/shared/ui/Toast';
 import { ErrorState, LoadingState, ForbiddenState } from '@/shared/ui/states';
 import { formatLocal } from '@/shared/format/datetime';
 import { orNone } from '@/shared/format/empty';
-import { qk } from '@/shared/api/queryKeys';
+import { qk, qkRoot } from '@/shared/api/queryKeys';
 import { messagesHref } from '@/shared/lib/messagesHref';
+import { EditDriverModal } from './components/EditDriverModal';
+import { DRIVER_DOCUMENTS_REASON, DRIVER_TOAST, NO_PASSWORD_RESET } from './lib/copy';
+import { DVIR_HREF, tripsHrefForDriver } from './lib/links';
 
 const TABS = ['overview', 'hos', 'dvirs', 'trips', 'documents', 'activity'] as const;
 type Tab = (typeof TABS)[number];
@@ -76,6 +83,29 @@ export default function DriverProfilePage() {
 
   useDynamicSubtitle(driverQuery.data ? `Drivers › ${driverQuery.data.firstName} ${driverQuery.data.lastName}` : null);
   useRoom(id ? `driver:${id}` : null, {});
+
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [editOpen, setEditOpen] = useState(false);
+  const [confirmDeactivate, setConfirmDeactivate] = useState(false);
+  // WB-183 — the row menu's `Deactivate driver` had no handler at all; it now confirms first
+  // (§5.9 destructive confirm) and then really writes `PATCH /drivers/:id { status: 'INACTIVE' }`.
+  const deactivate = useDeactivateDriver();
+
+  function runDeactivate() {
+    if (!id || deactivate.isPending) return;
+    deactivate.mutate(id, {
+      onSuccess: () => {
+        setConfirmDeactivate(false);
+        void queryClient.invalidateQueries({ queryKey: qkRoot.drivers });
+        toast({ kind: 'success', ...DRIVER_TOAST.driversDeactivated(1) });
+      },
+      onError: (error) => {
+        setConfirmDeactivate(false);
+        toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+      },
+    });
+  }
 
   if (!can('drivers')) return <ForbiddenState screenName="Driver profile" />;
   if (driverQuery.isLoading) return <LoadingState rows={8} />;
@@ -137,7 +167,7 @@ export default function DriverProfilePage() {
               View logs
             </Button>
             {canAssignTrip && (
-              <Button variant="primary" iconLeft={<UserPlus size={16} strokeWidth={1.75} />} onClick={() => navigate('/trips')}>
+              <Button variant="primary" iconLeft={<UserPlus size={16} strokeWidth={1.75} />} onClick={() => navigate(tripsHrefForDriver(driver.id))}>
                 Assign trip
               </Button>
             )}
@@ -150,10 +180,15 @@ export default function DriverProfilePage() {
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Portal>
                   <DropdownMenu.Content align="end" className="z-50 min-w-40 rounded-md border border-border bg-bg-surface p-1 shadow-pop">
-                    <DropdownMenu.Item className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                    {/* ⛔ GAP B-81 — no carrier-side password reset for a driver account. */}
+                    <DropdownMenu.Item disabled className="rounded-md px-2 py-1.5 text-body text-text-muted outline-none data-[disabled]:cursor-not-allowed">
                       Reset app password
                     </DropdownMenu.Item>
-                    <DropdownMenu.Item className="cursor-pointer rounded-md px-2 py-1.5 text-body text-danger outline-none hover:bg-danger-soft">
+                    <p className="max-w-56 px-2 pb-1 text-caption text-text-muted">{NO_PASSWORD_RESET}</p>
+                    <DropdownMenu.Item
+                      onSelect={() => setConfirmDeactivate(true)}
+                      className="cursor-pointer rounded-md px-2 py-1.5 text-body text-danger outline-none hover:bg-danger-soft"
+                    >
                       Deactivate driver
                     </DropdownMenu.Item>
                   </DropdownMenu.Content>
@@ -164,25 +199,34 @@ export default function DriverProfilePage() {
         </div>
       </Card>
 
-      <div className="flex h-9 w-fit overflow-hidden rounded-md border border-border">
-        {TABS.map((t) => (
-          <button
-            key={t}
-            type="button"
-            aria-pressed={tab === t}
-            disabled={t === 'documents'}
-            onClick={() => setTab(t)}
-            className={
-              tab === t
-                ? 'bg-bg-inverse px-3 text-body-strong text-text-inverse'
-                : t === 'documents'
-                  ? 'cursor-not-allowed bg-bg-surface px-3 text-body text-text-muted'
-                  : 'bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'
-            }
-          >
-            {TAB_LABEL[t]}
-          </button>
-        ))}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex h-9 w-fit overflow-hidden rounded-md border border-border">
+          {TABS.map((t) => (
+            <button
+              key={t}
+              type="button"
+              aria-pressed={tab === t}
+              disabled={t === 'documents'}
+              // B-94 — disabled with its reason on screen (tooltip, "Soon" badge, caption), WB-236.
+              title={t === 'documents' ? DRIVER_DOCUMENTS_REASON : undefined}
+              aria-describedby={t === 'documents' ? 'driver-documents-reason' : undefined}
+              onClick={() => setTab(t)}
+              className={
+                tab === t
+                  ? 'bg-bg-inverse px-3 text-body-strong text-text-inverse'
+                  : t === 'documents'
+                    ? 'cursor-not-allowed bg-bg-surface px-3 text-body text-text-muted'
+                    : 'bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'
+              }
+            >
+              {TAB_LABEL[t]}
+              {t === 'documents' && <Badge tone="neutral" className="ml-1.5">Soon</Badge>}
+            </button>
+          ))}
+        </div>
+        <p id="driver-documents-reason" className="text-caption text-text-muted">
+          {DRIVER_DOCUMENTS_REASON}
+        </p>
       </div>
 
       {tab === 'overview' && (
@@ -193,9 +237,13 @@ export default function DriverProfilePage() {
               {hosQuery.isLoading ? (
                 <LoadingState rows={4} className="mt-3" />
               ) : hosQuery.isError || !hosQuery.data ? (
+                // WB-185 — the card used to print the internal gap id ("backend gap B-2") at the
+                // end user. `GET /drivers/:id/hos` shipped: a failure here is an ordinary error
+                // state, in the same words every other card uses, with a retry.
                 <ErrorState
                   title="HOS clocks unavailable"
-                  description="GET /drivers/:id/hos is not implemented yet (backend gap B-2)."
+                  description="The hours-of-service service did not respond. Your data is safe — try again in a moment."
+                  onRetry={() => void hosQuery.refetch()}
                 />
               ) : (
                 <div className="mt-3 grid grid-cols-4 gap-3">
@@ -216,7 +264,18 @@ export default function DriverProfilePage() {
             </Card>
 
             <Card>
-              <SectionHeader title="Violations & alerts" subtitle="Last 8 days" action={<Button variant="link">View all ›</Button>} />
+              <SectionHeader
+                title="Violations & alerts"
+                subtitle="Last 8 days"
+                action={
+                  // WB-186 — the button had no handler. Per-driver violations are rendered by
+                  // W-08, so `View all` opens this driver's log there, exactly like the sentence
+                  // below it says.
+                  <Button variant="link" onClick={() => navigate(`/hos-logs?driverId=${driver.id}`)}>
+                    View all ›
+                  </Button>
+                }
+              />
               {/* ⛔ GAP B-6 — no GET /violations; per-driver violations only surface inside the
                   logs response, which HOS Logs (W-08, owned elsewhere) already renders. */}
               <p className="mt-3 text-body text-text-muted">Open HOS Logs to review violations for this driver.</p>
@@ -239,7 +298,7 @@ export default function DriverProfilePage() {
               title="Driver profile"
               action={
                 <Can perm="drivers" level="FULL">
-                  <Button variant="ghost" size="sm" iconLeft={<Pencil size={14} strokeWidth={1.75} />}>
+                  <Button variant="ghost" size="sm" iconLeft={<Pencil size={14} strokeWidth={1.75} />} onClick={() => setEditOpen(true)}>
                     Edit
                   </Button>
                 </Can>
@@ -278,12 +337,16 @@ export default function DriverProfilePage() {
       )}
       {tab === 'dvirs' && (
         <Card>
+          {/* WB-180 — the link used to carry `?driverId=`, which W-09 never reads: it landed on an
+              unfiltered board that looked filtered. `GET /dvir` has no driver param and the screen
+              has no driver filter (gap B-80), so the link is plain and says so. */}
           <p className="text-body text-text-muted">
-            DVIR history for this driver lives on{' '}
-            <Link to={`/dvir?driverId=${driver.id}`} className="text-primary">
+            DVIR history lives on{' '}
+            <Link to={DVIR_HREF} className="text-primary">
               DVIR &amp; Maintenance
             </Link>
-            .
+            . It cannot be filtered to one driver yet — look for {driver.firstName} {driver.lastName} in the
+            DRIVER column.
           </p>
         </Card>
       )}
@@ -291,7 +354,7 @@ export default function DriverProfilePage() {
         <Card>
           <p className="text-body text-text-muted">
             Trip history for this driver lives on{' '}
-            <Link to={`/trips?driverId=${driver.id}`} className="text-primary">
+            <Link to={tripsHrefForDriver(driver.id)} className="text-primary">
               Dispatch &amp; Trips
             </Link>
             .
@@ -303,6 +366,17 @@ export default function DriverProfilePage() {
           <p className="text-body text-text-muted">No activity recorded.</p>
         </Card>
       )}
+
+      {editOpen && <EditDriverModal driver={driver} onClose={() => setEditOpen(false)} />}
+      <ConfirmDelete
+        open={confirmDeactivate}
+        onClose={() => setConfirmDeactivate(false)}
+        onConfirm={runDeactivate}
+        title="Deactivate this driver?"
+        description="They can no longer sign in to the mobile app. Their logs, DVIRs and certifications stay available for audits."
+        confirmLabel="Deactivate"
+        loading={deactivate.isPending}
+      />
     </div>
   );
 }

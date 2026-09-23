@@ -455,8 +455,20 @@ export function useCancelWorkOrder(id: string) {
 
 /** WB-074 — the `…` `Edit` item on the Work orders tab. `PATCH /work-orders/:id` is a real
  * endpoint (`endpoints.workOrders.update`); the vehicle and attached defects are not editable
- * here, only the fields `CreateWorkOrderModal` also collects. */
-export type UpdateWorkOrderPayload = Partial<Omit<CreateWorkOrderPayload, 'vehicleId' | 'defectIds'>>;
+ * here, only the fields `CreateWorkOrderModal` also collects.
+ *
+ * Every optional column on `WorkOrderRow` is nullable (`description`, `vendor`, `costUsd`,
+ * `odometerMi`, `dueAt`), so clearing one sends an explicit `null` — omitting the key (the old
+ * `value || undefined`) is "leave it as it was" on a PATCH and silently lost the user's clear. */
+export type UpdateWorkOrderPayload = {
+  title?: string;
+  description?: string | null;
+  priority?: WorkOrderPriority;
+  vendor?: string | null;
+  costUsd?: number | null;
+  odometerMi?: number | null;
+  dueAt?: string | null;
+};
 
 export function useUpdateWorkOrder(id: string) {
   const queryClient = useQueryClient();
@@ -572,8 +584,18 @@ export function useCreateSchedule() {
 }
 
 /** WB-074 — the `…` `Edit` item on the Schedules tab. `PATCH /maintenance-schedules/:id` is a
- * real endpoint (`endpoints.maintenanceSchedules.update`). */
-export type UpdateSchedulePayload = Partial<CreateSchedulePayload>;
+ * real endpoint (`endpoints.maintenanceSchedules.update`).
+ *
+ * `intervalMi`, `intervalDays`, `lastServiceMi` and `lastServiceAt` are nullable on
+ * `MaintenanceScheduleRow`, so clearing one sends `null`; omitting the key keeps the old value. */
+export type UpdateSchedulePayload = {
+  name?: string;
+  intervalMi?: number | null;
+  intervalDays?: number | null;
+  lastServiceMi?: number | null;
+  lastServiceAt?: string | null;
+  enabled?: boolean;
+};
 
 export function useUpdateSchedule(id: string) {
   const queryClient = useQueryClient();

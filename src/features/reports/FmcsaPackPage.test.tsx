@@ -115,7 +115,8 @@ describe('W-15 Reports · FMCSA / DOT audit pack', () => {
       ['Driver log edits and annotations', 'Original value, edited value, reason and approver', true],
       ['Vehicle and ELD identification', 'VIN, unit number, ELD serial and firmware version', true],
       ['DVIRs and defect corrections', 'Pre-trip, post-trip and mechanic signatures', true],
-      ['Malfunction and diagnostic events', 'Power, engine sync, timing and data-recording events', false],
+      // WB-177 — checked: the pack is always built in full, and 11.14's `Includes` line says so.
+      ['Malfunction and diagnostic events', 'Power, engine sync, timing and data-recording events', true],
     ];
     for (const [name, description, checked] of rows) {
       const box = screen.getByRole('checkbox', { name });
@@ -282,5 +283,32 @@ describe('W-15 Reports · FMCSA / DOT audit pack', () => {
     await waitFor(() => expect(kpi('Unassigned segments').getByText('—')).toBeInTheDocument());
     expect(await screen.findByText('Could not load transfers')).toBeInTheDocument();
     expect(kpi('Daily logs included').getByText('3')).toBeInTheDocument();
+  });
+});
+
+// WB-178 — `Send to inspector` used to open 11.14 prefilled with an address this card had
+// already rejected: the modal re-validated, refused, and the only result was a wasted click.
+describe('W-15 Send to inspector guards the recipient it prefills', () => {
+  it('is disabled while the typed inspector email is invalid, and enabled again once it is not', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    renderPage(<FmcsaPackPage />, ROUTE);
+
+    await user.click(await screen.findByRole('radio', { name: /Email/ }));
+    const field = screen.getByRole('textbox', { name: /Inspector email address/ });
+    await user.type(field, 'inspector@gmail.com');
+
+    const send = screen.getByRole('button', { name: 'Send to inspector' });
+    await waitFor(() => expect(send).toBeDisabled());
+
+    await user.clear(field);
+    await user.type(field, 'inspector@ga.fmcsa.dot.gov');
+    await waitFor(() => expect(send).toBeEnabled());
+  });
+
+  it('stays enabled on an empty field — 11.14 collects the address itself', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    renderPage(<FmcsaPackPage />, ROUTE);
+    await user.click(await screen.findByRole('radio', { name: /Email/ }));
+    expect(screen.getByRole('button', { name: 'Send to inspector' })).toBeEnabled();
   });
 });

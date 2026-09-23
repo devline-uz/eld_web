@@ -2176,6 +2176,202 @@ oxiri); `AuditLogPage` shundan foydalanadi. Testlar: `src/shared/lib/csv.test.ts
 **Qilindi:** yangi `eld_web/README.md` — `cp .env.example .env.local`, `VITE_AUTH_MODE=dev`,
 demo akkauntlar va ishga tushirish skriptlari hujjatlashtirildi.
 
+
+## WB-140 · Har qanday yuklab olish butun SPA'ni o'ldiradi — ✅ tuzatildi
+**Fayl:** `src/features/reports/reportMeta.ts:214` (`saveFile`).
+**Sabab:** `<a download href="{cross-origin presigned MinIO URL}">` — brauzer cross-origin
+hrefda `download` atributini e'tiborsiz qoldiradi, shuning uchun havola SPA'ni o'sha URL'ga
+**navigatsiya qildi**: oq sahifa, sessiya yo'qoladi, hech qanday xato ko'rinmaydi. Ta'sir
+qilgan joylar: Activity/DVIR/IFTA `Export CSV`, `Download PDF`, `Recently generated` qatoridagi
+yuklab olish, FMCSA `Preview` va `Download a copy`, `Report ready` toast'idagi `Download`.
+**Tuzatish:** `saveFile` endi href'ning origin'ini tekshiradi. Cross-origin bo'lsa —
+`target="_blank"` + `rel="noopener noreferrer"`, `download`siz (fayl `Content-Disposition`
+bo'yicha yuklanadi, joriy hujjat hech qachon unload bo'lmaydi). Blob / same-origin URL avvalgidek
+`download` bilan qoladi (WB-100 revoke kechikishi ham saqlandi). Har bir chaqiruvchida `.catch`
+allaqachon `refusalText` bilan banner yoki error toast ko'rsatadi.
+**Testlar:** `src/features/reports/reportMeta.test.ts`.
+
+## WB-141 · Vehicles bulk `Set inactive` muvaffaqiyatni soxtalashtirardi — ✅ tuzatildi
+**Fayl:** `src/features/vehicles/VehiclesPage.tsx:199,486`.
+**Hozir (edi):** faqat toast ("1 units set inactive") chiqardi — hech qanday so'rov ketmasdi,
+hech narsa o'zgarmasdi; ko'plik ham noto'g'ri edi.
+**Tuzatish:** haqiqiy `PATCH /vehicles/:id { status: 'INACTIVE' }` fan-out (`Promise.allSettled`),
+`qkRoot.vehicles` invalidatsiyasi, tanlov tozalanadi. Hammasi o'tsa — `TOAST_COPY.unitsSetInactive(n)`,
+biror biri yiqilsa — `TOAST_COPY.unitsSetInactiveFailed(failed,total)` error toast'i; muvaffaqiyat
+hech qachon soxtalashtirilmaydi. Bulk status endpoint yo'q — `backend-gaps.md` B-71 ga yozildi.
+**Testlar:** `src/features/vehicles/VehiclesPage.test.tsx`.
+
+## WB-142 · `Add driver` POST xatosi mutlaqo jim edi — ✅ tuzatildi
+**Fayl:** `src/features/drivers/components/AddDriverModal.tsx:151,183`.
+**Hozir (edi):** mutatsiya rad etilsa modal ochiq qolardi — banner ham, toast ham yo'q.
+**Tuzatish:** 422 `details` → `setError` (avvalgidek), 409 → `username` maydon xatosi, qolgan
+har qanday nosozlik → modal ichida `role="alert"` banner (`bg-danger-soft`) **va** error toast.
+**Testlar:** `src/features/drivers/components/modals.test.tsx`.
+
+## WB-143 · Import drivers / Import vehicles: soxta "N valid, 0 errors" va o'lik boshqaruvlar — ✅ tuzatildi
+**Fayllar:** `src/features/drivers/components/ImportDriversModal.tsx:123`,
+`src/features/vehicles/components/ImportVehiclesModal.tsx:143,168-187`.
+**Hozir (edi):** har ikki modal qattiq yozilgan validatsiya sonini ko'rsatardi; select va
+checkbox'lar so'rovga umuman kirmasdi; drag-and-drop matni yolg'on edi (fayl tashlansa brauzer
+boshqa sahifaga o'tardi).
+**Tuzatish:** ikkala endpoint (`POST /drivers/import`, `POST /vehicles/import`) mavjud, shuning
+uchun modallar o'chirilmadi. Soxta sonlar olib tashlandi — Drivers'da haqiqiy "e'tibor talab
+qiladigan qatorlar" to'plami, Vehicles'da faqat "N rows detected" (mijoz tomonida validatsiya
+yo'q ⇒ hech qanday "valid" da'vosi yo'q). Endpoint qabul qilmaydigan opsiyalar (`Duplicate
+handling`, `Default terminal`, `Pair ELD devices`, `Send invitations`/`Send summary email`,
+`Apply default exemptions`) ko'rinadigan sabab bilan `disabled`. Drag-and-drop real qilindi,
+`Download CSV template` lokal `toCsv` bilan ishlaydi.
+**Testlar:** `modals.test.tsx` (drivers va vehicles).
+
+## WB-144 · `Send invitation` mutlaqo jim yiqilardi — ✅ tuzatildi
+**Fayl:** `src/features/settings/components/InviteUserModal.tsx:153-191`.
+**Sabab:** `errors.roleKey` validatsiyada o'rnatilardi, lekin uni ko'rsatadigan element yo'q edi —
+tugma bosilardi, hech narsa bo'lmasdi, sabab ko'rinmasdi.
+**Tuzatish:** rol guruhi `role="radiogroup"` + `aria-invalid` + `aria-describedby`, xato guruh
+ostida `role="alert"` `text-caption text-danger` bo'lib chiqadi. Bundan tashqari 422 `details`
+→ `setError`, xaritalanmagani → modal ichidagi banner + error toast.
+**Testlar:** `src/features/settings/components/InviteUserModal.test.tsx`.
+
+## WB-145 · Footer `Cancel` 11.30 `Discard changes?` ni chetlab o'tardi — ✅ tuzatildi
+**Fayl:** `src/shared/ui/Modal.tsx` (+ 20 ga yaqin modal footer'i), `src/shared/ui/FilterDrawer.tsx`.
+**Hozir (edi):** Esc va X `isDirty` bo'lsa tasdiqni ochardi, `Cancel` esa to'g'ridan-to'g'ri
+`onClose` ni chaqirib, kiritilgan ma'lumotni jimgina yo'q qilardi.
+**Tuzatish:** `Modal`/`Drawer` endi `ModalCloseContext` orqali o'zining 11.30-ga bo'ysunuvchi
+`requestClose` funksiyasini beradi; yangi `useModalClose()` hook va `<ModalCancelButton>`
+shared komponenti qo'shildi. Har bir footer `Cancel` shu komponentdan foydalanadi, shuning
+uchun chiqishning barcha yo'llari (Esc / X / Cancel / overlay) bir xil ishlaydi.
+`FilterDrawer` endi `isDirty` ni qabul qilib `Drawer` ga uzatadi.
+**Testlar:** `src/shared/ui/Modal.test.tsx` + har bir modal to'plamida.
+
+## WB-146 · Ikki marta bosish ikkita yozuv yaratadi — ✅ tuzatildi
+**Fayllar:** `src/features/reports/useReportJobs.ts:43` (`useGuardedMutate`),
+`IftaReportPage.tsx:116`, `DvirReportPage.tsx:85`, `FmcsaPackPage.tsx:100`,
+`components/ScheduleReportModal.tsx:59`, `components/SendLogsModal.tsx:99`,
+`src/features/drivers/components/AddDriverModal.tsx:90,107`,
+`src/features/settings/components/{InviteUser,CreateRole,NewAlertRule,RegisterDevice,CreateApiKey}Modal.tsx`,
+`src/features/trips/components/AssignLoadModal.tsx:45`,
+`src/features/safety/components/AssignCoachingModal.tsx:49`,
+`src/features/support/components/NewTicketModal.tsx:44`,
+`src/features/hos-logs/components/{RequestLogEdit,CertifyLogs,UnassignedDriving}Modal.tsx`.
+**Sabab (ikki qatlam):** (1) submit qo'riqchisi RHF `isSubmitting` da edi — `mutate()` darhol
+qaytadi, shuning uchun POST uchayotganda `isSubmitting` allaqachon `false`; (2) `mutation.isPending`
+ham **keyingi render**da rost bo'ladi, shuning uchun haqiqiy double-click'ning ikkala bosilishi
+tugma hali yoqiqligida tushadi. Natija: ikkita haydovchi, ikkita `POST /reports`.
+**Tuzatish:** qo'riqchi `mutation.isPending` ga ko'chirildi **va** ustiga bir xil tick ichida
+ishlaydigan `useRef` single-flight bayrog'i qo'shildi (`onSettled` da tozalanadi); tugma
+`loading` + `disabled`.
+**Testlar:** `src/features/reports/doubleSubmit.test.tsx` (6 ta tugma, har biri aynan 1 ta
+so'rov), `modals.test.tsx` (drivers/vehicles/settings), `logEditFlow.test.tsx`.
+
+## WB-147 · `Add / edit event` bo'sh kunda boshi berk ko'chaga olib borardi — ✅ tuzatildi (qisman backend bo'shlig'i)
+**Fayl:** `src/features/hos-logs/HosLogsPage.tsx:170,256-260,288-290`.
+**Hozir (edi):** toolbar tugmasi modal'ni `event = null` va bo'sh majburiy vaqtlar bilan ochardi;
+to'g'ri kiritilganda ham `Send edit request` hech qanday so'rov yubormasdi, toast ko'rsatmasdi
+va yopilmasdi.
+**Tuzatish:** tugma endi kunning oxirgi faol duty o'zgarishini (`editableEvent`) uzatadi, shuning
+uchun oqim `POST /logs/:driverId/edit-requests` ga to'liq boradi (`TOAST_COPY.editRequestSent`,
+`qkRoot.logs` invalidatsiyasi, yopilish). Yozuvsiz kunda tugma `disabled` va sababi ko'rinadi:
+"A log edit is proposed against an existing record (49 CFR §395.30). This day has no duty record
+yet." — chunki `CreateEditRequestPayload.originalEventId` majburiy va "yangi event qo'shish"
+endpoint'i yo'q (`backend-gaps.md` B-72). Hech narsa o'ylab topilmadi.
+**Testlar:** `src/features/hos-logs/logEditFlow.test.tsx`.
+
+## WB-148 · `Create work order` yig'ilgan ma'lumotni tashlab, yolg'on da'vo qilardi — ✅ tuzatildi
+**Fayl:** `src/features/dvir/components/CreateWorkOrderModal.tsx:62`.
+**Hozir (edi):** `Estimated labour` va uchta checkbox (out-of-service / notify-driver /
+block-dispatch, hammasi `true` bilan) hech qachon yuborilmasdi — UI haydovchi xabardor
+qilinadi deb da'vo qilardi, aslida hech narsa bo'lmasdi.
+**Tuzatish:** `CreateWorkOrderDto` da bu maydonlar yo'q (B-42, tasdiqlangan), shuning uchun
+boshqaruvlar va da'vo olib tashlandi; haqiqiy `costUsd` (`Estimated parts cost`) qoldi.
+`onClick`siz o'lik `Save as draft` tugmasi ham olib tashlandi (`WorkOrderStatus` da DRAFT yo'q).
+Kerakli backend shakli `backend-gaps.md` B-42 ga yozildi.
+**Testlar:** `src/features/dvir/components/DvirModals.test.tsx`.
+
+## WB-149 · Edit WO / Edit schedule: maydonni tozalash jimgina eski qiymatni saqlardi — ✅ tuzatildi
+**Fayllar:** `src/shared/api/dvir.ts:463,591`, `src/features/dvir/components/EditWorkOrderModal.tsx:53`,
+`EditScheduleModal.tsx:44`.
+**Sabab:** `value || undefined` — `undefined` maydon PATCH body'ga umuman tushmaydi, server esa
+"tegma" deb tushunadi, shuning uchun foydalanuvchining tozalashi jimgina yo'qolardi.
+**Tuzatish:** `UpdateWorkOrderPayload` / `UpdateSchedulePayload` endi aniq shakl bo'lib
+nullable maydonlarni ko'rsatadi; bo'shatilgan maydon `null` yuboradi. Ustunda `null` bo'lolmaydigan
+maydonlar (`title`, `name`, kamida bitta interval) formada majburiy bo'lib qoldi.
+**Testlar:** `src/features/dvir/components/DvirModals.test.tsx`.
+
+## WB-150 · Dirty-tracking hamma joyda yolg'on edi — ✅ tuzatildi
+**Fayllar:** 4 ta DVIR modali (`Resolve defect`, `Create work order`, `Edit work order`,
+`Edit schedule`), 6 ta vehicle/geofence modali, 6 ta filter drawer
+(`drivers/dvir/vehicles/trips/safety/settings`), `AddVehicleModal.tsx:55`,
+`AddDriverModal.tsx:92`, `CreateTripModal.tsx:184,242`.
+**Hozir (edi):** ikki xil yolg'on. (a) DVIR modallari va **hamma** filter drawer'lari `isDirty`
+ni umuman uzatmasdi ⇒ Esc/X/Cancel tahrirni jimgina tashlardi. (b) `Add vehicle`, `Add driver`
+va `Create trip` teginilmagan formada ham "Discard changes?" so'rardi, chunki `defaultValues`
+ro'yxatdan o'tgan barcha maydonlarni qamrab olmagani uchun RHF `isDirty` mount'dayoq rost edi,
+yoki maydonlar RHF'dan tashqarida yashardi.
+**Tuzatish:** (a) har bir DVIR modali va har bir drawer endi haqiqiy `isDirty` uzatadi — plain
+state modallarida modal ochilgandagi qiymat bilan aniq solishtirish, drawer'larda esa "qoralama
+≠ qo'llanilgan filtrlar" (guruhlar ichida tartibga bog'liq emas, shuning uchun belgilab, keyin
+qaytarib olish dirty hisoblanmaydi). (b) `defaultValues` barcha maydonlarni qamraydi va RHF'dan
+tashqaridagi boshqaruvlar ochilishdagi qiymat bilan solishtiriladi. `Apply` hech qachon tasdiq
+so'ramaydi (qo'llash — tashlab yuborish emas).
+**Testlar:** har bir feature'ning `modals.test.tsx` / `*FiltersDrawer.test.tsx` fayllarida
+"teginilmagan — jim yopiladi / tahrirlangan — tasdiq so'raydi / qaytarib olingan — yana toza".
+
+## WB-151 · `Resolve defect` yig'ilgan 4 ta maydonni tashlab yuborardi — ✅ tuzatildi
+**Fayl:** `src/features/dvir/components/ResolveDefectModal.tsx:42`.
+**Hozir (edi):** `Corrected by *`, `Completed on`, `Labour hours`, `Parts cost` va `Work order`
+yig'ilardi va tekshirilardi, lekin mutatsiya faqat `{status, resolutionNote}` yuborardi.
+**Tuzatish:** `DefectResolveDto` (B-68) faqat `status` va `resolutionNote` ni qabul qiladi,
+shuning uchun birinchi to'rtta maydon (va ular bilan birga faqat ularni ko'zgu qiladigan
+"Mechanic signature" / "Driver acknowledgement" kartalari) olib tashlandi — endi so'ralmaydi.
+`Work order` esa **saqlandi va endi haqiqatan yuboriladi**: alohida mavjud endpoint
+`PATCH /defects/:id/work-order` orqali, resolve'dan oldin (link yiqilsa, defekt hal qilinmaydi
+va banner sababni aytadi); `—` tanlansa `workOrderId: null` ketadi.
+Kerakli backend shakli `backend-gaps.md` B-68 ga yozildi.
+**Testlar:** `src/features/dvir/components/DvirModals.test.tsx`.
+
+## WB-153 · `Add driver` noto'g'ri ma'lumot yozardi — ✅ tuzatildi
+**Fayl:** `src/features/drivers/components/AddDriverModal.tsx:18-29,123`.
+**Hozir (edi):** `homeTerminalName` ga IANA zona satri (`America/New_York`) yozilardi, terminal
+xaritasi esa "Raleigh, NC (Eastern)" uchun `America/Chicago` yuborardi — ya'ni haydovchining HOS
+kuni noto'g'ri zonada hisoblanardi.
+**Tuzatish:** yagona `TERMINALS` jadvali `{ name, label, timezone }`; `homeTerminalName` endi
+inson o'qiydigan nom (`Raleigh, NC`), zona esa to'g'ri IANA qiymati (`America/New_York`).
+**Testlar:** `src/features/drivers/components/modals.test.tsx` (payload tekshiriladi).
+
+## WB-154 · Calibrate'ning >5,000 mi qo'shimcha tasdig'i hech qachon ishlamasdi — ✅ tuzatildi
+**Fayl:** `src/features/vehicles/components/CalibrateOdometerModal.tsx:27-36,126`.
+**Sabab:** `deviceOdometerMi` yo'q bo'lsa `delta` `NaN` bo'lardi, `NaN > 5000` esa `false` —
+qo'riqchi **ochiq yiqilardi**, ya'ni eng xavfli holatda tasdiq umuman so'ralmasdi.
+**Tuzatish:** hisoblab bo'lmasa `delta` endi `null`; `needsExtraConfirm = valid && (delta === null
+|| delta > 5000)` — yopiq yiqiladi. Checkbox sababni aytadi ("This unit has no ELD odometer
+reading, so the change cannot be checked against a known value…"), `Save` belgilanmaguncha o'chiq.
+**Testlar:** `src/features/vehicles/components/modals.test.tsx`.
+
+## WB-155 · Delete unit modalini bekor qilish ham `/vehicles` ga olib ketardi — ✅ tuzatildi
+**Fayllar:** `src/features/vehicles/UnitProfilePage.tsx:416`, `components/DeleteUnitModal.tsx:16,24,54`.
+**Hozir (edi):** `onClose` ichida `navigate('/vehicles')` bor edi, shuning uchun `Cancel` ham
+foydalanuvchini unit profilidan chiqarib yuborardi.
+**Tuzatish:** modal yangi ixtiyoriy `onDeleted` propini oldi va uni faqat `onSuccess` da chaqiradi;
+`onClose` endi faqat yopadi.
+**Testlar:** `src/features/vehicles/UnitProfilePage.test.tsx`.
+
+## WB-156 · Developer sign-in ikkala maydon bo'sh holda ham kirardi — ✅ tuzatildi
+**Fayl:** `src/features/auth/DeveloperSignIn.tsx:35-43,74-142`.
+**Hozir (edi):** bo'sh email va bo'sh parol bilan haqiqiy `POST /auth/login` yuborilardi.
+**Tuzatish:** submit'dan oldin tekshiruv — bo'sh maydon `VALIDATION_MESSAGES.required`
+("This field is required.") ni `role="alert"` bilan ko'rsatadi va so'rov yuborilmaydi;
+`aria-invalid` + `aria-describedby` ulandi, yozilganda yoki demo akkaunt tanlanganda tozalanadi.
+**Testlar:** `src/features/auth/SignInPage.test.tsx`.
+
+## WB-157 · `Create trip` 422 xatosini yutib yuborardi — ✅ tuzatildi
+**Fayl:** `src/features/trips/components/CreateTripModal.tsx:126-140,318-338,388-392`.
+**Sabab:** `SERVER_FIELD_MAP` `notes` ni RHF maydoniga xaritalardi, lekin uning xatosini
+ko'rsatadigan input yo'q edi — `setError('notes')` hech qayerda ko'rinmasdi.
+**Tuzatish:** xaritalanadigan maydonlar `setError` ga, xaritalanmagani esa modal ichidagi
+`role="alert"` bannerga (`"Notes: <message>"`) tushadi; oddiy nosozlik banner + toast.
+Shu bilan birga `Distance` endi majburiy emas va ko'rinadigan izoh oladi (WB-134 ga qarang).
+**Testlar:** `src/features/trips/components/CreateTripModal.test.tsx`.
+
 ## Ochiq
 
 ## WB-134 · Distance va Rate backendga yuborilmaydi — ⏳ ochiq (backend kerak)
@@ -2183,12 +2379,17 @@ demo akkauntlar va ishga tushirish skriptlari hujjatlashtirildi.
 **Hozir:** ikkala maydon tekshiriladi, lekin payloadda ular uchun maydon yo'q — qiymat yo'qoladi.
 **Kutilgan:** backendda maydon qo'shilsin, so'ng payloadga ulansin.
 **Izoh:** avval backendda `CreateTripPayload` uchun maydon kerak — shungacha frontendda qilinadigan ish yo'q.
+**2026-09-23 yangilanishi:** endi hech bo'lmaganda **jim emas**. `Distance` majburiy bo'lmay qoldi
+va ko'rinadigan izoh oldi ("Not saved yet — the create-trip API has no distance field."), `Rate`
+ham shunday; `Customer` va `Trailer` inputlari "Not available yet" bilan `disabled`. Kerakli
+backend shakli `backend-gaps.md` B-73 ga yozildi.
 
-## WB-137 · ResolveDefectModal: vaqt 12/24 soatlik ko'rinishi brauzer tiliga bog'liq — ⏳ ochiq (past)
+## WB-137 · ResolveDefectModal: vaqt 12/24 soatlik ko'rinishi brauzer tiliga bog'liq — ✅ tuzatildi
 **Fayl:** `src/features/dvir/components/ResolveDefectModal.tsx:138` (native `datetime-local`).
 **Hozir:** brauzer lokaliga qarab AM/PM yoki 24 soat — ilovaning qolgan qismi bilan nomuvofiq.
 **Kutilgan:** yagona format (past ustuvorlik).
 **Izoh:** past ustuvorlik, hozircha tuzatilmadi.
+**Tuzatish:** ✅ fixed — ResolveDefectModal's 'reported …' stamp now uses formatCarrier in carrier.timezone (Eastern fallback without carrierSettings) plus zone abbreviation; datetime-local input was already removed by WB-151. Test: DvirModals.test.tsx 'WB-137 ·'.
 
 ## WB-138 · Dashboard `HOS violations & alerts` qator menyusi hech narsa qilmaydi — ✅ tuzatildi
 **Fayl:** `src/features/dashboard/DashboardPage.tsx` (rowActions).
@@ -2200,3 +2401,301 @@ demo akkauntlar va ishga tushirish skriptlari hujjatlashtirildi.
 **Hozir (edi):** barcha "Send message"/"Message" tugmalari oddiy `/messages` ga o'tardi — foydalanuvchi haydovchini qo'lda qidirib topishi kerak edi; W-16 URL'dan haydovchini qabul qilmasdi.
 **Qilindi:** umumiy `messagesHref(driverId)` → `/messages?driverId=<id>` (`/hos-logs?driverId=` bilan bir xil nom). W-16 ro'yxat yuklangach: shu haydovchi bilan DIRECT suhbat bo'lsa — o'sha tanlanadi; bo'lmasa — `+ New` → `Message a driver` bilan bir xil `POST /conversations { type: 'DIRECT', driverIds: [id] }` chaqiriladi (bir marta — `useRef` guard) va yangi suhbat tanlanadi (`useCreateConversation` endi serverdan qaytgan qatorni ro'yxat keshiga darhol qo'shadi). Noma'lum `driverId` (lookup'da yo'q va `GET /drivers/:id` xato) → `Driver not found.` toast, hech narsa yaratilmaydi. `messaging` FULL bo'lmasa yaratilmaydi (warning toast). Ishlov berilgach `driverId` URL'dan `replace` bilan olib tashlanadi. RBAC (`messaging`) o'zgarmadi. Testlar: `MessagesPage.test.tsx` (mavjud suhbat / bir martalik yaratish / noma'lum id), `messagesHref.test.ts`, Dashboard/Drivers/Driver profile/Live Fleet testlari `/messages?driverId=drv_1` ni tekshiradi.
 **Izoh:** backend `POST /conversations` DIRECT uchun mavjud suhbatni qaytaradimi (idempotentlik) — lokal backend kodi yo'q, tekshirib bo'lmadi; frontend avval mavjud suhbatni ro'yxatdan qidiradi, shuning uchun takroriy yaratish faqat ro'yxatda ko'rinmagan suhbat uchun mumkin.
+
+## WB-158 · `Notify the driver in the app` ikkala assign modalida o'lik edi — ✅ tuzatildi (B-74)
+**Fayl:** `src/features/vehicles/components/AssignDriverModal.tsx:38-41`, `src/features/trips/components/AssignLoadModal.tsx:33-40`.
+**Sabab:** `notify` faqat lokal state edi; `POST /vehicles/:id/assign-driver` va `POST /trips/:id/assign` payload'ida bunday maydon yo'q — belgi standart holatda yoqilgan bo'lib, hech qachon yuborilmagan (foydalanuvchiga xabar berilgandek ko'rinardi).
+**Tuzatish:** ikkala checkbox `disabled`, sabab ekranda ko'rinadi (`NOTIFY_REASON`), `isDirty` dan olib tashlandi; bo'shliq `backend-gaps.md` B-74 sifatida yozildi. Testlar: `modals.test.tsx`, `TripsPage.test.tsx`.
+
+## WB-159 · DVIR drawer: `Export PDF` o'lik, `Print` butun ilovani chop etardi, foto plitkalari hech narsa qilmasdi — ✅ tuzatildi (B-75/B-41)
+**Fayl:** `src/features/dvir/components/DvirDrawer.tsx:83-140,170-200`, yangi `src/features/dvir/lib/printDvir.ts`.
+**Tuzatish:** `Print` endi DVIR'ni alohida yashirin iframe hujjatiga chizib chop etadi (ilova chrome'isiz); `Export PDF` `disabled` + ko'rinadigan sabab (B-75); foto plitkalari `<button>` emas, statik "No preview" kataklari + sabab (B-41, ilgari noto'g'ri B-37 deb yozilgan edi). Testlar: `DvirModals.test.tsx`, `printDvir.test.ts`.
+
+## WB-160 · Vehicles: ODOMETER ustuni kalibrlashdan keyin o'zgarmasdi — ✅ tuzatildi
+**Fayl:** `src/features/vehicles/VehiclesPage.tsx:290`.
+**Sabab:** ustun `row.original.odometerMi` ni chizardi; tz §4.3 bo'yicha ko'rsatiladigan qiymat `totalVehicleMiles()` (ECU + offset), shuning uchun muvaffaqiyatli `Calibrate odometer` jadvalda ko'rinmasdi. Test: `VehiclesPage.test.tsx`.
+
+## WB-161 · O'lik tugmalar: bulk `Assign driver`, `New work order` (unit profile), histories `Export` — ✅ tuzatildi
+**Fayl:** `src/features/vehicles/VehiclesPage.tsx` (bulk bar), `src/features/vehicles/UnitProfilePage.tsx` (`New work order` → `/dvir?newWorkOrder=<vehicleId>`), `src/features/dvir/DvirPage.tsx` (shu parametrni o'qiydi), `src/features/vehicles/UnitHistoriesPage.tsx` (`Export` → ko'rinib turgan segmentlar CSV).
+**Izoh:** bulk `Assign driver` bitta unit tanlanganda 11.4 modalini ochadi, ko'p tanlovda `disabled` + sabab (endpoint bitta unitga bitta haydovchi biriktiradi).
+
+## WB-162 · Ikki marta bosish ikkita unit yaratardi (`AddVehicleModal`) — ✅ tuzatildi
+**Fayl:** `src/features/vehicles/components/AddVehicleModal.tsx:87-112`.
+**Sabab:** guard RHF `isSubmitting` ga tayangan, `mutation.mutate()` esa sinxron qaytadi — bayroq so'rov tugashidan oldin tozalanardi. Endi `mutation.isPending` + bir tick'lik `useRef` (WB-146 bilan bir xil naqsh).
+
+## WB-163 · Vehicles/DVIR panel boshqaruvlari noto'g'ri ishlardi — ✅ tuzatildi
+**Fayl:** `src/features/vehicles/VehiclesPage.tsx`, `src/features/dvir/DvirPage.tsx`.
+**Tuzatish:** Export/Import ikonkalari almashtirildi (Export → `Download`); Export loading/qayta bosish guard'i; bulk `Export` endi faqat tanlangan unitlarni (CSV) chiqaradi; `Open HOS logs` / `View logs` haydovchisiz unitda `disabled` + sabab (`?driverId=` bo'sh parametri yo'q); bo'sh natija `Clear search` `q` ni URL'dan o'chiradi; DVIR `Export` faol tab ma'lumotini chiqaradi (ilgari doim open defects), `Filters` faqat DVIRs tabida yoqiladi, `DVIRs N` hisobi jadval ko'rsatayotgan 48 soatlik to'plamga moslandi, `Open defects` (Defects tab) `currentDefectsPage` ishlatadi.
+
+## WB-164 · `+ Add an intermediate stop` hech narsa qilmasdi — ✅ tuzatildi
+**Fayl:** `src/features/trips/components/CreateTripModal.tsx:174-178,300-320,437-495`.
+**Tuzatish:** oraliq to'xtashlar ro'yxati (joy + vaqt, `Remove`), `CreateTripPayload.stops` ichiga PICKUP va DELIVERY orasida `CHECKPOINT` sifatida to'g'ri `sequence` bilan yuboriladi; bo'sh nomli qatorlar yuborilmaydi; `isDirty` ga qo'shildi. Footer'dagi bo'sh `<label>` olib tashlandi, `Save as draft` sababi endi ekranda.
+
+## Stage 2 (Drivers · HOS logs) — WB-180…WB-200
+*Numbers start at WB-180 to stay clear of the WB-158…WB-164 block another stage-2 agent was
+appending in parallel.*
+
+## WB-180 · Driver deep links carried a param the target screen never reads — ✅ fixed
+**Files:** `src/features/drivers/lib/links.ts`, `DriversPage.tsx` (row menu `Assign trip`), `DriverProfilePage.tsx` (`Assign trip`, Trips tab, DVIRs tab).
+**Was:** `/trips?driverId=…` — W-11 filters on `fDriver` (`features/trips/lib/filters.ts`), so the board came up unfiltered but looked filtered; `/dvir?driverId=…` is read by nothing at all.
+**Now:** `tripsHrefForDriver()` writes `?fDriver=<id>`; the DVIR link is plain `/dvir` with a sentence saying it cannot be narrowed to one driver yet (gap B-80).
+
+## WB-181 · `Export Drivers` failed silently — ✅ fixed
+**File:** `src/features/drivers/DriversPage.tsx` (`handleExport`). try/catch + `loading` + error toast, same shape as the Vehicles export.
+
+## WB-182 · `Export 8-day RODS` / bulk `Export logs` fired a success toast and made no request — ✅ fixed
+**File:** `src/features/drivers/DriversPage.tsx`. Both queue the real `GET /reports/fmcsa-pack` (today − 7 … today, `driverId`), `reportsTransfer` READ; the bulk action fans out with `allSettled` and reports a partial failure honestly.
+
+## WB-183 · `Deactivate driver` had no handler (list row menu and profile) — ✅ fixed
+**Files:** `DriversPage.tsx`, `DriverProfilePage.tsx`. `ConfirmDelete` first (§5.9, says what survives for audits), then `PATCH /drivers/:id { status: 'INACTIVE' }`.
+
+## WB-184 · Drivers bulk bar: four buttons with no `onClick` — ✅ fixed
+**File:** `src/features/drivers/DriversPage.tsx` + `components/AssignUnitModal.tsx`, `components/BulkMessageModal.tsx`.
+`Assign unit` → single-row only (a unit carries one driver), `POST /vehicles/:id/assign-driver`; `Send message` → one driver opens their conversation, several go through `POST /messages/broadcast` (`messaging` FULL); `Export logs` → the WB-182 fan-out; `Deactivate` → the WB-183 confirm + fan-out.
+
+## WB-185 · The profile leaked an internal gap id to the end user — ✅ fixed
+**File:** `DriverProfilePage.tsx` (HOS card). "GET /drivers/:id/hos is not implemented yet (backend gap B-2)" → the ordinary error copy plus Retry (B-2 shipped).
+
+## WB-186 · Violations card `View all ›` had no handler — ✅ fixed
+**File:** `DriverProfilePage.tsx`. Opens `/hos-logs?driverId=…`, where per-driver violations are actually rendered.
+
+## WB-187 · Add driver offered ten US states — ✅ fixed (`AddDriverModal.tsx`)
+
+## WB-188 · Driver profile `Edit` had no handler — ✅ fixed
+**File:** `DriverProfilePage.tsx` + new `components/EditDriverModal.tsx`. Identity, contact, licence, terminal and the HOS allowances through `PATCH /drivers/:id`; username and password are out (no reset endpoint, B-81).
+
+## WB-189 · `Send invitation now` was never in the request body — 🚫 disabled with its reason (gap B-82)
+
+## WB-190 · Show/hide password was a 16×16 target — ✅ fixed (28px, §5.6)
+
+## WB-191 · A blank exemption reason was only a toast — ✅ fixed: inline error + `aria-invalid`
+
+## WB-192 · Import drivers: "Drop your CSV here" handled no drop — ✅ fixed (`onDragOver`/`onDrop`)
+
+## WB-193 · Removing the chosen CSV left `input.value`, so the same file could not be re-picked — ✅ fixed
+
+## WB-194 · Driver filter chips: the `×` had no accessible name — ✅ fixed (`aria-label="Remove filter …"`)
+
+## WB-195 · HOS header read `Unit ##101` — ✅ fixed
+**File:** `src/features/hos-logs/HosLogsPage.tsx` (`unitLabel`). Unit numbers arrive both as `101` and `#101`; the prefix is rendered once.
+
+## WB-196 · Log events `View full record` was a dead `#event-…` anchor — ✅ fixed
+**Files:** `components/LogEventsCard.tsx`, new `components/LogRecordModal.tsx`. Opens the §395.8 record read-only (sequence, record status/origin, editor, edit reason, supersede chain), all times in the home terminal zone.
+
+## WB-197 · 11.13 `Ask each driver to confirm in the app` was a dead checkbox — 🚫 disabled with its reason (gap B-83)
+
+## WB-198 · 11.12 Certify logs dropped toggled days silently on Esc — ✅ fixed (`isDirty` → 11.30 confirm)
+
+## WB-199 · 11.11 YM/PC chips only explained themselves when another rule also applied — ✅ fixed (permanent caption)
+
+## WB-200 · 11.11 `Notify the driver immediately` did nothing when unchecked — 🚫 disabled, checked, with the fixed behaviour stated (gap B-39)
+
+---
+
+# Stage 2 — shared UI, Safety, Messages, Reports, Notifications, app shell (`WB-165`…`WB-178`)
+
+## WB-165 · Dirty-close bypass: a typed broadcast / a typed resolution reason was dropped silently — ✅ fixed
+**Files:** `src/features/messages/components/NewConversationModal.tsx`, `src/shared/violations/ResolveViolationModal.tsx`.
+Both footers called `onClick={onClose}` instead of `<ModalCancelButton>`; the New-message modal passed no
+`isDirty` at all. Both route through `useModalClose()` now and raise the 11.30 confirm. The New-message
+driver rows also stopped nesting a real `<input>` inside their `<button>`.
+
+## WB-166 · IFTA / DVIR report generation confirmed nothing on screen — ✅ fixed
+**Files:** `src/features/reports/useReportJobs.ts` (new `useTrackedReport`), `IftaReportPage.tsx`, `DvirReportPage.tsx`.
+`generate.isPending` cleared when the `POST` resolved and the only completion signal was `report.ready`,
+which the mock socket never emits and which has no resume/seq in production. The queued job is now polled
+with the named `reportStatus` policy and announced through the same `useAnnounceReport` the FMCSA pack
+uses (de-duplicated per report id), so the toast fires from whichever signal lands first; a FAILED job
+renders its error in the screen's `ActionAlert` instead of disappearing.
+
+## WB-167 · Coaching modal showed the raw enum (`HARSH_BRAKING · —`) — ✅ fixed
+**Files:** `src/features/safety/lib/filters.ts` (`safetyEventLabel`), `components/AssignCoachingModal.tsx`, `SafetyPage.tsx`.
+One label map now serves the table, the export and the modal.
+
+## WB-168 · Safety scorecard `View profile ›` was a dead `<span>` — ✅ fixed
+**File:** `src/features/safety/SafetyPage.tsx`. A real button that navigates to `/drivers/:id`, absent
+(not disabled) without `drivers` READ.
+
+## WB-169 · Safety `Export` dumped the whole raw feed as JSON, ignoring tab/search/filters — ✅ fixed
+**File:** `src/features/safety/SafetyPage.tsx`. Writes RFC 4180 CSV (`shared/lib/csv` `toCsv`) of exactly
+the rows the current tab lists, with per-tab columns and file name.
+
+## WB-170 · Fleet safety score always read "Good standing" in success green (mock fleet scores 68) — ✅ fixed
+**File:** `src/features/safety/SafetyPage.tsx`. Verdict derived on the same 90/70 bands as the SCORE
+badge; the sentence under it also agrees its verb ("1 driver **is** below…").
+
+## WB-171 · Messages showed "No conversations yet" when a search matched nothing — ✅ fixed
+**File:** `src/features/messages/MessagesPage.tsx`. `searchEmptyState` + `Clear search`, and a distinct
+empty state for the Unread / Groups segments.
+
+## WB-172 · Messages `Call` had no handler — ✅ fixed
+**File:** `src/features/messages/MessagesPage.tsx`. Dials `tel:` from the driver's number; disabled with
+"No phone number on file for this driver" when there is none. No calling endpoint was invented.
+
+## WB-173 · The sidebar had no collapse control although §3 specifies a 64px state — ✅ fixed
+**File:** `src/app/layouts/Sidebar.tsx`. Toggle with `aria-expanded`/`aria-controls`, `w-sidebar-collapsed`,
+labels kept in the accessibility tree, choice remembered in `localStorage` (`obk.sidebarCollapsed`).
+
+## WB-174 · Sidebar organisation card hardcoded `DOT #1234567 · 69 units` — ✅ fixed
+**File:** `src/app/layouts/Sidebar.tsx`. Reads `GET /carrier` and the same `limit: 1` unit total the
+Dashboard tiles use; a part that did not load is left out rather than guessed.
+
+## WB-175 · `/404` was still the `PagePlaceholder` scaffold with no way back — ✅ fixed
+**File:** `src/features/auth/NotFoundPage.tsx`. Shared empty state naming the missing path, with
+`Go back` and `Open dashboard`.
+
+## WB-176 · Command-palette scope claimed 69 units while `GET /vehicles` answered the real fixture — ✅ fixed
+**Files:** `src/mocks/handlers/shellGaps.ts`, `src/shared/api/search.test.tsx`, `src/app/layouts/Topbar.overlays.test.tsx`.
+Scope counts and both assertions derive from `VEHICLES`/`DRIVERS`.
+
+## WB-177 · FMCSA pack contents contradicted itself on "Malfunction and diagnostic events" — ✅ fixed
+**File:** `src/features/reports/FmcsaPackPage.tsx`. The backend always builds the pack in full and 11.14's
+`Includes` line says so; the row is checked.
+
+## WB-178 · FMCSA `Send to inspector` opened 11.14 prefilled with an address the page had already rejected — ✅ fixed
+**File:** `src/features/reports/FmcsaPackPage.tsx`. Disabled while `recipientError` is set; an empty field
+is still allowed because 11.14 collects the address itself.
+
+---
+
+# Stage 2 — Settings / Support (`WB-201`…`WB-234`)
+
+Approach: WD-079. Gap ids: B-84…B-91 (`backend-gaps.md`, "Stage 2 — Settings/Support"). Id history: WD-080.
+
+## WB-201 · Company profile: the text fields validated only on Save — ✅ fixed (validate on blur)
+**File:** `src/features/settings/CompanyProfilePage.tsx`. Name, DOT, MC, EIN, phone, compliance email, street, city and ZIP each run `validateField` on blur; Save still re-checks everything.
+
+## WB-202 · ELD identifier always said "exactly 4 characters", even when the fault was lowercase — ✅ fixed
+**File:** `CompanyProfilePage.tsx` (`validateEldIdentifier`). The message names the real fault (length/character set, or casing), and the check runs on blur like the other fields instead of on every keystroke.
+
+## WB-203 · Users had no Dispatchers tab — ✅ fixed
+**File:** `UsersPage.tsx`. Dispatchers were reachable only through `All` or the Filters drawer; the tab is added with its count.
+
+## WB-204 · Six search inputs had a placeholder and no accessible name — ✅ fixed
+**Files:** `UsersPage.tsx`, `RolesPage.tsx`, `DevicesPage.tsx`, `AlertRulesPage.tsx`, `AuditLogPage.tsx`, `support/SupportPage.tsx` — each has an `aria-label` matching its placeholder.
+
+## WB-205 · Users row menu `Edit user` / `Change role` had no handler — ✅ fixed
+**Files:** `UsersPage.tsx`, new `components/EditUserModal.tsx` (profile and role-only modes) → `PATCH /users/:id`. Email, job title, phone and home terminal are absent with the reason on screen, since the DTO takes none of them (gap B-84).
+
+## WB-206 · `Revoke invitation` (row menu and pending-invitations row) had no handler — ✅ fixed
+**File:** `UsersPage.tsx` (`handleRevokeInvitation`). Confirm first, then `DELETE /users/:id`, with a success or error toast.
+
+## WB-207 · Pending invitations `Resend all` had no handler — ✅ fixed
+**File:** `UsersPage.tsx`. There is no bulk endpoint, so it sends one resend per invitation with `allSettled` and reports a partial failure as an error toast with the failed/total counts, never as a blanket success. A second click is ignored while it runs.
+
+## WB-208 · Invite modal `Terminal access` / `Message` were collected and dropped — 🚫 disabled with their reason (gap B-85)
+**File:** `components/InviteUserModal.tsx`. Both were read only for the dirty check and never reached `POST /users`. Now they are disabled, with `SETTINGS_REASON.inviteTerminal` / `inviteMessage` shown.
+
+## WB-209 · Roles `Reset to defaults` had no handler — ✅ fixed
+**File:** `RolesPage.tsx`. Confirm, then `PATCH /roles/:id` puts the three editable built-in roles (FM, Dispatcher, Viewer) back to the shipped matrix. Admin is untouched.
+
+## WB-210 · Roles tab `Edit` on a custom role had no handler — ✅ fixed
+**Files:** `RolesPage.tsx`, `components/CreateRoleModal.tsx` (edit mode, prefilled, `PATCH /roles/:id`).
+
+## WB-211 · Devices row menu `Pair to unit` had no handler and no dialog — ✅ fixed
+**File:** new `components/PairDeviceModal.tsx` → `usePairDevice`.
+
+## WB-212 · Devices row menu `Update firmware` had no handler — ✅ fixed
+**File:** new `components/UpdateFirmwareModal.tsx` → `useUpdateFirmware`, which was defined but never used. The target version is required and format-checked.
+
+## WB-213 · Register device `Open scanner` painted a fake success banner — 🚫 disabled with its reason
+**File:** `components/RegisterDeviceModal.tsx`. There was no camera or QR scan and no auto-fill. The web panel has no scanner, so this is a product limit, not a backend gap. The button is disabled with the reason, and the serial is typed.
+
+## WB-214 · Register device `Update firmware automatically` / `Send diagnostics` were collected and dropped — 🚫 disabled with their reason (gap B-88)
+**File:** `components/RegisterDeviceModal.tsx`. `POST /devices` takes only serial, model and firmware.
+
+## WB-215 · Devices: silent `Unpair`, unguarded `Export`, and a made-up "L113 available" chip — ✅ fixed
+**File:** `DevicesPage.tsx`. `Unpair` now shows a success or error toast. `Export` has an error toast and ignores double clicks while running. The hardcoded firmware chip was not read from any data and is removed.
+
+## WB-216 · Alert rules header `Email` / `Webhook` channel switches were dead `<span>`s — 🚫 disabled with their reason (gap B-87)
+**File:** `AlertRulesPage.tsx`. They looked exactly like the working per-rule switch. Now they are real switches, disabled, with the reason shown. There is no organisation-level channel resource.
+
+## WB-217 · Alert rules row menu `Edit rule` / `Duplicate` had no handler — ✅ fixed
+**Files:** `AlertRulesPage.tsx`, `components/NewAlertRuleModal.tsx` (edit → `PATCH /alert-rules/:id`, duplicate → prefilled `POST`).
+
+## WB-218 · Alert rules `Mute for 24 h` had no handler — 🚫 disabled with its reason (gap B-86)
+**File:** `AlertRulesPage.tsx`. It is not faked with `enabled:false`, which would mute the rule for ever.
+
+## WB-219 · New alert rule: `+ Add a condition` was dead and `Repeat` was never sent — ✅ fixed
+**File:** `components/NewAlertRuleModal.tsx`. The condition block is a real row builder (add/remove). `Repeat` is controlled and maps onto the DTO's `throttle`. An existing custom throttle stays under `custom` and is not overwritten.
+
+## WB-220 · Editing an alert rule re-sent a regenerated `key` — ✅ fixed
+**File:** `components/NewAlertRuleModal.tsx`. The key is derived from the name on create only. An edit no longer tries to rename the rule's stable key.
+
+## WB-221 · Editing an alert rule reset its quiet hours to the default window — ✅ fixed
+**File:** `components/NewAlertRuleModal.tsx`. The rule's own `quietHours` is kept when the toggle stays on.
+
+## WB-222 · An alert rule could be saved with no channel, or with a 0-minute threshold — ✅ fixed
+**File:** `components/NewAlertRuleModal.tsx`. Inline errors: "Choose at least one delivery channel." and "Enter a number of minutes greater than 0 for every condition."
+
+## WB-223 · Integrations `Browse marketplace` had no handler — 🚫 disabled with its reason (gap B-89)
+**File:** `IntegrationsPage.tsx`.
+
+## WB-224 · Integrations `Manage` disconnected the integration instantly — ✅ fixed (renamed `Disconnect`, confirm first)
+**File:** `IntegrationsPage.tsx`. The label promised a settings panel. It is now `Disconnect`, goes through a confirm dialog, and toasts the result.
+
+## WB-225 · API keys row menu `Edit scopes` had no handler — ✅ fixed
+**File:** new `components/EditApiKeyScopesModal.tsx` → `useUpdateApiKeyScopes`, which existed but was never wired.
+
+## WB-226 · Integrations: `Revoke` with no confirm or feedback, a raw provider id in the Connect toast, double-click Connect — ✅ fixed
+**File:** `IntegrationsPage.tsx`. `Revoke` now asks first and toasts the result. The Connect toast names the product ("WEX fuel cards"), not `wex`. `Connect` ignores clicks while the request is in flight.
+
+## WB-227 · Audit log filters narrowed only the loaded pages, with nothing on screen saying so — ✅ fixed (notice; gap B-64 stays)
+**File:** `AuditLogPage.tsx`. While older pages exist, a notice says the action, date and search filters apply only to the N entries loaded so far, and points to `Load more`.
+
+## WB-228 · Support `Start chat` had no handler — 🚫 disabled with its reason (gap B-90)
+**File:** `support/SupportPage.tsx`.
+
+## WB-229 · Support `Export` had no handler — ✅ fixed
+**File:** `support/SupportPage.tsx` (`handleExport`). There is no export endpoint, so it builds a CSV of the tickets on screen (current tab and search).
+
+## WB-230 · New ticket: `Include device diagnostics` / `Include last 24h of ELD events` were fake — 🚫 disabled with their reason (gap B-91)
+**File:** `support/components/NewTicketModal.tsx`. Both were ticked by default and only added "[… attached]" text to the body. Nothing was attached. They are now disabled with `SUPPORT_REASON.diagnostics` shown, and the body carries no marker. `buttonsAndInputs.md` had listed them as ✅.
+
+## WB-231 · Support had no `All` tab and a hardcoded "42 min average response" — ✅ fixed
+**File:** `support/SupportPage.tsx`. `All` is added and is the default tab. The response-time figure was not measured anywhere and is removed.
+
+## WB-232 · Integrations cards show hardcoded status lines ("69 devices syncing", "1,842 receipts this quarter") — ✅ fixed (stage 4)
+**File:** `IntegrationsPage.tsx` (static `CATALOG`). No endpoint returns these figures. The owner must choose: drop the lines, replace them with neutral descriptions, or wait for real per-integration stats. Left unchanged.
+**Fix (stage 4, owner accepted — WD-087):** `IntegrationsPage.tsx:39-59, 197`. The `meta` strings are removed from `CATALOG`. The status line now comes from the `GET /integrations` record only: `Last sync · <relative>` (`lastSyncAt`, a real field on the integration row), `Connected · no sync yet`, `Not connected`, or — for entries with no connector — the reason their `Connect` is disabled. Strings: `INTEGRATION_STATUS` in `settings/lib/copy.ts`. Test: `IntegrationsPage.test.tsx` ("derives each card status line…").
+
+## WB-233 · Roles footer "Last changed by … · today" is made up — ✅ fixed (stage 4)
+**File:** `RolesPage.tsx`. The roles payload has no last-changed actor or timestamp. "today" is invented, and the name is only the carrier's. Left unchanged until the owner chooses to remove it or to have the backend expose it (the Access log tab has the real history).
+**Fix (stage 4, owner accepted — WD-087):** `RolesPage.tsx:284-286`. `RoleRow` has no `updatedAt`/`updatedBy`, so the footer text is removed; the legend stays. Test: `RolesPage.test.tsx` ("shows no fabricated…").
+
+## WB-234 · `CreateRoleModal` "Can send data transfers" shares its permission key with FMCSA export — ✅ fixed (stage 4)
+**File:** `components/CreateRoleModal.tsx`. Both checkboxes write `reportsTransfer`, so ticking one ticks the other. §11.19 shows two rights, but the 22-key matrix has one. The owner must choose between a new permission key (backend) and merging the two checkboxes.
+**Fix (stage 4, owner accepted — WD-087):** `CreateRoleModal.tsx:104-106, 218-221`. One checkbox, "Can export FMCSA / DOT pack and send data transfers" (`ROLE_COPY.transferCheckbox`), drives `reportsTransfer`; the second state and checkbox are gone (in practice the transfers box could only ever force the key to FULL, never clear it). The role-matrix row for the same key reads "Export FMCSA / DOT pack & send data transfers" (`permissionMatrix.ts:48-49`), matching the RBAC key description (Send to inspector, Generate pack, transfers). A separate key is gap B-95. Tests: `CreateRoleModal.test.tsx` ("shows a single FMCSA export / data transfers checkbox…"), `RolesPage.test.tsx`.
+
+## WB-235 · `usePagedQuery` returns a new `items` array on every render — ⏳ open (medium)
+**File:** `src/shared/api/paging.ts` (`usePagedQuery`: `items: data?.items ?? []` in server mode, `filtered.slice(...)` in window mode).
+**Now:** `items` is never referentially stable, so any consumer that pushes it into state from a `useEffect` re-renders forever. That is what hung the DVIR Schedules tab in stage 3. The page was fixed locally (`DvirPage.tsx` `setScheduleRows` / `setWorkOrderRows` keep `prev` when the rows are unchanged, see WD-086), but the hook still hands back a fresh array each render.
+**Expected:** `items` memoised (`useMemo` over `filtered`/`page`/`limit`, and a module-level empty array for the loading case), so callers do not need their own equality guard.
+**Note:** not changed in stage 3 because every `usePagedQuery` screen would need re-testing; the DvirPage guard stays in place either way.
+
+## WB-236 · Driver profile `Documents` tab was disabled with no reason on screen — 🚫 disabled with its reason (gap B-94)
+**File:** `src/features/drivers/DriverProfilePage.tsx:209-229`, `drivers/lib/copy.ts` (`DRIVER_DOCUMENTS_REASON`). The tab was always `disabled` and muted, and the only explanation was in the code. The API stores no driver documents (B-94, the driver side of tz.md §20 B-16). The tab stays disabled and now has a "Soon" badge (as on Unit profile), a `title`, and a visible caption next to the tab strip that is also its `aria-describedby`. Test: `DriverProfilePage.test.tsx`.
+
+## WB-237 · AssignLoadModal: Enter in the driver search did nothing — ✅ fixed
+**File:** `src/features/trips/components/AssignLoadModal.tsx:73-82`. Enter now selects the first driver in the live-filtered list and moves focus to its radio. It never submits the modal, and it does nothing when no driver matches. Test: `AssignLoadModal.test.tsx`.
+
+## WB-243 · Unit histories `Play` / `Pause` only flipped its own label — 🚫 disabled with its reason (gap B-4)
+**File:** `src/features/vehicles/UnitHistoriesPage.tsx:190-207`, `vehicles/lib/copy.ts` (`REPLAY_UNAVAILABLE_REASON`). There is no histories track on the real API (B-4), so the toggle drove nothing. It is now a disabled `Play` whose reason is its `title`, its `aria-describedby` and a visible caption under the Route replay header; the dead `playing` state was removed. Test: `UnitHistoriesPage.test.tsx`.
+
+## WB-244 · Notification row mark-read failed silently on the live API — ✅ fixed (gap B-56 stays open)
+**File:** `src/shared/api/notifications.ts:92-128`, `src/features/notifications/NotificationsPanel.tsx:106-129`, `notifications/lib/copy.ts`, `notifications/lib/markReadNotice.ts`. `POST /notifications/:id/read` is MSW-only (B-56). The row still opens its target first. The mutation is not optimistic, so a failure leaves `readAt: null` and the row keeps its unread marker (nothing to roll back). Any failure now shows one non-blocking warning toast per session ("Marking a single notification as read isn't available yet" · "Use Mark all read instead."); a 404/405 is remembered for the session and the route is not called again. The notice runs from the hook-level `onError`, so it still fires after the panel closed on navigation. Tests: `NotificationsPanel.test.tsx` (new), `shared/api/notifications.test.tsx`.
+
+## WB-245 · New ticket: VIEWER could fill and submit a ticket that always 403s — ✅ permission-based (gap B-12)
+**File:** `src/features/support/components/NewTicketModal.tsx:32-35,52,84-104`, `support/lib/copy.ts` (`SUPPORT_REASON.ticketForbidden`). `POST /support/tickets` needs `support:FULL`. Without it `Submit ticket` is disabled (`usePermission().can('support', 'FULL')`) with the reason shown in the modal and as `title`/`aria-describedby`. `+ New ticket` stays for every role, because tz.md §21.4 decides so (help is not a permission matter; B-12 asks the backend to accept READ). The inline 403 banner stays as a fallback. Test: `SupportPage.test.tsx`.
+
+## WB-246 · Feedback: VIEWER could submit feedback that always 403s — ✅ permission-based (gap B-12)
+**File:** `src/features/support/FeedbackPage.tsx:49-52,61,159-176`, `support/lib/copy.ts` (`SUPPORT_REASON.feedbackForbidden`). `POST /feedback` has the same `support:FULL` gate. Without it `Submit feedback` is disabled with the reason on screen (caption + `title` + `aria-describedby`); the inline 403 stays as a fallback. Test: `FeedbackPage.test.tsx`.
+
+## WB-238 · Audit log: "use Load more" was unreachable when a filter matched nothing loaded — ✅ fixed
+**Found:** stage 4, while fixing the B-64 rows. **Severity:** medium.
+**File:** `src/features/settings/AuditLogPage.tsx:364-373`. `Load more` lived inside the table branch, so when action/date/search matched none of the loaded entries the empty state replaced it, while the notice above still said "use Load more to include older entries". It now renders under the empty state too whenever older pages exist. Test: `AuditLogPage.test.tsx` ("stops at the automatic-search cap…").
+
+## WB-239 · Audit log search / action / date range only searched the pages already clicked open — ✅ fixed within a cap (gap B-64 stays open)
+**Found:** stage 4 (⚠️ rows, B-64). **Severity:** medium.
+**File:** `src/features/settings/AuditLogPage.tsx:33-42, 91-137, 290-311`; copy `AUDIT_SEARCH_COPY` in `settings/lib/copy.ts`. `GET /audit-log` has no `action`/date/search params (B-64), so those filters ran over the loaded cursor pages only. Now, while a search, an action or a non-default date range is active, older pages are fetched automatically (the cursor chain is walked through the query cache — no `setState` in an effect) up to 1,000 entries (20 × 50). A `role="status"` line shows "Searching older entries… N entries searched so far." with a `Stop`. Because entries arrive newest first, fetching ends as soon as the loaded pages reach past the start of the date range ("Searched every entry in the selected date range (N loaded)."). On the cap or after `Stop` a notice says older entries are not covered and `Load more` stays. Clearing the search keeps pages already fetched. Tests: `AuditLogPage.test.tsx` (4 new).
+

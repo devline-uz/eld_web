@@ -182,7 +182,7 @@ export default function SignInPage() {
         <Button
           variant="secondary"
           size="lg"
-          className="mt-5 h-12 w-full"
+          className="mt-5 w-full"
           loading={busy === 'google'}
           iconLeft={<GoogleLogo />}
           onClick={() => void onGoogle()}

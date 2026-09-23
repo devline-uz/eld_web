@@ -20,9 +20,11 @@ import {
   useCarrier,
   type RoleRow,
 } from '@/shared/api/settingsAdmin';
-import type { PermissionKey, PermissionLevel } from '@/shared/auth/permissions';
+import type { PermissionKey, PermissionLevel, Role } from '@/shared/auth/permissions';
+import { ROLE_PERMISSIONS, isRole } from '@/shared/auth/permissions';
 import { PERMISSION_MATRIX_GROUPS } from './components/permissionMatrix';
 import { CreateRoleModal } from './components/CreateRoleModal';
+import { SETTINGS_TOAST } from './lib/copy';
 
 type Tab = 'matrix' | 'roles' | 'access-log';
 
@@ -59,7 +61,10 @@ export default function RolesPage() {
   const [tab, setTab] = useState<Tab>('matrix');
   const [search, setSearch] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<RoleRow | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<RoleRow | null>(null);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   const roles = rolesQuery.rows;
   const roleByKey = useMemo(() => Object.fromEntries(roles.map((r) => [r.key, r])), [roles]);
@@ -85,6 +90,33 @@ export default function RolesPage() {
         onError: (error) => toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }),
       },
     );
+  }
+
+  /**
+   * WB-209 — `Reset to defaults` puts the three editable built-in columns back to the shipped
+   * permission maps in `shared/auth/permissions.ts` (the same table the client enforces with).
+   * There is no bulk endpoint, so it fans out one `PATCH /roles/:id` per role; ADMIN is never
+   * touched (§11.19) and custom roles are left alone. A partial failure is reported as one.
+   */
+  async function resetToDefaults() {
+    if (resetting) return;
+    const targets = roles.filter((r) => r.key !== 'ADMIN' && isRole(r.key));
+    if (targets.length === 0) {
+      setConfirmReset(false);
+      return;
+    }
+    setResetting(true);
+    const results = await Promise.allSettled(
+      targets.map((r) => updateRole.mutateAsync({ id: r.id, dto: { permissions: ROLE_PERMISSIONS[r.key as Role] } })),
+    );
+    setResetting(false);
+    setConfirmReset(false);
+    const failed = results.filter((r) => r.status === 'rejected').length;
+    if (failed === 0) {
+      toast({ kind: 'success', ...SETTINGS_TOAST.permissionsReset });
+      return;
+    }
+    toast({ kind: 'error', ...SETTINGS_TOAST.permissionsResetFailed(failed, targets.length) });
   }
 
   const filteredGroups = useMemo(() => {
@@ -156,15 +188,25 @@ export default function RolesPage() {
             <div className="flex h-input items-center gap-2 rounded-md border border-border bg-bg-surface px-3">
               <Search size={16} strokeWidth={1.75} className="text-text-muted" />
               <input
+                type="search"
+                aria-label="Search permission"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search permission…"
                 className="w-56 bg-transparent text-body outline-none"
               />
             </div>
-            <Button variant="secondary" iconLeft={<RefreshCw size={16} strokeWidth={1.75} />}>
-              Reset to defaults
-            </Button>
+            {canFull && (
+              <Button
+                variant="secondary"
+                iconLeft={<RefreshCw size={16} strokeWidth={1.75} />}
+                loading={resetting}
+                disabled={resetting}
+                onClick={() => setConfirmReset(true)}
+              >
+                Reset to defaults
+              </Button>
+            )}
           </div>
         )}
       </div>
@@ -239,11 +281,9 @@ export default function RolesPage() {
                 <Minus size={14} className="text-text-muted" /> No access
               </span>
             </span>
-            <span>
-              Last changed by {carrierQuery.data?.name ?? 'an administrator'}
-              {' · '}
-              {formatCarrier(new Date().toISOString(), carrierQuery.data?.timezone ?? 'UTC', 'shortDate')}
-            </span>
+            {/* WB-233 — a "Last changed by <carrier name> · <today>" line used to sit here, built
+                from `new Date()` and the carrier name. The role DTO has no updatedAt/updatedBy,
+                so it is removed; the Access log tab carries the real change history. */}
           </div>
         </Card>
       )}
@@ -263,7 +303,7 @@ export default function RolesPage() {
                 ) : (
                   canFull && (
                     <div className="flex gap-2">
-                      <Button variant="secondary" size="sm">
+                      <Button variant="secondary" size="sm" onClick={() => setEditTarget(role)}>
                         Edit
                       </Button>
                       <Button variant="danger-outline" size="sm" onClick={() => setDeleteTarget(role)}>
@@ -316,6 +356,16 @@ export default function RolesPage() {
       )}
 
       {createOpen && <CreateRoleModal templates={roles} onClose={() => setCreateOpen(false)} />}
+      {editTarget && <CreateRoleModal templates={roles} role={editTarget} onClose={() => setEditTarget(null)} />}
+      <ConfirmDelete
+        open={confirmReset}
+        onClose={() => setConfirmReset(false)}
+        onConfirm={() => void resetToDefaults()}
+        title="Reset permissions to defaults?"
+        description="Fleet manager, Dispatcher and Viewer go back to the permissions OneBook ships with. Admin and any custom roles are left unchanged. Users keep their role — only what that role can do changes."
+        confirmLabel="Reset to defaults"
+        loading={resetting}
+      />
       <ConfirmDelete
         open={Boolean(deleteTarget)}
         onClose={() => setDeleteTarget(null)}

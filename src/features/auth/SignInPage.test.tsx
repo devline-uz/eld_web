@@ -181,6 +181,31 @@ describe('W-00 · the dev block (VITE_AUTH_MODE=dev)', () => {
     );
   });
 
+  it('submits on Enter from the password field, once even when Enter is pressed twice (stage 3)', async () => {
+    const user = userEvent.setup();
+    const ctx = mockAuth({
+      signInWithPassword: vi.fn(() => new Promise(() => undefined)),
+    });
+    renderSignIn();
+    await user.click(screen.getByRole('button', { name: 'Developer sign-in' }));
+    await user.type(screen.getByLabelText('Email'), 'sarah.chen@universal-logistics.example');
+    await user.type(screen.getByLabelText('Password'), 'Onebook2026{Enter}{Enter}');
+
+    await waitFor(() => expect(ctx.signInWithPassword).toHaveBeenCalledTimes(1));
+    expect(ctx.signInWithPassword).toHaveBeenCalledWith(
+      'sarah.chen@universal-logistics.example',
+      'Onebook2026',
+    );
+    expect(screen.getByRole('button', { name: /Sign in/ })).toBeDisabled();
+  });
+
+  it('renders Continue with Google with a single height class (stage 3)', () => {
+    renderSignIn();
+    const google = screen.getByRole('button', { name: 'Continue with Google' });
+    expect(google.className).toContain('h-btn-lg');
+    expect(google.className).not.toContain('h-12');
+  });
+
   it('shows `Incorrect email or password.` for a 401', async () => {
     const user = userEvent.setup();
     mockAuth({
@@ -394,5 +419,52 @@ describe('W-00 · back to the deep link after sign-in (WB-081)', () => {
     renderGuarded({ pathname: '/sign-in', state: { from: '/vehicles/v_9' } });
     await user.click(screen.getByRole('button', { name: /Continue with Google/ }));
     await waitFor(() => expect(window.sessionStorage.getItem('obk.returnTo')).toBeNull());
+  });
+});
+
+describe('W-00 developer sign-in — empty credentials', () => {
+  it('blocks submit and shows both field errors when the form is empty', async () => {
+    const user = userEvent.setup();
+    const ctx = mockAuth();
+    renderSignIn();
+    await user.click(screen.getByRole('button', { name: 'Developer sign-in' }));
+
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    expect(ctx.signInWithPassword).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Email')).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByLabelText('Email')).toHaveAttribute('aria-describedby', 'developer-sign-in-email-error');
+    expect(screen.getByLabelText('Password')).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByLabelText('Password')).toHaveAttribute('aria-describedby', 'developer-sign-in-password-error');
+    expect(screen.getAllByText('This field is required.')).toHaveLength(2);
+  });
+
+  it('blocks submit on a blank password alone', async () => {
+    const user = userEvent.setup();
+    const ctx = mockAuth();
+    renderSignIn();
+    await user.click(screen.getByRole('button', { name: 'Developer sign-in' }));
+    await user.type(screen.getByLabelText('Email'), 'sarah.chen@universal-logistics.example');
+
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    expect(ctx.signInWithPassword).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Password')).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getAllByText('This field is required.')).toHaveLength(1);
+  });
+
+  it('clears the error as soon as the field is typed into, then signs in', async () => {
+    const user = userEvent.setup();
+    const ctx = mockAuth();
+    renderSignIn();
+    await user.click(screen.getByRole('button', { name: 'Developer sign-in' }));
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+    expect(screen.getAllByText('This field is required.')).toHaveLength(2);
+
+    await user.click(screen.getByRole('button', { name: 'admin' }));
+    expect(screen.queryByText('This field is required.')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+    await waitFor(() => expect(ctx.signInWithPassword).toHaveBeenCalled());
   });
 });

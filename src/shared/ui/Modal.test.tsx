@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { Modal } from './Modal';
+import { Modal, ModalCancelButton } from './Modal';
 
 function Fixture({ isDirty, onClose }: { isDirty: boolean; onClose: () => void }) {
   return (
@@ -66,5 +66,30 @@ describe('<Modal> focus trap and dirty close (§5.9, 11.30)', () => {
     await user.click(screen.getByRole('button', { name: 'Close' }));
     expect(await screen.findByText('Discard changes?')).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  // WB-145 — a footer `Cancel` used to call `onClose` directly and walked straight past 11.30.
+  it('footer Cancel on a dirty form opens the confirm, and closes a clean one at once', async () => {
+    const user = userEvent.setup();
+    const dirtyClose = vi.fn();
+    const { unmount } = render(
+      <Modal open title="Add vehicle" isDirty onClose={dirtyClose} footer={<ModalCancelButton />}>
+        <input aria-label="Unit number" />
+      </Modal>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(await screen.findByText('Discard changes?')).toBeInTheDocument();
+    expect(dirtyClose).not.toHaveBeenCalled();
+    unmount();
+
+    const cleanClose = vi.fn();
+    render(
+      <Modal open title="Add vehicle" isDirty={false} onClose={cleanClose} footer={<ModalCancelButton />}>
+        <input aria-label="Unit number" />
+      </Modal>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(cleanClose).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText('Discard changes?')).not.toBeInTheDocument();
   });
 });

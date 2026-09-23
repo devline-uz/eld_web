@@ -20,6 +20,7 @@ import { ApiError } from '@/shared/api/errors';
 import {
   NOTIFICATIONS_EXPANDED_SIZE,
   NOTIFICATIONS_PAGE_SIZE,
+  isSingleMarkReadAvailable,
   notificationTarget,
   useMarkAllNotificationsRead,
   useMarkNotificationRead,
@@ -34,6 +35,9 @@ import { Button } from '@/shared/ui/Button';
 import { cn } from '@/shared/ui/cn';
 import { EMPTY_STATE_COPY } from '@/shared/ui/copy';
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
+import { useToast } from '@/shared/ui/Toast';
+import { MARK_ONE_UNAVAILABLE_DESCRIPTION, MARK_ONE_UNAVAILABLE_TITLE } from './lib/copy';
+import { claimMarkReadNotice } from './lib/markReadNotice';
 
 export interface NotificationsPanelProps {
   onClose: () => void;
@@ -99,7 +103,16 @@ export default function NotificationsPanel({ onClose, isPathAllowed }: Notificat
   const list = useNotifications(params);
   const unread = useUnreadNotificationCount();
   const markAll = useMarkAllNotificationsRead();
-  const markOne = useMarkNotificationRead();
+  const { toast } = useToast();
+  // WB-244 / B-56 — a failed single mark-read is never silent, but the notice is once per
+  // session (non-blocking warning toast), not once per click.
+  const markOne = useMarkNotificationRead({
+    onFailure: () => {
+      if (claimMarkReadNotice()) {
+        toast({ kind: 'warning', title: MARK_ONE_UNAVAILABLE_TITLE, description: MARK_ONE_UNAVAILABLE_DESCRIPTION });
+      }
+    },
+  });
 
   const items = list.data?.items ?? [];
   const counts = list.data?.counts;
@@ -110,7 +123,9 @@ export default function NotificationsPanel({ onClose, isPathAllowed }: Notificat
   }
 
   function open(item: NotificationItem) {
-    if (!item.readAt) markOne.mutate(item.id);
+    // The row's main job (open the linked record) never waits on mark-read. After a 404/405 the
+    // session stops calling the missing B-56 route at all.
+    if (!item.readAt && isSingleMarkReadAvailable()) markOne.mutate(item.id);
     const to = notificationTarget(item);
     if (to && isPathAllowed(to)) go(to);
   }

@@ -15,7 +15,7 @@ describe('UserFiltersDrawer — 11.23', () => {
     renderDrawer(EMPTY_USER_FILTERS);
     expect(screen.getByText('Role')).toBeInTheDocument();
     expect(screen.getByText('Status')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Apply 0 filters/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeInTheDocument();
   });
 
   it('toggles every group and applies the accumulated draft', async () => {
@@ -41,7 +41,7 @@ describe('UserFiltersDrawer — 11.23', () => {
 
     expect(screen.getByRole('button', { name: /Apply 2 filters/ })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Reset all' }));
-    expect(screen.getByRole('button', { name: /Apply 0 filters/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeInTheDocument();
   });
 });
 
@@ -71,5 +71,46 @@ describe('UserFilterChips — 11.23', () => {
 
     await user.click(screen.getByText('Clear all'));
     expect(onClearAll).toHaveBeenCalled();
+  });
+});
+
+describe('UserFiltersDrawer — 11.30 dirty close', () => {
+  it('closes without a confirm while the draft matches the applied filters', async () => {
+    const user = userEvent.setup();
+    const { onClose } = renderDrawer(EMPTY_USER_FILTERS);
+
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+
+    expect(screen.queryByText('Discard changes?')).not.toBeInTheDocument();
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('confirms before dropping an edited draft, and keeps the edit on `Keep editing`', async () => {
+    const user = userEvent.setup();
+    const { onClose } = renderDrawer(EMPTY_USER_FILTERS);
+    await user.click(screen.getByLabelText('Admin'));
+
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+
+    expect(await screen.findByText('Discard changes?')).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Keep editing' }));
+    expect(screen.getByLabelText('Admin')).toBeChecked();
+
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    await user.click(await screen.findByRole('button', { name: 'Discard' }));
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('stops confirming once the draft is toggled back to the applied filters', async () => {
+    const user = userEvent.setup();
+    const { onClose } = renderDrawer(EMPTY_USER_FILTERS);
+    await user.click(screen.getByLabelText('Admin'));
+    await user.click(screen.getByLabelText('Admin'));
+
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+
+    expect(screen.queryByText('Discard changes?')).not.toBeInTheDocument();
+    expect(onClose).toHaveBeenCalled();
   });
 });

@@ -1,9 +1,40 @@
 import * as Dialog from '@radix-ui/react-dialog';
-import { useState } from 'react';
+import { createContext, useContext, useState } from 'react';
 import type { ReactNode } from 'react';
 import { X } from 'lucide-react';
 import { Button } from './Button';
 import { cn } from './cn';
+
+/**
+ * WB-145 — the footer's `Cancel` used to call `onClose` directly, so it walked past the 11.30
+ * discard confirm that Esc and X honour. Everything rendered inside a Modal/Drawer (body and
+ * footer alike) closes through this instead, so every route out of a dirty overlay confirms.
+ */
+const ModalCloseContext = createContext<(() => void) | null>(null);
+
+/**
+ * The 11.30-aware close for the surrounding Modal/Drawer; falls back to a no-op outside one.
+ * Only valid inside the modal's own subtree — the `footer` node qualifies, the component that
+ * *renders* the Modal does not. Footers normally use `<ModalCancelButton>` instead.
+ */
+export function useModalClose(): () => void {
+  return useContext(ModalCloseContext) ?? (() => undefined);
+}
+
+export interface ModalCancelButtonProps {
+  children?: ReactNode;
+  disabled?: boolean;
+}
+
+/** The footer's `Cancel` — closes through the 11.30 confirm instead of straight past it. */
+export function ModalCancelButton({ children = 'Cancel', disabled }: ModalCancelButtonProps) {
+  const close = useModalClose();
+  return (
+    <Button variant="secondary" size="lg" onClick={close} disabled={disabled}>
+      {children}
+    </Button>
+  );
+}
 
 // owner: web-design-system — §5.9. Focus trap, Esc closes, focus returns to the trigger
 // (all from Radix Dialog); dirty forms route through 11.30 Discard changes first.
@@ -95,8 +126,10 @@ export function Modal({
                 </button>
               </Dialog.Close>
             </div>
-            <div className="flex-1 overflow-y-auto p-card">{children}</div>
-            {footer && <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border p-card">{footer}</div>}
+            <ModalCloseContext.Provider value={requestClose}>
+              <div className="flex-1 overflow-y-auto p-card">{children}</div>
+              {footer && <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border p-card">{footer}</div>}
+            </ModalCloseContext.Provider>
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
@@ -166,8 +199,10 @@ export function Drawer({ open, onClose, title, subtitle, isDirty = false, footer
                 </button>
               </Dialog.Close>
             </div>
-            <div className="flex-1 overflow-y-auto p-card">{children}</div>
-            {footer && <div className="flex shrink-0 items-center gap-2 border-t border-border p-card">{footer}</div>}
+            <ModalCloseContext.Provider value={requestClose}>
+              <div className="flex-1 overflow-y-auto p-card">{children}</div>
+              {footer && <div className="flex shrink-0 items-center gap-2 border-t border-border p-card">{footer}</div>}
+            </ModalCloseContext.Provider>
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>

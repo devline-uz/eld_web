@@ -210,13 +210,35 @@ export function refusalText(error: unknown): string {
   return error instanceof Error && error.message ? error.message : 'Something went wrong.';
 }
 
-/** Saves a Blob or opens a presigned URL without ever putting the URL in the DOM or a log. */
+/** True when the href would be served by this origin — `download` is only honoured there. */
+function isSameOrigin(href: string): boolean {
+  try {
+    return new URL(href, window.location.href).origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Saves a Blob or opens a presigned URL without ever putting the URL in the DOM or a log.
+ *
+ * WB-140 — `download` is ignored on a cross-origin href (the presigned MinIO URL lives on
+ * :19000), so the anchor navigated the SPA away and the whole session was lost. A cross-origin
+ * href is therefore opened in a new context (`target="_blank"`, `rel="noopener noreferrer"`):
+ * the browser downloads it from `Content-Disposition` and this document is never unloaded.
+ */
 export function saveFile(source: Blob | string, fileName: string): void {
   const href = typeof source === 'string' ? source : URL.createObjectURL(source);
+  const crossOrigin = typeof source === 'string' && !isSameOrigin(href);
   const link = document.createElement('a');
   link.href = href;
-  link.download = fileName;
-  link.rel = 'noopener';
+  if (crossOrigin) {
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+  } else {
+    link.download = fileName;
+    link.rel = 'noopener';
+  }
   document.body.appendChild(link);
   link.click();
   link.remove();

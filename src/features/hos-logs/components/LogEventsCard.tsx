@@ -4,7 +4,7 @@
 // (4) records as well. §395.8 forbids hiding the audit trail — but it must not be the default
 // view either, or the inspector reads the same duty change three times. Default: recordStatus = 1.
 // The checkbox reveals the rest: superseded struck through and muted, proposed on `--info-soft`.
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronRight } from 'lucide-react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { formatInTimeZone } from 'date-fns-tz';
@@ -20,6 +20,7 @@ import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
 import { EMPTY, formatEngineHours, formatOdometer } from '@/shared/format';
 import { RECORD_ORIGIN, RECORD_STATUS, type LogEventView } from '@/shared/api/hosLogs';
+import { LogRecordModal } from './LogRecordModal';
 
 const DUTY_BADGE: Record<string, DutyStatus> = {
   OFF: 'OFF_DUTY',
@@ -73,6 +74,8 @@ export function LogEventsCard({
   const { toast } = useToast();
   const { can } = usePermission();
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  // WB-196 — `View full record` used to be a dead `#event-…` anchor; it opens the record instead.
+  const [recordEvent, setRecordEvent] = useState<LogEventView | null>(null);
 
   const visible = useMemo(
     () => (showAllRecords ? events : events.filter((event) => event.recordStatus === RECORD_STATUS.active)),
@@ -193,12 +196,12 @@ export function LogEventsCard({
               can('hosEdit', 'FULL')
                 ? (row) => (
                     <RowMenu
-                      event={row}
                       onRequestEdit={() => onRequestEdit(row)}
                       onCopyId={() => {
                         void navigator.clipboard?.writeText(row.id);
                         toast({ kind: 'success', title: 'Event ID copied' });
                       }}
+                      onViewRecord={() => setRecordEvent(row)}
                     />
                   )
                 : undefined
@@ -212,6 +215,9 @@ export function LogEventsCard({
           />
         )}
       </div>
+      {recordEvent && (
+        <LogRecordModal event={recordEvent} timezone={timezone} onClose={() => setRecordEvent(null)} />
+      )}
     </Card>
   );
 }
@@ -220,22 +226,22 @@ const menuItemClass =
   'flex w-full cursor-pointer items-center rounded-md px-2 py-1.5 text-body text-text outline-none data-[highlighted]:bg-bg-subtle';
 
 function RowMenu({
-  event,
   onRequestEdit,
   onCopyId,
+  onViewRecord,
 }: {
-  event: LogEventView;
   onRequestEdit: () => void;
   onCopyId: () => void;
+  onViewRecord: () => void;
 }) {
   return (
     <Can perm="hosEdit" level="FULL">
       <button type="button" className={menuItemClass} onClick={onRequestEdit}>
         Request an edit
       </button>
-      <a className={menuItemClass} href={`#event-${event.id}`}>
+      <button type="button" className={menuItemClass} onClick={onViewRecord}>
         View full record
-      </a>
+      </button>
       <button type="button" className={menuItemClass} onClick={onCopyId}>
         Copy event ID
       </button>

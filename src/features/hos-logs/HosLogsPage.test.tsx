@@ -198,6 +198,34 @@ describe('W-08 · header and timezone', () => {
     expect(await screen.findByText('14:26:58')).toBeInTheDocument();
     expect(screen.queryByText('18:26:58')).not.toBeInTheDocument();
   });
+
+  it('Export PDF prints the log region only, not the whole app (stage 3)', async () => {
+    const user = userEvent.setup();
+    let target: Element | null = null;
+    let printing = false;
+    const print = vi.spyOn(window, 'print').mockImplementation(() => {
+      target = document.querySelector('[data-print-target]');
+      printing = document.body.hasAttribute('data-printing');
+    });
+    try {
+      renderPage();
+      await screen.findByText('14:26:58');
+      await user.click(screen.getByRole('button', { name: 'Export PDF' }));
+
+      expect(print).toHaveBeenCalledTimes(1);
+      expect(printing).toBe(true);
+      expect(target).not.toBeNull();
+      expect(target!.textContent).toContain('Hours of Service · Driver log');
+      // The toolbar is marked to drop out of the printout.
+      expect(screen.getByRole('button', { name: 'Export PDF' }).closest('[data-print-hide]')).not.toBeNull();
+
+      window.dispatchEvent(new Event('afterprint'));
+      expect(document.querySelector('[data-print-target]')).toBeNull();
+      expect(document.body).not.toHaveAttribute('data-printing');
+    } finally {
+      print.mockRestore();
+    }
+  });
 });
 
 describe('W-08 · role gating (§10 W-08 role table)', () => {
@@ -362,6 +390,16 @@ describe('11.12 · Certify logs', () => {
     expect(within(dialog).getByLabelText(`Certify ${DATE}`)).toBeChecked();
     await userEvent.click(within(dialog).getByRole('button', { name: 'Certify 1 selected day' }));
     expect(body).toEqual({ dates: [DATE] });
+  });
+
+  it('WB-198 · a toggled day selection is not dropped silently on Esc', async () => {
+    renderPage();
+    await userEvent.click(await screen.findByRole('button', { name: 'Certify all' }));
+    const dialog = await screen.findByRole('dialog');
+    await userEvent.click(within(dialog).getByLabelText(`Certify ${DATE}`));
+    await userEvent.keyboard('{Escape}');
+
+    expect(await screen.findByText('Discard changes?')).toBeInTheDocument();
   });
 });
 
@@ -1156,5 +1194,68 @@ describe('audited fixes WB-061 … WB-073', () => {
       await screen.findByText('Unassigned segments unavailable · Retry', undefined, { timeout: 10_000 }),
     ).toBeInTheDocument();
     expect(screen.queryByText('No unassigned segments')).not.toBeInTheDocument();
+  });
+});
+
+describe('W-08 · stage-2 dead controls', () => {
+  it('WB-195 · a unit number that already carries a # is not printed as `Unit ##101`', async () => {
+    server.use(
+      http.get(url(endpoints.vehicles.list), () =>
+        ok({ items: [{ id: 'veh-1', unitNumber: '#101' }], page: 1, limit: 200, total: 1, totalPages: 1 }),
+      ),
+    );
+    renderPage();
+
+    expect(
+      await screen.findByText('John Smith · Unit #101 · Home terminal: Columbus, OH (Eastern)', undefined, {
+        timeout: 5_000,
+      }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Unit ##/)).not.toBeInTheDocument();
+  });
+
+  it('WB-196 · `View full record` opens the §395.8 record instead of a dead #anchor', async () => {
+    server.use(http.get(url(endpoints.unidentified.list), () => ok({ items: [], total: 0, page: 1 })));
+    renderPage();
+    // Same settling rule as the 11.11 test above: a late response remounts the row-action cell.
+    await screen.findByText('No unassigned segments');
+    await userEvent.click(await screen.findByRole('button', { name: 'Row actions' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'View full record' }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('Full record')).toBeInTheDocument();
+    expect(within(dialog).getByText('Record origin')).toBeInTheDocument();
+    expect(within(dialog).getByText('Event ID')).toBeInTheDocument();
+  });
+
+  it('WB-197 · 11.13 `Ask each driver to confirm` is disabled with its reason (gap B-83)', async () => {
+    server.use(http.get(url(endpoints.unidentified.list), () => ok({ items: [UNASSIGNED], total: 1, page: 1 })));
+    renderPage();
+    await userEvent.click(await screen.findByText('1 unassigned segment'));
+    const dialog = await screen.findByRole('dialog');
+
+    const checkbox = within(dialog).getByLabelText('Ask each driver to confirm in the app');
+    expect(checkbox).toBeDisabled();
+    expect(checkbox).not.toBeChecked();
+    expect(
+      within(dialog).getByText('Not available yet — assigning a segment does not ask the driver to confirm it.'),
+    ).toBeInTheDocument();
+  });
+
+  it('WB-200 · 11.11 `Notify the driver immediately` states that it is always on', async () => {
+    server.use(http.get(url(endpoints.unidentified.list), () => ok({ items: [], total: 0, page: 1 })));
+    renderPage();
+    await screen.findByText('No unassigned segments');
+    await userEvent.click(await screen.findByRole('button', { name: 'Row actions' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Request an edit' }));
+
+    const dialog = await screen.findByRole('dialog');
+    const notify = within(dialog).getByLabelText('Notify the driver immediately');
+    expect(notify).toBeDisabled();
+    expect(notify).toBeChecked();
+    expect(within(dialog).getByText(/Always on — the driver must accept the proposal/)).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(/Yard move and Personal conveyance cannot be proposed/),
+    ).toBeInTheDocument();
   });
 });

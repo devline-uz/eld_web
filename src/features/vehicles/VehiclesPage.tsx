@@ -3,14 +3,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import type { ColumnDef } from '@tanstack/react-table';
-import { Search, Plus, Download, Filter, Upload } from 'lucide-react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { Search, Plus, Download, Filter, Upload, X } from 'lucide-react';
+import { liveFleetHref } from '@/shared/lib/liveFleetHref';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
 import { useIsOffline, OFFLINE_TOOLTIP } from '@/shared/realtime/RealtimeProvider';
 import { useDynamicSubtitle } from '@/app/layouts/Topbar';
 import { useLiveFleet } from '@/shared/api/liveFleet';
-import { useVehiclesList, useVehicleCounts, joinVehicles, type VehicleTableRow } from '@/shared/api/vehicles';
+import { useVehiclesList, useVehicleCounts, joinVehicles, totalVehicleMiles, type VehicleTableRow } from '@/shared/api/vehicles';
 import { useVehiclesLookup } from '@/shared/api/lookups';
 import { client } from '@/shared/api/client';
 import { endpoints } from '@/shared/api/endpoints';
@@ -21,7 +23,10 @@ import { DataTable } from '@/shared/ui/DataTable';
 import { Pagination } from '@/shared/ui/Pagination';
 import { Card } from '@/shared/ui/Card';
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
-import { EMPTY_STATE_COPY, searchEmptyState } from '@/shared/ui/copy';
+import { EMPTY_STATE_COPY, TOAST_COPY, searchEmptyState } from '@/shared/ui/copy';
+import { qkRoot } from '@/shared/api/queryKeys';
+import { toCsv } from '@/shared/lib/csv';
+import { ApiError } from '@/shared/api/errors';
 import { useToast } from '@/shared/ui/Toast';
 import { formatOdometer } from '@/shared/format/numbers';
 import { orUnassigned, orNotAssigned } from '@/shared/format/empty';
@@ -31,6 +36,7 @@ import { AssignDriverModal } from './components/AssignDriverModal';
 import { CalibrateOdometerModal } from './components/CalibrateOdometerModal';
 import { ImportVehiclesModal } from './components/ImportVehiclesModal';
 import { VehicleFiltersDrawer, VehicleFilterChips } from './components/VehicleFiltersDrawer';
+import { MULTI_ASSIGN_REASON, NO_DRIVER_LOGS_REASON } from './lib/copy';
 import { parseVehicleFilters, writeVehicleFilters, matchesVehicleFilters, EMPTY_VEHICLE_FILTERS, countActiveVehicleFilters } from './lib/filters';
 
 type Segment = 'ALL' | 'ACTIVE' | 'INACTIVE' | 'UNASSIGNED';
@@ -55,6 +61,7 @@ function positiveIntParam(raw: string | null, fallback: number): number {
 
 export default function VehiclesPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { can } = usePermission();
   const isOffline = useIsOffline();
   const { toast } = useToast();
@@ -171,15 +178,93 @@ export default function VehiclesPage() {
     setParams(writeVehicleFilters(params, next), { replace: true });
   }
 
-  async function handleExport() {
-    const data = await client.get(endpoints.vehicles.export);
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  /** The selected units, resolved from the rows this screen has actually loaded. */
+  const selectedRows = useMemo(() => {
+    const byId = new Map<string, VehicleTableRow>();
+    for (const row of [...allVehicles.fleetRows, ...allVehicles.rows]) byId.set(row.id, row);
+    return selection.map((id) => byId.get(id)).filter((r): r is VehicleTableRow => Boolean(r));
+  }, [selection, allVehicles.fleetRows, allVehicles.rows]);
+
+  function saveBlob(blob: Blob, fileName: string) {
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = 'vehicles-export.json';
+    link.download = fileName;
     link.click();
     URL.revokeObjectURL(link.href);
   }
+
+  const [exporting, setExporting] = useState(false);
+
+  async function handleExport() {
+    // A failing `GET /vehicles/export` used to reject into an unhandled promise: the button did
+    // nothing and said nothing. Every failure is now visible, and a second click while the first
+    // request is still open is ignored instead of downloading the file twice.
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const data = await client.get(endpoints.vehicles.export);
+      saveBlob(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), 'vehicles-export.json');
+    } catch (error) {
+      toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  /** Bulk-bar `Export` used to call `handleExport()`, which dumps the whole fleet — the selection
+   * was ignored. `GET /vehicles/export` has no id filter (its rows carry no id at all), so the
+   * selected units are serialized from the rows already on screen instead of asking the server
+   * for a slice it cannot answer. */
+  function handleExportSelection() {
+    const rows = selectedRows;
+    const csv = toCsv([
+      ['unitNumber', 'status', 'driver', 'make', 'model', 'year', 'vin', 'eldSerial', 'odometerMi'],
+      ...rows.map((r) => [
+        r.unitNumber,
+        r.status,
+        r.driver ? `${r.driver.firstName} ${r.driver.lastName}` : '',
+        r.make,
+        r.model,
+        r.year,
+        r.vin,
+        r.eldSerial ?? '',
+        totalVehicleMiles(r),
+      ]),
+    ]);
+    saveBlob(new Blob([csv], { type: 'text/csv' }), 'vehicles-selected.csv');
+  }
+
+  // WB — the bulk `Set inactive` used to fire the success toast without touching the network, so
+  // the selected units stayed ACTIVE. There is no bulk-status endpoint (`backend-gaps.md`): the
+  // real write is `PATCH /vehicles/:id { status }`, fanned out one request per selected unit.
+  // `allSettled`, not `all`, so one rejection cannot hide the units that did change; the failed
+  // count is reported instead of being swallowed.
+  const setInactiveMutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const results = await Promise.allSettled(
+        ids.map((id) => client.patch(endpoints.vehicles.update(id), { status: 'INACTIVE' })),
+      );
+      const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+      return { total: ids.length, succeeded: ids.length - rejected.length, firstError: rejected[0]?.reason as unknown };
+    },
+    onSuccess: ({ total, succeeded, firstError }) => {
+      void queryClient.invalidateQueries({ queryKey: qkRoot.vehicles });
+      if (succeeded > 0) setSelection([]);
+      if (succeeded === total) {
+        toast({ kind: 'success', ...TOAST_COPY.unitsSetInactive(succeeded) });
+        return;
+      }
+      toast({
+        kind: 'error',
+        ...TOAST_COPY.unitsSetInactiveFailed(total - succeeded, total),
+        description:
+          firstError instanceof ApiError ? firstError.userMessage : TOAST_COPY.unitsSetInactiveFailed(total - succeeded, total).description,
+      });
+    },
+    onError: (error) => {
+      toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+    },
+  });
 
   const columns: ColumnDef<VehicleTableRow, unknown>[] = [
     {
@@ -238,8 +323,11 @@ export default function VehiclesPage() {
     {
       id: 'odometer',
       header: 'ODOMETER',
+      // §4.3 — the displayed odometer is the ECU reading plus the calibration offset when the
+      // device reports one, never the raw stored `odometerMi`: otherwise a successful
+      // `Calibrate odometer` never changed the number in this column.
       cell: ({ row }) => (
-        <span className="block tabular-nums text-right text-text">{formatOdometer(row.original.odometerMi)} mi</span>
+        <span className="block tabular-nums text-right text-text">{formatOdometer(totalVehicleMiles(row.original))} mi</span>
       ),
     },
   ];
@@ -265,6 +353,7 @@ export default function VehiclesPage() {
                 setParam('q', e.target.value || null);
               }}
               placeholder="Search unit #, VIN, plate…"
+              aria-label="Search unit #, VIN, plate"
               className="w-56 bg-transparent text-body outline-none"
             />
           </div>
@@ -278,11 +367,19 @@ export default function VehiclesPage() {
           >
             Filters{activeFilterCount > 0 ? ` · ${activeFilterCount}` : ''}
           </Button>
-          <Button variant="secondary" className="w-btn-wide" iconLeft={<Upload size={16} strokeWidth={1.75} />} onClick={handleExport}>
+          {/* Export pulls a file down (`Download`), Import pushes one up (`Upload`) — the two
+              icons used to be the wrong way round. */}
+          <Button
+            variant="secondary"
+            className="w-btn-wide"
+            iconLeft={<Download size={16} strokeWidth={1.75} />}
+            onClick={handleExport}
+            loading={exporting}
+          >
             Export Units
           </Button>
           <Can perm="vehicles" level="FULL">
-            <Button variant="secondary" className="w-btn-wide" iconLeft={<Download size={16} strokeWidth={1.75} />} onClick={() => setImportOpen(true)}>
+            <Button variant="secondary" className="w-btn-wide" iconLeft={<Upload size={16} strokeWidth={1.75} />} onClick={() => setImportOpen(true)}>
               Import Units
             </Button>
             <Button
@@ -344,7 +441,13 @@ export default function VehiclesPage() {
               actions={[
                 {
                   label: debouncedSearch ? 'Clear search' : 'Clear filters',
-                  onClick: () => (debouncedSearch ? setSearchInput('') : applyFilters(EMPTY_VEHICLE_FILTERS)),
+                  // Clearing the box without deleting `q` left the search in the URL, so a
+                  // reload brought the empty result straight back.
+                  onClick: () => {
+                    if (!debouncedSearch) return applyFilters(EMPTY_VEHICLE_FILTERS);
+                    setSearchInput('');
+                    setParam('q', null);
+                  },
                 },
               ]}
             />
@@ -383,10 +486,19 @@ export default function VehiclesPage() {
                           <DropdownMenu.Item onSelect={() => navigate(`/vehicles/${row.id}`)} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
                             View unit profile
                           </DropdownMenu.Item>
-                          <DropdownMenu.Item onSelect={() => navigate(`/hos-logs?driverId=${row.driver?.id ?? ''}`)} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                          {/* `?driverId=` with an empty value reached W-06 as a driver id no
+                              lookup can answer. A driverless unit says so instead. */}
+                          <DropdownMenu.Item
+                            disabled={!row.driver}
+                            title={row.driver ? undefined : NO_DRIVER_LOGS_REASON}
+                            onSelect={() => {
+                              if (row.driver) navigate(`/hos-logs?driverId=${row.driver.id}`);
+                            }}
+                            className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle data-[disabled]:cursor-not-allowed data-[disabled]:text-text-muted"
+                          >
                             Open HOS logs
                           </DropdownMenu.Item>
-                          <DropdownMenu.Item onSelect={() => navigate('/live-fleet')} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                          <DropdownMenu.Item onSelect={() => navigate(liveFleetHref(row.id))} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
                             Track on map
                           </DropdownMenu.Item>
                           <DropdownMenu.Item onSelect={() => setAssignVehicle(row)} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
@@ -426,22 +538,45 @@ export default function VehiclesPage() {
 
       {selection.length > 0 && canFull && (
         <div className="fixed inset-x-0 bottom-6 z-30 mx-auto flex h-14 w-fit min-w-bulk-bar items-center gap-3 rounded-lg bg-bg-inverse px-4 shadow-pop">
-          <span className="text-body-strong text-text-inverse">{selection.length} vehicles selected</span>
-          <Button variant="ghost" className="text-text-inverse hover:bg-white/10">
+          <span className="text-body-strong text-text-inverse">
+            {selection.length} vehicle{selection.length === 1 ? '' : 's'} selected
+          </span>
+          {/* `POST /vehicles/:id/assign-driver` assigns one driver to one unit, and a driver can
+              hold a single unit — so this opens the 11.4 modal for the one selected unit and says
+              why it cannot act on several. */}
+          <Button
+            variant="ghost"
+            className="text-text-inverse hover:bg-white/10"
+            disabled={selection.length !== 1}
+            title={selection.length !== 1 ? MULTI_ASSIGN_REASON : undefined}
+            onClick={() => {
+              const row = selectedRows[0];
+              if (row) setAssignVehicle(row);
+            }}
+          >
             Assign driver
           </Button>
-          <Button variant="ghost" className="text-text-inverse hover:bg-white/10" onClick={handleExport}>
+          <Button variant="ghost" className="text-text-inverse hover:bg-white/10" onClick={handleExportSelection}>
             Export
           </Button>
           <Button
             variant="ghost"
             className="text-text-inverse hover:bg-white/10"
-            onClick={() => toast({ kind: 'success', title: `${selection.length} units set inactive` })}
+            loading={setInactiveMutation.isPending}
+            disabled={isOffline}
+            title={isOffline ? OFFLINE_TOOLTIP : undefined}
+            onClick={() => setInactiveMutation.mutate(selection)}
           >
             Set inactive
           </Button>
-          <button type="button" aria-label="Clear selection" onClick={() => setSelection([])} className="ml-auto text-text-inverse">
-            ×
+          {/* Stage 3 — was a bare `×` glyph; now a 32×32 target like the other icon buttons. */}
+          <button
+            type="button"
+            aria-label="Clear selection"
+            onClick={() => setSelection([])}
+            className="ml-auto flex size-btn-sm items-center justify-center rounded-md text-text-inverse hover:bg-white/10"
+          >
+            <X size={16} strokeWidth={1.75} aria-hidden="true" />
           </button>
         </div>
       )}

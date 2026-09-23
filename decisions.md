@@ -1120,3 +1120,202 @@ test count.
 **Problem.** tz.md §10 W-01 specifies a 28 px circle with a white ring; the customer supplied `photos/{green,red,purple,gray}_arrow_transparent.png` — a faceted navigation chevron — and wants every unit drawn with it, coloured by status and pointing the way the unit is travelling.
 **Choice.** One shared change in `src/shared/map/FleetMap.tsx` (both maps use it): the per-status canvas image is now the chevron (duty token fill, facets shaded with a translucent white/black wash, dark halo + `--color-bg-surface` ring for light and dark tiles), still a GeoJSON symbol layer. Rotation via `icon-rotate: ['get','heading']` + `icon-rotation-alignment`/`icon-pitch-alignment: 'map'`. Heading = `GET /live/fleet` `headingDeg`; when null, `src/shared/map/heading.ts` derives the bearing from the unit's movement between updates (≥ 25 m, jitter ignored) and keeps the last known heading while stationary. With no heading at all the chevron stays in its neutral north-up pose (`hasHeading: false` on the feature) — same shape for every unit, as asked.
 **Why.** Customer request supersedes the §10 marker line; reusing `DUTY_TOKEN` keeps colours identical to badges; the symbol layer keeps the §16.3 marker budget.
+
+## WD-077 · Stage-1 correctness pass — one way out of a modal, one guard per mutation, no fabricated success
+**Problem.** An audit found the same three shapes repeated across the panel: (1) a control that
+reported success it had not achieved (bulk `Set inactive`, `N valid, 0 errors`, "the driver is
+notified"), (2) a form that collected and validated input the mutation never sent (Resolve defect,
+Create work order, Create trip `Distance`), and (3) a close/submit path whose guard did not hold
+(footer `Cancel` skipping 11.30, RHF `isSubmitting` guarding an async mutation, `NaN` defeating a
+`> 5000` confirm). On top of these, `saveFile()` navigated the whole SPA to a cross-origin presigned
+URL, so any export ended the session.
+**Options.** 1. Fix each screen locally where the audit pointed. 2. Fix the shared primitives first
+and let the screens inherit the correct behaviour, fixing locally only what the primitives cannot
+reach. 3. Disable every half-wired control until the backend catches up.
+**Choice.** 2, with 3 as the rule wherever an endpoint genuinely does not exist.
+- **Downloads (WB-140).** `saveFile()` now branches on origin: a cross-origin presigned URL opens
+  with `target="_blank" rel="noopener noreferrer"` and **no** `download` (browsers ignore `download`
+  across origins, which is exactly why the anchor navigated instead of downloading); a Blob or
+  same-origin URL keeps the `download` anchor and the WB-100 deferred revoke. Not a `fetch()` +
+  object URL, because the MinIO bucket's CORS policy is not ours to assume and a failed preflight
+  would turn a working download into a broken one.
+- **One way out of a modal (WB-145).** `Modal`/`Drawer` publish their 11.30-aware `requestClose`
+  through a context; `useModalClose()` reads it and the new shared `<ModalCancelButton>` is what
+  every footer now renders. Making each modal re-implement "Cancel should confirm too" is how the
+  bug got in; the primitive owns it once. `FilterDrawer` gained the `isDirty` pass-through it never
+  had, so all six filter drawers stop dropping a half-built filter set.
+- **Double-submit (WB-146).** The guard moved from RHF `isSubmitting` (already false while
+  `mutate()` is in flight) to `mutation.isPending` **plus** a same-tick `useRef` single-flight flag.
+  The ref is not belt-and-braces: `isPending` only turns true on the next render, so both clicks of
+  a real double click land while the button is still enabled — measured, not assumed
+  (`doubleSubmit.test.tsx` failed with "expected 2 to be 1" on four of six buttons before the fix).
+- **Collected-but-unsent input.** The rule applied everywhere was *send it, or stop asking for it*.
+  Where the DTO had the field, it is now sent (`Work order` on Resolve defect, via the existing
+  `PATCH /defects/:id/work-order`). Where it did not, the control was removed together with the
+  claim it made (Resolve defect's four repair fields, Create work order's labour + three
+  always-`true` checkboxes) rather than left collecting data for a bin. `Create trip`'s `Distance`
+  is the one case kept on screen — it is genuinely useful to the dispatcher reading the form — but
+  it is no longer *required* and says in plain words that it is not saved yet.
+- **Fail closed, not open (WB-154).** Calibrate's `delta` is `null` when it cannot be computed, and
+  a `null` delta now *demands* the extra confirmation. A guard that cannot evaluate its condition
+  must refuse, not wave the user through.
+- **Clearing a field (WB-149).** `value || undefined` drops the key from a PATCH body, which the
+  server reads as "leave it alone", so clearing silently kept the old value. Nullable columns now
+  send an explicit `null`; non-nullable ones are required in the form instead of pretending.
+**Why.** Every one of these was a lie the UI told the user, and three of them (the download, the
+faked bulk status, the duplicate `POST /reports`) changed or destroyed state. Fixing the primitives
+means the next modal inherits the right behaviour instead of re-deriving it. Verified:
+`tsc --noEmit` clean, `eslint . --max-warnings=0` clean, `vitest run` 124 files / 1452 passed /
+1 skipped (baseline 121 / 1364 / 1; +3 files, +88 tests, no test lost).
+**Caveat.** `../backend/` is not present in this checkout, so DTO facts came from
+`src/shared/api/*.ts`, `backend-gaps.md` and the MSW fixtures rather than from the controllers. The
+`undefined` → `null` change on the two DVIR PATCH payloads is the one place that should be
+re-checked against a live API: if a field is `@IsOptional() @IsString()` without null tolerance it
+will 400.
+
+## WD-078 · Stage-2 (Vehicles / DVIR / Trips): qaysi boshqaruv tuzatildi, qaysi ochiq aytib o'chirildi
+**Muammo.** W-03/W-04/W-05/W-09/W-11 da 8 ta o'lik va bir qancha yarim ishlaydigan boshqaruv bor edi.
+**Tanlov.** (1) Endpoint mavjud bo'lsa — to'liq simladik (`stops`, `PATCH /vehicles/:id`, histories CSV).
+(2) Endpoint yo'q bo'lsa — hech narsa o'ylab topilmadi: `Notify the driver` (B-74) va `Export PDF` (B-75)
+ko'rinadigan sabab bilan `disabled`, DVIR fotolari esa endi bosiladigandek ko'rinmaydi (B-41).
+(3) Feature'lararo import taqiqi tufayli W-04 `New work order` 11.18 modalini o'zi ocholmaydi —
+`/dvir?newWorkOrder=<vehicleId>` havolasi ishlatildi; W-09 parametrni URL'dan o'qiydi (state nusxasi emas),
+yopilganda parametr olib tashlanadi.
+(4) `Print` (11.15) endi `window.print()` emas: DVIR alohida iframe hujjatiga chizilib chop etiladi, chunki
+ilovada print stylesheet yo'q va u `src/app/**` da bo'lardi (bu bosqich doirasidan tashqarida).
+(5) Oraliq to'xtash `StopType` da yo'q — API'ning `CHECKPOINT` turi ishlatildi (`PICKUP`/`DELIVERY` orasidagi yagona mos qiymat).
+(6) Bulk `Assign driver` bir vaqtda faqat bitta unit uchun: `POST /vehicles/:id/assign-driver` bitta unitga
+bitta haydovchi biriktiradi va haydovchi bir vaqtda bitta unitga ega — ko'p tanlovda sabab bilan `disabled`.
+(7) DVIR `Export` faol tabni chiqaradi; Work orders/Schedules jadvallari o'z qatorlarini sarlavhaga
+`onRows` orqali bildiradi (server tomonda hech qanday export endpoint yo'q).
+
+## WD-079 · Stage-2 (Settings / Support): modals for missing actions, feature-local copy, disabled-with-reason instead of fake success
+
+**Problem.** W-18…W-24 had a dozen dead row-menu items and buttons (Edit user, Change role, Revoke
+invitation, Resend all, Reset to defaults, custom-role Edit, Pair to unit, Update firmware, Edit rule,
+Duplicate, Edit scopes, Start chat, Export), several controls whose value was collected and silently
+dropped (invite Terminal access/Message, Register-device toggles, alert `Repeat`), and three that
+faked success (`Open scanner` banner, the pre-ticked support diagnostics/ELD-events checkboxes, a
+`Manage` button that disconnected instantly).
+**Options.** (a) Inline editing in the tables; (b) one overlay per action, per §11 / `web-modal-spec`;
+(c) hide what does not work.
+**Choice.** (b) where a real endpoint exists — new `EditUserModal` (profile and role-only modes),
+`PairDeviceModal`, `UpdateFirmwareModal`, `EditApiKeyScopesModal`; `CreateRoleModal` and
+`NewAlertRuleModal` gained edit (and duplicate) modes instead of new copies. Every one uses the shared
+`Modal` dirty-close, a double-submit guard and a toast; destructive actions (revoke invitation,
+disconnect, revoke key, reset roles) go through a confirm first. Bulk actions with no bulk route
+(`Resend all`) fan out and report partial failure honestly (WD-081 pattern).
+Where nothing exists server-side the control stays **visible and disabled with its reason on screen**
+(B-84…B-91), never a fake toast and never hidden — the user must see the feature is known and
+blocked. Hiding is reserved for RBAC (house rule). `Open scanner` is disabled for a product reason, not
+a backend one: the web panel has no QR scanner.
+**Copy.** As in WD-081, `src/features/settings/lib/copy.ts` and `src/features/support/lib/copy.ts` hold
+the toast wording (`SETTINGS_TOAST`, `SUPPORT_TOAST`, typed `ToastCopy`) and the disabled-control
+reasons (`SETTINGS_REASON`, `SUPPORT_REASON`), so no call site invents a sentence and the tables can be
+lifted into §13.3 unchanged.
+**Left for the owner** (open, not guessed): hardcoded Integrations status lines (WB-232), the made-up
+Roles footer "Last changed … · today" (WB-233), and "Can send data transfers" sharing the FMCSA export
+permission key (WB-234).
+
+## WD-080 · Invented gap ids B-74…B-80 and colliding WB ids in Settings/Support were removed and renumbered
+
+**Problem.** An earlier Settings/Support pass wrote gap ids B-74…B-80 and several WB numbers into code
+comments, copy tables and test names without recording them. Parallel stage-2 agents had meanwhile
+used B-74/B-75 (Vehicles/DVIR) and B-80 (Drivers) for different gaps, and the WB numbers collided with
+existing `bugs.md` entries, so a reader following an id landed on the wrong defect.
+**Choice.** The code agent replaced every invented id with a slug placeholder (`B-TBD(<slug>)`,
+`WB-TBD(<slug>)`); the documentation pass then gave each slug the next free number and recorded it:
+B-84…B-91 in `backend-gaps.md` ("Stage 2 — Settings/Support") and WB-201…WB-234 in `bugs.md`. No
+number was reused; B-76…B-79 stay unassigned on purpose, because they had circulated with other
+meanings. Rule going forward: an id is only written into code after its row exists in the log.
+
+## WD-081 · Stage-2 (Drivers / HOS logs): feature-local toast copy, and the three shapes a dead control took
+
+**Problem.** The stage-2 brief forbids editing `src/shared/**`, but §13.3 (`shared/ui/copy.ts`) has no
+wording for driver deactivation, a bulk unit assignment, a bulk message or a queued RODS export, and
+the house rule forbids one-off toast strings at the call site.
+**Choice.** `src/features/drivers/lib/copy.ts` — one keyed table, typed as `ToastCopy`, named like the
+`TOAST_COPY` entries so it can be lifted into §13.3 verbatim when that table is next extended.
+
+**How each dead control was resolved** (never a fabricated success):
+1. *A real endpoint exists* → wire it, fan out with `allSettled` where there is no bulk route, report
+   partial failure (`Export 8-day RODS`, bulk `Export logs`, `Deactivate`, `Assign unit`, `Send message`).
+2. *A real screen exists elsewhere* → make the link carry the filter the target actually reads
+   (`fDriver` for W-11), never a param it ignores.
+3. *Nothing exists server-side* → disable with a visible human reason and a `B-NN` row
+   (`Reset app password` B-81, `Send invitation now` B-82, 11.13 driver confirmation B-83,
+   11.11 notify B-39).
+
+**Two judgement calls.** (a) `Assign unit` is single-row: `POST /vehicles/:id/assign-driver` moves the
+one driver a unit can have, so fanning it out across a selection would silently leave one winner — the
+button is disabled above one row with that sentence next to it (same reasoning as the stage-2 vehicles
+agent's bulk `Assign driver`). (b) `Export 8-day RODS` queues the FMCSA pack (`reportsTransfer` READ)
+rather than the activity report: the pack is the §395.8 RODS output an inspector asks for.
+
+## WD-082 · One tracked-job hook instead of trusting `report.ready`
+
+**Problem.** IFTA `Generate report` / `Download IFTA PDF` and DVIR `Download PDF` queued a job and then
+went quiet: `report.ready` is the only completion event, the mock socket never pushes one, and §7 gives
+the socket no resume/seq so a reconnect can lose it in production too.
+
+**Options.** (a) Emit `report.ready` from the mock socket — fixes the demo, not the product. (b) Fake a
+success toast on the `202` — a lie, the worker can still fail. (c) Follow the queued job.
+
+**Choice.** (c), factored as `useTrackedReport()` next to the FMCSA pack's existing pattern, announcing
+through the shared `useAnnounceReport` (de-duplicated per report id) so the WS frame and the 3 s poll
+cannot double-toast, and surfacing FAILED verbatim in the screen's `ActionAlert`.
+
+## WD-083 · Messages `Call` dials through the operator's own phone
+
+There is no click-to-call service on the backend and none was invented. The button is a `tel:` hand-off
+to whatever the workstation registers, and is disabled with "No phone number on file for this driver"
+when `driver.phone` is null — the honest two states rather than a dead button or a fake toast.
+
+## WD-084 · The sign-in panel's `69 units connected` stays static — it is NOT carrier data
+
+The stage-2 brief asked for `AuthLayout` to read `useCarrier()` like the sidebar. It cannot and should
+not: `/sign-in` renders outside `RequireAuth`, there is no session and `GET /carrier` would 401 — and
+showing a real carrier's fleet size to a signed-out visitor would leak it. `tz.md` §10 W-00 (line 1226)
+specifies those three figures literally (`69 / units connected · 58 / active drivers · 99.9% / ELD
+uptime`) as marketing copy. `AuthLayout.tsx` was left as it is; the hardcoded pair the brief was really
+after — `DOT #1234567 · 69 units` in the signed-in sidebar — is fixed in WB-174.
+
+## WD-085 · Safety export is CSV, scoped to the screen
+
+The export now mirrors what the operator is looking at (tab + search + drawer filters) rather than the
+whole loaded feed, and writes CSV like the audit log instead of raw JSON: a JSON dump of the wire rows
+is a developer artefact, and the mismatch between the table and the file was the actual defect.
+
+## WD-086 · Stage 3 (⚠️ fixes): small, local fixes; the DVIR hang fixed at the page, not the hook
+
+**Problem.** Stage 3 turned the ⚠️ rows in `buttonsAndInputs.md` into ✅ or 🚫: labels, 32 px targets,
+`Apply` vs `Apply N filters`, radio groups, dirty-close, double-submit, carrier-zone stamps (WB-137).
+During that pass the DVIR Schedules tab went into an infinite render loop: the tabs report their rows
+up with `useEffect(() => onRows(rows))`, and `usePagedQuery` returns a new `items` array every render.
+
+**Options.** (a) Make `usePagedQuery` return a stable array — the real root cause, but it touches every
+paged screen. (b) Guard the setter in `DvirPage.tsx` so identical rows keep the previous state.
+
+**Choice.** (b) for stage 3 (`sameRows` check in `setScheduleRows` / `setWorkOrderRows`). The root cause
+in `shared/api/paging.ts` stays open as WB-235. Missing fields found on the way were logged as B-92 / B-93,
+never invented.
+
+## WD-087 · Stage 4 settings: owner accepted — remove fake text, merge transfer checkbox
+
+**Problem.** Three ⚠️ rows were waiting on the owner: invented Integrations status lines (WB-232), a
+"Last changed by … · today" footer built from `new Date()` (WB-233), and two role checkboxes writing the
+same `reportsTransfer` key (WB-234). Separately, audit-log search/action/date filtered only loaded pages (B-64).
+
+**Options.** Keep the text until the backend has stats / remove it; add a key on the backend / merge the
+checkboxes; for B-64, leave the notice / fetch older pages on the client.
+
+**Choice.** Owner accepted: remove fake text, merge transfer checkbox. Integration cards show only
+`status` and `lastSyncAt` from the API; the roles footer is removed (no `updatedAt`/`updatedBy`); one
+checkbox covers export and transfers, with B-95 asking for a separate key. For B-64 the audit log fetches
+older pages automatically while a local filter is active, capped at 1,000 entries, with a live count, a
+`Stop`, and the notice kept for the cap (WB-239).
+
+**Why.** No dead controls and no fake data. A 1,000-entry cap bounds the load (20 requests of 50) while
+covering a normal month of a carrier's audit trail; entries arrive newest first, so the date range usually
+ends the fetch much sooner.
+

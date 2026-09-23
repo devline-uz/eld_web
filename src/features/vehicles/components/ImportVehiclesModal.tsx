@@ -2,17 +2,27 @@
 // is one transaction, per-row errors shown, result toast is the exact §13.3 string.
 import { useRef, useState } from 'react';
 import { Upload, FileText, X } from 'lucide-react';
-import { Modal } from '@/shared/ui/Modal';
+import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { Badge } from '@/shared/ui/Badge';
 import { useToast } from '@/shared/ui/Toast';
 import { TOAST_COPY } from '@/shared/ui/copy';
 import { useImportVehicles } from '@/shared/api/vehicles';
 import { ApiError } from '@/shared/api/errors';
-import { parseCsv } from '@/shared/lib/csv';
+import { parseCsv, toCsv } from '@/shared/lib/csv';
 
 const MAX_BYTES = 5 * 1024 * 1024;
 const MAX_ROWS = 2000;
+const optionClass = 'h-input rounded-md border border-border bg-bg-subtle px-3 text-body text-text-muted disabled:cursor-not-allowed disabled:opacity-50';
+
+/** The columns `POST /vehicles/import` reads — also the template's header row. */
+const TEMPLATE_COLUMNS = ['unitNumber', 'vin', 'make', 'model', 'year', 'licensePlate', 'plateState', 'fuelType', 'odometerMi', 'notes'];
+
+// ⛔ `POST /vehicles/import` accepts one field, `{ vehicles: [...] }`. Duplicate handling, a
+// default terminal, ELD auto-pairing and the summary email have no counterpart in the request or
+// in any other endpoint, so the controls stay visible (they are in the design) but disabled with
+// the reason spelled out, rather than pretending to change an import they cannot reach.
+const UNSUPPORTED_OPTION_REASON = 'Not available yet — the import endpoint does not accept this option.';
 
 export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
   const { toast } = useToast();
@@ -20,9 +30,21 @@ export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [rows, setRows] = useState<Array<Record<string, unknown>>>([]);
   const [error, setError] = useState<string | null>(null);
-  const [pairDevices, setPairDevices] = useState(true);
-  const [sendSummary, setSendSummary] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const mutation = useImportVehicles();
+
+  function downloadTemplate() {
+    // Built in the browser from the columns the endpoint reads — no `/vehicles/template` endpoint
+    // exists, and inventing one would be worse than generating the two lines here.
+    const blob = new Blob([toCsv([TEMPLATE_COLUMNS, ['201', '1FUJGLDR8LLLL0001', 'Freightliner', 'Cascadia', '2023', '', '', 'DIESEL', '', '']])], {
+      type: 'text/csv',
+    });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'vehicles-template.csv';
+    link.click();
+    URL.revokeObjectURL(link.href);
+  }
 
   function handleFile(selected: File) {
     setError(null);
@@ -50,11 +72,11 @@ export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
       title="Import vehicles"
       subtitle="Bulk-create or update units from a CSV file"
       size="md"
+      // A staged file is a real edit — closing confirms first, from Cancel as from Esc / X.
+      isDirty={file !== null}
       footer={
         <>
-          <Button variant="secondary" size="lg" onClick={onClose} disabled={mutation.isPending}>
-            Cancel
-          </Button>
+          <ModalCancelButton disabled={mutation.isPending} />
           <Button
             variant="primary"
             size="lg"
@@ -89,7 +111,22 @@ export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
           <button
             type="button"
             onClick={() => inputRef.current?.click()}
-            className="flex h-28 flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border-strong text-center hover:bg-bg-subtle"
+            // WB — the drop copy was inert: dropping a file on the zone let the browser navigate
+            // away to it. The zone now accepts the drop it advertises.
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              const dropped = e.dataTransfer.files?.[0];
+              if (dropped) handleFile(dropped);
+            }}
+            className={`flex h-28 flex-col items-center justify-center gap-1 rounded-lg border border-dashed text-center hover:bg-bg-subtle ${
+              dragOver ? 'border-primary bg-primary-soft' : 'border-border-strong'
+            }`}
           >
             <Upload size={20} strokeWidth={1.75} className="text-text-muted" aria-hidden="true" />
             <span className="text-body text-text">Drop your CSV here or click to browse</span>
@@ -101,7 +138,9 @@ export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
             <div className="flex-1">
               <p className="text-body-strong text-text">{file.name}</p>
               <p className="text-caption text-text-muted">
-                {(file.size / 1024).toFixed(0)} KB · {rows.length} rows detected · {rows.length} valid, 0 errors
+                {/* No client-side validation runs on these rows, so no "N valid, 0 errors"
+                    claim is made here — the server answers with the per-row result. */}
+                {(file.size / 1024).toFixed(0)} KB · {rows.length} rows detected
               </p>
             </div>
             <Badge tone="success" dot>
@@ -125,30 +164,32 @@ export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
         {error && <p className="text-body text-danger">{error}</p>}
         <div className="grid grid-cols-2 gap-4">
           <label className="flex flex-col gap-1">
-            <span className="text-label text-text">Duplicate handling</span>
-            <select className="h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text">
+            <span className="text-label text-text-muted">Duplicate handling</span>
+            <select disabled title={UNSUPPORTED_OPTION_REASON} className={optionClass}>
               <option>Update existing units by VIN</option>
-              <option>Skip existing</option>
-              <option>Always create new</option>
             </select>
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-label text-text">Default terminal</span>
-            <select className="h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text">
+            <span className="text-label text-text-muted">Default terminal</span>
+            <select disabled title={UNSUPPORTED_OPTION_REASON} className={optionClass}>
               <option>Columbus, OH</option>
             </select>
           </label>
         </div>
-        <label className="flex items-center gap-2 text-body text-text">
-          <input type="checkbox" checked={pairDevices} onChange={(e) => setPairDevices(e.target.checked)} />
+        <label className="flex items-center gap-2 text-body text-text-muted">
+          <input type="checkbox" disabled title={UNSUPPORTED_OPTION_REASON} />
           Pair ELD devices automatically — match the ELD serial column to unpaired devices
         </label>
-        <label className="flex items-center gap-2 text-body text-text">
-          <input type="checkbox" checked={sendSummary} onChange={(e) => setSendSummary(e.target.checked)} />
+        <label className="flex items-center gap-2 text-body text-text-muted">
+          <input type="checkbox" disabled title={UNSUPPORTED_OPTION_REASON} />
           Send a summary email when the import finishes
         </label>
+        <p className="text-caption text-text-muted">{UNSUPPORTED_OPTION_REASON}</p>
         <p className="text-caption text-text-muted">
-          Not sure about the format? <span className="text-primary">Download CSV template</span>
+          Not sure about the format?{' '}
+          <button type="button" onClick={downloadTemplate} className="text-primary hover:underline">
+            Download CSV template
+          </button>
         </p>
       </div>
     </Modal>

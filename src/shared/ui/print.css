@@ -1,0 +1,22 @@
+/* owner: web-design-system — print-only regions. `printRegion(el)` (shared/lib/printRegion.ts)
+   marks one element and the body for the length of a print job; everything else on the page —
+   sidebar, topbar, toolbars — is left out of the printout. `data-print-hide` drops a control
+   (buttons, pickers) that is meaningless on paper from inside the printed region. */
+@media print {
+  body[data-printing] * {
+    visibility: hidden;
+  }
+  body[data-printing] [data-print-target],
+  body[data-printing] [data-print-target] * {
+    visibility: visible;
+  }
+  body[data-printing] [data-print-target] {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+  }
+  body[data-printing] [data-print-target] [data-print-hide] {
+    display: none;
+  }
+}

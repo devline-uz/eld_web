@@ -45,7 +45,7 @@ import {
   todayKey,
   visibleReportRoutes,
 } from './reportMeta';
-import { useExportWhenReady, useReportReadyToasts } from './useReportJobs';
+import { useExportWhenReady, useGuardedMutate, useReportReadyToasts, useTrackedReport } from './useReportJobs';
 import { useNavigate } from 'react-router-dom';
 
 const QUARTER_RE = /^\d{4}-Q[1-4]$/;
@@ -112,7 +112,12 @@ export default function IftaReportPage() {
   );
   useReportReadyToasts();
 
-  const generate = useGenerateReport();
+  // WB-146 — every queueing click goes through the single-flight guard, not just the disabled attribute.
+  const generate = useGuardedMutate(useGenerateReport());
+  // WB-166 — the queued job is followed to READY/FAILED so `Generate report` and `Download IFTA
+  // PDF` confirm on screen without depending on a `report.ready` socket frame.
+  const csvJob = useTrackedReport();
+  const pdfJob = useTrackedReport();
   const exportCsv = useExportWhenReady();
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
@@ -125,7 +130,10 @@ export default function IftaReportPage() {
     setActionError(null);
     generate.mutate(
       { type: 'IFTA', format: 'CSV', params: { quarter } },
-      { onError: (error) => setActionError(refusalText(error)) },
+      {
+        onSuccess: (queued) => csvJob.track(queued.reportId),
+        onError: (error) => setActionError(refusalText(error)),
+      },
     );
   };
 
@@ -156,8 +164,8 @@ export default function IftaReportPage() {
             <Button
               variant="primary"
               iconLeft={<FileText size={16} strokeWidth={1.75} />}
-              loading={generate.isPending}
-              disabled={generate.isPending}
+              loading={generate.isPending || csvJob.isPending}
+              disabled={generate.isPending || csvJob.isPending}
               onClick={generateCsv}
             >
               Generate report
@@ -166,7 +174,14 @@ export default function IftaReportPage() {
         </div>
       </div>
 
-      <ActionAlert message={actionError ?? exportCsv.error} onDismiss={() => { setActionError(null); exportCsv.clearError(); }} />
+      <ActionAlert
+        message={actionError ?? csvJob.error ?? exportCsv.error}
+        onDismiss={() => {
+          setActionError(null);
+          csvJob.clearError();
+          exportCsv.clearError();
+        }}
+      />
 
       {summary.isLoading ? (
         <KpiRowSkeleton />
@@ -214,12 +229,16 @@ export default function IftaReportPage() {
                   <Button
                     variant="secondary"
                     iconLeft={<Download size={16} strokeWidth={1.75} />}
-                    loading={generate.isPending}
+                    loading={generate.isPending || pdfJob.isPending}
+                    disabled={generate.isPending || pdfJob.isPending}
                     onClick={() => {
                       setPdfError(null);
                       generate.mutate(
                         { type: 'IFTA', format: 'PDF', params: { quarter } },
-                        { onError: (error) => setPdfError(refusalText(error)) },
+                        {
+                          onSuccess: (queued) => pdfJob.track(queued.reportId),
+                          onError: (error) => setPdfError(refusalText(error)),
+                        },
                       );
                     }}
                   >
@@ -229,9 +248,15 @@ export default function IftaReportPage() {
               }
             />
           </div>
-          {pdfError && (
+          {(pdfError ?? pdfJob.error) && (
             <div className="px-card pb-3">
-              <ActionAlert message={pdfError} onDismiss={() => setPdfError(null)} />
+              <ActionAlert
+                message={pdfError ?? pdfJob.error}
+                onDismiss={() => {
+                  setPdfError(null);
+                  pdfJob.clearError();
+                }}
+              />
             </div>
           )}
           {summary.isError ? (

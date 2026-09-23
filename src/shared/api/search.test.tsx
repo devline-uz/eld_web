@@ -3,6 +3,7 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { http } from 'msw';
 import type { ReactNode } from 'react';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { DRIVERS, VEHICLES } from '@/mocks/handlers/mockState';
 import { fail, ok, server, url } from '@/mocks/server';
 import { ApiError } from './errors';
 import { endpoints } from './endpoints';
@@ -20,7 +21,9 @@ describe('fetchGlobalSearch (B-10)', () => {
     expect(all.source).toBe('search');
     expect(all.drivers.map((d) => d.name)).toEqual(['John Smith', 'Smith Rodriguez']);
     expect(all.vehicles).toHaveLength(1);
-    expect(all.scope).toEqual({ units: 69, drivers: 58, logs: 1284 });
+    // WB-176 — derived from the fixture, not a pinned literal: the handler and the panel now
+    // report the units `GET /vehicles` really answers.
+    expect(all.scope).toEqual({ units: VEHICLES.length, drivers: DRIVERS.length, logs: 1284 });
 
     const driversOnly = await fetchGlobalSearch('smith', { drivers: true, vehicles: false });
     expect(driversOnly.vehicles).toEqual([]);

@@ -4,9 +4,10 @@
 // this suite also exercises — and no in-page forbidden render (the route guard owns it, see the
 // generic RBAC route tests; `vehicles` is never `NONE` for any role so it is unreachable here).
 // web/backend-gaps.md B-4 — `GET /vehicles/:id/histories` is MSW-only.
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
@@ -116,5 +117,70 @@ describe('W-05 Unit histories — states', () => {
     server.use(http.get(url(endpoints.vehicles.histories('veh_1')), () => ok(emptyHistories())));
     renderPage();
     expect(await screen.findByText(/0 segments today/)).toBeInTheDocument();
+  });
+
+  // WB-161 — the `Export` button had no `onClick` at all.
+  it('Export writes a CSV of the segments on screen, and is disabled when there are none', async () => {
+    const segment = {
+      marker: 'A',
+      type: 'DRIVE' as const,
+      startAt: '2026-09-01T08:00:00.000Z',
+      endAt: '2026-09-01T09:00:00.000Z',
+      durationSec: 3600,
+      location: 'Columbus, OH',
+      distanceMi: 42,
+      odometerMi: 993589,
+      driverName: 'John Smith',
+    };
+    server.use(
+      http.get(url(endpoints.vehicles.histories('veh_1')), () =>
+        ok({ ...emptyHistories(), segments: [segment], driveSegments: 1 }),
+      ),
+    );
+    const user = userEvent.setup();
+    let csv = '';
+    let name = '';
+    const originalCreate = URL.createObjectURL;
+    const originalRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn((blob: Blob) => {
+      void blob.text().then((t) => {
+        csv = t;
+      });
+      return 'blob:mock';
+    }) as unknown as typeof URL.createObjectURL;
+    URL.revokeObjectURL = vi.fn();
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      name = this.download;
+    });
+    try {
+      renderPage();
+      await screen.findByText(/1 segments today/);
+      await user.click(screen.getByRole('button', { name: 'Export' }));
+
+      expect(name).toMatch(/^unit-histories-#101-/);
+      await vi.waitFor(() => expect(csv).toContain('type,start,end'));
+      expect(csv).toContain('Columbus, OH'.replace('Columbus, OH', '"Columbus, OH"'));
+      expect(csv).toContain('John Smith');
+
+      // The filter narrows the export too: no STOP segments today.
+      await user.click(screen.getByRole('button', { name: /Stop 0/ }));
+      expect(screen.getByRole('button', { name: 'Export' })).toBeDisabled();
+    } finally {
+      click.mockRestore();
+      URL.createObjectURL = originalCreate;
+      URL.revokeObjectURL = originalRevoke;
+    }
+  });
+
+  // WB-243 / B-4 — Play only flipped its own label; there is no track to replay.
+  it('Route replay Play is disabled and states the B-4 reason on screen', async () => {
+    server.use(http.get(url(endpoints.vehicles.histories('veh_1')), () => ok(emptyHistories())));
+    renderPage();
+    const play = await screen.findByRole('button', { name: 'Play' });
+    expect(play).toBeDisabled();
+    expect(play).toHaveAccessibleDescription(/Route replay is not available yet.*B-4/);
+    expect(play).toHaveAttribute('title', expect.stringMatching(/B-4/));
+    expect(screen.getByText(/Route replay is not available yet/)).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Pause' })).not.toBeInTheDocument();
   });
 });

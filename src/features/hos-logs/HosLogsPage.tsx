@@ -6,7 +6,7 @@
 //   • every timestamp is in `driver.homeTerminalTimezone` — `formatLocal` is an ESLint error here;
 //   • `Certify all` needs `hosCertifyOnBehalf` FULL (ADMIN); a fleet manager never sees it;
 //   • the §395 audit trail is never hidden, and it is never the default view either.
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Calendar, ChevronLeft, ChevronRight, FileText, Plus, Upload } from 'lucide-react';
@@ -34,6 +34,7 @@ import {
   useUnidentifiedSegments,
   type LogEventView,
 } from '@/shared/api/hosLogs';
+import { printRegion } from '@/shared/lib/printRegion';
 import { GraphGrid } from './components/GraphGrid';
 import { AvailableHoursCard } from './components/AvailableHoursCard';
 import { ViolationsCard } from './components/ViolationsCard';
@@ -46,6 +47,13 @@ import { certificationNote, rodsDayStart, unassignedInDay, validDayKey, zoneLabe
 
 const DAY_MS = 86_400_000;
 
+/** Shown under the toolbar when there is no record to propose an edit against (WB-147). */
+/** `Export PDF` opens the browser print dialog on the log region only (`shared/ui/print.css`). */
+const PRINT_LOG_HINT = 'Prints this driver log only — choose "Save as PDF" in the print dialog.';
+
+const EDIT_NEEDS_A_RECORD =
+  'A log edit is proposed against an existing record (49 CFR §395.30). This day has no duty record yet.';
+
 /** `2026-09-12` in a given zone — never the browser's. */
 function dayKeyIn(timezone: string, at: Date = new Date()): string {
   return formatInTimeZone(at, timezone, 'yyyy-MM-dd');
@@ -56,6 +64,7 @@ function shiftDay(date: string, days: number): string {
 }
 
 export default function HosLogsPage() {
+  const printRef = useRef<HTMLDivElement>(null);
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
   const { can } = usePermission();
@@ -97,7 +106,9 @@ export default function HosLogsPage() {
   const unitLabel = useCallback(
     (vehicleId: string) => {
       const unit = vehiclesQuery.data?.items?.find((candidate) => candidate.id === vehicleId);
-      return unit ? `Unit #${unit.unitNumber}` : EMPTY.unassigned;
+      // WB-195 — unit numbers come back both as `101` and as `#101`, and the label added a second
+      // `#`: the header read `Unit ##101`. The prefix is rendered exactly once.
+      return unit ? `Unit #${unit.unitNumber.replace(/^#+/, '')}` : EMPTY.unassigned;
     },
     [vehiclesQuery.data],
   );
@@ -162,6 +173,8 @@ export default function HosLogsPage() {
     () => events.filter((event) => event.recordStatus === RECORD_STATUS.active && event.status !== null),
     [events],
   );
+  // The record a proposal is made against: the day's latest active duty change (WB-147).
+  const editableEvent = activeDutyEvents[activeDutyEvents.length - 1] ?? null;
   const pendingEditCount = useMemo(
     () => events.filter((event) => event.recordStatus === RECORD_STATUS.proposed).length,
     [events],
@@ -196,7 +209,9 @@ export default function HosLogsPage() {
   }
 
   return (
-    <div className="flex flex-col gap-card-gap p-page">
+    // Stage 3 — `Export PDF` used to `window.print()` the whole app (sidebar, topbar, toolbar).
+    // The page root is now the print region; its controls carry `data-print-hide`.
+    <div ref={printRef} className="flex flex-col gap-card-gap p-page">
       <header>
         <h1 className="text-page-title text-text">Hours of Service · Driver log</h1>
         <p className="text-page-sub text-text-muted">
@@ -243,12 +258,15 @@ export default function HosLogsPage() {
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2" data-print-hide="">
           <Can perm="hosEdit" level="FULL">
             <Button
               variant="secondary"
+              disabled={!editableEvent}
+              aria-describedby={editableEvent ? undefined : 'hos-edit-unavailable'}
               onClick={() => {
-                setEditTarget(activeDutyEvents[activeDutyEvents.length - 1] ?? null);
+                if (!editableEvent) return;
+                setEditTarget(editableEvent);
                 setEditOpen(true);
               }}
             >
@@ -256,7 +274,11 @@ export default function HosLogsPage() {
               Add / edit event
             </Button>
           </Can>
-          <Button variant="secondary" onClick={() => window.print()}>
+          <Button
+            variant="secondary"
+            title={PRINT_LOG_HINT}
+            onClick={() => printRegion(printRef.current)}
+          >
             <Upload size={16} strokeWidth={1.75} />
             Export PDF
           </Button>
@@ -271,6 +293,16 @@ export default function HosLogsPage() {
           </Can>
         </div>
       </div>
+
+      {/* WB-147 — §395.30 lets a carrier only PROPOSE a change to an existing record, and
+          `POST /logs/:driverId/edit-requests` requires `originalEventId`. With no record on the
+          day there is nothing to propose against, so the action is disabled with its reason
+          rather than opening a form that can never be sent (backend gap B-39). */}
+      {driverId && can('hosEdit', 'FULL') && !editableEvent && (
+        <p id="hos-edit-unavailable" className="text-caption text-text-muted">
+          {EDIT_NEEDS_A_RECORD}
+        </p>
+      )}
 
       {!driverId ? (
         <Card>

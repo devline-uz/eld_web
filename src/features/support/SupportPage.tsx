@@ -12,11 +12,16 @@ import { Card, SectionHeader } from '@/shared/ui/Card';
 import { DataTable } from '@/shared/ui/DataTable';
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
 import { EMPTY_STATE_COPY } from '@/shared/ui/copy';
+import { toCsv } from '@/shared/lib/csv';
 import { formatRelative } from '@/shared/format/relative';
 import { useTicketsList, type TicketRow, type TicketStatus, type TicketPriority } from '@/shared/api/settingsAdmin';
 import { NewTicketModal } from './components/NewTicketModal';
+import { SUPPORT_REASON } from './lib/copy';
 
 type Segment = 'ALL' | 'OPEN' | 'IN_PROGRESS' | 'RESOLVED';
+
+/** ⛔ GAP B-90 — shown under the disabled `Start chat` button. */
+const CHAT_REASON = SUPPORT_REASON.chat;
 
 const PRIORITY_TONE: Record<TicketPriority, BadgeTone> = { URGENT: 'danger', HIGH: 'warning', NORMAL: 'neutral', LOW: 'neutral' };
 const STATUS_TONE: Record<TicketStatus, BadgeTone> = { OPEN: 'info', IN_PROGRESS: 'warning', RESOLVED: 'success', CLOSED: 'neutral' };
@@ -47,6 +52,33 @@ export default function SupportPage() {
     return rows.filter((r) => r.status === 'RESOLVED');
   }, [rows, segment]);
 
+  /**
+   * WB-229 — `Export` had no handler at all. There is no `GET /support/tickets/export`, so the
+   * CSV is built from exactly the rows on screen (the same segment and search the table shows)
+   * rather than claiming a server-side export of everything.
+   */
+  function handleExport() {
+    if (filtered.length === 0) return;
+    const csv = toCsv([
+      ['ticket', 'subject', 'priority', 'status', 'opened by', 'created', 'updated'],
+      ...filtered.map((t) => [
+        `#${t.number}`,
+        t.subject,
+        t.priority,
+        t.status,
+        t.requesterName ?? '',
+        t.createdAt,
+        t.updatedAt ?? t.createdAt,
+      ]),
+    ]);
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'support-tickets.csv';
+    link.click();
+    URL.revokeObjectURL(link.href);
+  }
+
   const columns: ColumnDef<TicketRow, unknown>[] = [
     { accessorKey: 'number', header: 'TICKET', cell: ({ row }) => <span className="text-primary">#{row.original.number}</span> },
     { accessorKey: 'subject', header: 'SUBJECT', cell: ({ row }) => <span className="line-clamp-2 text-text">{row.original.subject}</span> },
@@ -70,7 +102,7 @@ export default function SupportPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-page-title text-text">Settings · Support</h1>
-          <p className="text-page-sub text-text-muted">{counts.open} open tickets · average first response 42 minutes</p>
+          <p className="text-page-sub text-text-muted">{counts.open} open tickets</p>
         </div>
         <Button variant="primary" iconLeft={<Plus size={16} strokeWidth={1.75} />} onClick={() => setTicketOpen(true)}>
           New ticket
@@ -88,9 +120,14 @@ export default function SupportPage() {
               <p className="text-caption text-text-muted">Mon–Fri, 07:00–21:00 ET</p>
             </div>
           </div>
-          <Button variant="primary" className="mt-3 w-full">
+          {/* ⛔ GAP B-90 — there is no chat service or chat widget behind this card, and no
+              endpoint to open a conversation with support. The button used to do nothing at all
+              (WB-228); it is disabled with the reason visible and the two channels that do work
+              sit next to it. */}
+          <Button variant="primary" className="mt-3 w-full" disabled title={CHAT_REASON}>
             › Start chat
           </Button>
+          <p className="mt-1 text-caption text-text-muted">{CHAT_REASON}</p>
         </Card>
         <Card>
           <div className="flex items-center gap-3">
@@ -126,6 +163,7 @@ export default function SupportPage() {
         <div className="flex h-9 w-fit overflow-hidden rounded-md border border-border">
           {(
             [
+              ['ALL', `All ${rows.length}`],
               ['OPEN', `Open ${counts.open}`],
               ['IN_PROGRESS', `In progress ${counts.inProgress}`],
               ['RESOLVED', `Resolved ${counts.resolved}`],
@@ -144,21 +182,38 @@ export default function SupportPage() {
         </div>
         <div className="flex h-input items-center gap-2 rounded-md border border-border bg-bg-surface px-3">
           <Search size={16} strokeWidth={1.75} className="text-text-muted" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search ticket…" className="w-56 bg-transparent text-body outline-none" />
+          <input
+            type="search"
+            aria-label="Search ticket"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search ticket…"
+            className="w-56 bg-transparent text-body outline-none"
+          />
         </div>
       </div>
 
       <Card padded={false}>
         <div className="flex items-center justify-between p-card">
           <SectionHeader title="Your tickets" subtitle={`${rows.length} tickets in total`} />
-          <Button variant="secondary" iconLeft={<Download size={16} strokeWidth={1.75} />}>
+          <Button
+            variant="secondary"
+            iconLeft={<Download size={16} strokeWidth={1.75} />}
+            disabled={filtered.length === 0}
+            title={filtered.length === 0 ? 'There are no tickets to export' : undefined}
+            onClick={handleExport}
+          >
             Export
           </Button>
         </div>
         {ticketsQuery.isLoading ? (
           <LoadingState className="p-4" />
         ) : ticketsQuery.isError ? (
-          <ErrorState onRetry={() => ticketsQuery.refetch()} />
+          <ErrorState
+            title="Could not load your tickets"
+            description="The support desk did not respond. Any ticket you have opened is still there — try again in a moment."
+            onRetry={() => ticketsQuery.refetch()}
+          />
         ) : filtered.length === 0 ? (
           <EmptyState {...EMPTY_STATE_COPY.support} actions={[{ label: 'New ticket', onClick: () => setTicketOpen(true) }]} />
         ) : (

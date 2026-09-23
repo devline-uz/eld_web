@@ -58,7 +58,7 @@ import {
   visibleReportRoutes,
 } from './reportMeta';
 import { TEST_BANNER_TEXT, transferRangeFor } from './sendLogs';
-import { useAnnounceReport, useReportReadyToasts } from './useReportJobs';
+import { useAnnounceReport, useGuardedMutate, useReportReadyToasts } from './useReportJobs';
 import { useReportRange } from './useReportRange';
 
 const PACK_CONTENTS: { name: string; description: string; checked: boolean }[] = [
@@ -67,7 +67,10 @@ const PACK_CONTENTS: { name: string; description: string; checked: boolean }[] =
   { name: 'Driver log edits and annotations', description: 'Original value, edited value, reason and approver', checked: true },
   { name: 'Vehicle and ELD identification', description: 'VIN, unit number, ELD serial and firmware version', checked: true },
   { name: 'DVIRs and defect corrections', description: 'Pre-trip, post-trip and mechanic signatures', checked: true },
-  { name: 'Malfunction and diagnostic events', description: 'Power, engine sync, timing and data-recording events', checked: false },
+  // WB-177 — this row rendered unchecked while the backend always builds the pack in full and
+  // 11.14's own `Includes` line lists ELD malfunctions: the list contradicted itself and told the
+  // operator the pack was short of a §395.8 section it in fact contains.
+  { name: 'Malfunction and diagnostic events', description: 'Power, engine sync, timing and data-recording events', checked: true },
 ];
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -96,7 +99,8 @@ export default function FmcsaPackPage() {
   const unassigned = usePendingUnassignedCount(from, to);
   const drivers = useReportDrivers();
   const packs = useReportsList({ type: 'FMCSA_PACK', limit: 10 });
-  const queue = useQueueReport();
+  // WB-146 — single-flight: `isPending` alone still lets a real double click queue two packs.
+  const queue = useGuardedMutate(useQueueReport());
   const [packId, setPackId] = useState<string | null>(null);
   const trackedPack = useReport(packId);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -403,6 +407,11 @@ export default function FmcsaPackPage() {
                 size="lg"
                 className="w-full justify-center"
                 iconLeft={<Send size={16} strokeWidth={1.75} />}
+                // WB-178 — the button used to open 11.14 prefilled with an address this very
+                // card had already rejected; the modal re-validated and refused, so the only
+                // result was an extra click. An empty field is still fine (11.14 collects it).
+                disabled={Boolean(recipientError)}
+                aria-describedby={recipientError ? 'pack-recipient-error' : undefined}
                 onClick={() =>
                   setModal({
                     key: Date.now(),

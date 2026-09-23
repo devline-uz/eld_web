@@ -10,6 +10,7 @@ import {
   SAFETY_COACHING_STATUS_OPTIONS,
   EMPTY_SAFETY_FILTERS,
   countActiveSafetyFilters,
+  writeSafetyFilters,
   type SafetyFilters,
   type SafetySeverityBucket,
 } from '../lib/filters';
@@ -52,6 +53,11 @@ export function SafetyFiltersDrawer({ open, onClose, filters, onApply }: SafetyF
   // opens, so the draft always starts fresh from the last applied `filters` without setState in
   // an effect (react-hooks/set-state-in-effect).
   const [draft, setDraft] = useState<SafetyFilters>(filters);
+  // WB — Esc / X / Cancel used to drop every edit silently. Two filter sets are equal exactly
+  // when they serialise to the same URL, so the canonical writer doubles as the comparison.
+  const isDirty =
+    writeSafetyFilters(new URLSearchParams(), draft).toString() !==
+    writeSafetyFilters(new URLSearchParams(), filters).toString();
 
   return (
     <FilterDrawer
@@ -59,6 +65,7 @@ export function SafetyFiltersDrawer({ open, onClose, filters, onApply }: SafetyF
       onClose={onClose}
       screenName="Safety"
       appliedCount={countActiveSafetyFilters(draft)}
+      isDirty={isDirty}
       onReset={() => setDraft(EMPTY_SAFETY_FILTERS)}
       onApply={() => {
         onApply(draft);

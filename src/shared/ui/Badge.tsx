@@ -63,7 +63,8 @@ export type DutyStatus =
   | 'IDLE'
   | 'INACTIVE';
 
-const DUTY_LABEL: Record<DutyStatus, string> = {
+/** Human label for a duty status — the text `DutyBadge` renders (also used for accessible names). */
+export const DUTY_LABEL: Record<DutyStatus, string> = {
   DRIVING: 'Driving',
   ON_DUTY: 'On-duty (not driving)',
   SLEEPER: 'Sleeper',

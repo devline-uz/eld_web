@@ -403,3 +403,39 @@ describe('11.14 interactions', () => {
     expect(screen.getByText('Send logs to a safety official')).toBeInTheDocument();
   });
 });
+
+// WB-166 — `Generate report` / `Download PDF` used to queue a job and say nothing: the only
+// completion signal was a `report.ready` socket frame the mock never sends. The queued job is
+// followed now, so the `Report ready` toast fires from the poll alone, with no socket involved.
+describe('queued report jobs confirm without a `report.ready` frame (WB-166)', () => {
+  it('W-12 IFTA Generate report announces the finished job', async () => {
+    renderPage(<IftaReportPage />, '/reports/ifta?quarter=2026-Q3');
+    await user.click(await screen.findByRole('button', { name: 'Generate report' }));
+    expect(await screen.findByText('Report ready')).toBeInTheDocument();
+  });
+
+  it('W-12 Download IFTA PDF announces the finished job', async () => {
+    renderPage(<IftaReportPage />, '/reports/ifta?quarter=2026-Q3');
+    await user.click(await screen.findByRole('button', { name: 'Download IFTA PDF' }));
+    expect(await screen.findByText('Report ready')).toBeInTheDocument();
+  });
+
+  it('W-14 DVIR Download PDF announces the finished job', async () => {
+    renderPage(<DvirReportPage />, '/reports/dvir');
+    await user.click(await screen.findByRole('button', { name: 'Download PDF' }));
+    expect(await screen.findByText('Report ready')).toBeInTheDocument();
+  });
+
+  it('surfaces a FAILED job in place instead of leaving the button silent', async () => {
+    server.use(
+      http.post(url(endpoints.reports.generate), () => ok({ reportId: 'rpt_failed', status: 'QUEUED' }, 202)),
+      http.get(url(endpoints.reports.detail('rpt_failed')), () =>
+        ok({ ...reportRows[0], id: 'rpt_failed', status: 'FAILED', error: 'The worker ran out of memory.' }),
+      ),
+    );
+    renderPage(<DvirReportPage />, '/reports/dvir');
+    await user.click(await screen.findByRole('button', { name: 'Download PDF' }));
+    expect(await screen.findByText('The worker ran out of memory.')).toBeInTheDocument();
+    expect(screen.queryByText('Report ready')).toBeNull();
+  });
+});

@@ -376,3 +376,186 @@ describe('UsersPage — W-18', () => {
     expect(await screen.findByText('Anna Weiss')).toBeInTheDocument();
   });
 });
+
+/* ------------------------------------------------------------------ stage-2 row actions */
+
+const ROLES = [
+  { id: 'rol_admin', key: 'ADMIN', name: 'Administrator', isSystem: true, permissions: {}, userCount: 2 },
+  { id: 'rol_fm', key: 'FLEET_MANAGER', name: 'Fleet manager', isSystem: true, permissions: {}, userCount: 3 },
+  { id: 'rol_disp', key: 'DISPATCHER', name: 'Dispatcher', isSystem: true, permissions: {}, userCount: 4 },
+  { id: 'rol_viewer', key: 'VIEWER', name: 'Viewer', isSystem: true, permissions: {}, userCount: 1 },
+];
+
+const ANNA = {
+  id: 'usr_1',
+  email: 'anna.weiss@example.com',
+  firstName: 'Anna',
+  lastName: 'Weiss',
+  status: 'ACTIVE',
+  role: { id: 'rol_fm', key: 'FLEET_MANAGER', name: 'Fleet manager' },
+};
+
+describe('UsersPage — stage-2 row actions', () => {
+  beforeEach(() => {
+    server.use(http.get(url(endpoints.roles.list), () => ok(ROLES)));
+  });
+
+  it('has a Dispatchers segment tab that filters to dispatchers', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(url(endpoints.users.list), () =>
+        ok([
+          ANNA,
+          {
+            id: 'usr_2',
+            email: 'carlos@example.com',
+            firstName: 'Carlos',
+            lastName: 'Ramirez',
+            status: 'ACTIVE',
+            role: { id: 'rol_disp', key: 'DISPATCHER', name: 'Dispatcher' },
+          },
+        ]),
+      ),
+    );
+    renderPage();
+    await screen.findByText('Anna Weiss');
+
+    await user.click(screen.getByRole('button', { name: /^dispatchers/i }));
+    expect(screen.getByText('Carlos Ramirez')).toBeInTheDocument();
+    expect(screen.queryByText('Anna Weiss')).not.toBeInTheDocument();
+  });
+
+  it('gives the search box an accessible name', async () => {
+    server.use(http.get(url(endpoints.users.list), () => ok([ANNA])));
+    renderPage();
+    await screen.findByText('Anna Weiss');
+    expect(screen.getByRole('searchbox', { name: 'Search user or email' })).toBeInTheDocument();
+  });
+
+  it('Edit user saves the name through PATCH /users/:id', async () => {
+    const user = userEvent.setup();
+    let patched: unknown = null;
+    server.use(
+      http.get(url(endpoints.users.list), () => ok([ANNA])),
+      http.patch(url(endpoints.users.update('usr_1')), async ({ request }) => {
+        patched = await request.json();
+        return ok({ ...ANNA, firstName: 'Anne' });
+      }),
+    );
+    renderPage();
+    await screen.findByText('Anna Weiss');
+
+    await user.click(screen.getByRole('button', { name: 'Row actions' }));
+    await user.click(await screen.findByText('Edit user'));
+    const first = await screen.findByDisplayValue('Anna');
+    await user.clear(first);
+    await user.type(first, 'Anne');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(patched).toEqual({ firstName: 'Anne', lastName: 'Weiss' }));
+  });
+
+  it('Change role sends only roleId', async () => {
+    const user = userEvent.setup();
+    let patched: unknown = null;
+    server.use(
+      http.get(url(endpoints.users.list), () => ok([ANNA])),
+      http.patch(url(endpoints.users.update('usr_1')), async ({ request }) => {
+        patched = await request.json();
+        return ok({ ...ANNA });
+      }),
+    );
+    renderPage();
+    await screen.findByText('Anna Weiss');
+
+    await user.click(screen.getByRole('button', { name: 'Row actions' }));
+    await user.click(await screen.findByText('Change role'));
+    await user.selectOptions(await screen.findByRole('combobox', { name: 'Role' }), 'rol_viewer');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(patched).toEqual({ roleId: 'rol_viewer' }));
+  });
+
+  it('refuses to demote the last active admin and never sends the PATCH', async () => {
+    const user = userEvent.setup();
+    let patched = false;
+    const soleAdmin = { ...ANNA, role: { id: 'rol_admin', key: 'ADMIN', name: 'Administrator' } };
+    server.use(
+      http.get(url(endpoints.users.list), () => ok([soleAdmin])),
+      http.patch(url(endpoints.users.update('usr_1')), () => {
+        patched = true;
+        return ok(soleAdmin);
+      }),
+    );
+    renderPage();
+    await screen.findByText('Anna Weiss');
+
+    await user.click(screen.getByRole('button', { name: 'Row actions' }));
+    await user.click(await screen.findByText('Change role'));
+    await user.selectOptions(await screen.findByRole('combobox', { name: 'Role' }), 'rol_viewer');
+
+    expect(screen.getByText(/last active admin/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+    expect(patched).toBe(false);
+  });
+
+  it('Revoke invitation confirms first, then DELETEs the pending user', async () => {
+    const user = userEvent.setup();
+    let deleted = false;
+    const invited = { ...ANNA, id: 'usr_3', email: 'dana@example.com', firstName: 'Dana', lastName: 'Ford', status: 'INVITED' };
+    server.use(
+      http.get(url(endpoints.users.list), () => ok([invited])),
+      http.delete(url(endpoints.users.remove('usr_3')), () => {
+        deleted = true;
+        return ok({ success: true });
+      }),
+    );
+    renderPage();
+    await screen.findByText('Dana Ford');
+
+    await user.click(screen.getByRole('button', { name: 'Row actions' }));
+    await user.click(await screen.findByText('Revoke invitation'));
+    expect(await screen.findByText('Revoke the invitation for dana@example.com?')).toBeInTheDocument();
+    expect(deleted).toBe(false);
+
+    await user.click(screen.getByRole('button', { name: 'Revoke invitation' }));
+    await waitFor(() => expect(deleted).toBe(true));
+  });
+
+  it('Resend all fires one resend per pending invitation', async () => {
+    const user = userEvent.setup();
+    const resent: string[] = [];
+    const invited = (id: string, email: string) => ({ ...ANNA, id, email, status: 'INVITED' });
+    server.use(
+      http.get(url(endpoints.users.list), () => ok([invited('usr_3', 'a@example.com'), invited('usr_4', 'b@example.com')])),
+      http.post(url(endpoints.users.resendInvite(':id')), ({ params }) => {
+        resent.push(String(params.id));
+        return ok({ user: ANNA, inviteToken: 'x', expiresAt: new Date().toISOString() });
+      }),
+    );
+    renderPage();
+    await screen.findByText('Pending invitations');
+
+    await user.click(screen.getByRole('button', { name: 'Resend all' }));
+    await waitFor(() => expect(resent.sort()).toEqual(['usr_3', 'usr_4']));
+    expect(await screen.findByText('2 invitations resent')).toBeInTheDocument();
+  });
+
+  it('Resend all reports a partial failure instead of a success', async () => {
+    const user = userEvent.setup();
+    const invited = (id: string, email: string) => ({ ...ANNA, id, email, status: 'INVITED' });
+    server.use(
+      http.get(url(endpoints.users.list), () => ok([invited('usr_3', 'a@example.com'), invited('usr_4', 'b@example.com')])),
+      http.post(url(endpoints.users.resendInvite(':id')), ({ params }) =>
+        String(params.id) === 'usr_4'
+          ? fail(500, 'INTERNAL_ERROR', 'Boom')
+          : ok({ user: ANNA, inviteToken: 'x', expiresAt: new Date().toISOString() }),
+      ),
+    );
+    renderPage();
+    await screen.findByText('Pending invitations');
+
+    await user.click(screen.getByRole('button', { name: 'Resend all' }));
+    expect(await screen.findByText('1 of 2 invitations could not be resent')).toBeInTheDocument();
+  });
+});

@@ -1,10 +1,10 @@
 // owner: web-dvir-safety — W-09 DVIR & Maintenance (web/tz.md §10).
 // Design: web/roles and screens/admin panel/DVIRs, open defects, preventive maintenance.jpg
 // Route `/dvir` · Perm `dvir` READ · absent for DISPATCHER (router.tsx already blocks it).
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { ColumnDef } from '@tanstack/react-table';
-import { Filter, Plus, Search, Upload, Wrench, AlertTriangle, ClipboardList, ShieldOff } from 'lucide-react';
+import { Filter, Plus, Search, Download, Wrench, AlertTriangle, ClipboardList, ShieldOff, X } from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
@@ -17,7 +17,7 @@ import { DataTable } from '@/shared/ui/DataTable';
 import { Pagination } from '@/shared/ui/Pagination';
 import { KpiCard, KpiRowSkeleton } from '@/shared/ui/KpiCard';
 import { ProgressBar } from '@/shared/ui/ProgressBar';
-import { Modal } from '@/shared/ui/Modal';
+import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
 import { EMPTY_STATE_COPY, searchEmptyState, TOAST_COPY } from '@/shared/ui/copy';
 import { useToast } from '@/shared/ui/Toast';
@@ -44,6 +44,8 @@ import {
 import { useVehiclesLookup } from '@/shared/api/lookups';
 import { useDebouncedValue } from '@/shared/hooks/useDebouncedValue';
 import { DvirDrawer } from './components/DvirDrawer';
+import { DVIR_TOAST_COPY } from './lib/copy';
+import { defectsCsv, dvirsCsv, schedulesCsv, workOrdersCsv } from './lib/exportCsv';
 import { CreateWorkOrderModal } from './components/CreateWorkOrderModal';
 import { EditWorkOrderModal } from './components/EditWorkOrderModal';
 import { EditScheduleModal } from './components/EditScheduleModal';
@@ -59,6 +61,16 @@ import {
 } from './lib/filters';
 
 type Tab = 'dvirs' | 'defects' | 'workOrders' | 'schedules';
+
+/** The 11.23 drawer only filters the Recent DVIRs table. */
+const FILTERS_TAB_REASON = 'Filters apply to the DVIRs tab only.';
+
+/** Same rows by content — the export only needs to change when what the table shows changes. */
+function sameRows<T>(a: readonly T[], b: readonly T[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  return JSON.stringify(a) === JSON.stringify(b);
+}
 
 function toNum(v: unknown): number | null {
   if (v === null || v === undefined) return null;
@@ -83,6 +95,7 @@ export default function DvirPage() {
   const [params, setParams] = useSearchParams();
   const canMaintenanceRead = can('maintenance', 'READ');
   const canDvirFull = can('dvir', 'FULL');
+  const { toast } = useToast();
 
   const tab = (params.get('tab') as Tab) ?? 'dvirs';
   const [search, setSearch] = useState('');
@@ -151,10 +164,45 @@ export default function DvirPage() {
 
   const isKpiLoading = dvirs.isLoading || defects.isLoading || overdue.isLoading || vehicles.isLoading;
 
+  // The Work orders / Schedules tables own their paging and search, so they report the rows they
+  // are showing up to the header's `Export`.
+  const [tabRows, setTabRows] = useState<{ workOrders: WorkOrderTableRow[]; schedules: ScheduleTableRow[] }>({
+    workOrders: [],
+    schedules: [],
+  });
+  // Stage 3 (hang fix) — `usePagedQuery` hands back a fresh array every render (`data?.items ?? []`
+  // while loading, `filtered.slice()` in window mode), so the tabs' `useEffect(() => onRows(rows))`
+  // fed a new object into this state on every render and the Schedules tab re-rendered forever.
+  // Keeping `prev` when the content is unchanged lets React bail out and breaks the loop.
+  const setWorkOrderRows = useCallback(
+    (rows: WorkOrderTableRow[]) =>
+      setTabRows((prev) => (sameRows(prev.workOrders, rows) ? prev : { ...prev, workOrders: rows })),
+    [],
+  );
+  const setScheduleRows = useCallback(
+    (rows: ScheduleTableRow[]) =>
+      setTabRows((prev) => (sameRows(prev.schedules, rows) ? prev : { ...prev, schedules: rows })),
+    [],
+  );
+
   const [drawerDvirId, setDrawerDvirId] = useState<string | null>(null);
   const [resolveDefect, setResolveDefect] = useState<DefectTableRow | null>(null);
-  const [workOrderVehicleId, setWorkOrderVehicleId] = useState<string | null>(null);
+  const [rowWorkOrderVehicleId, setRowWorkOrderVehicleId] = useState<string | null>(null);
   const [createWoOpen, setCreateWoOpen] = useState(false);
+
+  // W-04's `New work order` (which may not import this feature's modal) links here with the unit
+  // it was pressed on: `/dvir?newWorkOrder=<vehicleId>`. The modal is derived from the URL rather
+  // than copied into state, and closing it removes the param.
+  const linkedWorkOrderVehicleId = can('maintenance', 'FULL') ? params.get('newWorkOrder') : null;
+  const workOrderVehicleId = rowWorkOrderVehicleId ?? linkedWorkOrderVehicleId;
+  function closeWorkOrderModal() {
+    setCreateWoOpen(false);
+    setRowWorkOrderVehicleId(null);
+    if (!params.get('newWorkOrder')) return;
+    const next = new URLSearchParams(params);
+    next.delete('newWorkOrder');
+    setParams(next, { replace: true });
+  }
 
   // The 48 h + search window, before the severity/type/repair-status filters and the 10-row
   // slice — WB-078 needs this to know how many of the DVIRs a severity filter *could* match are
@@ -169,14 +217,20 @@ export default function DvirPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dvirs.rows, needle, nowTick]);
 
-  const recentDvirs = useMemo(
+  const recentDvirsFiltered = useMemo(
     () =>
       recentDvirsWindow
         .filter((d) => matchesDvirFilters(d, filters))
-        .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime())
-        .slice(0, 10),
+        .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()),
     [recentDvirsWindow, filters],
   );
+  const recentDvirs = useMemo(() => recentDvirsFiltered.slice(0, 10), [recentDvirsFiltered]);
+  // `+` when the loaded window is full and every row in it is inside the 48 h the table shows:
+  // there may be more submissions the window never reached (B-66).
+  const recentDvirsCountLabel =
+    dvirs.windowFull && recentDvirsWindow.length === dvirs.rows.length
+      ? `${recentDvirsFiltered.length}+`
+      : `${recentDvirsFiltered.length}`;
 
   const unknownSeverityExcluded = useMemo(
     () => countUnknownSeverityExcluded(recentDvirsWindow, filters),
@@ -192,14 +246,40 @@ export default function DvirPage() {
     [overdue.rows],
   );
 
-  async function handleExport() {
-    // The export is the open-defects page currently on screen (the API has no defects export).
-    const blob = new Blob([JSON.stringify(defects.rows, null, 2)], { type: 'application/json' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = 'dvir-export.json';
-    link.click();
-    URL.revokeObjectURL(link.href);
+  // There is no server-side export on any of these four lists, so the file is what the active
+  // tab is showing. Stage 3 — it used to be a raw JSON dump with no toast and no error path; it is
+  // now CSV like every other table export, and both outcomes are announced.
+  const exportable: Record<Tab, { count: number; fileName: string; build: () => string }> = {
+    dvirs: { count: recentDvirs.length, fileName: 'dvir-recent-dvirs.csv', build: () => dvirsCsv(recentDvirs) },
+    defects: { count: defects.rows.length, fileName: 'dvir-open-defects.csv', build: () => defectsCsv(defects.rows) },
+    workOrders: {
+      count: tabRows.workOrders.length,
+      fileName: 'dvir-work-orders.csv',
+      build: () => workOrdersCsv(tabRows.workOrders),
+    },
+    schedules: {
+      count: tabRows.schedules.length,
+      fileName: 'dvir-schedules.csv',
+      build: () => schedulesCsv(tabRows.schedules),
+    },
+  };
+
+  function handleExport() {
+    const { count, fileName, build } = exportable[tab];
+    try {
+      const blob = new Blob([build()], { type: 'text/csv' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = fileName;
+      link.click();
+      URL.revokeObjectURL(link.href);
+      toast({ kind: 'success', ...DVIR_TOAST_COPY.exported(count, fileName) });
+    } catch (error) {
+      toast({
+        kind: 'error',
+        ...DVIR_TOAST_COPY.exportFailed(error instanceof Error ? error.message : 'Something went wrong.'),
+      });
+    }
   }
 
   return (
@@ -215,13 +295,33 @@ export default function DvirPage() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              // Stage 3 — one term, debounced once, feeds every tab; Esc and × clear it everywhere.
+              onKeyDown={(e) => {
+                if (e.key === 'Escape' && search) setSearch('');
+              }}
+              aria-label="Search unit, defect"
               placeholder="Search unit, defect…"
               className="w-56 bg-transparent text-body outline-none"
             />
+            {search && (
+              <button
+                type="button"
+                aria-label="Clear search"
+                onClick={() => setSearch('')}
+                className="flex size-6 items-center justify-center rounded-md text-text-muted hover:bg-bg-subtle hover:text-text"
+              >
+                <X size={14} strokeWidth={1.75} aria-hidden="true" />
+              </button>
+            )}
           </div>
+          {/* The drawer's three groups (type / severity / repair status) only narrow the Recent
+              DVIRs table. On the other three tabs it applied to nothing while still looking
+              live, so it says so instead. */}
           <Button
             variant="secondary"
             iconLeft={<Filter size={16} strokeWidth={1.75} />}
+            disabled={tab !== 'dvirs'}
+            title={tab === 'dvirs' ? undefined : FILTERS_TAB_REASON}
             onClick={() => {
               setFiltersRevision((r) => r + 1);
               setFiltersOpen(true);
@@ -229,7 +329,13 @@ export default function DvirPage() {
           >
             Filters{countActiveDvirFilters(filters) > 0 ? ` · ${countActiveDvirFilters(filters)}` : ''}
           </Button>
-          <Button variant="secondary" iconLeft={<Upload size={16} strokeWidth={1.75} />} onClick={handleExport}>
+          <Button
+            variant="secondary"
+            iconLeft={<Download size={16} strokeWidth={1.75} />}
+            disabled={exportable[tab].count === 0}
+            title={exportable[tab].count === 0 ? 'Nothing to export on this tab.' : undefined}
+            onClick={handleExport}
+          >
             Export
           </Button>
           <Can perm="maintenance" level="FULL">
@@ -282,7 +388,9 @@ export default function DvirPage() {
       <div className="flex h-9 w-fit overflow-hidden rounded-md border border-border">
         {(
           [
-            ['dvirs', `DVIRs ${dvirs.page?.total ?? dvirs.rows.length}`],
+            // The table under this tab is the last 48 h, filtered — counting every DVIR the
+            // server holds made the tab disagree with the rows beneath it.
+            ['dvirs', `DVIRs ${recentDvirsCountLabel}`],
             ['defects', `Open defects ${defects.total}`],
             ...(canMaintenanceRead ? ([['workOrders', 'Work orders'], ['schedules', 'Schedules']] as [Tab, string][]) : []),
           ] as [Tab, string][]
@@ -484,7 +592,7 @@ export default function DvirPage() {
               rows={defects.rows}
               total={defects.total}
               totalPages={defects.totalPages}
-              page={defectsPage}
+              page={currentDefectsPage}
               limit={defectsLimit}
               onPageChange={setDefectsPage}
               onLimitChange={(l) => {
@@ -501,8 +609,8 @@ export default function DvirPage() {
       )}
 
       <Can perm="maintenance" level="READ">
-        {tab === 'workOrders' && <WorkOrdersTab search={debouncedSearch} />}
-        {tab === 'schedules' && <SchedulesTab search={debouncedSearch} />}
+        {tab === 'workOrders' && <WorkOrdersTab search={debouncedSearch} onRows={setWorkOrderRows} />}
+        {tab === 'schedules' && <SchedulesTab search={debouncedSearch} onRows={setScheduleRows} />}
       </Can>
 
       {drawerDvirId && (
@@ -511,7 +619,7 @@ export default function DvirPage() {
           onClose={() => setDrawerDvirId(null)}
           onCreateWorkOrder={(vehicleId) => {
             setDrawerDvirId(null);
-            setWorkOrderVehicleId(vehicleId);
+            setRowWorkOrderVehicleId(vehicleId);
           }}
         />
       )}
@@ -519,10 +627,7 @@ export default function DvirPage() {
       {(createWoOpen || workOrderVehicleId) && (
         <CreateWorkOrderModal
           vehicleId={workOrderVehicleId ?? undefined}
-          onClose={() => {
-            setCreateWoOpen(false);
-            setWorkOrderVehicleId(null);
-          }}
+          onClose={closeWorkOrderModal}
         />
       )}
       <DvirFiltersDrawer
@@ -619,7 +724,7 @@ function OpenDefectsTable({
 }
 
 /** Mounted only while its tab is active — `GET /work-orders` (`q` is a real param) per page. */
-function WorkOrdersTab({ search }: { search: string }) {
+function WorkOrdersTab({ search, onRows }: { search: string; onRows: (rows: WorkOrderTableRow[]) => void }) {
   const { can } = usePermission();
   const canFull = can('maintenance', 'FULL');
   const [page, setPage] = useState(1);
@@ -635,6 +740,7 @@ function WorkOrdersTab({ search }: { search: string }) {
   const currentPage = isLoading ? requestedPage : Math.min(requestedPage, Math.max(1, totalPages));
   if (currentPage !== page) setPage(currentPage);
   const onRetry = () => void refetch();
+  useEffect(() => onRows(rows), [rows, onRows]);
   // WB-074 — the `…` menu's three actions; each opens its own confirm/edit overlay so the
   // mutation-bearing hooks (`useCloseWorkOrder(id)` etc.) only mount once the target is known.
   const [closeTarget, setCloseTarget] = useState<WorkOrderTableRow | null>(null);
@@ -822,7 +928,7 @@ function WorkOrderCancelModal({ workOrder, onClose }: { workOrder: WorkOrderTabl
 }
 
 /** Mounted only while its tab is active — one `GET /maintenance-schedules` page per render. */
-function SchedulesTab({ search }: { search: string }) {
+function SchedulesTab({ search, onRows }: { search: string; onRows: (rows: ScheduleTableRow[]) => void }) {
   const { can } = usePermission();
   const canFull = can('maintenance', 'FULL');
   const [page, setPage] = useState(1);
@@ -836,6 +942,7 @@ function SchedulesTab({ search }: { search: string }) {
   const currentPage = isLoading ? requestedPage : Math.min(requestedPage, Math.max(1, totalPages));
   if (currentPage !== page) setPage(currentPage);
   const onRetry = () => refetch();
+  useEffect(() => onRows(rows), [rows, onRows]);
   // WB-074 — same one-target-at-a-time pattern as the Work orders tab.
   const [completeTarget, setCompleteTarget] = useState<ScheduleTableRow | null>(null);
   const [editTarget, setEditTarget] = useState<ScheduleTableRow | null>(null);
@@ -944,21 +1051,24 @@ function ScheduleCompleteModal({ schedule, onClose }: { schedule: ScheduleTableR
   const { toast } = useToast();
   const mutation = useCompleteSchedule(schedule.id);
   const [odometer, setOdometer] = useState('');
-  const [serviceDate, setServiceDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [initialServiceDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [serviceDate, setServiceDate] = useState(initialServiceDate);
   const [serverError, setServerError] = useState<string | null>(null);
+  // Stage 3 — typed odometer/date used to be lost silently on Cancel/×/Esc: the Modal had no
+  // `isDirty` and Cancel called `onClose` straight past the 11.30 discard confirm.
+  const isDirty = odometer !== '' || serviceDate !== initialServiceDate;
   const inputClass = 'h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text';
   return (
     <Modal
       open
       onClose={onClose}
+      isDirty={isDirty}
       title={`Complete ${schedule.name}?`}
       subtitle={`Unit ${schedule.vehicle?.unitNumber ?? '—'}`}
       size="sm"
       footer={
         <>
-          <Button variant="secondary" size="lg" onClick={onClose} disabled={mutation.isPending}>
-            Cancel
-          </Button>
+          <ModalCancelButton disabled={mutation.isPending} />
           <Button
             variant="primary"
             size="lg"

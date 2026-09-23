@@ -3,7 +3,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { http, HttpResponse } from 'msw';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
 import { ok, url } from '@/mocks/envelope';
@@ -14,6 +14,11 @@ import VehiclesPage from './VehiclesPage';
 
 vi.mock('@/shared/auth/usePermission', () => ({ usePermission: () => ({ can: () => true }) }));
 
+function LocationProbe() {
+  const location = useLocation();
+  return <output data-testid="location">{`${location.pathname}${location.search}`}</output>;
+}
+
 function renderPage(initialEntries: string[] = ['/vehicles']) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -21,6 +26,7 @@ function renderPage(initialEntries: string[] = ['/vehicles']) {
       <ToastProvider>
         <MemoryRouter initialEntries={initialEntries}>
           <VehiclesPage />
+          <LocationProbe />
         </MemoryRouter>
       </ToastProvider>
     </QueryClientProvider>,
@@ -194,13 +200,70 @@ describe('W-03 Vehicles', () => {
     // Row checkbox -> bulk bar
     const checkboxes = screen.getAllByRole('checkbox');
     await user.click(checkboxes[1]!);
-    expect(await screen.findByText('1 vehicles selected')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Set inactive' }));
-    expect(await screen.findByText('1 units set inactive')).toBeInTheDocument();
+    expect(await screen.findByText('1 vehicle selected')).toBeInTheDocument();
 
     // Import and Export are their own header buttons, not a "More" menu
     expect(screen.getByRole('button', { name: 'Export Units' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Import Units' })).toBeInTheDocument();
+  });
+
+  it('WB — bulk "Set inactive" PATCHes every selected unit instead of faking the toast', async () => {
+    usePopulatedFleet();
+    const patched: Array<{ id: string; body: unknown }> = [];
+    server.use(
+      http.patch(url(endpoints.vehicles.update(':id')), async ({ params, request }) => {
+        patched.push({ id: String(params.id), body: await request.json() });
+        return ok({ id: String(params.id), status: 'INACTIVE' });
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('#101');
+
+    await user.click(screen.getAllByRole('checkbox')[1]!);
+    await user.click(await screen.findByRole('button', { name: 'Set inactive' }));
+
+    // The real write happened, and the toast is singular ("1 unit", not "1 units").
+    expect(await screen.findByText('1 unit set inactive')).toBeInTheDocument();
+    expect(patched).toEqual([{ id: 'veh_1', body: { status: 'INACTIVE' } }]);
+  });
+
+  it('WB — a failing bulk "Set inactive" reports the failure instead of claiming success', async () => {
+    usePopulatedFleet();
+    server.use(
+      http.patch(url(endpoints.vehicles.update(':id')), () =>
+        HttpResponse.json(
+          { statusCode: 500, code: 'INTERNAL', message: 'boom', traceId: 't1' },
+          { status: 500 },
+        ),
+      ),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('#101');
+
+    await user.click(screen.getAllByRole('checkbox')[1]!);
+    await user.click(await screen.findByRole('button', { name: 'Set inactive' }));
+
+    expect(await screen.findByText('1 of 1 unit could not be set inactive')).toBeInTheDocument();
+    expect(screen.queryByText('1 unit set inactive')).not.toBeInTheDocument();
+  });
+
+  it('row "Track on map" opens Live fleet with that unit selected; the bulk-bar × is a 32px target (stage 3)', async () => {
+    usePopulatedFleet();
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('#101');
+
+    await user.click(screen.getAllByRole('checkbox')[1]!);
+    const clear = await screen.findByRole('button', { name: 'Clear selection' });
+    expect(clear.className).toContain('size-btn-sm');
+    await user.click(clear);
+    expect(screen.queryByText('1 vehicle selected')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Row actions' }));
+    await user.click(await screen.findByText('Track on map'));
+    expect(screen.getByTestId('location')).toHaveTextContent(/^\/live-fleet\?unit=veh_/);
   });
 
   it('the search box, pagination and every row-menu item all reach their handler', async () => {
@@ -284,6 +347,93 @@ describe('W-03 Vehicles', () => {
 
     expect(await screen.findByText('#101')).toBeInTheDocument();
     expect(screen.getByText('1–1 of 1 vehicles')).toBeInTheDocument();
+  });
+
+  // WB-160 — §4.3: the column shows the ECU reading plus the calibration offset, so a successful
+  // `Calibrate odometer` is visible here. It used to render the raw stored `odometerMi`.
+  it('the ODOMETER column is ECU + offset, not the stored odometerMi', async () => {
+    server.use(
+      http.get(url(endpoints.vehicles.list), () =>
+        ok({
+          items: [{ ...VEHICLE_ROW, odometerMi: 900000, deviceOdometerMi: 981109, odometerOffsetMi: 12480 }],
+          page: 1,
+          limit: 10,
+          total: 1,
+          totalPages: 1,
+        }),
+      ),
+      http.get(url(endpoints.drivers.list), () => ok({ items: [], page: 1, limit: 500, total: 0, totalPages: 1 })),
+      http.get(url(endpoints.devices.list), () => ok({ items: [], page: 1, limit: 500, total: 0, totalPages: 1 })),
+    );
+    renderPage();
+
+    expect(await screen.findByText('993,589 mi')).toBeInTheDocument();
+    expect(screen.queryByText('900,000 mi')).not.toBeInTheDocument();
+  });
+
+  // WB-161 — the bulk-bar button had no onClick at all.
+  it('bulk "Assign driver" opens 11.4 for the one selected unit', async () => {
+    usePopulatedFleet();
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('#101');
+
+    await user.click(screen.getAllByRole('checkbox')[1]!);
+    await user.click(await screen.findByRole('button', { name: 'Assign driver' }));
+
+    expect(await screen.findByText('Assign driver to unit #101')).toBeInTheDocument();
+  });
+
+  // WB-163 — the bulk `Export` used to call the whole-fleet export endpoint.
+  it('bulk "Export" writes the selected units, not the whole fleet', async () => {
+    usePopulatedFleet();
+    const user = userEvent.setup();
+    let csv = '';
+    let name = '';
+    const originalCreate = URL.createObjectURL;
+    const originalRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn((blob: Blob) => {
+      void blob.text().then((t) => {
+        csv = t;
+      });
+      return 'blob:mock';
+    }) as unknown as typeof URL.createObjectURL;
+    URL.revokeObjectURL = vi.fn();
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      name = this.download;
+    });
+    try {
+      renderPage();
+      await screen.findByText('#101');
+      await user.click(screen.getAllByRole('checkbox')[1]!);
+      await user.click(await screen.findByRole('button', { name: 'Export' }));
+
+      expect(name).toBe('vehicles-selected.csv');
+      await vi.waitFor(() => expect(csv).toContain('unitNumber,status,driver'));
+      expect(csv).toContain('#101');
+      expect(csv.split('\r\n')).toHaveLength(2);
+    } finally {
+      click.mockRestore();
+      URL.createObjectURL = originalCreate;
+      URL.revokeObjectURL = originalRevoke;
+    }
+  });
+
+  // WB-163 — `?driverId=` with an empty value used to reach W-06 as a driver id.
+  it('"Open HOS logs" is disabled on a driverless unit', async () => {
+    server.use(
+      http.get(url(endpoints.vehicles.list), () => ok({ items: [VEHICLE_ROW], page: 1, limit: 10, total: 1, totalPages: 1 })),
+      http.get(url(endpoints.drivers.list), () => ok({ items: [], page: 1, limit: 500, total: 0, totalPages: 1 })),
+      http.get(url(endpoints.devices.list), () => ok({ items: [], page: 1, limit: 500, total: 0, totalPages: 1 })),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('#101');
+
+    await user.click(screen.getByRole('button', { name: 'Row actions' }));
+    const item = await screen.findByText('Open HOS logs');
+    expect(item).toHaveAttribute('data-disabled');
+    expect(item).toHaveAttribute('title', 'No driver is assigned to this unit.');
   });
 
   it('error: renders <ErrorState> with Retry when the list fails', async () => {

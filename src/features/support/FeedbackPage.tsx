@@ -9,6 +9,8 @@ import { Avatar } from '@/shared/ui/Avatar';
 import { useToast } from '@/shared/ui/Toast';
 import { ApiError } from '@/shared/api/errors';
 import { useSubmitFeedback } from '@/shared/api/settingsAdmin';
+import { usePermission } from '@/shared/auth/usePermission';
+import { SUPPORT_REASON } from './lib/copy';
 
 type Tab = 'send' | 'driver' | 'requests';
 
@@ -44,6 +46,10 @@ function satisfactionTone(value: number): 'success' | 'warning' {
 export default function FeedbackPage() {
   const { toast } = useToast();
   const submitFeedback = useSubmitFeedback();
+  // WB-246 / B-12 — `POST /feedback` needs `support:FULL`; a READ role sees the reason
+  // instead of a guaranteed 403. The inline 403 below stays as the fallback.
+  const { can } = usePermission();
+  const canSubmit = can('support', 'FULL');
   const [tab, setTab] = useState<Tab>('send');
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [comment, setComment] = useState('');
@@ -52,6 +58,7 @@ export default function FeedbackPage() {
   const [error, setError] = useState<string | null>(null);
 
   function handleSubmit() {
+    if (!canSubmit) return;
     setError(null);
     submitFeedback.mutate(
       { answers: { ...answers, contactMe }, comment: comment || undefined },
@@ -149,7 +156,21 @@ export default function FeedbackPage() {
                   <input type="checkbox" checked={contactMe} onChange={(e) => setContactMe(e.target.checked)} />
                   You may contact me about this feedback
                 </label>
-                <Button variant="primary" className="w-full" iconLeft={<Send size={16} strokeWidth={1.75} />} loading={submitFeedback.isPending} onClick={handleSubmit}>
+                {!canSubmit && (
+                  <p id="feedback-submit-forbidden" className="rounded-md bg-bg-subtle px-3 py-2 text-caption text-text-secondary">
+                    {SUPPORT_REASON.feedbackForbidden}
+                  </p>
+                )}
+                <Button
+                  variant="primary"
+                  className="w-full"
+                  iconLeft={<Send size={16} strokeWidth={1.75} />}
+                  loading={submitFeedback.isPending}
+                  disabled={!canSubmit}
+                  title={canSubmit ? undefined : SUPPORT_REASON.feedbackForbidden}
+                  aria-describedby={canSubmit ? undefined : 'feedback-submit-forbidden'}
+                  onClick={handleSubmit}
+                >
                   Submit feedback
                 </Button>
               </div>

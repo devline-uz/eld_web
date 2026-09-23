@@ -126,3 +126,24 @@ describe('W-11 Dispatch & Trips · PeriodDropdown', () => {
     expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled();
   });
 });
+
+// WB-163 — `Clear` used to render even with nothing applied, where clicking it did nothing.
+describe('PeriodDropdown — Clear', () => {
+  it('is absent with no period applied and clears the applied one', async () => {
+    const onApply = vi.fn();
+    const { rerender } = render(<PeriodDropdown filters={EMPTY_TRIP_FILTERS} onApply={onApply} />);
+    await user.click(screen.getByRole('button', { name: 'All dates' }));
+    expect(screen.queryByRole('button', { name: 'Clear' })).not.toBeInTheDocument();
+    await user.keyboard('{Escape}');
+
+    const applied: TripFilters = { ...EMPTY_TRIP_FILTERS, departFrom: '2026-09-01', departTo: '2026-09-02' };
+    rerender(<PeriodDropdown filters={applied} onApply={onApply} />);
+    await user.click(screen.getAllByRole('button')[0]!);
+    const clear = await screen.findByRole('button', { name: 'Clear' });
+    // Stage 3 — a real small-button hit target (32px), not a ~29×16 text link.
+    expect(clear.className).toContain('h-btn-sm');
+    expect(clear.className).toContain('min-w-btn-sm');
+    await user.click(clear);
+    expect(onApply).toHaveBeenCalledWith({ departFrom: null, departTo: null });
+  });
+});

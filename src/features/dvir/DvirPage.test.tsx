@@ -70,6 +70,97 @@ describe('DvirPage', () => {
     expect(screen.getAllByText('Every reported defect has been corrected.').length).toBeGreaterThan(0);
   });
 
+  // WB-163 — the header `Export` always dumped the open-defects page, and `Filters` stayed
+  // enabled on the three tabs its drawer does not touch.
+  it('Export follows the active tab and Filters is only live on the DVIRs tab', async () => {
+    const user = userEvent.setup();
+    let name = '';
+    let json = '';
+    const originalCreate = URL.createObjectURL;
+    const originalRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = vi.fn((blob: Blob) => {
+      void blob.text().then((t) => {
+        json = t;
+      });
+      return 'blob:mock';
+    }) as unknown as typeof URL.createObjectURL;
+    URL.revokeObjectURL = vi.fn();
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      name = this.download;
+    });
+    try {
+      renderPage();
+      await screen.findByText('DVIR & Maintenance');
+      expect(screen.getByRole('button', { name: /^Filters/ })).toBeEnabled();
+
+      // The fixture DVIRs fall outside the 48 h window, so the DVIRs tab has nothing to export
+      // and says so rather than writing an empty file.
+      const exportButton = screen.getByRole('button', { name: 'Export' });
+      expect(exportButton).toBeDisabled();
+      expect(exportButton).toHaveAttribute('title', 'Nothing to export on this tab.');
+
+      await user.click(screen.getByRole('button', { name: /^Open defects/ }));
+      const filters = screen.getByRole('button', { name: /^Filters/ });
+      expect(filters).toBeDisabled();
+      expect(filters).toHaveAttribute('title', 'Filters apply to the DVIRs tab only.');
+
+      json = '';
+      await user.click(screen.getByRole('button', { name: 'Export' }));
+      expect(name).toBe('dvir-open-defects.csv');
+      // Stage 3 — CSV with a header row, and the outcome is announced.
+      await vi.waitFor(() =>
+        expect(json.split('\r\n')[0]).toBe('reportedAt,unit,part,category,severity,status,outOfService,description'),
+      );
+      expect(await screen.findByText('Export ready')).toBeInTheDocument();
+    } finally {
+      click.mockRestore();
+      URL.createObjectURL = originalCreate;
+      URL.revokeObjectURL = originalRevoke;
+    }
+  });
+
+  it('Export failure is announced instead of failing silently (stage 3)', async () => {
+    const user = userEvent.setup();
+    const originalCreate = URL.createObjectURL;
+    URL.createObjectURL = vi.fn(() => {
+      throw new Error('Blob storage is unavailable.');
+    }) as unknown as typeof URL.createObjectURL;
+    try {
+      renderPage();
+      await screen.findByText('DVIR & Maintenance');
+      await user.click(screen.getByRole('button', { name: /^Open defects/ }));
+      await vi.waitFor(() => expect(screen.getByRole('button', { name: 'Export' })).toBeEnabled());
+      await user.click(screen.getByRole('button', { name: 'Export' }));
+      expect(await screen.findByText('Export failed')).toBeInTheDocument();
+      expect(screen.getByText('Blob storage is unavailable.')).toBeInTheDocument();
+    } finally {
+      URL.createObjectURL = originalCreate;
+    }
+  });
+
+  it('search has a clear button and Esc, and the one term follows every tab (stage 3)', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('DVIR & Maintenance');
+    const search = screen.getByRole('textbox', { name: 'Search unit, defect' });
+    expect(screen.queryByRole('button', { name: 'Clear search' })).not.toBeInTheDocument();
+
+    await user.type(search, 'brake');
+    await user.click(screen.getByRole('button', { name: /^Work orders/ }));
+    expect(screen.getByRole('textbox', { name: 'Search unit, defect' })).toHaveValue('brake');
+    await user.click(screen.getByRole('button', { name: 'Clear search' }));
+    expect(search).toHaveValue('');
+
+    await user.type(search, 'x{Escape}');
+    expect(search).toHaveValue('');
+  });
+
+  // WB-161 — W-04's `New work order` links here with the unit it was pressed on.
+  it('?newWorkOrder= opens 11.18 pre-filled and drops the param', async () => {
+    renderPage('/dvir?newWorkOrder=veh_1');
+    expect(await screen.findByRole('dialog', { name: 'Create work order' })).toBeInTheDocument();
+  });
+
   it('renders "+ New work order" for maintenance FULL and removes it otherwise', async () => {
     renderPage();
     expect(await screen.findByRole('button', { name: 'New work order' })).toBeInTheDocument();
@@ -297,6 +388,19 @@ describe('DvirPage', () => {
       expect((body as { name?: string })?.name).toBe('Brake service — full');
     });
 
+    it('Schedules: Complete — Cancel after typing asks to discard first (stage 3)', async () => {
+      const user = userEvent.setup();
+      renderPage('/dvir?tab=schedules');
+
+      await user.click(await screen.findByRole('button', { name: 'Row actions' }));
+      await user.click(await screen.findByText('Complete'));
+      await user.type(await screen.findByLabelText(/Odometer at service/), '994700');
+      await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+      expect(await screen.findByText('Discard changes?')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Mark complete', hidden: true })).toBeInTheDocument();
+    });
+
     it('Schedules: Delete calls DELETE /maintenance-schedules/:id and toasts', async () => {
       const user = userEvent.setup();
       let deleted = false;
@@ -355,7 +459,6 @@ describe('DvirPage', () => {
       expect(await screen.findByText(/is out of service because of this defect/)).toBeInTheDocument();
       expect(screen.queryByText(/Return unit .* to service/)).not.toBeInTheDocument();
 
-      await user.type(screen.getByPlaceholderText('Mike Rowan · Shop A'), 'Mike Rowan');
       await user.type(screen.getByLabelText(/Repair notes/i), 'Replaced pads');
       await user.click(await screen.findByRole('button', { name: 'Mark as resolved' }));
 
@@ -402,7 +505,6 @@ describe('DvirPage', () => {
 
       await user.click(await screen.findByText('Mirror'));
       await user.click(await screen.findByText('No repair needed'));
-      await user.type(screen.getByPlaceholderText('Mike Rowan · Shop A'), 'Mike Rowan');
       await user.type(screen.getByLabelText(/Repair notes/i), 'Inspected, within spec');
       await user.click(await screen.findByRole('button', { name: 'Mark as resolved' }));
 

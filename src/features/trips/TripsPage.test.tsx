@@ -280,6 +280,20 @@ describe('W-11 Dispatch & Trips', () => {
     expect(inProgressAfter?.items.some((t) => t.id === 'trp_1')).toBe(false);
   });
 
+  it('names the search box and clears it with the × button (stage 3)', async () => {
+    usePopulatedTrips();
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText('TR-4821');
+    const search = screen.getByRole('textbox', { name: 'Search trips' });
+    expect(screen.queryByRole('button', { name: 'Clear search' })).not.toBeInTheDocument();
+    await user.type(search, 'TR-48');
+    await user.click(screen.getByRole('button', { name: 'Clear search' }));
+    expect(search).toHaveValue('');
+    expect(screen.queryByRole('button', { name: 'Clear search' })).not.toBeInTheDocument();
+  });
+
   it('opens the Create trip modal', async () => {
     usePopulatedTrips();
     const user = userEvent.setup();
