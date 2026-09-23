@@ -1,6 +1,6 @@
 // owner: web-dvir-safety — 11.16 Create work order (web/tz.md §11.16). `maintenance` FULL, `lg`.
 import { useMemo, useState } from 'react';
-import { Modal } from '@/shared/ui/Modal';
+import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { SeverityBadge } from '@/shared/ui/Badge';
 import { useToast } from '@/shared/ui/Toast';
@@ -30,13 +30,9 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
   const [vendor, setVendor] = useState('');
   const [priority, setPriority] = useState<WorkOrderPriority>('NORMAL');
   const [dueDate, setDueDate] = useState('');
-  const [laborHours, setLaborHours] = useState('');
   const [partsCost, setPartsCost] = useState('');
   const [odometer, setOdometer] = useState('');
   const [description, setDescription] = useState('');
-  const [keepOutOfService, setKeepOutOfService] = useState(true);
-  const [notifyDriver, setNotifyDriver] = useState(true);
-  const [blockDispatch, setBlockDispatch] = useState(true);
   const [serverError, setServerError] = useState<string | null>(null);
 
   const vehicle = useMemo(
@@ -45,12 +41,41 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
   );
 
   const valid = selectedVehicleId !== '' && title.trim() !== '';
+  // WB-150 — plain state, so `isDirty` compares against what the modal opened with; a freshly
+  // opened form (unit pre-selected from the row action, `Normal` priority) is never dirty.
+  const isDirty =
+    selectedVehicleId !== (vehicleId ?? '') ||
+    selectedDefects.length > 0 ||
+    title !== '' ||
+    vendor !== '' ||
+    priority !== 'NORMAL' ||
+    dueDate !== '' ||
+    partsCost !== '' ||
+    odometer !== '' ||
+    description !== '';
+
+  // Stage 3 — the ticked defects belong to the unit they were listed for; switching the unit used
+  // to keep them, so another vehicle's defect IDs could be submitted on this work order.
+  function changeVehicle(next: string) {
+    if (next === selectedVehicleId) return;
+    setSelectedVehicleId(next);
+    setSelectedDefects([]);
+  }
 
   function toggleDefect(id: string) {
     setSelectedDefects((prev) => (prev.includes(id) ? prev.filter((d) => d !== id) : [...prev, id]));
   }
 
   function submit() {
+    // WB-148 — `Estimated labour` and the three trailing checkboxes (`Keep the unit out of
+    // service`, `Notify the driver`, `Block dispatch assignment`) were collected, defaulted to
+    // checked, and then never put on the wire: `CreateWorkOrderDto` has no labour-hours field and
+    // no `keepOutOfService`/`notifyDriver`/`blockDispatchAssignment` flags (web/backend-gaps.md
+    // B-42). Out-of-service state still follows only the "an open CRITICAL defect exists" rule,
+    // and nothing notifies the driver from here — so the controls are gone rather than left
+    // promising three effects the request cannot ask for. `Estimated parts cost` stays: it is a
+    // real DTO field (`costUsd`).
+    setServerError(null);
     mutation.mutate(
       {
         vehicleId: selectedVehicleId,
@@ -78,16 +103,12 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
       open
       onClose={onClose}
       title="Create work order"
+      isDirty={isDirty}
       subtitle={vehicle ? `Unit ${vehicle.unitNumber} · ${[vehicle.make, vehicle.model].filter(Boolean).join(' ')} · ${defects.rows.length} open defects` : 'Select a unit'}
       size="lg"
       footer={
         <>
-          <Button variant="secondary" size="lg" onClick={onClose} disabled={mutation.isPending}>
-            Cancel
-          </Button>
-          <Button variant="secondary" size="lg" disabled={!valid || mutation.isPending}>
-            Save as draft
-          </Button>
+          <ModalCancelButton disabled={mutation.isPending} />
           <Button variant="primary" size="lg" disabled={!valid} loading={mutation.isPending} onClick={submit}>
             Create work order
           </Button>
@@ -100,7 +121,7 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
             <span className="text-label text-text">
               Unit <span className="text-danger">*</span>
             </span>
-            <select value={selectedVehicleId} onChange={(e) => setSelectedVehicleId(e.target.value)} className={inputClass}>
+            <select value={selectedVehicleId} onChange={(e) => changeVehicle(e.target.value)} className={inputClass}>
               <option value="">Select a unit…</option>
               {(vehiclesQuery.data?.items ?? []).map((v) => (
                 <option key={v.id} value={v.id}>
@@ -169,14 +190,7 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
           </label>
         </div>
 
-        <div className="grid grid-cols-3 gap-4">
-          <label className="flex flex-col gap-1">
-            <span className="text-label text-text">Estimated labour</span>
-            <div className="flex items-center gap-2">
-              <input type="number" value={laborHours} onChange={(e) => setLaborHours(e.target.value)} className={inputClass} />
-              <span className="text-body text-text-muted">hours</span>
-            </div>
-          </label>
+        <div className="grid grid-cols-2 gap-4">
           <label className="flex flex-col gap-1">
             <span className="text-label text-text">Estimated parts cost</span>
             <div className="flex items-center gap-2">
@@ -203,22 +217,11 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
           />
         </label>
 
-        <div className="flex items-center gap-6">
-          <label className="flex items-center gap-2 text-body text-text">
-            <input type="checkbox" checked={keepOutOfService} onChange={(e) => setKeepOutOfService(e.target.checked)} />
-            Keep the unit out of service until closed
-          </label>
-          <label className="flex items-center gap-2 text-body text-text">
-            <input type="checkbox" checked={notifyDriver} onChange={(e) => setNotifyDriver(e.target.checked)} />
-            Notify the driver
-          </label>
-          <label className="flex items-center gap-2 text-body text-text">
-            <input type="checkbox" checked={blockDispatch} onChange={(e) => setBlockDispatch(e.target.checked)} />
-            Block dispatch assignment
-          </label>
-        </div>
-
-        {serverError && <p className="text-body text-danger">{serverError}</p>}
+        {serverError && (
+          <p role="alert" className="rounded-md bg-danger-soft p-3 text-body text-danger">
+            {serverError}
+          </p>
+        )}
       </div>
     </Modal>
   );

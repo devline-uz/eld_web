@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import { Copy } from 'lucide-react';
-import { Modal } from '@/shared/ui/Modal';
+import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
 import { ApiError } from '@/shared/api/errors';
@@ -28,10 +28,17 @@ export function CreateApiKeyModal({ onClose }: { onClose: () => void }) {
   const {
     register,
     handleSubmit,
-    formState: { errors, isSubmitting, isDirty },
+    formState: { errors, isDirty },
   } = useForm<CreateKeyValues>({ resolver: zodResolver(createKeySchema), mode: 'onBlur', defaultValues: { name: '' } });
 
+  const submitting = createKey.isPending;
+  // `scopes` lives outside react-hook-form.
+  const dirty = isDirty || scopes.length !== 1 || scopes[0] !== 'reports:read';
+
   function onSubmit(values: CreateKeyValues) {
+    // `mutate()` resolves RHF's `submitting` before the request lands — guard on the mutation
+    // so a double click cannot mint two keys.
+    if (submitting) return;
     createKey.mutate(
       { name: values.name, scopes },
       {
@@ -65,13 +72,11 @@ export function CreateApiKeyModal({ onClose }: { onClose: () => void }) {
       onClose={onClose}
       title="Create key"
       size="sm"
-      isDirty={isDirty}
+      isDirty={dirty}
       footer={
         <>
-          <Button variant="secondary" size="lg" onClick={onClose} disabled={isSubmitting}>
-            Cancel
-          </Button>
-          <Button variant="primary" size="lg" loading={isSubmitting} onClick={handleSubmit(onSubmit)}>
+          <ModalCancelButton disabled={submitting} />
+          <Button variant="primary" size="lg" loading={submitting} disabled={submitting} onClick={handleSubmit(onSubmit)}>
             Create key
           </Button>
         </>
@@ -79,7 +84,7 @@ export function CreateApiKeyModal({ onClose }: { onClose: () => void }) {
     >
       <form className="flex flex-col gap-4" onSubmit={handleSubmit(onSubmit)}>
         <Field label="Name" required error={errors.name?.message}>
-          <input {...register('name')} placeholder="McLeod TMS" disabled={isSubmitting} className={inputClass} />
+          <input {...register('name')} placeholder="McLeod TMS" disabled={submitting} className={inputClass} />
         </Field>
         <div>
           <p className="mb-2 text-label text-text">Scopes</p>

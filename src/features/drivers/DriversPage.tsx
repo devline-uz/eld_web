@@ -4,14 +4,18 @@
 // B-1 `GET /drivers/roster` shipped 2026-09-14 (server-paginated, server filters per B-55).
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
-import { Search, Plus, Download, Filter, Upload } from 'lucide-react';
+import { Search, Plus, Download, Filter, Upload, X } from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
 import { useDynamicSubtitle } from '@/app/layouts/Topbar';
 import { useDriverRoster, useDriverRosterCounts, useDriverRosterWindow, type DriverRosterEntry } from '@/shared/api/drivers';
+import { useQueueReport } from '@/shared/api/reports';
 import { client } from '@/shared/api/client';
+import { ApiError } from '@/shared/api/errors';
+import { qkRoot } from '@/shared/api/queryKeys';
 import { endpoints } from '@/shared/api/endpoints';
 import { Button } from '@/shared/ui/Button';
 import { Badge, DutyBadge } from '@/shared/ui/Badge';
@@ -20,14 +24,19 @@ import { HosMeter } from '@/shared/ui/HosMeter';
 import { DataTable } from '@/shared/ui/DataTable';
 import { Pagination } from '@/shared/ui/Pagination';
 import { Card } from '@/shared/ui/Card';
+import { ConfirmDelete } from '@/shared/ui/Modal';
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
 import { EMPTY_STATE_COPY, searchEmptyState } from '@/shared/ui/copy';
 import { useToast } from '@/shared/ui/Toast';
 import { AddDriverModal } from './components/AddDriverModal';
+import { AssignUnitModal } from './components/AssignUnitModal';
+import { BulkMessageModal } from './components/BulkMessageModal';
 import { ImportDriversModal } from './components/ImportDriversModal';
 import { DriverFiltersDrawer, DriverFilterChips } from './components/DriverFiltersDrawer';
 import { parseDriverFilters, writeDriverFilters, matchesDriverFilters, EMPTY_DRIVER_FILTERS, countActiveDriverFilters } from './lib/filters';
+import { DRIVER_TOAST, NO_PASSWORD_RESET } from './lib/copy';
 import { messagesHref } from '@/shared/lib/messagesHref';
+import { tripsHrefForDriver } from './lib/links';
 
 type Segment = 'ALL' | 'ON_DUTY' | 'OFF_DUTY' | 'VIOLATIONS';
 const LIMIT_SEC = { drive: 39600, shift: 50400, cycle: 252000 };
@@ -132,20 +141,112 @@ export default function DriversPage() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filtersRevision, setFiltersRevision] = useState(0);
   const [selection, setSelection] = useState<string[]>([]);
+  const [exporting, setExporting] = useState(false);
+  const [assignUnitTarget, setAssignUnitTarget] = useState<{ id: string; name: string } | null>(null);
+  const [bulkMessageIds, setBulkMessageIds] = useState<string[] | null>(null);
+  const [deactivateTargets, setDeactivateTargets] = useState<string[] | null>(null);
+
+  const queryClient = useQueryClient();
+  const queueReport = useQueueReport();
 
   function applyFilters(next: typeof filters) {
     setParams(writeDriverFilters(params, next), { replace: true });
   }
 
   async function handleExport() {
-    const data = await client.get(endpoints.drivers.export);
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = 'drivers-export.json';
-    link.click();
-    URL.revokeObjectURL(link.href);
+    // WB-181 — the download used to reject into an unhandled promise: a failing
+    // `GET /drivers/export` left the button silent and the user with no file and no reason.
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const data = await client.get(endpoints.drivers.export);
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = 'drivers-export.json';
+      link.click();
+      URL.revokeObjectURL(link.href);
+    } catch (error) {
+      toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+    } finally {
+      setExporting(false);
+    }
   }
+
+  /** The §395.8 retention window the roadside inspector asks for: today and the previous 7 days. */
+  function rodsRange(): { from: string; to: string } {
+    const now = new Date();
+    return {
+      from: new Date(now.getTime() - 7 * 86_400_000).toISOString().slice(0, 10),
+      to: now.toISOString().slice(0, 10),
+    };
+  }
+
+  // WB-182 — `Export 8-day RODS` and the bulk `Export logs` used to fire a success toast and make
+  // no request at all. Both now queue the real FMCSA pack job (`GET /reports/fmcsa-pack`, the same
+  // shortcut W-15 uses) per driver; there is no bulk report endpoint, so a multi-row selection fans
+  // out and `allSettled` reports a partial failure honestly.
+  const exportRodsMutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const { from, to } = rodsRange();
+      const results = await Promise.allSettled(
+        ids.map((driverId) => queueReport.mutateAsync({ kind: 'fmcsaPack', params: { from, to, driverId } })),
+      );
+      const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+      return { total: ids.length, succeeded: ids.length - rejected.length, firstError: rejected[0]?.reason as unknown };
+    },
+    onSuccess: ({ total, succeeded, firstError }) => {
+      if (succeeded === total) {
+        toast({ kind: 'success', ...DRIVER_TOAST.rodsExportQueued(succeeded) });
+        return;
+      }
+      toast({
+        kind: 'error',
+        ...DRIVER_TOAST.rodsExportFailed(total - succeeded, total),
+        description:
+          firstError instanceof ApiError ? firstError.userMessage : DRIVER_TOAST.rodsExportFailed(total - succeeded, total).description,
+      });
+    },
+    onError: (error) => toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }),
+  });
+
+  // WB-183 — `Deactivate driver` (row menu) and the bulk `Deactivate` had no handler at all. There
+  // is no bulk driver-status endpoint (gap B-71's driver twin), so this fans out
+  // `PATCH /drivers/:id { status: 'INACTIVE' }`, one request per driver, and never claims more than
+  // the server confirmed.
+  const deactivateMutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const results = await Promise.allSettled(
+        ids.map((id) => client.patch(endpoints.drivers.update(id), { status: 'INACTIVE' })),
+      );
+      const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+      return { total: ids.length, succeeded: ids.length - rejected.length, firstError: rejected[0]?.reason as unknown };
+    },
+    onSuccess: ({ total, succeeded, firstError }) => {
+      void queryClient.invalidateQueries({ queryKey: qkRoot.drivers });
+      setDeactivateTargets(null);
+      if (succeeded > 0) setSelection([]);
+      if (succeeded === total) {
+        toast({ kind: 'success', ...DRIVER_TOAST.driversDeactivated(succeeded) });
+        return;
+      }
+      toast({
+        kind: 'error',
+        ...DRIVER_TOAST.driversDeactivateFailed(total - succeeded, total),
+        description:
+          firstError instanceof ApiError
+            ? firstError.userMessage
+            : DRIVER_TOAST.driversDeactivateFailed(total - succeeded, total).description,
+      });
+    },
+    onError: (error) => {
+      setDeactivateTargets(null);
+      toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+    },
+  });
+
+  const canExportRods = can('reportsTransfer');
+  const canBroadcast = can('messaging', 'FULL');
 
   const columns: ColumnDef<DriverRosterEntry, unknown>[] = [
     {
@@ -232,10 +333,24 @@ export default function DriversPage() {
             <Search size={16} strokeWidth={1.75} className="text-text-muted" />
             <input
               value={q}
+              aria-label="Search drivers"
               onChange={(e) => setParam('q', e.target.value || null)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape' && q) setParam('q', null);
+              }}
               placeholder="Search driver, username…"
               className="w-56 bg-transparent text-body outline-none"
             />
+            {q && (
+              <button
+                type="button"
+                aria-label="Clear search"
+                onClick={() => setParam('q', null)}
+                className="flex size-5 items-center justify-center rounded-md text-text-muted hover:bg-bg-subtle hover:text-text"
+              >
+                <X size={14} strokeWidth={1.75} />
+              </button>
+            )}
           </div>
           <Button
             variant="secondary"
@@ -247,7 +362,14 @@ export default function DriversPage() {
           >
             Filters{countActiveDriverFilters(filters) > 0 ? ` · ${countActiveDriverFilters(filters)}` : ''}
           </Button>
-          <Button variant="secondary" className="w-btn-wide" iconLeft={<Upload size={16} strokeWidth={1.75} />} onClick={handleExport}>
+          <Button
+            variant="secondary"
+            className="w-btn-wide"
+            iconLeft={<Upload size={16} strokeWidth={1.75} />}
+            loading={exporting}
+            disabled={exporting}
+            onClick={handleExport}
+          >
             Export Drivers
           </Button>
           <Can perm="drivers" level="FULL">
@@ -353,7 +475,7 @@ export default function DriversPage() {
                             </DropdownMenu.Item>
                           </Can>
                           <Can perm="trips" level="FULL">
-                            <DropdownMenu.Item onSelect={() => navigate('/trips')} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                            <DropdownMenu.Item onSelect={() => navigate(tripsHrefForDriver(row.driver.id))} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
                               Assign trip
                             </DropdownMenu.Item>
                           </Can>
@@ -369,14 +491,26 @@ export default function DriversPage() {
                               Certify on behalf
                             </DropdownMenu.Item>
                           </Can>
-                          <DropdownMenu.Item onSelect={() => toast({ kind: 'success', title: 'Export started' })} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
-                            Export 8-day RODS
-                          </DropdownMenu.Item>
+                          <Can perm="reportsTransfer">
+                            <DropdownMenu.Item
+                              onSelect={() => exportRodsMutation.mutate([row.driver.id])}
+                              className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle"
+                            >
+                              Export 8-day RODS
+                            </DropdownMenu.Item>
+                          </Can>
                           <DropdownMenu.Separator className="my-1 h-px bg-border" />
-                          <DropdownMenu.Item onSelect={() => toast({ kind: 'success', title: 'Password reset' })} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                          {/* ⛔ GAP B-81 — no carrier-side password reset for a driver account. The
+                              item stays visible with its reason rather than firing a toast for a
+                              request that was never made. */}
+                          <DropdownMenu.Item disabled className="rounded-md px-2 py-1.5 text-body text-text-muted outline-none data-[disabled]:cursor-not-allowed">
                             Reset app password
                           </DropdownMenu.Item>
-                          <DropdownMenu.Item className="cursor-pointer rounded-md px-2 py-1.5 text-body text-danger outline-none hover:bg-danger-soft">
+                          <p className="px-2 pb-1 text-caption text-text-muted">{NO_PASSWORD_RESET}</p>
+                          <DropdownMenu.Item
+                            onSelect={() => setDeactivateTargets([row.driver.id])}
+                            className="cursor-pointer rounded-md px-2 py-1.5 text-body text-danger outline-none hover:bg-danger-soft"
+                          >
                             Deactivate driver
                           </DropdownMenu.Item>
                         </>
@@ -401,16 +535,56 @@ export default function DriversPage() {
       {selection.length > 0 && canFull && (
         <div className="fixed inset-x-0 bottom-6 z-30 mx-auto flex h-14 w-fit min-w-bulk-bar items-center gap-3 rounded-lg bg-bg-inverse px-4 shadow-pop">
           <span className="text-body-strong text-text-inverse">{selection.length} drivers selected</span>
-          <Button variant="ghost" className="text-text-inverse hover:bg-white/10">
+          {/* WB-184 — all four buttons used to have no `onClick` whatsoever. A unit carries exactly
+              one driver (`POST /vehicles/:id/assign-driver` moves the link), so `Assign unit` is a
+              single-row action and says so instead of pretending to fan out. */}
+          <Button
+            variant="ghost"
+            className="text-text-inverse hover:bg-white/10"
+            disabled={selection.length !== 1}
+            onClick={() => {
+              const id = selection[0];
+              const entry = entries.find((e) => e.driver.id === id);
+              if (!id) return;
+              setAssignUnitTarget({ id, name: entry ? `${entry.driver.firstName} ${entry.driver.lastName}` : 'This driver' });
+            }}
+          >
             Assign unit
           </Button>
-          <Button variant="ghost" className="text-text-inverse hover:bg-white/10">
-            Send message
-          </Button>
-          <Button variant="ghost" className="text-text-inverse hover:bg-white/10">
-            Export logs
-          </Button>
-          <Button variant="ghost" className="text-text-inverse hover:bg-white/10">
+          {selection.length !== 1 && (
+            <span className="text-caption text-text-inverse/70">A unit takes one driver — select a single row.</span>
+          )}
+          {canBroadcast && (
+            <Button
+              variant="ghost"
+              className="text-text-inverse hover:bg-white/10"
+              onClick={() => {
+                if (selection.length === 1 && selection[0]) {
+                  navigate(messagesHref(selection[0]));
+                  return;
+                }
+                setBulkMessageIds(selection);
+              }}
+            >
+              Send message
+            </Button>
+          )}
+          {canExportRods && (
+            <Button
+              variant="ghost"
+              className="text-text-inverse hover:bg-white/10"
+              loading={exportRodsMutation.isPending}
+              onClick={() => exportRodsMutation.mutate(selection)}
+            >
+              Export logs
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            className="text-text-inverse hover:bg-white/10"
+            loading={deactivateMutation.isPending}
+            onClick={() => setDeactivateTargets(selection)}
+          >
             Deactivate
           </Button>
           <button type="button" aria-label="Clear selection" onClick={() => setSelection([])} className="ml-auto text-text-inverse">
@@ -418,6 +592,31 @@ export default function DriversPage() {
           </button>
         </div>
       )}
+
+      {assignUnitTarget && (
+        <AssignUnitModal
+          driverId={assignUnitTarget.id}
+          driverName={assignUnitTarget.name}
+          onClose={() => setAssignUnitTarget(null)}
+          onAssigned={() => setSelection([])}
+        />
+      )}
+      {bulkMessageIds && bulkMessageIds.length > 0 && (
+        <BulkMessageModal driverIds={bulkMessageIds} onClose={() => setBulkMessageIds(null)} onSent={() => setSelection([])} />
+      )}
+      <ConfirmDelete
+        open={Boolean(deactivateTargets && deactivateTargets.length > 0)}
+        onClose={() => setDeactivateTargets(null)}
+        onConfirm={() => deactivateTargets && deactivateMutation.mutate(deactivateTargets)}
+        title={
+          deactivateTargets && deactivateTargets.length > 1
+            ? `Deactivate ${deactivateTargets.length} drivers?`
+            : 'Deactivate this driver?'
+        }
+        description="They can no longer sign in to the mobile app. Their logs, DVIRs and certifications stay available for audits."
+        confirmLabel="Deactivate"
+        loading={deactivateMutation.isPending}
+      />
 
       {addOpen && <AddDriverModal onClose={() => setAddOpen(false)} />}
       {importOpen && <ImportDriversModal onClose={() => setImportOpen(false)} />}

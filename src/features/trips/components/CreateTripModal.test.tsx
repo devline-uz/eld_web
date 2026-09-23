@@ -7,11 +7,12 @@ import userEvent from '@testing-library/user-event';
 import { addDays, format } from 'date-fns';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
-import { ok, url } from '@/mocks/envelope';
+import { fail, ok, url } from '@/mocks/envelope';
 import { endpoints } from '@/shared/api/endpoints';
 import { ToastProvider } from '@/shared/ui/Toast';
 import { VALIDATION_MESSAGES } from '@/shared/forms/messages';
 import { CreateTripModal } from './CreateTripModal';
+import { EST_DRIVE_TIME_HINT } from '../lib/copy';
 
 const VALIDATION_REQUIRED = VALIDATION_MESSAGES.required;
 
@@ -109,7 +110,11 @@ describe('CreateTripModal — WB-115 assignment block', () => {
 });
 
 describe('CreateTripModal — submit', () => {
-  async function fillRequiredAndSubmit(pickup: string, delivery: string, { twice = false } = {}) {
+  async function fillRequiredAndSubmit(
+    pickup: string,
+    delivery: string,
+    { twice = false, intermediate }: { twice?: boolean; intermediate?: string } = {},
+  ) {
     const posts: Record<string, unknown>[] = [];
     let release: () => void = () => {};
     const gate = new Promise<void>((r) => (release = r));
@@ -133,6 +138,11 @@ describe('CreateTripModal — submit', () => {
     await user.type(destination!, 'Dayton, OH');
     enterWindow('Pickup', pickup);
     enterWindow('Delivery', delivery);
+    if (intermediate) {
+      await user.click(screen.getByRole('button', { name: '+ Add an intermediate stop' }));
+      const stopLabel = screen.getByText((content, el) => el?.tagName === 'SPAN' && content.trim() === 'Stop 1 location').closest('label')!;
+      await user.type(within(stopLabel).getByRole('textbox'), intermediate);
+    }
     await user.type(screen.getByPlaceholderText('mi'), '120.5');
     await selectDriver('Vera Verified');
     const unitLabel = screen
@@ -162,6 +172,24 @@ describe('CreateTripModal — submit', () => {
       plannedEndAt: new Date(`${tomorrow}T14:00`).toISOString(),
     });
     expect(posts[0]!.weightLbs).toBeUndefined();
+  });
+
+  // WB-164 — `+ Add an intermediate stop` had no `onClick`; `CreateTripPayload.stops` is real.
+  it('sends an added intermediate stop between the pickup and the delivery', async () => {
+    const posts = await fillRequiredAndSubmit(`${tomorrow}T08:00`, `${tomorrow}T14:00`, { intermediate: 'Springfield, OH' });
+
+    expect(posts[0]!.stops).toEqual([
+      { sequence: 1, type: 'PICKUP', name: 'Columbus, OH', scheduledAt: new Date(`${tomorrow}T08:00`).toISOString() },
+      { sequence: 2, type: 'CHECKPOINT', name: 'Springfield, OH', scheduledAt: undefined },
+      { sequence: 3, type: 'DELIVERY', name: 'Dayton, OH', scheduledAt: new Date(`${tomorrow}T14:00`).toISOString() },
+    ]);
+  });
+
+  // An added-then-emptied row must not be sent as a nameless stop.
+  it('drops an intermediate stop left blank', async () => {
+    const posts = await fillRequiredAndSubmit(`${tomorrow}T08:00`, `${tomorrow}T14:00`, { intermediate: ' ' });
+
+    expect(posts[0]!.stops).toHaveLength(2);
   });
 });
 
@@ -245,5 +273,156 @@ describe('CreateTripModal — date, distance and rate validation', () => {
     await user.click(rate);
     await user.paste('12abc');
     expect((rate as HTMLInputElement).value).toBe('');
+  });
+});
+
+describe('CreateTripModal — dirty close, payload and 422 mapping', () => {
+  const tomorrow = format(addDays(new Date(), 1), 'yyyy-MM-dd');
+
+  /** Fills every required field; the trailing `post` handler decides the response. */
+  async function fillValidForm() {
+    const user = userEvent.setup();
+    server.use(
+      http.get(url(endpoints.vehicles.list), () =>
+        ok({ items: [{ id: 'veh_1', unitNumber: '101', make: 'Volvo', model: 'VNL' }], page: 1, limit: 500, total: 1, totalPages: 1 }),
+      ),
+    );
+    const inputs = document.querySelectorAll<HTMLInputElement>('form input');
+    const [reference, , , origin, , destination] = Array.from(inputs);
+    await user.type(reference!, 'TR-1');
+    await user.type(origin!, 'Columbus, OH');
+    await user.type(destination!, 'Dayton, OH');
+    enterWindow('Pickup', `${tomorrow}T08:00`);
+    enterWindow('Delivery', `${tomorrow}T14:00`);
+    await selectDriver('Vera Verified');
+    const unitLabel = screen
+      .getByText((content, el) => el?.tagName === 'SPAN' && el.classList.contains('text-label') && content.trim().startsWith('Unit'))
+      .closest('label')!;
+    await user.click(within(unitLabel).getByRole('button'));
+    await user.click(await screen.findByText('#101'));
+    return user;
+  }
+
+  it('closes an untouched form with no discard confirm', async () => {
+    const user = userEvent.setup();
+    const { onClose } = renderModal();
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByText('Discard changes?')).not.toBeInTheDocument();
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('closes an untouched form from X with no discard confirm', async () => {
+    const user = userEvent.setup();
+    const { onClose } = renderModal();
+
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+
+    expect(screen.queryByText('Discard changes?')).not.toBeInTheDocument();
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('routes Cancel through the discard confirm after a real edit', async () => {
+    const user = userEvent.setup();
+    const { onClose } = renderModal();
+    await user.type(document.querySelectorAll<HTMLInputElement>('form input')[0]!, 'TR-9');
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(await screen.findByText('Discard changes?')).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Discard' }));
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('confirms on close after editing `Estimated drive time`, which lives outside the form', async () => {
+    const user = userEvent.setup();
+    renderModal();
+    await user.type(screen.getByPlaceholderText('h'), '9');
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(await screen.findByText('Discard changes?')).toBeInTheDocument();
+  });
+
+  it('submits without a distance and never sends one (WB-134 — no API field)', async () => {
+    const posts: Record<string, unknown>[] = [];
+    renderModal();
+    server.use(
+      http.post(url(endpoints.trips.create), async ({ request }) => {
+        posts.push((await request.json()) as Record<string, unknown>);
+        return ok({ id: 'trp_1', number: 'TR-1' });
+      }),
+    );
+    const user = await fillValidForm();
+
+    await user.click(screen.getByRole('button', { name: 'Create trip' }));
+
+    await vi.waitFor(() => expect(posts).toHaveLength(1));
+    expect(Object.keys(posts[0]!)).not.toContain('distanceMi');
+    // The gap is visible in the UI rather than silently swallowed.
+    expect(screen.getAllByText(/Not saved yet — the create-trip API has no distance field\./)).not.toHaveLength(0);
+  });
+
+  it('never sends `Estimated drive time` and says so on screen (B-92)', async () => {
+    const posts: Record<string, unknown>[] = [];
+    renderModal();
+    server.use(
+      http.post(url(endpoints.trips.create), async ({ request }) => {
+        posts.push((await request.json()) as Record<string, unknown>);
+        return ok({ id: 'trp_1', number: 'TR-1' });
+      }),
+    );
+    expect(screen.getByText(EST_DRIVE_TIME_HINT)).toBeInTheDocument();
+    const user = await fillValidForm();
+    await user.type(screen.getByPlaceholderText('h'), '6');
+
+    await user.click(screen.getByRole('button', { name: 'Create trip' }));
+
+    await vi.waitFor(() => expect(posts).toHaveLength(1));
+    expect(JSON.stringify(posts[0])).not.toMatch(/estimat|drive(Sec|Time|Hours|Duration)/i);
+  });
+
+  it('shows a 422 on `notes` in the modal banner instead of swallowing it', async () => {
+    renderModal();
+    server.use(
+      http.post(url(endpoints.trips.create), () =>
+        fail(422, 'VALIDATION_FAILED', 'Check the highlighted fields and try again.', {
+          fields: { notes: 'Notes are limited to 500 characters.' },
+        }),
+      ),
+    );
+    const user = await fillValidForm();
+
+    await user.click(screen.getByRole('button', { name: 'Create trip' }));
+
+    expect(await screen.findByText('Notes: Notes are limited to 500 characters.')).toBeInTheDocument();
+  });
+
+  it('maps a 422 on `number` onto the Trip / load ID field', async () => {
+    renderModal();
+    server.use(
+      http.post(url(endpoints.trips.create), () =>
+        fail(422, 'VALIDATION_FAILED', 'Check the highlighted fields and try again.', {
+          fields: { number: 'A trip with this number already exists.' },
+        }),
+      ),
+    );
+    const user = await fillValidForm();
+
+    await user.click(screen.getByRole('button', { name: 'Create trip' }));
+
+    expect(await screen.findByText('A trip with this number already exists.')).toBeInTheDocument();
+  });
+
+  it('shows a plain 500 in the banner as well as the toast', async () => {
+    renderModal();
+    server.use(http.post(url(endpoints.trips.create), () => fail(500, 'INTERNAL_ERROR', 'Boom')));
+    const user = await fillValidForm();
+
+    await user.click(screen.getByRole('button', { name: 'Create trip' }));
+
+    expect((await screen.findAllByText('Something went wrong on our side. Try again.')).length).toBeGreaterThan(0);
   });
 });

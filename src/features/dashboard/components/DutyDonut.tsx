@@ -6,6 +6,7 @@ import { DutyBadge } from '@/shared/ui/Badge';
 import type { LiveFleetUnit } from '@/shared/api/liveFleet';
 import { formatPercent } from '@/shared/format/numbers';
 import { allocatePercents } from '../lib/allocatePercents';
+import { dutyLegendLabel } from '../lib/dutyLegendLabel';
 
 const SEGMENTS: DutyStatus[] = ['DRIVING', 'ON_DUTY', 'SLEEPER', 'OFF_DUTY'];
 
@@ -84,10 +85,13 @@ export default function DutyDonut({
             key={s.status}
             type="button"
             onClick={() => onSegmentClick?.(s.status)}
+            // Stage 3 — the visible pieces (badge, count, percent) otherwise run together as one
+            // unseparated accessible name; give the row a real sentence instead.
+            aria-label={dutyLegendLabel(s.status, s.count, percents[index] ?? 0)}
             className="flex items-center justify-between text-body"
           >
             <DutyBadge status={s.status} />
-            <span className="flex items-center gap-3">
+            <span className="flex items-center gap-3" aria-hidden="true">
               <span className="tabular-nums font-semibold text-text">{s.count}</span>
               <span className="tabular-nums text-text-muted">{formatPercent(percents[index])}</span>
             </span>

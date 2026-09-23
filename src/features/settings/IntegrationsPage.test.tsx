@@ -2,7 +2,7 @@
 // the "shown once" API key secret.
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http } from 'msw';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
@@ -81,6 +81,29 @@ describe('IntegrationsPage — W-22', () => {
     expect(await screen.findByText('Connected')).toBeInTheDocument();
   });
 
+  // WB-232 — the status lines come from the API record only; no invented figures.
+  it('derives each card status line from the integration record, with no hardcoded figures', async () => {
+    server.use(
+      http.get(url(endpoints.integrations.list), () =>
+        ok([
+          { id: 'int_1', provider: 'mcleod', enabled: true, status: 'CONNECTED', lastSyncAt: new Date(Date.now() - 4 * 60_000).toISOString() },
+          { id: 'int_2', provider: 'slack', enabled: true, status: 'CONNECTED', lastSyncAt: null },
+        ]),
+      ),
+      http.get(url(endpoints.apiKeys.list), () => ok([])),
+    );
+    renderPage();
+    expect(await screen.findByText('Last sync · 4 minutes ago')).toBeInTheDocument();
+    expect(screen.getByText('Connected · no sync yet')).toBeInTheDocument();
+    // wex, quickbooks, webhook have a connector but no record.
+    expect(screen.getAllByText('Not connected')).toHaveLength(3);
+    // Pacific Track, DAT, Geotab, Zapier have no connector — the reason is on screen.
+    expect(screen.getAllByText('Not yet available — this provider has no connector yet.')).toHaveLength(4);
+    for (const fake of [/devices syncing/, /receipts this quarter/, /Last export/, /Last sync 4 minutes ago/]) {
+      expect(screen.queryByText(fake)).not.toBeInTheDocument();
+    }
+  });
+
   it('creates an API key and shows the plaintext secret exactly once', async () => {
     const user = userEvent.setup();
     server.use(http.get(url(endpoints.apiKeys.list), () => ok([])));
@@ -136,7 +159,12 @@ describe('IntegrationsPage — W-22', () => {
 
     renderPage();
     const mcleodCard = (await screen.findByText('McLeod PowerBroker')).closest('div.rounded-lg')!;
-    await userEventClickWithin(mcleodCard, /manage/i, user);
+    await userEventClickWithin(mcleodCard, /disconnect/i, user);
+
+    // WB — `Manage` used to disconnect on the first click; it now says `Disconnect` and confirms.
+    expect(await screen.findByText('Disconnect McLeod PowerBroker?')).toBeInTheDocument();
+    expect(disconnected).toBe(false);
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Disconnect' }));
 
     await waitFor(() => expect(disconnected).toBe(true));
   });
@@ -161,7 +189,35 @@ describe('IntegrationsPage — W-22', () => {
     await user.click(screen.getByRole('button', { name: 'Row actions' }));
     await user.click(screen.getByText('Revoke'));
 
+    // Irreversible — the row menu only opens a confirm; nothing is sent until it is accepted.
+    expect(await screen.findByText('Revoke McLeod TMS?')).toBeInTheDocument();
+    expect(revoked).toBe(false);
+    await user.click(screen.getByRole('button', { name: 'Revoke key' }));
+
     await waitFor(() => expect(revoked).toBe(true));
+    expect(await screen.findByText('API key McLeod TMS revoked')).toBeInTheDocument();
+  });
+
+  it('cancelling the revoke confirm sends nothing', async () => {
+    const user = userEvent.setup();
+    let revoked = false;
+    server.use(
+      http.get(url(endpoints.apiKeys.list), () =>
+        ok([{ id: 'key_1', name: 'McLeod TMS', prefix: 'obk_ABCD', scopes: ['reports:read'], lastUsedAt: null, expiresAt: null, revokedAt: null }]),
+      ),
+      http.delete(url(endpoints.apiKeys.remove('key_1')), () => {
+        revoked = true;
+        return ok({ success: true });
+      }),
+    );
+    renderPage();
+    await screen.findByText('McLeod TMS');
+    await user.click(screen.getByRole('button', { name: 'Row actions' }));
+    await user.click(screen.getByText('Revoke'));
+    await user.click(await screen.findByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => expect(screen.queryByText('Revoke McLeod TMS?')).not.toBeInTheDocument());
+    expect(revoked).toBe(false);
   });
 });
 
@@ -171,3 +227,42 @@ async function userEventClickWithin(container: Element, name: RegExp, user: Retu
   if (!button) throw new Error(`No button matching ${name} inside the card`);
   await user.click(button);
 }
+
+/* ------------------------------------------------------------------ stage-2 */
+
+describe('IntegrationsPage — stage-2', () => {
+  it('Browse marketplace is disabled with a visible reason (B-89)', async () => {
+    server.use(http.get(url(endpoints.apiKeys.list), () => ok([])));
+    renderPage();
+    expect(await screen.findByRole('button', { name: /browse marketplace/i })).toBeDisabled();
+    expect(screen.getByText('The integration marketplace is not available yet.')).toBeInTheDocument();
+  });
+
+  it('Edit scopes PATCHes the new scope set and refuses an empty one', async () => {
+    const user = userEvent.setup();
+    let body: unknown = null;
+    server.use(
+      http.get(url(endpoints.apiKeys.list), () =>
+        ok([{ id: 'key_1', name: 'McLeod TMS', prefix: 'obk_ABCD', scopes: ['reports:read'], lastUsedAt: null, expiresAt: null, revokedAt: null }]),
+      ),
+      http.patch(url(endpoints.apiKeys.scopes('key_1')), async ({ request }) => {
+        body = await request.json();
+        return ok({ id: 'key_1', scopes: ['reports:read', 'drivers:read'] });
+      }),
+    );
+    renderPage();
+    await screen.findByText('McLeod TMS');
+
+    await user.click(screen.getByRole('button', { name: 'Row actions' }));
+    await user.click(await screen.findByText('Edit scopes'));
+
+    await user.click(await screen.findByRole('checkbox', { name: /Read reports/ }));
+    await user.click(screen.getByRole('button', { name: 'Save scopes' }));
+    expect(await screen.findByText('Choose at least one scope.')).toBeInTheDocument();
+    expect(body).toBeNull();
+
+    await user.click(screen.getByRole('checkbox', { name: /Read drivers/ }));
+    await user.click(screen.getByRole('button', { name: 'Save scopes' }));
+    await waitFor(() => expect(body).toEqual({ scopes: ['drivers:read'] }));
+  });
+});

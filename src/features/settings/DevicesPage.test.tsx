@@ -92,6 +92,33 @@ describe('DevicesPage — W-20', () => {
     await user.click(await screen.findByText('Unpair'));
 
     await waitFor(() => expect(unpaired).toBe(true));
+    expect(await screen.findByText('Device PT30_A86E unpaired')).toBeInTheDocument();
+  });
+
+  it('says so when Unpair fails instead of doing nothing visible', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(url(endpoints.devices.list), () => ok({ items: [DEVICE], page: 1, limit: 25, total: 1, totalPages: 1 })),
+      http.post(url(endpoints.devices.unpair(DEVICE.id)), () => fail(500, 'INTERNAL_ERROR', 'Boom')),
+    );
+    renderPage();
+    await screen.findByText('PT30_A86E');
+    await user.click(screen.getByRole('button', { name: 'Row actions' }));
+    await user.click(await screen.findByText('Unpair'));
+    expect(await screen.findByText('Something went wrong on our side. Try again.')).toBeInTheDocument();
+    expect(screen.queryByText('Device PT30_A86E unpaired')).not.toBeInTheDocument();
+  });
+
+  it('shows an error toast when the export request fails', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(url(endpoints.devices.list), () => ok({ items: [DEVICE], page: 1, limit: 25, total: 1, totalPages: 1 })),
+      http.get(url(endpoints.devices.export), () => fail(500, 'INTERNAL_ERROR', 'Boom')),
+    );
+    renderPage();
+    await screen.findByText('PT30_A86E');
+    await user.click(screen.getByRole('button', { name: /export/i }));
+    expect(await screen.findByText('The device export did not download', {}, { timeout: 8000 })).toBeInTheDocument();
   });
 
   it('registers a device from the modal and shows the created toast', async () => {
@@ -277,5 +304,66 @@ describe('DevicesPage — W-20', () => {
     await user.click(screen.getByRole('button', { name: /export/i }));
 
     await waitFor(() => expect(createObjectURL).toHaveBeenCalled());
+  });
+});
+
+/* ------------------------------------------------------------------ stage-2 row actions */
+
+describe('DevicesPage — stage-2 row actions', () => {
+  it('gives the search box an accessible name', async () => {
+    server.use(http.get(url(endpoints.devices.list), () => ok({ items: [DEVICE], total: 1, page: 1, limit: 25, totalPages: 1 })));
+    renderPage();
+    await screen.findByText('PT30_A86E');
+    expect(screen.getByRole('searchbox', { name: 'Search serial or unit' })).toBeInTheDocument();
+  });
+
+  it('Pair to unit posts the chosen vehicle to POST /devices/:id/pair', async () => {
+    const user = userEvent.setup();
+    let paired: unknown = null;
+    server.use(
+      http.get(url(endpoints.devices.list), () =>
+        ok({ items: [{ ...DEVICE, vehicleId: null, status: 'UNASSIGNED' }], total: 1, page: 1, limit: 25, totalPages: 1 }),
+      ),
+      http.get(url(endpoints.vehicles.list), () =>
+        ok({ items: [{ id: 'veh_7', unitNumber: '#107' }], total: 1, page: 1, limit: 200, totalPages: 1 }),
+      ),
+      http.post(url(endpoints.devices.pair('dev_1')), async ({ request }) => {
+        paired = await request.json();
+        return ok({ id: 'dev_1', status: 'ASSIGNED' }, 201);
+      }),
+    );
+    renderPage();
+    await screen.findByText('PT30_A86E');
+
+    await user.click(screen.getByRole('button', { name: 'Row actions' }));
+    await user.click(await screen.findByText('Pair to unit'));
+    await user.selectOptions(await screen.findByRole('combobox', { name: 'Unit' }), 'veh_7');
+    await user.click(screen.getByRole('button', { name: 'Pair device' }));
+
+    await waitFor(() => expect(paired).toEqual({ vehicleId: 'veh_7' }));
+  });
+
+  it('Update firmware PATCHes the typed version and refuses an empty one', async () => {
+    const user = userEvent.setup();
+    let body: unknown = null;
+    server.use(
+      http.get(url(endpoints.devices.list), () => ok({ items: [DEVICE], total: 1, page: 1, limit: 25, totalPages: 1 })),
+      http.patch(url(endpoints.devices.firmware('dev_1')), async ({ request }) => {
+        body = await request.json();
+        return ok({ ...DEVICE, firmwareVersion: 'L113' });
+      }),
+    );
+    renderPage();
+    await screen.findByText('PT30_A86E');
+
+    await user.click(screen.getByRole('button', { name: 'Row actions' }));
+    await user.click(await screen.findByText('Update firmware'));
+    await user.click(await screen.findByRole('button', { name: 'Update firmware' }));
+    expect(await screen.findByText(/Enter the firmware version to install/)).toBeInTheDocument();
+    expect(body).toBeNull();
+
+    await user.type(screen.getByRole('textbox', { name: 'Target version' }), 'L113');
+    await user.click(screen.getByRole('button', { name: 'Update firmware' }));
+    await waitFor(() => expect(body).toEqual({ firmware: 'L113' }));
   });
 });

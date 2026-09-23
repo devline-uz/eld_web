@@ -422,3 +422,65 @@ describe('W-16 Messages', () => {
     expect(await screen.findByRole('button', { name: /retry/i })).toBeInTheDocument();
   });
 });
+
+// WB-165 / WB-171 / WB-172 — stage-2 regressions: the dirty-close bypass in the New-message
+// modal, the no-match empty state and the dead `Call` button.
+describe('W-16 Messages — stage-2 fixes', () => {
+  it('shows the search empty state (not "No conversations yet") when nothing matches', async () => {
+    usePopulatedConversations();
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText('John Smith');
+    await user.type(screen.getByRole('textbox', { name: 'Search conversations' }), 'zzz');
+
+    expect(await screen.findByText('Nothing matches "zzz"')).toBeInTheDocument();
+    expect(screen.queryByText('No conversations yet')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Clear search' }));
+    expect(await screen.findByText('John Smith')).toBeInTheDocument();
+  });
+
+  it('Call is disabled with a visible reason when the driver has no number on file', async () => {
+    usePopulatedConversations();
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByText('John Smith'));
+
+    const call = await screen.findByRole('button', { name: 'Call' });
+    expect(call).toBeDisabled();
+    expect(call).toHaveAttribute('title', 'No phone number on file for this driver');
+  });
+
+  it('Call dials the driver through the operator phone when a number is on file', async () => {
+    server.use(
+      http.get(url(endpoints.conversations.list), () => ok({ items: [CONVERSATION] })),
+      http.get(url(endpoints.drivers.list), () =>
+        ok({ items: [{ ...DRIVER, phone: '+1 (614) 555-0134' }], page: 1, limit: 500, total: 1, totalPages: 1 }),
+      ),
+      http.get(url(endpoints.conversations.messages(':id')), () =>
+        ok({ items: [], page: 1, limit: 100, total: 0, totalPages: 1 }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByText('John Smith'));
+
+    const call = await screen.findByRole('button', { name: 'Call' });
+    expect(call).toBeEnabled();
+  });
+
+  it('New message: Cancel on a typed broadcast raises the 11.30 discard confirm', async () => {
+    usePopulatedConversations();
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: 'New' }));
+    await user.click(await screen.findByRole('button', { name: 'Broadcast to fleet' }));
+    await user.type(await screen.findByRole('textbox', { name: /Message/ }), 'Chains required on I-70.');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(await screen.findByText('Discard changes?')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Keep editing' }));
+    expect(await screen.findByDisplayValue('Chains required on I-70.')).toBeInTheDocument();
+  });
+});

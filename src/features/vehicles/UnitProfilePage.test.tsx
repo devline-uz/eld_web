@@ -7,7 +7,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { http, HttpResponse } from 'msw';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useSearchParams } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
 import { ok, url } from '@/mocks/envelope';
@@ -15,6 +15,11 @@ import { endpoints } from '@/shared/api/endpoints';
 import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/client';
 import { ToastProvider } from '@/shared/ui/Toast';
 import UnitProfilePage from './UnitProfilePage';
+
+function DvirStub() {
+  const [params] = useSearchParams();
+  return <div>DVIR screen · newWorkOrder={params.get('newWorkOrder')}</div>;
+}
 
 let permission = true;
 vi.mock('@/shared/auth/usePermission', () => ({
@@ -44,6 +49,11 @@ const VEHICLE = {
   createdAt: '2025-04-18T00:00:00.000Z',
 };
 
+function LiveFleetStub() {
+  const [params] = useSearchParams();
+  return <div>Live fleet · unit={params.get('unit')}</div>;
+}
+
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -52,6 +62,11 @@ function renderPage() {
         <MemoryRouter initialEntries={['/vehicles/veh_1']}>
           <Routes>
             <Route path="/vehicles/:id" element={<UnitProfilePage />} />
+            {/* Stand-in for W-03 so a navigation away from the profile is observable. */}
+            <Route path="/vehicles" element={<div>Vehicles list screen</div>} />
+            {/* Stand-in for W-09 so the `New work order` deep link is observable. */}
+            <Route path="/dvir" element={<DvirStub />} />
+            <Route path="/live-fleet" element={<LiveFleetStub />} />
           </Routes>
         </MemoryRouter>
       </ToastProvider>
@@ -102,6 +117,36 @@ describe('W-04 Unit profile — four states', () => {
     );
     renderPage();
     expect(await screen.findByRole('button', { name: /retry/i })).toBeInTheDocument();
+  });
+
+  // WB-161 / WB-163 — the header's dead `New work order` button and the `?driverId=` navigation.
+  it('"Track on map" opens Live fleet with this unit selected (stage 3)', async () => {
+    server.use(
+      http.get(url(endpoints.vehicles.detail('veh_1')), () => ok(VEHICLE)),
+      http.get(url(endpoints.vehicles.activities('veh_1')), () => ok({ items: [] })),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('Unit #101');
+    await user.click(screen.getByRole('button', { name: 'Track on map' }));
+    expect(await screen.findByText('Live fleet · unit=veh_1')).toBeInTheDocument();
+  });
+
+  it('"New work order" deep-links to W-09 and "View logs" is disabled without a driver', async () => {
+    server.use(
+      http.get(url(endpoints.vehicles.detail('veh_1')), () => ok(VEHICLE)),
+      http.get(url(endpoints.vehicles.activities('veh_1')), () => ok({ items: [] })),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('Unit #101');
+
+    const viewLogs = screen.getByRole('button', { name: 'View logs' });
+    expect(viewLogs).toBeDisabled();
+    expect(viewLogs).toHaveAttribute('title', 'No driver is assigned to this unit.');
+
+    await user.click(screen.getByRole('button', { name: /New work order/ }));
+    expect(await screen.findByText('DVIR screen · newWorkOrder=veh_1')).toBeInTheDocument();
   });
 
   it('empty: the Unit activity card shows "No activity recorded." when there are none', async () => {
@@ -202,5 +247,48 @@ describe('W-04 Unit profile — active DTC badge (WB-105)', () => {
 
     await user.click(screen.getByRole('button', { name: 'Diagnostics' }));
     expect(await screen.findByText('1 active DTCs')).toBeInTheDocument();
+  });
+});
+
+// WB — `DeleteUnitModal`'s `onClose` fires on Cancel, Esc and X as well as after a confirmed
+// delete, and the profile navigated to /vehicles from it. Cancelling threw the user off the page
+// they were reading, with the unit still very much alive.
+describe('W-04 Unit profile — cancelling the delete modal stays on the unit', () => {
+  function useVehicle() {
+    server.use(
+      http.get(url(endpoints.vehicles.detail('veh_1')), () => ok(VEHICLE)),
+      http.get(url(endpoints.vehicles.activities('veh_1')), () => ok({ items: [] })),
+    );
+  }
+
+  it('cancelling the Delete unit modal does not navigate away', async () => {
+    const user = userEvent.setup();
+    useVehicle();
+    renderPage();
+    await screen.findByText('Unit #101');
+
+    await user.click(screen.getByRole('button', { name: 'More' }));
+    await user.click(await screen.findByText('Delete unit'));
+    expect(await screen.findByText('Delete Unit #101?')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByText('Vehicles list screen')).not.toBeInTheDocument();
+    expect(await screen.findByText('Unit #101')).toBeInTheDocument();
+  });
+
+  it('a confirmed delete still navigates back to the vehicles list', async () => {
+    const user = userEvent.setup();
+    useVehicle();
+    server.use(http.delete(url(endpoints.vehicles.remove('veh_1')), () => ok({ id: 'veh_1', status: 'INACTIVE' })));
+    renderPage();
+    await screen.findByText('Unit #101');
+
+    await user.click(screen.getByRole('button', { name: 'More' }));
+    await user.click(await screen.findByText('Delete unit'));
+    await user.type(await screen.findByPlaceholderText('UNIT-101'), 'UNIT-101');
+    await user.click(screen.getByRole('button', { name: 'Delete unit' }));
+
+    expect(await screen.findByText('Vehicles list screen')).toBeInTheDocument();
   });
 });

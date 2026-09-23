@@ -1,9 +1,9 @@
 // owner: web-dashboard-fleet — W-02 Live Fleet (web/tz.md §10 W-02).
 // Design: web/roles and screens/admin panel/Real-time GPS map, vehicle list, unit detail card.jpg
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { MessageSquare, Plus, Search, X } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { qk } from '@/shared/api/queryKeys';
 import { useLiveFleet, hasPosition, type LiveFleetUnit } from '@/shared/api/liveFleet';
 import { useGeofences } from '@/shared/api/geofences';
@@ -29,6 +29,7 @@ import { useRelativeTime } from '@/shared/format/useRelativeTime';
 import { useCountdown, useCountdownFromSeconds, formatCountdown } from '@/shared/hooks/useCountdown';
 import { CreateGeofenceModal } from './components/CreateGeofenceModal';
 import { messagesHref } from '@/shared/lib/messagesHref';
+import { VIEW_LOGS_NO_DRIVER } from './lib/copy';
 
 const FleetMap = lazy(() => import('@/shared/map/FleetMap'));
 
@@ -72,9 +73,15 @@ function UnitListRow({
 }) {
   const lastSeen = useRelativeTime(unit.lastSeenAt, 'short');
   const offline = unit.dutyStatus === 'ELD_OFFLINE';
+  const ref = useRef<HTMLButtonElement>(null);
+  // A unit selected from elsewhere (map click, `?unit=` deep link) scrolls into view in the list.
+  useEffect(() => {
+    if (selected) ref.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [selected]);
   return (
     <li>
       <button
+        ref={ref}
         type="button"
         aria-current={selected || undefined}
         onClick={onSelect}
@@ -118,8 +125,14 @@ function DetailCard({
     <div className="absolute right-4 top-16 z-10 w-detail-card rounded-lg bg-bg-surface p-4 shadow-pop">
       <div className="flex items-start justify-between">
         <h3 className="text-card-title font-semibold text-text">Unit {unit.unitNumber}</h3>
-        <button type="button" aria-label="Close" onClick={onClose} className="text-text-muted hover:text-text">
-          <X size={16} strokeWidth={1.75} />
+        {/* Stage 3 — was a bare ~16×16 glyph; now the 32×32 target the Modal close uses. */}
+        <button
+          type="button"
+          aria-label="Close"
+          onClick={onClose}
+          className="-mr-2 -mt-2 flex size-btn-sm shrink-0 items-center justify-center rounded-md text-text-muted hover:bg-bg-subtle hover:text-text"
+        >
+          <X size={16} strokeWidth={1.75} aria-hidden="true" />
         </button>
       </div>
       <p className="text-card-sub text-text-muted">
@@ -163,10 +176,15 @@ function DetailCard({
         </div>
       </dl>
       <div className="mt-4 flex gap-2">
+        {/* Stage 3 — a driverless unit used to open `/hos-logs?driverId=` (empty param). */}
         <Button
           variant="primary"
           className={canMessage ? 'flex-1' : 'w-full'}
-          onClick={() => navigate(`/hos-logs?driverId=${unit.driverId ?? ''}`)}
+          disabled={!unit.driverId}
+          aria-describedby={unit.driverId ? undefined : 'view-logs-no-driver'}
+          onClick={() => {
+            if (unit.driverId) navigate(`/hos-logs?driverId=${encodeURIComponent(unit.driverId)}`);
+          }}
         >
           View logs
         </Button>
@@ -176,6 +194,11 @@ function DetailCard({
           </Button>
         )}
       </div>
+      {!unit.driverId && (
+        <p id="view-logs-no-driver" className="mt-2 text-caption text-text-muted">
+          {VIEW_LOGS_NO_DRIVER}
+        </p>
+      )}
     </div>
   );
 }
@@ -187,7 +210,10 @@ export default function LiveFleetPage() {
   const [query, setQuery] = useState('');
   const [segment, setSegment] = useState<Segment>('ALL');
   const [activeLayers, setActiveLayers] = useState<Set<Layer>>(() => new Set(['Vehicles']));
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // `?unit=<vehicleId>` (Vehicles → `Track on map`) opens the page with that unit selected; the
+  // map flies to the selected unit and the list scrolls it into view.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [selectedId, setSelectedId] = useState<string | null>(() => searchParams.get('unit'));
   const [flashId, setFlashId] = useState<string | null>(null);
   const [geofenceOpen, setGeofenceOpen] = useState(false);
 
@@ -257,6 +283,7 @@ export default function LiveFleetPage() {
             <Search size={16} strokeWidth={1.75} aria-hidden="true" className="pointer-events-none absolute left-3 text-text-muted" />
             <input
               type="search"
+              aria-label="Search units"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search unit, driver, plate…"
@@ -380,7 +407,18 @@ export default function LiveFleetPage() {
         )}
 
         {selected && (
-          <DetailCard unit={selected} onClose={() => setSelectedId(null)} canMessage={can('messaging', 'FULL')} />
+          <DetailCard
+            unit={selected}
+            onClose={() => {
+              setSelectedId(null);
+              if (searchParams.has('unit')) {
+                const next = new URLSearchParams(searchParams);
+                next.delete('unit');
+                setSearchParams(next, { replace: true });
+              }
+            }}
+            canMessage={can('messaging', 'FULL')}
+          />
         )}
       </div>
 

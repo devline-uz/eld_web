@@ -2,6 +2,7 @@
 // Design: web/roles and screens/admin panel/Unit profile — telemetry, details, activity log.jpg
 import { useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { liveFleetHref } from '@/shared/lib/liveFleetHref';
 import { useQueryClient } from '@tanstack/react-query';
 import { ChevronRight, MoreHorizontal, Pencil, Truck, UserPlus, Wrench } from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
@@ -25,6 +26,7 @@ import { ErrorState, LoadingState, ForbiddenState } from '@/shared/ui/states';
 import { formatOdometer, formatEngineHoursLong } from '@/shared/format/numbers';
 import { formatLocal } from '@/shared/format/datetime';
 import { useRelativeTime } from '@/shared/format/useRelativeTime';
+import { NO_DRIVER_LOGS_REASON } from './lib/copy';
 import { AddVehicleModal } from './components/AddVehicleModal';
 import { AssignDriverModal } from './components/AssignDriverModal';
 import { CalibrateOdometerModal } from './components/CalibrateOdometerModal';
@@ -136,10 +138,17 @@ export default function UnitProfilePage() {
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <Button variant="secondary" onClick={() => navigate(`/hos-logs?driverId=${driver?.id ?? ''}`)}>
+            {/* An unassigned unit used to navigate to `?driverId=` — a driver id W-06 cannot
+                resolve. It now says why there is nothing to open. */}
+            <Button
+              variant="secondary"
+              disabled={!driver}
+              title={driver ? undefined : NO_DRIVER_LOGS_REASON}
+              onClick={() => driver && navigate(`/hos-logs?driverId=${driver.id}`)}
+            >
               View logs
             </Button>
-            <Button variant="secondary" onClick={() => navigate('/live-fleet')}>
+            <Button variant="secondary" onClick={() => navigate(liveFleetHref(vehicle.id))}>
               Track on map
             </Button>
             <Can perm="vehicles" level="FULL">
@@ -234,7 +243,15 @@ export default function UnitProfilePage() {
                 title="Upcoming maintenance"
                 action={
                   <Can perm="maintenance" level="FULL">
-                    <Button variant="secondary" size="sm" iconLeft={<Wrench size={14} strokeWidth={1.75} />}>
+                    {/* 11.18 lives in `features/dvir`, which this feature may not import
+                        (house rule: no cross-feature imports). W-09 opens the modal pre-filled
+                        with this unit from `?newWorkOrder=<vehicleId>`. */}
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      iconLeft={<Wrench size={14} strokeWidth={1.75} />}
+                      onClick={() => navigate(`/dvir?newWorkOrder=${vehicle.id}`)}
+                    >
                       New work order
                     </Button>
                   </Can>
@@ -413,10 +430,8 @@ export default function UnitProfilePage() {
         <DeleteUnitModal
           vehicle={vehicle}
           eldSerial={device?.serial ?? null}
-          onClose={() => {
-            setDeleteOpen(false);
-            navigate('/vehicles');
-          }}
+          onClose={() => setDeleteOpen(false)}
+          onDeleted={() => navigate('/vehicles')}
         />
       )}
     </div>

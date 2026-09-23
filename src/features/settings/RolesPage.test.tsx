@@ -214,3 +214,69 @@ describe('RolesPage — W-19 permission matrix', () => {
     expect(await screen.findByText('Retry', {}, { timeout: 8000 })).toBeInTheDocument();
   });
 });
+
+/* ------------------------------------------------------------------ stage-2 */
+
+describe('RolesPage — stage-2', () => {
+  it('gives the permission search box an accessible name', async () => {
+    renderPage();
+    expect(await screen.findByRole('searchbox', { name: 'Search permission' })).toBeInTheDocument();
+  });
+
+  it('Reset to defaults confirms, then PATCHes the three editable built-in roles only', async () => {
+    const user = userEvent.setup();
+    const patched: string[] = [];
+    server.use(
+      http.patch(url(endpoints.roles.update(':id')), async ({ params, request }) => {
+        patched.push(String(params.id));
+        await request.json();
+        return ok({ id: String(params.id) });
+      }),
+    );
+    renderPage();
+    await screen.findByRole('searchbox', { name: 'Search permission' });
+
+    await user.click(screen.getByRole('button', { name: /reset to defaults/i }));
+    expect(await screen.findByText('Reset permissions to defaults?')).toBeInTheDocument();
+    expect(patched).toEqual([]);
+
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Reset to defaults' }));
+    await waitFor(() => expect(patched.sort()).toEqual(['rol_disp', 'rol_fm', 'rol_view']));
+    expect(await screen.findByText('Permissions reset to defaults')).toBeInTheDocument();
+  });
+
+  it('a custom role card Edit opens the modal prefilled and PATCHes the role', async () => {
+    const user = userEvent.setup();
+    let patched: { name?: string } | null = null;
+    server.use(
+      http.patch(url(endpoints.roles.update('rol_auditor')), async ({ request }) => {
+        patched = (await request.json()) as { name?: string };
+        return ok({ id: 'rol_auditor' });
+      }),
+    );
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: 'Roles' }));
+
+    await user.click(await screen.findByRole('button', { name: 'Edit' }));
+    const name = await screen.findByDisplayValue('Compliance auditor');
+    await user.clear(name);
+    await user.type(name, 'Internal auditor');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(patched!.name).toBe('Internal auditor'));
+  });
+
+  // WB-233 — the footer used to say "Last changed by Acme · <today>", invented from `new Date()`.
+  it('shows no fabricated "Last changed by" footer under the matrix', async () => {
+    renderPage();
+    await screen.findByText('View vehicles / Add & edit vehicles');
+    expect(screen.getByText('Full access')).toBeInTheDocument();
+    expect(screen.queryByText(/Last changed by/)).not.toBeInTheDocument();
+  });
+
+  // WB-234 — the matrix row and the create-role checkbox name the same single key.
+  it('labels the reportsTransfer row as covering both the pack export and data transfers', async () => {
+    renderPage();
+    expect(await screen.findByText('Export FMCSA / DOT pack & send data transfers')).toBeInTheDocument();
+  });
+});

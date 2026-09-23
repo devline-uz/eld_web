@@ -9,6 +9,7 @@ import {
   USER_ROLE_OPTIONS,
   USER_STATUS_OPTIONS,
   countActiveUserFilters,
+  writeUserFilters,
   type UserFilters,
   type UserRoleFilter,
   type UserStatusFilter,
@@ -36,6 +37,11 @@ export function UserFiltersDrawer({ open, onClose, filters, onApply }: UserFilte
   // opens, so the draft always starts fresh from the last applied `filters` without setState in
   // an effect (react-hooks/set-state-in-effect) — matches VehicleFiltersDrawer.
   const [draft, setDraft] = useState<UserFilters>(filters);
+  // WB — Esc / X / Cancel used to drop every edit silently. Two filter sets are equal exactly
+  // when they serialise to the same URL, so the canonical writer doubles as the comparison.
+  const isDirty =
+    writeUserFilters(new URLSearchParams(), draft).toString() !==
+    writeUserFilters(new URLSearchParams(), filters).toString();
 
   return (
     <FilterDrawer
@@ -43,6 +49,7 @@ export function UserFiltersDrawer({ open, onClose, filters, onApply }: UserFilte
       onClose={onClose}
       screenName="Users"
       appliedCount={countActiveUserFilters(draft)}
+      isDirty={isDirty}
       onReset={() => setDraft(EMPTY_USER_FILTERS)}
       onApply={() => {
         onApply(draft);

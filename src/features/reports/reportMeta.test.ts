@@ -135,13 +135,26 @@ describe('saveFile', () => {
 
   it('clicks a temporary link for a presigned URL and for a Blob', () => {
     vi.useFakeTimers();
-    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    const links: HTMLAnchorElement[] = [];
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      links.push(this);
+    });
     const create = vi.fn(() => 'blob:local');
     const revoke = vi.fn();
     Object.assign(URL, { createObjectURL: create, revokeObjectURL: revoke });
 
     saveFile('http://127.0.0.1:19000/reports/a.csv', 'a.csv');
     saveFile(new Blob(['x']), 'SMITH38018.csv');
+
+    const [presigned, blobLink] = links as [HTMLAnchorElement, HTMLAnchorElement];
+    // WB-140 — a cross-origin presigned URL opens in a new context; `download` is ignored there
+    // and would navigate the SPA away, destroying the session.
+    expect(presigned.target).toBe('_blank');
+    expect(presigned.rel).toBe('noopener noreferrer');
+    expect(presigned.hasAttribute('download')).toBe(false);
+    // A blob URL is same-origin, so it still downloads in place.
+    expect(blobLink.target).toBe('');
+    expect(blobLink.getAttribute('download')).toBe('SMITH38018.csv');
 
     expect(click).toHaveBeenCalledTimes(2);
     expect(create).toHaveBeenCalledTimes(1);

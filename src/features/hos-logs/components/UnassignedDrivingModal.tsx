@@ -3,10 +3,10 @@
 // ⭐ The rule that is easy to get wrong: after an assignment `recordOrigin` STAYS 1. The panel
 // never calls an assigned segment "driver entered" — `ORIGIN` keeps reading `ELD · automatic` and
 // only an `Assigned by …` annotation is added (§7.4 / §23). Nothing here deletes a record.
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { formatInTimeZone } from 'date-fns-tz';
-import { Modal } from '@/shared/ui/Modal';
+import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
 import { TOAST_COPY } from '@/shared/ui/copy';
@@ -61,9 +61,10 @@ export function UnassignedDrivingModal({
   );
   const [choice, setChoice] = useState<Record<string, string>>({});
   const [annotation, setAnnotation] = useState('');
-  const [askDriver, setAskDriver] = useState(true);
   const [banner, setBanner] = useState<string | null>(null);
   const [annotationError, setAnnotationError] = useState<string | null>(null);
+  // WB-146 — same-tick guard: one click, one assignment batch.
+  const inFlight = useRef(false);
 
   const totalSec = useMemo(
     () => segments.reduce((sum, segment) => sum + segment.durationSec, 0),
@@ -75,6 +76,7 @@ export function UnassignedDrivingModal({
   }
 
   function submit() {
+    if (inFlight.current || mutation.isPending) return;
     setBanner(null);
     setAnnotationError(null);
     if (annotation.trim().length < LIMITS.annotationMin) {
@@ -95,6 +97,7 @@ export function UnassignedDrivingModal({
       setBanner('Choose a driver or an annotation for at least one selected segment.');
       return;
     }
+    inFlight.current = true;
     mutation.mutate(actions, {
       onSuccess: () => {
         toast({ kind: 'success', ...TOAST_COPY.segmentsAssigned(actions.length) });
@@ -114,6 +117,9 @@ export function UnassignedDrivingModal({
         }
         setBanner(refusal);
       },
+      onSettled: () => {
+        inFlight.current = false;
+      },
     });
   }
 
@@ -127,14 +133,21 @@ export function UnassignedDrivingModal({
       isDirty={annotation.length > 0}
       footer={
         <div className="flex w-full items-center justify-between">
-          <label className="flex items-center gap-2 text-body text-text-secondary">
-            <input type="checkbox" checked={askDriver} onChange={(e) => setAskDriver(e.target.checked)} />
-            Ask each driver to confirm in the app
-          </label>
+          {/* WB-197 — `askDriver` was never part of the posted actions: the checkbox promised the
+              driver would be asked to confirm and nothing ever asked them.
+              `POST /unidentified/:id/assign` takes `driverId` + `annotation` only (gap B-83), so
+              the control is disabled with its reason on screen instead of lying. */}
+          <span className="flex flex-col gap-0.5">
+            <label className="flex items-center gap-2 text-body text-text-muted">
+              <input type="checkbox" checked={false} disabled aria-describedby="unassigned-confirm-note" />
+              Ask each driver to confirm in the app
+            </label>
+            <span id="unassigned-confirm-note" className="max-w-80 text-caption text-text-muted">
+              Not available yet — assigning a segment does not ask the driver to confirm it.
+            </span>
+          </span>
           <div className="flex gap-2">
-            <Button variant="secondary" size="lg" onClick={onClose}>
-              Cancel
-            </Button>
+            <ModalCancelButton disabled={mutation.isPending} />
             <Button
               variant="primary"
               size="lg"

@@ -2,15 +2,16 @@
 import { useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
-import { Modal } from '@/shared/ui/Modal';
+import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
 import { ApiError } from '@/shared/api/errors';
 import { roleSchema } from '@/shared/forms/schemas';
-import { useCreateRole, type RoleRow } from '@/shared/api/settingsAdmin';
+import { useCreateRole, useUpdateRole, type RoleRow } from '@/shared/api/settingsAdmin';
 import type { PermissionKey, PermissionLevel } from '@/shared/auth/permissions';
 import { NO_PERMISSIONS } from '@/shared/auth/permissions';
 import { Field, inputClass } from './formKit';
+import { ROLE_COPY } from '../lib/copy';
 
 const SEGMENT_ROWS: { label: string; keys: PermissionKey[]; defaultLevel: PermissionLevel }[] = [
   { label: 'Vehicles', keys: ['vehicles', 'liveFleet'], defaultLevel: 'READ' },
@@ -23,26 +24,54 @@ const SEGMENT_ROWS: { label: string; keys: PermissionKey[]; defaultLevel: Permis
 
 const LEVELS: PermissionLevel[] = ['NONE', 'READ', 'FULL'];
 
-export function CreateRoleModal({ templates, onClose }: { templates: RoleRow[]; onClose: () => void }) {
+const DEFAULT_SEGMENT_LEVELS: Record<string, PermissionLevel> = Object.fromEntries(
+  SEGMENT_ROWS.map((r) => [r.label, r.defaultLevel]),
+);
+
+/** The six grid rows read back off an existing role's permission map. */
+function levelsOf(role: RoleRow): Record<string, PermissionLevel> {
+  return Object.fromEntries(SEGMENT_ROWS.map((row) => [row.label, role.permissions[row.keys[0]!] ?? 'NONE']));
+}
+
+export function CreateRoleModal({
+  templates,
+  role,
+  onClose,
+}: {
+  templates: RoleRow[];
+  /** Present ⇒ the modal edits that role through `PATCH /roles/:id` instead of creating one. */
+  role?: RoleRow;
+  onClose: () => void;
+}) {
   const { toast } = useToast();
   const createRole = useCreateRole();
+  const updateRole = useUpdateRole();
+  const editing = role !== undefined;
+  const seededLevels = role ? levelsOf(role) : DEFAULT_SEGMENT_LEVELS;
+  const seededExport = role ? role.permissions.reportsTransfer === 'FULL' : true;
   const [copyFrom, setCopyFrom] = useState<string>('');
-  const [segmentLevels, setSegmentLevels] = useState<Record<string, PermissionLevel>>(
-    Object.fromEntries(SEGMENT_ROWS.map((r) => [r.label, r.defaultLevel])),
-  );
-  const [canExportFmcsa, setCanExportFmcsa] = useState(true);
-  const [canSendTransfers, setCanSendTransfers] = useState(false);
+  const [segmentLevels, setSegmentLevels] = useState<Record<string, PermissionLevel>>(seededLevels);
+  const [canExportFmcsa, setCanExportFmcsa] = useState(seededExport);
 
   const {
     register,
     handleSubmit,
-    formState: { errors, isSubmitting, isDirty },
+    formState: { errors, isDirty },
     setError,
   } = useForm<{ name: string; description?: string }>({
     resolver: zodResolver(roleSchema.pick({ name: true, description: true })),
     mode: 'onBlur',
-    defaultValues: { name: '', description: '' },
+    defaultValues: { name: role?.name ?? '', description: role?.description ?? '' },
   });
+
+  const submitting = createRole.isPending || updateRole.isPending;
+  // The permission grid and the two checkboxes live outside react-hook-form; without them a real
+  // edit closed with no 11.30 confirm.
+  const dirty =
+    isDirty ||
+    copyFrom !== '' ||
+    canExportFmcsa !== seededExport ||
+    SEGMENT_ROWS.some((row) => segmentLevels[row.label] !== seededLevels[row.label]);
 
   function applyTemplate(roleId: string) {
     setCopyFrom(roleId);
@@ -59,18 +88,22 @@ export function CreateRoleModal({ templates, onClose }: { templates: RoleRow[]; 
   }
 
   function onSubmit(values: { name: string; description?: string }) {
+    // `mutate()` resolves RHF's `submitting` before the request lands — a double click created
+    // two roles. Guard on the mutation.
+    if (submitting) return;
     const template = templates.find((r) => r.id === copyFrom);
     const base: Record<PermissionKey, PermissionLevel> = template
       ? { ...template.permissions }
-      : ({ ...NO_PERMISSIONS } as Record<PermissionKey, PermissionLevel>);
+      : role
+        ? { ...role.permissions }
+        : ({ ...NO_PERMISSIONS } as Record<PermissionKey, PermissionLevel>);
 
     for (const row of SEGMENT_ROWS) {
       for (const key of row.keys) base[key] = segmentLevels[row.label] ?? 'NONE';
     }
+    // WB-234 — FMCSA export and data transfers share the one `reportsTransfer` key (gap B-95 asks
+    // for a separate key), so they are one checkbox, not two that silently wrote the same key.
     base.reportsTransfer = canExportFmcsa ? 'FULL' : 'NONE';
-    // "Can send data transfers" rides the same reportsTransfer key (§11.19 note — no distinct
-    // backend key for it yet); the export checkbox therefore governs both.
-    if (canSendTransfers) base.reportsTransfer = 'FULL';
     base.hosCertifyOnBehalf = base.hosCertifyOnBehalf ?? 'NONE';
     base.carrierSettings = base.carrierSettings ?? 'NONE';
 
@@ -80,21 +113,31 @@ export function CreateRoleModal({ templates, onClose }: { templates: RoleRow[]; 
       .replace(/[^A-Z0-9]+/g, '_')
       .replace(/^_+|_+$/g, '');
 
+    const handlers = {
+      onSuccess: () => {
+        toast({ kind: 'success' as const, title: editing ? 'Role updated' : 'Role created' });
+        onClose();
+      },
+      onError: (error: unknown) => {
+        if (error instanceof ApiError && error.status === 409) {
+          setError('name', { message: 'A role with this name already exists.' });
+          return;
+        }
+        toast({ kind: 'error' as const, title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+      },
+    };
+
+    if (editing) {
+      updateRole.mutate(
+        { id: role.id, dto: { name: values.name, description: values.description, permissions: base } },
+        handlers,
+      );
+      return;
+    }
+
     createRole.mutate(
       { key: key || 'CUSTOM_ROLE', name: values.name, description: values.description, permissions: base },
-      {
-        onSuccess: () => {
-          toast({ kind: 'success', title: 'Role created' });
-          onClose();
-        },
-        onError: (error) => {
-          if (error instanceof ApiError && error.status === 409) {
-            setError('name', { message: 'A role with this name already exists.' });
-            return;
-          }
-          toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
-        },
-      },
+      handlers,
     );
   }
 
@@ -102,17 +145,15 @@ export function CreateRoleModal({ templates, onClose }: { templates: RoleRow[]; 
     <Modal
       open
       onClose={onClose}
-      title="Create a role"
-      subtitle="Start from a template and adjust the permissions"
+      title={editing ? `Edit ${role.name}` : 'Create a role'}
+      subtitle={editing ? 'Changes apply immediately to every user with this role' : 'Start from a template and adjust the permissions'}
       size="lg"
-      isDirty={isDirty}
+      isDirty={dirty}
       footer={
         <>
-          <Button variant="secondary" size="lg" onClick={onClose} disabled={isSubmitting}>
-            Cancel
-          </Button>
-          <Button variant="primary" size="lg" loading={isSubmitting} onClick={handleSubmit(onSubmit)}>
-            Create role
+          <ModalCancelButton disabled={submitting} />
+          <Button variant="primary" size="lg" loading={submitting} disabled={submitting} onClick={handleSubmit(onSubmit)}>
+            {editing ? 'Save changes' : 'Create role'}
           </Button>
         </>
       }
@@ -120,12 +161,13 @@ export function CreateRoleModal({ templates, onClose }: { templates: RoleRow[]; 
       <form className="flex flex-col gap-4" onSubmit={handleSubmit(onSubmit)}>
         <div className="grid grid-cols-2 gap-4">
           <Field label="Role name" required error={errors.name?.message}>
-            <input {...register('name')} placeholder="Compliance auditor" disabled={isSubmitting} className={inputClass} />
+            <input {...register('name')} placeholder="Compliance auditor" disabled={submitting} className={inputClass} />
           </Field>
           <Field label="Copy permissions from">
-            <select value={copyFrom} onChange={(e) => applyTemplate(e.target.value)} disabled={isSubmitting} className={inputClass}>
-              <option value="">— Start from scratch —</option>
+            <select value={copyFrom} onChange={(e) => applyTemplate(e.target.value)} disabled={submitting} className={inputClass}>
+              <option value="">{editing ? '— Keep the current permissions —' : '— Start from scratch —'}</option>
               {templates
+                .filter((t) => t.id !== role?.id)
                 .filter((t) => !t.isSystem || t.key !== 'ADMIN')
                 .map((t) => (
                   <option key={t.id} value={t.id}>
@@ -140,7 +182,7 @@ export function CreateRoleModal({ templates, onClose }: { templates: RoleRow[]; 
             {...register('description')}
             rows={2}
             placeholder="Read-only access to logs, DVIRs and reports for internal audits."
-            disabled={isSubmitting}
+            disabled={submitting}
             className="rounded-md border border-border bg-bg-surface px-3 py-2 text-body text-text"
           />
         </Field>
@@ -174,12 +216,8 @@ export function CreateRoleModal({ templates, onClose }: { templates: RoleRow[]; 
         </div>
 
         <label className="flex items-center gap-2 text-body text-text">
-          <input type="checkbox" checked={canExportFmcsa} onChange={(e) => setCanExportFmcsa(e.target.checked)} disabled={isSubmitting} />
-          Can export FMCSA / DOT pack
-        </label>
-        <label className="flex items-center gap-2 text-body text-text">
-          <input type="checkbox" checked={canSendTransfers} onChange={(e) => setCanSendTransfers(e.target.checked)} disabled={isSubmitting} />
-          Can send data transfers
+          <input type="checkbox" checked={canExportFmcsa} onChange={(e) => setCanExportFmcsa(e.target.checked)} disabled={submitting} />
+          {ROLE_COPY.transferCheckbox}
         </label>
       </form>
     </Modal>

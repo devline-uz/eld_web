@@ -12,7 +12,8 @@
 // success toast is the warning variant when the file was built in TEST mode, and the modal stays
 // open on the result so `Download a copy` can hand the file to the officer (web/decisions.md WD-044).
 // The file name is never built client-side — it is the backend's `fileName` (§4.8.2.2).
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
+import type { BaseSyntheticEvent } from 'react';
 import { useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { AlertTriangle, CheckCircle2, Download, Send } from 'lucide-react';
@@ -40,7 +41,7 @@ import { cn } from '@/shared/ui/cn';
 import { TOAST_COPY } from '@/shared/ui/copy';
 import { DateRangePicker } from '@/shared/ui/DateRangePicker';
 import { DriverPicker } from '@/shared/ui/DriverPicker';
-import { DiscardChangesDialog, Modal } from '@/shared/ui/Modal';
+import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { useToast } from '@/shared/ui/Toast';
 import {
   TRANSFER_RESULT_BADGE,
@@ -93,7 +94,9 @@ export function SendLogsModal({ open, onClose, initial, erodsMode, eldIdentifier
   const result: CreateTransferResponse | undefined = create.data;
   const live = useTransfer(result?.transfer.id);
   const toasted = useRef<string | null>(null);
-  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  // WB-146 — `isSubmitting`/`isPending` only turn true on the next render, so two clicks in the
+  // same tick both reach the handler. The ref makes the submit non-reentrant.
+  const inFlight = useRef(false);
 
   const to = initial?.to ?? todayKey(timezone);
   const form = useForm<SendLogsValues>({
@@ -152,7 +155,7 @@ export function SendLogsModal({ open, onClose, initial, erodsMode, eldIdentifier
     }
   }, [result, status, live.data, toast]);
 
-  const submit = handleSubmit(async (v) => {
+  const submitForm = handleSubmit(async (v) => {
     try {
       await create.mutateAsync({
         driverId: v.driverId,
@@ -172,6 +175,15 @@ export function SendLogsModal({ open, onClose, initial, erodsMode, eldIdentifier
       if (error.code === 'RANGE_TOO_LARGE') setError('to', { message: M.transferRange });
     }
   });
+
+  /** The non-reentrant entry point — the ref is only ever touched from an event handler. */
+  const submit = (event?: BaseSyntheticEvent) => {
+    if (inFlight.current || create.isPending) return;
+    inFlight.current = true;
+    void submitForm(event).finally(() => {
+      inFlight.current = false;
+    });
+  };
 
   const close = () => {
     create.reset();
@@ -205,14 +217,8 @@ export function SendLogsModal({ open, onClose, initial, erodsMode, eldIdentifier
       isDirty={formState.isDirty && !sent}
       footer={
         <>
-          <Button
-            variant="secondary"
-            size="lg"
-            onClick={() => (formState.isDirty && !sent ? setConfirmDiscard(true) : close())}
-            disabled={busy}
-          >
-            {sent ? 'Close' : 'Cancel'}
-          </Button>
+          {/* WB-145 — 11.30 Discard changes on Cancel, handled by the Modal itself. */}
+          <ModalCancelButton disabled={busy}>{sent ? 'Close' : 'Cancel'}</ModalCancelButton>
           <Button
             variant="secondary"
             size="lg"
@@ -387,15 +393,6 @@ export function SendLogsModal({ open, onClose, initial, erodsMode, eldIdentifier
           ))}
       </form>
     </Modal>
-    {/* 11.30 — the footer Cancel on a dirty form confirms first, like Esc / overlay / X. */}
-    <DiscardChangesDialog
-      open={confirmDiscard}
-      onKeepEditing={() => setConfirmDiscard(false)}
-      onDiscard={() => {
-        setConfirmDiscard(false);
-        close();
-      }}
-    />
     </>
   );
 }

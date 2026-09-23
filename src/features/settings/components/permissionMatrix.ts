@@ -4,6 +4,7 @@
 // roles") and are always written to the same level together — the one place a single control
 // spans two backend keys.
 import type { PermissionKey } from '@/shared/auth/permissions';
+import { ROLE_COPY } from '../lib/copy';
 
 export interface MatrixRow {
   id: string;
@@ -44,7 +45,8 @@ export const PERMISSION_MATRIX_GROUPS: MatrixGroup[] = [
       { id: 'hosEdit', label: 'Request driver log edit', keys: ['hosEdit'] },
       { id: 'hosCertifyOnBehalf', label: 'Certify on behalf of driver', keys: ['hosCertifyOnBehalf'] },
       { id: 'reports', label: 'View & generate reports', keys: ['reports'] },
-      { id: 'reportsTransfer', label: 'Export FMCSA / DOT pack', keys: ['reportsTransfer'] },
+      // WB-234 — one key covers both the pack export and data transfers (B-95).
+      { id: 'reportsTransfer', label: ROLE_COPY.transferMatrixRow, keys: ['reportsTransfer'] },
     ],
   },
   {

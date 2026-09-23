@@ -8,6 +8,7 @@ import {
   EMPTY_TRIP_FILTERS,
   TRIP_STATUS_OPTIONS,
   countActiveTripFilters,
+  writeTripFilters,
   type TripFilters,
 } from '../lib/filters';
 import { departRangeMax, CUSTOM_RANGE_MIN, validateDepartRange } from '../lib/periodRange';
@@ -46,6 +47,11 @@ export function TripFiltersDrawer({
   const [today] = useState(() => new Date());
   const departMax = departRangeMax(today);
   const { fromError, toError } = validateDepartRange(draft.departFrom, draft.departTo, today);
+  // WB — Esc / X / Cancel used to drop every edit silently. Two filter sets are equal exactly
+  // when they serialise to the same URL, so the canonical writer doubles as the comparison.
+  const isDirty =
+    writeTripFilters(new URLSearchParams(), draft).toString() !==
+    writeTripFilters(new URLSearchParams(), filters).toString();
 
   return (
     <FilterDrawer
@@ -53,6 +59,7 @@ export function TripFiltersDrawer({
       onClose={onClose}
       screenName="Trips"
       appliedCount={countActiveTripFilters(draft)}
+      isDirty={isDirty}
       onReset={() => setDraft(EMPTY_TRIP_FILTERS)}
       applyDisabled={Boolean(fromError || toError)}
       onApply={() => {

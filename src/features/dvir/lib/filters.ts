@@ -66,6 +66,19 @@ export function countActiveDvirFilters(filters: DvirFilters): number {
   return n;
 }
 
+/** WB-150 — the 11.23 drawer holds a draft; comparing it to the applied set is what makes an
+ * Esc / X / overlay close confirm instead of silently dropping the edits. Order-insensitive,
+ * because a group is toggled item by item. */
+export function sameDvirFilters(a: DvirFilters, b: DvirFilters): boolean {
+  const sameGroup = (x: readonly string[], y: readonly string[]) =>
+    x.length === y.length && x.every((v) => y.includes(v));
+  return (
+    sameGroup(a.type, b.type) &&
+    sameGroup(a.severity, b.severity) &&
+    sameGroup(a.repairStatus, b.repairStatus)
+  );
+}
+
 export function matchesDvirFilters(row: DvirTableRow, filters: DvirFilters): boolean {
   if (filters.type.length && !filters.type.includes(row.type)) return false;
   if (filters.severity.length && !row.defects.some((d) => filters.severity.includes(d.severity))) return false;

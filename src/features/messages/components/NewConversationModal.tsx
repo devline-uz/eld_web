@@ -5,8 +5,8 @@
 import { useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
-import { Search } from 'lucide-react';
-import { Modal } from '@/shared/ui/Modal';
+import { Check, Search } from 'lucide-react';
+import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { Avatar } from '@/shared/ui/Avatar';
 import { useToast } from '@/shared/ui/Toast';
@@ -33,7 +33,7 @@ export function NewConversationModal({ onClose, onCreated }: { onClose: () => vo
   const {
     register,
     handleSubmit,
-    formState: { errors },
+    formState: { errors, isDirty: bodyDirty },
   } = useForm<MessageFormValues>({ resolver: zodResolver(messageSchema), mode: 'onBlur', defaultValues: { body: '' } });
 
   const drivers = driversQuery.data?.items ?? [];
@@ -73,6 +73,9 @@ export function NewConversationModal({ onClose, onCreated }: { onClose: () => vo
   }
 
   const canSubmit = tab === 'DIRECT' ? Boolean(driverId) : selectedIds.length > 0;
+  // WB-165 — a typed broadcast or a picked recipient is unsaved work: closing now raises the
+  // 11.30 discard confirm instead of dropping it, and `Cancel` goes through the same route.
+  const isDirty = Boolean(driverId) || selectedIds.length > 0 || bodyDirty;
 
   return (
     <Modal
@@ -81,11 +84,10 @@ export function NewConversationModal({ onClose, onCreated }: { onClose: () => vo
       title="New message"
       subtitle="Message a driver or broadcast to the fleet"
       size="md"
+      isDirty={isDirty && !submitting}
       footer={
         <>
-          <Button variant="secondary" size="lg" onClick={onClose} disabled={submitting}>
-            Cancel
-          </Button>
+          <ModalCancelButton disabled={submitting} />
           <Button
             variant="primary"
             size="lg"
@@ -124,6 +126,7 @@ export function NewConversationModal({ onClose, onCreated }: { onClose: () => vo
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search driver…"
+            aria-label="Search driver"
             className="h-full flex-1 bg-transparent text-body outline-none"
           />
         </div>
@@ -140,7 +143,17 @@ export function NewConversationModal({ onClose, onCreated }: { onClose: () => vo
                   aria-pressed={selected}
                   className={`flex w-full items-center gap-3 rounded-md border p-2 text-left ${selected ? 'border-primary bg-primary-soft' : 'border-transparent hover:bg-bg-subtle'}`}
                 >
-                  <input type={tab === 'DIRECT' ? 'radio' : 'checkbox'} readOnly checked={selected} />
+                  {/* WB-165 — a real <input> nested in a <button> is interactive-in-interactive
+                      markup; the button's own `aria-pressed` already carries the state, so the
+                      tick is drawn, not focusable. */}
+                  <span
+                    aria-hidden="true"
+                    className={`flex size-4 shrink-0 items-center justify-center border border-border ${
+                      tab === 'DIRECT' ? 'rounded-full' : 'rounded-sm'
+                    } ${selected ? 'border-primary bg-primary text-text-inverse' : 'bg-bg-surface'}`}
+                  >
+                    {selected && <Check size={12} strokeWidth={2} />}
+                  </span>
                   <Avatar name={name} size="sm" />
                   <span className="flex-1 text-body-strong text-text">{name}</span>
                 </button>

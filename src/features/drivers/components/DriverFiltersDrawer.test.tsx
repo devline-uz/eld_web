@@ -17,7 +17,7 @@ describe('DriverFiltersDrawer — 11.23', () => {
     expect(screen.getByText('Home terminal')).toBeInTheDocument();
     expect(screen.getByText('Violations')).toBeInTheDocument();
     expect(screen.getByText('Exemptions')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Apply 0 filters/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeInTheDocument();
   });
 
   it('toggles every group and applies the accumulated draft', async () => {
@@ -41,13 +41,48 @@ describe('DriverFiltersDrawer — 11.23', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it('closes straight away when nothing was edited', async () => {
+    const user = userEvent.setup();
+    const { onClose } = renderDrawer(EMPTY_DRIVER_FILTERS);
+
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+
+    expect(screen.queryByText('Discard changes?')).not.toBeInTheDocument();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('WB — an edited draft confirms before the edits are dropped (11.30)', async () => {
+    const user = userEvent.setup();
+    const { onClose } = renderDrawer(EMPTY_DRIVER_FILTERS);
+
+    await user.click(screen.getByLabelText('Driving'));
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+
+    expect(await screen.findByText('Discard changes?')).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Discard' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('WB — a draft edited back to the applied filters is not dirty', async () => {
+    const user = userEvent.setup();
+    const { onClose } = renderDrawer({ ...EMPTY_DRIVER_FILTERS, status: ['DRIVING'] });
+
+    await user.click(screen.getByLabelText('Driving'));
+    await user.click(screen.getByLabelText('Driving'));
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+
+    expect(screen.queryByText('Discard changes?')).not.toBeInTheDocument();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
   it('Reset all clears the draft back to empty', async () => {
     const user = userEvent.setup();
     renderDrawer({ ...EMPTY_DRIVER_FILTERS, status: ['DRIVING'], violationsOnly: true });
 
     expect(screen.getByRole('button', { name: /Apply 2 filters/ })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Reset all' }));
-    expect(screen.getByRole('button', { name: /Apply 0 filters/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeInTheDocument();
   });
 });
 

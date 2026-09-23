@@ -13,7 +13,7 @@ import { Badge } from '@/shared/ui/Badge';
 import { Avatar } from '@/shared/ui/Avatar';
 import { DataTable } from '@/shared/ui/DataTable';
 import { Card, SectionHeader } from '@/shared/ui/Card';
-import { Modal } from '@/shared/ui/Modal';
+import { ConfirmDelete, Modal } from '@/shared/ui/Modal';
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
 import { searchEmptyState } from '@/shared/ui/copy';
 import { useToast } from '@/shared/ui/Toast';
@@ -23,10 +23,13 @@ import { ApiError } from '@/shared/api/errors';
 import { useUsersList, useRolesList, useResendInvite, useUpdateUser, type UserRow } from '@/shared/api/settingsAdmin';
 import { ROLE_LABEL, isRole } from '@/shared/auth/permissions';
 import { InviteUserModal } from './components/InviteUserModal';
+import { EditUserModal } from './components/EditUserModal';
 import { UserFiltersDrawer, UserFilterChips } from './components/UserFiltersDrawer';
 import { EMPTY_USER_FILTERS, countActiveUserFilters, matchesUserFilters, parseUserFilters, writeUserFilters } from './lib/filters';
+import { useDeleteUser } from './api';
+import { SETTINGS_TOAST } from './lib/copy';
 
-type Segment = 'ALL' | 'ADMIN' | 'FLEET_MANAGER' | 'VIEWER';
+type Segment = 'ALL' | 'ADMIN' | 'FLEET_MANAGER' | 'DISPATCHER' | 'VIEWER';
 
 const ROLE_BADGE_TONE: Record<string, 'violet' | 'info' | 'success' | 'neutral'> = {
   ADMIN: 'violet',
@@ -47,10 +50,14 @@ export default function UsersPage() {
   const rolesQuery = useRolesList();
   const resendInvite = useResendInvite();
   const updateUser = useUpdateUser();
+  const deleteUser = useDeleteUser();
 
   const [segment, setSegment] = useState<Segment>('ALL');
   const [search, setSearch] = useState('');
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<{ user: UserRow; mode: 'profile' | 'role' } | null>(null);
+  const [revokeTarget, setRevokeTarget] = useState<UserRow | null>(null);
+  const [resendingAll, setResendingAll] = useState(false);
   // WB-113 — nothing on the server stops an admin from disabling themself or the last active
   // ADMIN either (this is a UI guard only; the write must also be refused server-side).
   const [blockedDisable, setBlockedDisable] = useState<{ user: UserRow; reason: 'self' | 'lastAdmin' } | null>(null);
@@ -70,6 +77,7 @@ export default function UsersPage() {
       all: rows.length,
       admin: rows.filter((r) => r.role.key === 'ADMIN').length,
       fleetManager: rows.filter((r) => r.role.key === 'FLEET_MANAGER').length,
+      dispatcher: rows.filter((r) => r.role.key === 'DISPATCHER').length,
       viewer: rows.filter((r) => r.role.key === 'VIEWER').length,
     }),
     [rows],
@@ -79,6 +87,7 @@ export default function UsersPage() {
     let out = rows;
     if (segment === 'ADMIN') out = out.filter((r) => r.role.key === 'ADMIN');
     if (segment === 'FLEET_MANAGER') out = out.filter((r) => r.role.key === 'FLEET_MANAGER');
+    if (segment === 'DISPATCHER') out = out.filter((r) => r.role.key === 'DISPATCHER');
     if (segment === 'VIEWER') out = out.filter((r) => r.role.key === 'VIEWER');
     if (search.trim()) {
       const needle = search.trim().toLowerCase();
@@ -100,7 +109,8 @@ export default function UsersPage() {
     updateUser.mutate(
       { id: user.id, dto: { status: nextStatus } },
       {
-        onSuccess: () => toast({ kind: 'success', title: nextStatus === 'DISABLED' ? 'User disabled' : 'User enabled' }),
+        onSuccess: () =>
+          toast({ kind: 'success', ...(nextStatus === 'DISABLED' ? SETTINGS_TOAST.userDisabled : SETTINGS_TOAST.userEnabled) }),
         onError: (error) =>
           toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }),
       },
@@ -126,8 +136,37 @@ export default function UsersPage() {
 
   function handleResendInvite(user: UserRow) {
     resendInvite.mutate(user.id, {
-      onSuccess: () => toast({ kind: 'success', title: 'Invitation resent', description: `A new invite was sent to ${user.email}.` }),
+      onSuccess: () => toast({ kind: 'success', ...SETTINGS_TOAST.invitationResent(user.email) }),
       onError: (error) => toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }),
+    });
+  }
+
+  // WB-207 — there is no bulk resend endpoint, so `Resend all` fans out one
+  // `POST /users/:id/resend-invite` per pending invitation. Not atomic: a partial failure is
+  // reported as a partial failure rather than as a success (same pattern as the W-03 bulk action).
+  async function handleResendAll() {
+    if (resendingAll || pending.length === 0) return;
+    setResendingAll(true);
+    const results = await Promise.allSettled(pending.map((user) => resendInvite.mutateAsync(user.id)));
+    setResendingAll(false);
+    const failed = results.filter((r) => r.status === 'rejected').length;
+    if (failed === 0) {
+      toast({ kind: 'success', ...SETTINGS_TOAST.invitationsResent(pending.length) });
+      return;
+    }
+    toast({ kind: 'error', ...SETTINGS_TOAST.invitationsResendFailed(failed, pending.length) });
+  }
+
+  function handleRevokeInvitation(user: UserRow) {
+    deleteUser.mutate(user.id, {
+      onSuccess: () => {
+        toast({ kind: 'success', ...SETTINGS_TOAST.invitationRevoked(user.email) });
+        setRevokeTarget(null);
+      },
+      onError: (error) => {
+        toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+        setRevokeTarget(null);
+      },
     });
   }
 
@@ -198,6 +237,7 @@ export default function UsersPage() {
               ['ALL', `All ${counts.all}`],
               ['ADMIN', `Admins ${counts.admin}`],
               ['FLEET_MANAGER', `Fleet managers ${counts.fleetManager}`],
+              ['DISPATCHER', `Dispatchers ${counts.dispatcher}`],
               ['VIEWER', `Viewers ${counts.viewer}`],
             ] as [Segment, string][]
           ).map(([value, label]) => (
@@ -220,6 +260,8 @@ export default function UsersPage() {
           <div className="flex h-input items-center gap-2 rounded-md border border-border bg-bg-surface px-3">
             <Search size={16} strokeWidth={1.75} className="text-text-muted" />
             <input
+              type="search"
+              aria-label="Search user or email"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search user or email…"
@@ -274,10 +316,16 @@ export default function UsersPage() {
               canFull
                 ? (row) => (
                     <>
-                      <DropdownMenu.Item className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                      <DropdownMenu.Item
+                        onSelect={() => setEditTarget({ user: row, mode: 'profile' })}
+                        className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle"
+                      >
                         Edit user
                       </DropdownMenu.Item>
-                      <DropdownMenu.Item className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                      <DropdownMenu.Item
+                        onSelect={() => setEditTarget({ user: row, mode: 'role' })}
+                        className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle"
+                      >
                         Change role
                       </DropdownMenu.Item>
                       {row.status === 'INVITED' && (
@@ -289,7 +337,10 @@ export default function UsersPage() {
                         </DropdownMenu.Item>
                       )}
                       {row.status === 'INVITED' && (
-                        <DropdownMenu.Item className="cursor-pointer rounded-md px-2 py-1.5 text-body text-danger outline-none hover:bg-danger-soft">
+                        <DropdownMenu.Item
+                          onSelect={() => setRevokeTarget(row)}
+                          className="cursor-pointer rounded-md px-2 py-1.5 text-body text-danger outline-none hover:bg-danger-soft"
+                        >
                           Revoke invitation
                         </DropdownMenu.Item>
                       )}
@@ -315,7 +366,13 @@ export default function UsersPage() {
             subtitle={`${pending.length} invitation${pending.length === 1 ? '' : 's'} waiting to be accepted`}
             action={
               canFull ? (
-                <Button variant="secondary" iconLeft={<Mail size={16} strokeWidth={1.75} />}>
+                <Button
+                  variant="secondary"
+                  iconLeft={<Mail size={16} strokeWidth={1.75} />}
+                  loading={resendingAll}
+                  disabled={resendingAll}
+                  onClick={() => void handleResendAll()}
+                >
                   Resend all
                 </Button>
               ) : undefined
@@ -343,7 +400,7 @@ export default function UsersPage() {
                       <Button variant="secondary" size="sm" onClick={() => handleResendInvite(user)}>
                         Resend
                       </Button>
-                      <Button variant="danger-outline" size="sm">
+                      <Button variant="danger-outline" size="sm" onClick={() => setRevokeTarget(user)}>
                         Revoke
                       </Button>
                     </>
@@ -356,6 +413,26 @@ export default function UsersPage() {
       )}
 
       {inviteOpen && <InviteUserModal roles={rolesQuery.rows} onClose={() => setInviteOpen(false)} />}
+
+      {editTarget && (
+        <EditUserModal
+          user={editTarget.user}
+          roles={rolesQuery.rows}
+          mode={editTarget.mode}
+          activeAdminCount={activeAdminCount}
+          onClose={() => setEditTarget(null)}
+        />
+      )}
+
+      <ConfirmDelete
+        open={Boolean(revokeTarget)}
+        onClose={() => setRevokeTarget(null)}
+        onConfirm={() => revokeTarget && handleRevokeInvitation(revokeTarget)}
+        title={`Revoke the invitation for ${revokeTarget?.email ?? ''}?`}
+        description="The invite link stops working immediately and the pending account is removed. You can invite this address again at any time."
+        confirmLabel="Revoke invitation"
+        loading={deleteUser.isPending}
+      />
 
       <UserFiltersDrawer
         key={filtersRevision}

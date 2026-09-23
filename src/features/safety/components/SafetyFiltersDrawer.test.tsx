@@ -16,7 +16,7 @@ describe('SafetyFiltersDrawer — 11.23', () => {
     expect(screen.getByText('Event type')).toBeInTheDocument();
     expect(screen.getByText('Severity')).toBeInTheDocument();
     expect(screen.getByText('Coaching status')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Apply 0 filters/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeInTheDocument();
   });
 
   it('toggles every group and applies the accumulated draft', async () => {
@@ -44,7 +44,7 @@ describe('SafetyFiltersDrawer — 11.23', () => {
 
     expect(screen.getByRole('button', { name: /Apply 2 filters/ })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Reset all' }));
-    expect(screen.getByRole('button', { name: /Apply 0 filters/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeInTheDocument();
   });
 });
 
@@ -74,5 +74,46 @@ describe('SafetyFilterChips — 11.23', () => {
 
     await user.click(screen.getByText('Clear all'));
     expect(onClearAll).toHaveBeenCalled();
+  });
+});
+
+describe('SafetyFiltersDrawer — 11.30 dirty close', () => {
+  it('closes without a confirm while the draft matches the applied filters', async () => {
+    const user = userEvent.setup();
+    const { onClose } = renderDrawer(EMPTY_SAFETY_FILTERS);
+
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+
+    expect(screen.queryByText('Discard changes?')).not.toBeInTheDocument();
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('confirms before dropping an edited draft, and keeps the edit on `Keep editing`', async () => {
+    const user = userEvent.setup();
+    const { onClose } = renderDrawer(EMPTY_SAFETY_FILTERS);
+    await user.click(screen.getByLabelText('Harsh braking'));
+
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+
+    expect(await screen.findByText('Discard changes?')).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Keep editing' }));
+    expect(screen.getByLabelText('Harsh braking')).toBeChecked();
+
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    await user.click(await screen.findByRole('button', { name: 'Discard' }));
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('stops confirming once the draft is toggled back to the applied filters', async () => {
+    const user = userEvent.setup();
+    const { onClose } = renderDrawer(EMPTY_SAFETY_FILTERS);
+    await user.click(screen.getByLabelText('Harsh braking'));
+    await user.click(screen.getByLabelText('Harsh braking'));
+
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+
+    expect(screen.queryByText('Discard changes?')).not.toBeInTheDocument();
+    expect(onClose).toHaveBeenCalled();
   });
 });

@@ -1,8 +1,8 @@
 // owner: web-vehicles-drivers — 11.2 Add vehicle / Edit unit (web/tz.md §11.2). `vehicles` FULL.
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
-import { Modal } from '@/shared/ui/Modal';
+import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
 import { TOAST_COPY } from '@/shared/ui/copy';
@@ -40,14 +40,19 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
   const { toast } = useToast();
   const isEdit = Boolean(vehicle);
   const currentYear = new Date().getFullYear();
-  const [fuelType, setFuelType] = useState<string>(vehicle?.fuelType ?? 'DIESEL');
-  const [sleeperBerth, setSleeperBerth] = useState(vehicle?.sleeperBerth ?? false);
-  const [notes, setNotes] = useState(vehicle?.notes ?? '');
+  // The three fields that live outside react-hook-form. Their initial values are captured once so
+  // "has the user changed anything?" can be answered honestly (see `isDirty` below).
+  const initialFuelType = vehicle?.fuelType ?? 'DIESEL';
+  const initialSleeperBerth = vehicle?.sleeperBerth ?? false;
+  const initialNotes = vehicle?.notes ?? '';
+  const [fuelType, setFuelType] = useState<string>(initialFuelType);
+  const [sleeperBerth, setSleeperBerth] = useState(initialSleeperBerth);
+  const [notes, setNotes] = useState(initialNotes);
 
   const {
     register,
     handleSubmit,
-    formState: { errors, isSubmitting, isDirty },
+    formState: { errors, dirtyFields },
     setError,
   } = useForm<VehicleFormValues>({
     resolver: zodResolver(vehicleSchema),
@@ -64,11 +69,29 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
     },
   });
 
+  // WB — a freshly opened, untouched form asked "Discard changes?" on every close: react-hook-form's
+  // `isDirty` deep-compares the live values against `defaultValues`, and fields the form registers
+  // without a default (`deviceId`) plus the `setValueAs` coercions on `licenseState` / `odometer`
+  // make them differ before the user has typed anything. `dirtyFields` only ever fills from a real
+  // change event (and empties again when a field is reverted), so it answers the question honestly.
+  // The three non-RHF fields are compared against the values they were opened with.
+  const isDirty =
+    Object.keys(dirtyFields).length > 0 ||
+    fuelType !== initialFuelType ||
+    sleeperBerth !== initialSleeperBerth ||
+    notes !== initialNotes;
+
   const createMutation = useCreateVehicle();
   const updateMutation = useUpdateVehicle(vehicle?.id ?? '');
   const mutation = isEdit ? updateMutation : createMutation;
+  // WB — `mutate()` returns on the same tick, so RHF's `isSubmitting` was already false again
+  // while the request was still open: two fast clicks created two units. The pending flag of the
+  // mutation plus a same-tick ref is the guard every other 11.x modal now uses.
+  const inFlight = useRef(false);
+  const submitting = mutation.isPending;
 
   function onSubmit(values: VehicleFormValues) {
+    if (inFlight.current || submitting) return;
     const payload = {
       unitNumber: values.unitNumber,
       vin: values.vin,
@@ -83,7 +106,11 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
       notes: notes || undefined,
       deviceId: values.deviceId || undefined,
     };
+    inFlight.current = true;
     mutation.mutate(payload, {
+      onSettled: () => {
+        inFlight.current = false;
+      },
       onSuccess: () => {
         if (isEdit) {
           toast({ kind: 'success', title: `Unit ${values.unitNumber} updated` });
@@ -119,30 +146,28 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
       isDirty={isDirty}
       footer={
         <>
-          <Button variant="secondary" size="lg" onClick={onClose} disabled={isSubmitting}>
-            Cancel
-          </Button>
-          <Button variant="primary" size="lg" loading={isSubmitting} onClick={handleSubmit(onSubmit)}>
+          <ModalCancelButton disabled={submitting} />
+          <Button variant="primary" size="lg" loading={submitting} onClick={() => void handleSubmit(onSubmit)()}>
             {isEdit ? 'Save changes' : 'Save unit'}
           </Button>
         </>
       }
     >
-      <form className="flex flex-col gap-4" onSubmit={handleSubmit(onSubmit)}>
+      <form className="flex flex-col gap-4" onSubmit={(e) => void handleSubmit(onSubmit)(e)}>
         <div className="grid grid-cols-2 gap-4">
           <Field label="Unit number" required error={errors.unitNumber?.message}>
-            <input {...register('unitNumber')} placeholder="e.g. 126" disabled={isSubmitting} className={inputClass} />
+            <input {...register('unitNumber')} placeholder="e.g. 126" disabled={submitting} className={inputClass} />
           </Field>
           <Field label="ELD serial">
-            <input {...register('deviceId')} placeholder="PT30_1C4F" disabled={isSubmitting} className={inputClass} />
+            <input {...register('deviceId')} placeholder="PT30_1C4F" disabled={submitting} className={inputClass} />
           </Field>
         </div>
         <div className="grid grid-cols-4 gap-4">
           <Field label="Make" required error={errors.make?.message}>
-            <input {...register('make')} disabled={isSubmitting} className={inputClass} />
+            <input {...register('make')} disabled={submitting} className={inputClass} />
           </Field>
           <Field label="Model" required error={errors.model?.message}>
-            <input {...register('model')} disabled={isSubmitting} className={inputClass} />
+            <input {...register('model')} disabled={submitting} className={inputClass} />
           </Field>
           <Field label="Year" required error={errors.year?.message}>
             <input
@@ -150,12 +175,12 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
               min={1970}
               max={currentYear}
               {...register('year', { valueAsNumber: true })}
-              disabled={isSubmitting}
+              disabled={submitting}
               className={inputClass}
             />
           </Field>
           <Field label="Fuel type">
-            <select value={fuelType} onChange={(e) => setFuelType(e.target.value)} disabled={isSubmitting} className={inputClass}>
+            <select value={fuelType} onChange={(e) => setFuelType(e.target.value)} disabled={submitting} className={inputClass}>
               {FUEL_TYPES.map((f) => (
                 <option key={f} value={f}>
                   {f.charAt(0) + f.slice(1).toLowerCase()}
@@ -165,11 +190,11 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
           </Field>
         </div>
         <Field label="VIN" required error={errors.vin?.message}>
-          <input {...register('vin')} placeholder="17-character VIN" disabled={isSubmitting} className={inputClass} />
+          <input {...register('vin')} placeholder="17-character VIN" disabled={submitting} className={inputClass} />
         </Field>
         <div className="grid grid-cols-3 gap-4">
           <Field label="License plate">
-            <input {...register('licensePlate')} disabled={isSubmitting} className={inputClass} />
+            <input {...register('licensePlate')} disabled={submitting} className={inputClass} />
           </Field>
           <Field label="Issuing state">
             <input
@@ -181,7 +206,7 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
               })}
               maxLength={2}
               placeholder="OH"
-              disabled={isSubmitting}
+              disabled={submitting}
               className={inputClass}
             />
           </Field>
@@ -194,20 +219,20 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
                 setValueAs: (v: string) => (v === '' ? undefined : Number(v)),
               })}
               placeholder="221,449"
-              disabled={isSubmitting}
+              disabled={submitting}
               className={inputClass}
             />
           </Field>
         </div>
         <label className="flex items-center gap-2 text-body text-text">
-          <input type="checkbox" checked={sleeperBerth} onChange={(e) => setSleeperBerth(e.target.checked)} disabled={isSubmitting} />
+          <input type="checkbox" checked={sleeperBerth} onChange={(e) => setSleeperBerth(e.target.checked)} disabled={submitting} />
           Sleeper berth available
         </label>
         <Field label="Notes">
           <textarea
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            disabled={isSubmitting}
+            disabled={submitting}
             placeholder="Optional — visible to fleet managers only"
             rows={3}
             className="rounded-md border border-border bg-bg-surface px-3 py-2 text-body text-text"

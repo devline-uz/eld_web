@@ -2,7 +2,7 @@
 // served by MSW per web/backend-gaps.md).
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -144,7 +144,6 @@ describe('W-06 Drivers', () => {
       'Request log edit',
       'Certify on behalf',
       'Export 8-day RODS',
-      'Reset app password',
     ]) {
       await user.click(screen.getAllByRole('button', { name: 'Row actions' })[0]!);
       await user.click(await screen.findByText(label));
@@ -396,5 +395,189 @@ describe('W-06 Drivers', () => {
     );
     renderPage();
     expect(await screen.findByRole('button', { name: /retry/i })).toBeInTheDocument();
+  });
+
+  // ---------------------------------------------------------------- stage-2 dead controls
+
+  it('WB-182 · row menu `Export 8-day RODS` really queues the pack for that driver', async () => {
+    const user = userEvent.setup();
+    let query: URLSearchParams | null = null;
+    server.use(
+      http.get(url(endpoints.reports.fmcsaPack), ({ request }) => {
+        query = new URL(request.url).searchParams;
+        return ok({ reportId: 'rpt_1', status: 'QUEUED' }, 202);
+      }),
+    );
+    renderPage();
+    await screen.findByText('John Smith');
+
+    await user.click(screen.getAllByRole('button', { name: 'Row actions' })[0]!);
+    await user.click(await screen.findByText('Export 8-day RODS'));
+
+    expect(await screen.findByText('RODS export queued')).toBeInTheDocument();
+    expect(query).not.toBeNull();
+    expect(query!.get('driverId')).toBeTruthy();
+    const from = Date.parse(`${query!.get('from')}T00:00:00Z`);
+    const to = Date.parse(`${query!.get('to')}T00:00:00Z`);
+    expect((to - from) / 86_400_000).toBe(7);
+  });
+
+  it('WB-183 · row menu `Deactivate driver` confirms first, then PATCHes the driver inactive', async () => {
+    const user = userEvent.setup();
+    const patched: Array<Record<string, unknown>> = [];
+    server.use(
+      http.patch(url(endpoints.drivers.update(':id')), async ({ request }) => {
+        patched.push((await request.json()) as Record<string, unknown>);
+        return ok({ id: 'drv_1', status: 'INACTIVE' });
+      }),
+    );
+    renderPage();
+    await screen.findByText('John Smith');
+
+    await user.click(screen.getAllByRole('button', { name: 'Row actions' })[0]!);
+    await user.click(await screen.findByText('Deactivate driver'));
+    // Nothing is written before the confirm (§5.9).
+    expect(patched).toHaveLength(0);
+    expect(await screen.findByText('Deactivate this driver?')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Deactivate' }));
+    expect(await screen.findByText('1 driver deactivated')).toBeInTheDocument();
+    expect(patched).toEqual([{ status: 'INACTIVE' }]);
+  });
+
+  it('WB-184 · the bulk bar deactivates every selected driver and reports a partial failure', async () => {
+    const user = userEvent.setup();
+    let seen = 0;
+    server.use(
+      http.patch(url(endpoints.drivers.update(':id')), () => {
+        seen += 1;
+        return seen === 1
+          ? ok({ id: 'drv_1', status: 'INACTIVE' })
+          : HttpResponse.json({ statusCode: 500, code: 'INTERNAL_ERROR', message: 'nope' }, { status: 500 });
+      }),
+    );
+    renderPage();
+    await screen.findByText('John Smith');
+
+    await user.click(screen.getAllByRole('checkbox')[1]!);
+    await screen.findByText('1 drivers selected');
+    await user.click(screen.getAllByRole('checkbox')[2]!);
+    await screen.findByText('2 drivers selected');
+
+    await user.click(screen.getByRole('button', { name: 'Deactivate' }));
+    await user.click(await screen.findByRole('button', { name: 'Deactivate' }));
+
+    expect(await screen.findByText('1 of 2 drivers could not be deactivated')).toBeInTheDocument();
+    expect(seen).toBe(2);
+  });
+
+  it('WB-184 · `Assign unit` is a single-row action and assigns through the real endpoint', async () => {
+    const user = userEvent.setup();
+    let assignedTo: string | null = null;
+    server.use(
+      http.post(url(endpoints.vehicles.assignDriver(':id')), async ({ request }) => {
+        assignedTo = ((await request.json()) as { driverId: string }).driverId;
+        return ok({ id: 'veh_1' });
+      }),
+    );
+    renderPage();
+    await screen.findByText('John Smith');
+
+    await user.click(screen.getAllByRole('checkbox')[1]!);
+    await screen.findByText('1 drivers selected');
+    await user.click(screen.getAllByRole('checkbox')[2]!);
+    expect(await screen.findByText('2 drivers selected')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Assign unit' })).toBeDisabled();
+    expect(screen.getByText('A unit takes one driver — select a single row.')).toBeInTheDocument();
+
+    await user.click(screen.getAllByRole('checkbox')[2]!);
+    await screen.findByText('1 drivers selected');
+    await user.click(screen.getByRole('button', { name: 'Assign unit' }));
+
+    const select = await screen.findByRole('combobox');
+    const option = (await screen.findAllByRole('option')).find((o) => o.getAttribute('value'))!;
+    await user.selectOptions(select, option.getAttribute('value')!);
+    await user.click(screen.getByRole('button', { name: 'Assign unit' }));
+
+    await screen.findByText(/assigned$/);
+    expect(assignedTo).toBeTruthy();
+  });
+
+  it('B-81 · `Reset app password` is disabled and says why instead of faking a reset', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('John Smith');
+
+    await user.click(screen.getAllByRole('button', { name: 'Row actions' })[0]!);
+    const item = await screen.findByText('Reset app password');
+    expect(item).toHaveAttribute('data-disabled');
+    expect(
+      screen.getByText('No carrier-side reset yet — the driver resets the app password from the sign-in screen.'),
+    ).toBeInTheDocument();
+  });
+
+  it('WB-180 · `Assign trip` carries the driver into the Trips filter (`fDriver`)', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('John Smith');
+
+    await user.click(screen.getAllByRole('button', { name: 'Row actions' })[0]!);
+    await user.click(await screen.findByText('Assign trip'));
+
+    expect(screen.getByTestId('location').textContent).toMatch(/^\/trips\?fDriver=.+/);
+  });
+
+  it('the search box is labelled and clears from its own button', async () => {
+    const user = userEvent.setup();
+    renderPage(['/drivers?q=smith']);
+    await screen.findByText('John Smith');
+
+    expect(screen.getByLabelText('Search drivers')).toHaveValue('smith');
+    await user.click(screen.getByRole('button', { name: 'Clear search' }));
+    expect(screen.getByLabelText('Search drivers')).toHaveValue('');
+  });
+
+  it('WB-181 · a failing driver export is toasted instead of failing silently', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(url(endpoints.drivers.export), () =>
+        HttpResponse.json({ statusCode: 500, code: 'INTERNAL_ERROR', message: 'Export failed' }, { status: 500 }),
+      ),
+    );
+    renderPage();
+    await screen.findByText('John Smith');
+
+    await user.click(screen.getByRole('button', { name: /Export Drivers/ }));
+    expect(await screen.findByText('Something went wrong on our side. Try again.')).toBeInTheDocument();
+  });
+
+  it('bulk bar `Send message` with 2+ rows opens the broadcast modal, sends, toasts and clears the selection', async () => {
+    const user = userEvent.setup();
+    let sentTo: string[] = [];
+    server.use(
+      http.post(url(endpoints.conversations.broadcast), async ({ request }) => {
+        sentTo = ((await request.json()) as { driverIds: string[] }).driverIds;
+        return ok({ sent: sentTo.length, deliveries: [] });
+      }),
+    );
+    renderPage();
+    await screen.findByText('John Smith');
+
+    await user.click(screen.getAllByRole('checkbox')[1]!);
+    await screen.findByText('1 drivers selected');
+    await user.click(screen.getAllByRole('checkbox')[2]!);
+    await screen.findByText('2 drivers selected');
+
+    await user.click(screen.getByRole('button', { name: 'Send message' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Send message' });
+    expect(within(dialog).getByText('2 drivers · each one receives it in their own conversation')).toBeInTheDocument();
+
+    await user.type(within(dialog).getByRole('textbox', { name: /Message/ }), 'Fuel stop at exit 12.');
+    await user.click(within(dialog).getByRole('button', { name: 'Send message' }));
+
+    expect(await screen.findByText('Message sent to 2 drivers')).toBeInTheDocument();
+    expect(sentTo).toHaveLength(2);
+    expect(screen.queryByRole('dialog', { name: 'Send message' })).not.toBeInTheDocument();
+    expect(screen.queryByText('2 drivers selected')).not.toBeInTheDocument();
   });
 });

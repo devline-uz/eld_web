@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import { Eye, EyeOff } from 'lucide-react';
-import { Modal } from '@/shared/ui/Modal';
+import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
 import { TOAST_COPY } from '@/shared/ui/copy';
@@ -13,7 +13,30 @@ import { useCreateDriver } from '@/shared/api/drivers';
 import { useVehiclesPicker } from '@/shared/api/vehicles';
 import { ApiError } from '@/shared/api/errors';
 
-const US_STATES = ['OH', 'NC', 'KY', 'IN', 'PA', 'TN', 'GA', 'VA', 'MI', 'IL'];
+/** WB-187 — the list used to hold ten states, so a CDL from any other one could not be recorded. */
+const US_STATES = [
+  'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'DC', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA',
+  'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM',
+  'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA',
+  'WV', 'WI', 'WY',
+];
+
+/** ⛔ GAP B-82 — `POST /drivers` has no `sendInvitation` flag; the server always emails. */
+const INVITATION_ALWAYS_SENT =
+  'The invitation is always sent — the create-driver API has no way to hold it back.';
+
+/**
+ * WB — `homeTerminalName` used to be written with the IANA zone, and "Raleigh, NC (Eastern)"
+ * mapped to `America/Chicago`. The terminal name is what the roster, W-07 and the 11.23 terminal
+ * filter read; the zone is what `formatRods` renders HOS/RODS in, so the two are kept apart here.
+ * Every entry is checked against the city it names: Eastern → `America/New_York`.
+ */
+const TERMINALS = [
+  { name: 'Columbus, OH', label: 'Columbus, OH (Eastern)', timezone: 'America/New_York' },
+  { name: 'Raleigh, NC', label: 'Raleigh, NC (Eastern)', timezone: 'America/New_York' },
+] as const;
+
+const DEFAULT_TERMINAL = TERMINALS[0];
 
 function Field({ label, required, error, children }: { label: string; required?: boolean; error?: string; children: React.ReactNode }) {
   return (
@@ -40,7 +63,11 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
   const [splitSleeperEnabled, setSplitSleeperEnabled] = useState(true);
   const [eldExempt, setEldExempt] = useState(false);
   const [eldExemptReason, setEldExemptReason] = useState('');
-  const [sendInvitation, setSendInvitation] = useState(true);
+  // WB-191 — the exemption reason used to be validated only by a toast on submit; the field itself
+  // showed nothing, so a screen reader never learned which input was wrong.
+  const [eldExemptReasonError, setEldExemptReasonError] = useState<string | null>(null);
+  const [terminalName, setTerminalName] = useState<string>(DEFAULT_TERMINAL.name);
+  const [banner, setBanner] = useState<string | null>(null);
 
   const vehiclesQuery = useVehiclesPicker();
   const mutation = useCreateDriver();
@@ -48,19 +75,54 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
   const {
     register,
     handleSubmit,
-    formState: { errors, isSubmitting, isDirty },
+    formState: { errors, isDirty },
     setError,
+    setValue,
   } = useForm<DriverFormValues>({
     resolver: zodResolver(driverSchema),
     mode: 'onBlur',
-    defaultValues: { cdlState: 'OH', notifyByEmail: true },
+    // Every field is seeded: RHF reads a registered control's DOM value at mount, so a field the
+    // defaults do not mention (the terminal `<select>`, which always has a value) made `isDirty`
+    // true on an untouched form and every close asked "Discard changes?".
+    defaultValues: {
+      firstName: '',
+      lastName: '',
+      username: '',
+      password: '',
+      email: '',
+      phone: undefined,
+      cdlNumber: '',
+      cdlState: 'OH',
+      homeTerminalTimezone: DEFAULT_TERMINAL.timezone,
+      notifyByEmail: true,
+    },
   });
 
+  // The submit guard is the mutation, not RHF: `isSubmitting` is already false again while the
+  // POST is in flight, so a double click used to create two drivers.
+  const isPending = mutation.isPending;
+
+  // Honest dirty tracking: the checkboxes, the unit, the exemption reason and the terminal all
+  // live outside RHF, so a real edit to any of them must confirm on close.
+  const extrasDirty =
+    assignedVehicleId !== '' ||
+    !allowPersonalConveyance ||
+    !allowYardMove ||
+    adverseDrivingEnabled ||
+    shortHaulException ||
+    !splitSleeperEnabled ||
+    eldExempt ||
+    eldExemptReason !== '' ||
+    terminalName !== DEFAULT_TERMINAL.name;
+
   function onSubmit(values: DriverFormValues) {
+    if (isPending) return;
     if (eldExempt && !eldExemptReason.trim()) {
-      toast({ kind: 'error', title: 'Exemption reason is required when ELD exempt is checked.' });
+      setEldExemptReasonError('An exemption reason is required while ELD exempt is checked.');
       return;
     }
+    setEldExemptReasonError(null);
+    setBanner(null);
     mutation.mutate(
       {
         firstName: values.firstName,
@@ -71,7 +133,7 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
         phone: values.phone,
         cdlNumber: values.cdlNumber,
         cdlState: values.cdlState,
-        homeTerminalName: values.homeTerminalTimezone,
+        homeTerminalName: terminalName,
         homeTerminalTimezone: values.homeTerminalTimezone,
         assignedVehicleId: assignedVehicleId || undefined,
         allowPersonalConveyance,
@@ -99,7 +161,11 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
             }
             if (Object.keys(fieldErrors).length > 0) return;
           }
-          toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+          // The POST used to fail silently: the modal stayed open with nothing to read. An
+          // unmapped failure is shown in the modal (§6.2 rule 6) as well as toasted.
+          const message = error instanceof ApiError ? error.userMessage : 'Something went wrong.';
+          setBanner(message);
+          toast({ kind: 'error', title: message });
         },
       },
     );
@@ -112,34 +178,45 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
       title="Add driver"
       subtitle="Creates a driver account for the OneBook ELD mobile app"
       size="lg"
-      isDirty={isDirty}
+      isDirty={isDirty || extrasDirty}
       footer={
         <>
-          <label className="mr-auto flex items-center gap-2 text-body text-text-secondary">
-            <input type="checkbox" checked={sendInvitation} onChange={(e) => setSendInvitation(e.target.checked)} />
-            Send invitation now
-          </label>
-          <Button variant="secondary" size="lg" onClick={onClose} disabled={isSubmitting}>
-            Cancel
-          </Button>
-          <Button variant="primary" size="lg" loading={isSubmitting} onClick={handleSubmit(onSubmit)}>
+          {/* WB-189 — `sendInvitation` never reached the request body: the checkbox claimed a
+              choice that does not exist. It is disabled, checked, with its reason on screen
+              (gap B-82), the same disclosure stage 1 used for the import options (B-69). */}
+          <span className="mr-auto flex flex-col gap-0.5">
+            <label className="flex items-center gap-2 text-body text-text-muted">
+              <input type="checkbox" checked disabled aria-describedby="add-driver-invitation-note" />
+              Send invitation now
+            </label>
+            <span id="add-driver-invitation-note" className="text-caption text-text-muted">
+              {INVITATION_ALWAYS_SENT}
+            </span>
+          </span>
+          <ModalCancelButton disabled={isPending} />
+          <Button variant="primary" size="lg" loading={isPending} disabled={isPending} onClick={handleSubmit(onSubmit)}>
             Save driver
           </Button>
         </>
       }
     >
       <form className="flex flex-col gap-5" onSubmit={handleSubmit(onSubmit)}>
+        {banner && (
+          <p role="alert" className="rounded-md bg-danger-soft p-3 text-body text-danger">
+            {banner}
+          </p>
+        )}
         <div>
           <p className="mb-2 text-caption font-semibold uppercase tracking-wide text-text-muted">Personal details</p>
           <div className="grid grid-cols-3 gap-4">
             <Field label="First name" required error={errors.firstName?.message}>
-              <input {...register('firstName')} disabled={isSubmitting} className={inputClass} />
+              <input {...register('firstName')} disabled={isPending} className={inputClass} />
             </Field>
             <Field label="Last name" required error={errors.lastName?.message}>
-              <input {...register('lastName')} disabled={isSubmitting} className={inputClass} />
+              <input {...register('lastName')} disabled={isPending} className={inputClass} />
             </Field>
             <Field label="Username" required error={errors.username?.message}>
-              <input {...register('username')} placeholder="Used to sign in to the app" disabled={isSubmitting} className={inputClass} />
+              <input {...register('username')} placeholder="Used to sign in to the app" disabled={isPending} className={inputClass} />
             </Field>
             {/* Not `<Field>`: the show/hide toggle is a `<button aria-label>` — nested inside a
                 `<label>`, its accessible name would be appended to the label's name-from-content
@@ -155,14 +232,15 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
                   type={showPassword ? 'text' : 'password'}
                   {...register('password')}
                   placeholder="Minimum 8 characters"
-                  disabled={isSubmitting}
+                  disabled={isPending}
                   className={`${inputClass} w-full pr-9`}
                 />
                 <button
                   type="button"
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
                   onClick={() => setShowPassword((v) => !v)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted"
+                  // WB-190 — the icon alone was a 16×16 target, under the 24px minimum (§5.6).
+                  className="absolute right-1 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-text-muted hover:bg-bg-subtle"
                 >
                   {showPassword ? <EyeOff size={16} strokeWidth={1.75} /> : <Eye size={16} strokeWidth={1.75} />}
                 </button>
@@ -170,7 +248,7 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
               {errors.password?.message && <span className="text-caption text-danger">{errors.password.message}</span>}
             </div>
             <Field label="Email address" required error={errors.email?.message}>
-              <input {...register('email')} type="email" placeholder="driver@gmail.com" disabled={isSubmitting} className={inputClass} />
+              <input {...register('email')} type="email" placeholder="driver@gmail.com" disabled={isPending} className={inputClass} />
             </Field>
             <Field label="Phone number" error={errors.phone?.message}>
               <input
@@ -179,7 +257,7 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
                   // field defaults to '', which fails the phone regex even though it is optional.
                   setValueAs: (v: string) => (v === '' ? undefined : v),
                 })}
-                disabled={isSubmitting}
+                disabled={isPending}
                 className={inputClass}
               />
             </Field>
@@ -193,10 +271,10 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
           <p className="mb-2 text-caption font-semibold uppercase tracking-wide text-text-muted">Licence & terminal</p>
           <div className="grid grid-cols-3 gap-4">
             <Field label="Driver licence number" required error={errors.cdlNumber?.message}>
-              <input {...register('cdlNumber')} disabled={isSubmitting} className={inputClass} />
+              <input {...register('cdlNumber')} disabled={isPending} className={inputClass} />
             </Field>
             <Field label="Issuing state" required error={errors.cdlState?.message}>
-              <select {...register('cdlState')} disabled={isSubmitting} className={inputClass}>
+              <select {...register('cdlState')} disabled={isPending} className={inputClass}>
                 {US_STATES.map((s) => (
                   <option key={s} value={s}>
                     {s}
@@ -205,13 +283,25 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
               </select>
             </Field>
             <Field label="Home terminal" required error={errors.homeTerminalTimezone?.message}>
-              <select {...register('homeTerminalTimezone')} disabled={isSubmitting} className={inputClass}>
-                <option value="America/New_York">Columbus, OH (Eastern)</option>
-                <option value="America/Chicago">Raleigh, NC (Eastern)</option>
+              <select
+                value={terminalName}
+                onChange={(e) => {
+                  const next = TERMINALS.find((t) => t.name === e.target.value) ?? DEFAULT_TERMINAL;
+                  setTerminalName(next.name);
+                  setValue('homeTerminalTimezone', next.timezone, { shouldDirty: true });
+                }}
+                disabled={isPending}
+                className={inputClass}
+              >
+                {TERMINALS.map((t) => (
+                  <option key={t.name} value={t.name}>
+                    {t.label}
+                  </option>
+                ))}
               </select>
             </Field>
             <Field label="Assigned unit">
-              <select value={assignedVehicleId} onChange={(e) => setAssignedVehicleId(e.target.value)} disabled={isSubmitting} className={inputClass}>
+              <select value={assignedVehicleId} onChange={(e) => setAssignedVehicleId(e.target.value)} disabled={isPending} className={inputClass}>
                 <option value="">None</option>
                 {(vehiclesQuery.data?.items ?? []).map((v) => (
                   <option key={v.id} value={v.id}>
@@ -254,8 +344,14 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
             </label>
           </div>
           {eldExempt && (
-            <Field label="Exemption reason" required>
-              <input value={eldExemptReason} onChange={(e) => setEldExemptReason(e.target.value)} disabled={isSubmitting} className={`${inputClass} mt-2 w-full`} />
+            <Field label="Exemption reason" required error={eldExemptReasonError ?? undefined}>
+              <input
+                value={eldExemptReason}
+                onChange={(e) => setEldExemptReason(e.target.value)}
+                disabled={isPending}
+                aria-invalid={eldExemptReasonError ? true : undefined}
+                className={`${inputClass} mt-2 w-full`}
+              />
             </Field>
           )}
         </div>

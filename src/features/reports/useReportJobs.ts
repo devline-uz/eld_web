@@ -9,7 +9,7 @@
 // action slot yet — hand-off to web-design-system, recorded in web/decisions.md WD-041. Until then
 // the READY row in `Recently generated` carries the download.
 import { useEffect, useRef, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, type UseMutationResult } from '@tanstack/react-query';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { qk, qkRoot } from '@/shared/api/queryKeys';
 import {
@@ -25,6 +25,40 @@ import { useRoom } from '@/shared/realtime/useRoom';
 import { TOAST_COPY } from '@/shared/ui/copy';
 import { useToast, type ToastInput } from '@/shared/ui/Toast';
 import { reportLabel, fileSizeLabel, refusalText, saveFile } from './reportMeta';
+
+/**
+ * WB-146 — `mutation.isPending` is only true on the NEXT render, so the two clicks of a real
+ * double click both land while the button is still enabled and two reports get queued. Disabling
+ * the button is therefore necessary but never sufficient: this ref closes the same-tick window,
+ * and the flag clears when the mutation settles.
+ */
+export interface GuardedMutation<TData, TError, TVars> {
+  isPending: boolean;
+  mutate: (
+    variables: TVars,
+    options?: { onSuccess?: (data: TData) => void; onError?: (error: TError) => void },
+  ) => void;
+}
+
+export function useGuardedMutate<TData, TError, TVars, TContext>(
+  mutation: UseMutationResult<TData, TError, TVars, TContext>,
+): GuardedMutation<TData, TError, TVars> {
+  const inFlight = useRef(false);
+  return {
+    isPending: mutation.isPending,
+    mutate: (variables, options) => {
+      if (inFlight.current || mutation.isPending) return;
+      inFlight.current = true;
+      mutation.mutate(variables, {
+        onSuccess: options?.onSuccess,
+        onError: options?.onError,
+        onSettled: () => {
+          inFlight.current = false;
+        },
+      });
+    },
+  };
+}
 
 /** A report is announced once per session, whether WS or polling saw READY first. */
 const announced = new Set<string>();
@@ -82,6 +116,54 @@ export function useReportReadyToasts(): void {
   });
 }
 
+export interface TrackedReportJob {
+  /** Follow the job returned by `POST /reports/generate` until it settles. */
+  track: (reportId: string) => void;
+  /** True while the tracked job is QUEUED/RUNNING — keeps the button in its loading state. */
+  isPending: boolean;
+  /** The worker's failure, verbatim, until dismissed — rendered by the screen's `ActionAlert`. */
+  error: string | null;
+  clearError: () => void;
+}
+
+/**
+ * WB-166 — `Generate report` / `Download PDF` used to give no on-screen confirmation at all:
+ * `generate.isPending` cleared the moment the `POST` resolved and the only completion signal was
+ * the `report.ready` socket event, which never arrives in mock (`src/mocks/dev/fakeSocket.ts`) and
+ * can be missed on a reconnect in production (§7 has no resume/seq). This follows the queued job
+ * with the named `reportStatus` policy (3 s, stops at READY/FAILED) and announces it exactly like
+ * the FMCSA pack does, so the toast fires whichever signal lands first — `useAnnounceReport`
+ * de-duplicates per report id.
+ */
+export function useTrackedReport(): TrackedReportJob {
+  const [reportId, setReportId] = useState<string | null>(null);
+  const [dismissedFailure, setDismissedFailure] = useState<string | null>(null);
+  const job = useReport(reportId);
+  const announce = useAnnounceReport();
+
+  const report = job.data && job.data.id === reportId ? job.data : undefined;
+
+  useEffect(() => {
+    if (report) announce(report);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- announce is idempotent per report id
+  }, [report?.id, report?.status]);
+
+  return {
+    track: (id) => {
+      setDismissedFailure(null);
+      setReportId(id);
+    },
+    isPending: Boolean(reportId) && (report === undefined || isReportPending(report.status)),
+    error:
+      report?.status === 'FAILED' && dismissedFailure !== report.id
+        ? (report.error ?? 'Report generation failed.')
+        : null,
+    clearError: () => {
+      if (report) setDismissedFailure(report.id);
+    },
+  };
+}
+
 export interface ExportJob {
   start: (input: QueueShortcutInput) => void;
   isPending: boolean;
@@ -97,6 +179,8 @@ export function useExportWhenReady(): ExportJob {
   const [dismissedFailure, setDismissedFailure] = useState<string | null>(null);
   const job = useReport(reportId);
   const downloaded = useRef<string | null>(null);
+  // WB-146 — same-tick guard: `queue.isPending` only flips on the next render.
+  const inFlight = useRef(false);
 
   const report = job.data && job.data.id === reportId ? job.data : undefined;
   const settled = Boolean(report && !isReportPending(report.status));
@@ -117,10 +201,15 @@ export function useExportWhenReady(): ExportJob {
 
   return {
     start: (input) => {
+      if (inFlight.current || queue.isPending) return;
+      inFlight.current = true;
       setError(null);
       queue.mutate(input, {
         onSuccess: (queued) => setReportId(queued.reportId),
         onError: (cause) => setError(refusalText(cause)),
+        onSettled: () => {
+          inFlight.current = false;
+        },
       });
     },
     isPending: queue.isPending || (Boolean(reportId) && !settled),

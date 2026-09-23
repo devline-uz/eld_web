@@ -10,6 +10,7 @@ import {
   DVIR_REPAIR_STATUS_OPTIONS,
   EMPTY_DVIR_FILTERS,
   countActiveDvirFilters,
+  sameDvirFilters,
   type DvirFilters,
 } from '../lib/filters';
 import type { DefectSeverity, DvirType, RepairStatus } from '@/shared/api/dvir';
@@ -56,6 +57,7 @@ export function DvirFiltersDrawer({ open, onClose, filters, onApply }: DvirFilte
       onClose={onClose}
       screenName="DVIRs"
       appliedCount={countActiveDvirFilters(draft)}
+      isDirty={!sameDvirFilters(draft, filters)}
       onReset={() => setDraft(EMPTY_DVIR_FILTERS)}
       onApply={() => {
         onApply(draft);

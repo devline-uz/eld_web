@@ -95,7 +95,10 @@ const GENERATED_ROSTER_ENTRIES: DriverRosterEntry[] = Array.from({ length: 53 },
       splitSleeperEnabled: i % 6 === 0,
     },
     dutyStatus,
-    unit: dutyStatus === 'OFF_DUTY' ? null : { id: `veh_${n}`, unitNumber: `#${100 + n}` },
+    // Only units that really exist in the fleet (`mockState.VEHICLE_COUNT` = 24) are assigned, so
+    // the roster's unit, the Vehicles table's DRIVER column and the `Unassigned` segment counter
+    // describe the same fleet. Rows 0–18 keep the unit numbers earlier tests pin.
+    unit: dutyStatus === 'OFF_DUTY' || i >= 19 ? null : { id: `veh_${n}`, unitNumber: `#${100 + n}` },
     hos: {
       driveRemainingSec: (i % 12) * 3600,
       shiftRemainingSec: ((i % 14) + 1) * 3600,
@@ -108,7 +111,9 @@ const GENERATED_ROSTER_ENTRIES: DriverRosterEntry[] = Array.from({ length: 53 },
   };
 });
 
-const ROSTER_ENTRIES: DriverRosterEntry[] = [...NAMED_ROSTER_ENTRIES, ...GENERATED_ROSTER_ENTRIES];
+/** Exported so `mockState.ts` can widen the same 58 identities into full `/drivers` rows — one
+ * driver id never means two different people across the mock (mock-layer audit, 2026-09-23). */
+export const ROSTER_ENTRIES: DriverRosterEntry[] = [...NAMED_ROSTER_ENTRIES, ...GENERATED_ROSTER_ENTRIES];
 
 const HOS_RIGHT_NOW = {
   driveRemainingSec: 0,

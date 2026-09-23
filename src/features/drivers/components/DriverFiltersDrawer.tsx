@@ -34,6 +34,20 @@ function toggle<T>(list: T[], value: T): T[] {
   return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
 }
 
+function sameList<T>(a: readonly T[], b: readonly T[]): boolean {
+  return a.length === b.length && a.every((v) => b.includes(v));
+}
+
+/** Draft vs applied — the drawer was closing on Esc/X/Cancel without warning that edits were lost. */
+function isFilterDraftDirty(draft: DriverFilters, applied: DriverFilters): boolean {
+  return (
+    !sameList(draft.status, applied.status) ||
+    draft.terminal !== applied.terminal ||
+    draft.violationsOnly !== applied.violationsOnly ||
+    !sameList(draft.exemptions, applied.exemptions)
+  );
+}
+
 export interface DriverFiltersDrawerProps {
   open: boolean;
   onClose: () => void;
@@ -54,6 +68,7 @@ export function DriverFiltersDrawer({ open, onClose, filters, onApply, terminalO
       onClose={onClose}
       screenName="Drivers"
       appliedCount={countActiveDriverFilters(draft)}
+      isDirty={isFilterDraftDirty(draft, filters)}
       onReset={() => setDraft(EMPTY_DRIVER_FILTERS)}
       onApply={() => {
         onApply(draft);
@@ -133,7 +148,15 @@ export function DriverFilterChips({
   return (
     <div className="flex flex-wrap items-center gap-2">
       {chips.map((chip) => (
-        <button key={chip.key} type="button" onClick={() => onRemove(chip.patch)} className="rounded-full">
+        // WB-194 — the accessible name used to be the whole chip text ending in a bare "×"; the
+        // button now says what removing it does.
+        <button
+          key={chip.key}
+          type="button"
+          aria-label={`Remove filter ${chip.label}`}
+          onClick={() => onRemove(chip.patch)}
+          className="rounded-full"
+        >
           <Badge tone="info">{`${chip.label} ×`}</Badge>
         </button>
       ))}

@@ -1,16 +1,16 @@
 // owner: web-settings-admin — 11.20 Register an ELD device (web/tz.md §11.20). `devices` FULL.
 // Validation comes from the shared `deviceSchema`, which matches `CreateDeviceDto` (WB-024).
-import { useState } from 'react';
 import { QrCode } from 'lucide-react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
-import { Modal } from '@/shared/ui/Modal';
+import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
 import { ApiError } from '@/shared/api/errors';
 import { useCreateDevice, usePairDevice, type DeviceModel } from '@/shared/api/settingsAdmin';
 import { useVehiclesPicker } from '@/shared/api/vehicles';
 import { Field, inputClass, ToggleRow } from './formKit';
+import { SETTINGS_REASON } from '../lib/copy';
 
 import {
   deviceSchema as registerDeviceSchema,
@@ -19,9 +19,6 @@ import {
 
 export function RegisterDeviceModal({ onClose }: { onClose: () => void }) {
   const { toast } = useToast();
-  const [autoUpdateFirmware, setAutoUpdateFirmware] = useState(true);
-  const [sendDiagnostics, setSendDiagnostics] = useState(false);
-  const [successBanner, setSuccessBanner] = useState(false);
 
   const createDevice = useCreateDevice();
   const pairDevice = usePairDevice();
@@ -30,7 +27,7 @@ export function RegisterDeviceModal({ onClose }: { onClose: () => void }) {
   const {
     register,
     handleSubmit,
-    formState: { errors, isSubmitting, isDirty },
+    formState: { errors, isDirty },
     setError,
   } = useForm<RegisterDeviceValues>({
     resolver: zodResolver(registerDeviceSchema),
@@ -38,7 +35,15 @@ export function RegisterDeviceModal({ onClose }: { onClose: () => void }) {
     defaultValues: { model: 'PT30' as DeviceModel, serial: '', vehicleId: '' },
   });
 
+  // Both requests count: the pair call runs inside `onSuccess`, so the modal is still busy.
+  const submitting = createDevice.isPending || pairDevice.isPending;
+  // Every editable control is inside react-hook-form now (the B-88 toggles are read-only).
+  const dirty = isDirty;
+
   function onSubmit(values: RegisterDeviceValues) {
+    // `mutate()` resolves RHF's `submitting` before the request lands — guard on the mutation
+    // so a double click cannot register the device twice.
+    if (submitting) return;
     createDevice.mutate(
       { serial: values.serial, model: values.model },
       {
@@ -76,15 +81,13 @@ export function RegisterDeviceModal({ onClose }: { onClose: () => void }) {
       title="Register an ELD device"
       subtitle="Pair a new Pacific Track PT30 with the fleet"
       size="md"
-      isDirty={isDirty}
+      isDirty={dirty}
       footer={
         <>
-          <Button variant="secondary" size="lg" onClick={onClose} disabled={isSubmitting}>
-            Cancel
-          </Button>
+          <ModalCancelButton disabled={submitting} />
           {/* ⛔ GAP B-8 — `GET /devices/:id/diagnostics` does not exist on the live API; the
               `Test connection` button stays out of the DOM until it ships (§20). */}
-          <Button variant="primary" size="lg" loading={isSubmitting} onClick={handleSubmit(onSubmit)}>
+          <Button variant="primary" size="lg" loading={submitting} disabled={submitting} onClick={handleSubmit(onSubmit)}>
             Register device
           </Button>
         </>
@@ -93,32 +96,38 @@ export function RegisterDeviceModal({ onClose }: { onClose: () => void }) {
       <form className="flex flex-col gap-4" onSubmit={handleSubmit(onSubmit)}>
         <div className="grid grid-cols-2 gap-4">
           <Field label="Device model" required>
-            <select {...register('model')} disabled={isSubmitting} className={inputClass}>
+            <select {...register('model')} disabled={submitting} className={inputClass}>
               <option value="PT30">Pacific Track PT30</option>
               <option value="PT40">Pacific Track PT40</option>
             </select>
           </Field>
           <Field label="Serial number" required error={errors.serial?.message}>
-            <input {...register('serial')} placeholder="PT30_1C4F" disabled={isSubmitting} className={inputClass} />
+            <input {...register('serial')} placeholder="PT30_1C4F" disabled={submitting} className={inputClass} />
           </Field>
         </div>
 
-        <div className="flex items-center justify-between gap-4 rounded-md bg-primary-soft p-4">
+        {/* Not a backend gap — there is no QR scanner in the web panel: `Open scanner` used to paint a
+            "Device responded · GPS lock acquired" banner without opening a camera or contacting
+            the device (WB-213). Disabled with the reason visible; the serial is typed from the
+            label instead. */}
+        <div className="flex items-center justify-between gap-4 rounded-md bg-bg-subtle p-4">
           <div className="flex items-center gap-3">
-            <QrCode size={40} strokeWidth={1.5} className="text-primary" />
+            <QrCode size={40} strokeWidth={1.5} className="text-text-muted" />
             <div>
               <p className="text-body-strong text-text">Scan the QR code on the device</p>
-              <p className="text-caption text-text-muted">The serial and firmware version are filled in automatically</p>
+              <p className="text-caption text-text-muted">
+                {SETTINGS_REASON.scanner}
+              </p>
             </div>
           </div>
-          <Button variant="secondary" type="button" onClick={() => setSuccessBanner(true)}>
+          <Button variant="secondary" type="button" disabled title={SETTINGS_REASON.scannerTooltip}>
             Open scanner
           </Button>
         </div>
 
         <div className="grid grid-cols-2 gap-4">
           <Field label="Assign to unit">
-            <select {...register('vehicleId')} disabled={isSubmitting} className={inputClass}>
+            <select {...register('vehicleId')} disabled={submitting} className={inputClass}>
               <option value="">None</option>
               {(vehiclesQuery.data?.items ?? []).map((v) => (
                 <option key={v.id} value={v.id}>
@@ -127,29 +136,28 @@ export function RegisterDeviceModal({ onClose }: { onClose: () => void }) {
               ))}
             </select>
           </Field>
-          <Field label="Firmware">
-            <input value="L113 (latest)" readOnly className={inputClass} />
+          <Field label="Firmware" hint="Reported by the device after it first connects.">
+            <input value="—" readOnly aria-label="Firmware" className={inputClass} />
           </Field>
         </div>
 
+        {/* ⛔ GAP B-88 — `POST /devices` takes `serial`, `model` and `firmware` only. Both toggles
+            were collected and dropped (WB-214); they are disabled with the reason on screen
+            rather than claiming a setting that never left the browser. */}
         <ToggleRow
           title="Update firmware automatically"
-          description="Install new versions over Bluetooth while the engine is off"
-          checked={autoUpdateFirmware}
-          onChange={setAutoUpdateFirmware}
+          description={SETTINGS_REASON.autoFirmware}
+          checked={false}
+          disabled
+          tooltip={SETTINGS_REASON.autoFirmwareTooltip}
         />
         <ToggleRow
           title="Send diagnostics to OneBook support"
-          description="Helps resolve connection problems faster"
-          checked={sendDiagnostics}
-          onChange={setSendDiagnostics}
+          description={SETTINGS_REASON.diagnosticsOptIn}
+          checked={false}
+          disabled
+          tooltip={SETTINGS_REASON.diagnosticsOptInTooltip}
         />
-
-        {successBanner && (
-          <p className="rounded-md bg-success-soft px-3 py-2 text-caption text-success">
-            ✓ Device responded to the pairing request · signal strength good · GPS lock acquired.
-          </p>
-        )}
       </form>
     </Modal>
   );

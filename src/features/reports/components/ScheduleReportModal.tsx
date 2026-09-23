@@ -3,7 +3,8 @@
 // No §11 overlay is drawn for this and §13.3 has no schedule toast, so the modal closes without one
 // rather than inventing wording (web/decisions.md WD-043). Q-2: delivery is email only; the DTO has
 // no SMS channel at all.
-import { useState } from 'react';
+import { useRef } from 'react';
+import type { BaseSyntheticEvent } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -11,7 +12,7 @@ import { useCreateReportSchedule, type GeneratableReportType } from '@/shared/ap
 import { email } from '@/shared/forms/fields';
 import { VALIDATION_MESSAGES as M } from '@/shared/forms/messages';
 import { Button } from '@/shared/ui/Button';
-import { DiscardChangesDialog, Modal } from '@/shared/ui/Modal';
+import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { REPORT_LABEL, refusalText } from '../reportMeta';
 import { ActionAlert } from './ActionAlert';
 
@@ -53,7 +54,9 @@ export function ScheduleReportModal({ open, onClose, reportType, params, timezon
   });
   const { register, handleSubmit, formState, reset } = form;
   const busy = formState.isSubmitting || create.isPending;
-  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  // WB-146 — `isSubmitting`/`isPending` only turn true on the next render, so two clicks in the
+  // same tick both reach the handler. The ref makes the submit non-reentrant.
+  const inFlight = useRef(false);
 
   const close = () => {
     reset();
@@ -61,7 +64,7 @@ export function ScheduleReportModal({ open, onClose, reportType, params, timezon
     onClose();
   };
 
-  const submit = handleSubmit(async (values) => {
+  const submitForm = handleSubmit(async (values) => {
     await create
       .mutateAsync({
         reportType,
@@ -76,6 +79,15 @@ export function ScheduleReportModal({ open, onClose, reportType, params, timezon
       .catch(() => undefined);
   });
 
+  /** The non-reentrant entry point — the ref is only ever touched from an event handler. */
+  const submit = (event?: BaseSyntheticEvent) => {
+    if (inFlight.current || create.isPending) return;
+    inFlight.current = true;
+    void submitForm(event).finally(() => {
+      inFlight.current = false;
+    });
+  };
+
   return (
     <>
     <Modal
@@ -87,14 +99,8 @@ export function ScheduleReportModal({ open, onClose, reportType, params, timezon
       isDirty={formState.isDirty && !create.isSuccess}
       footer={
         <>
-          <Button
-            variant="secondary"
-            size="lg"
-            onClick={() => (formState.isDirty ? setConfirmDiscard(true) : close())}
-            disabled={busy}
-          >
-            Cancel
-          </Button>
+          {/* WB-145 — 11.30 Discard changes on Cancel, handled by the Modal itself. */}
+          <ModalCancelButton disabled={busy} />
           <Button variant="primary" size="lg" loading={busy} disabled={busy} onClick={() => void submit()}>
             Schedule
           </Button>
@@ -138,14 +144,6 @@ export function ScheduleReportModal({ open, onClose, reportType, params, timezon
         </label>
       </form>
     </Modal>
-    <DiscardChangesDialog
-      open={confirmDiscard}
-      onKeepEditing={() => setConfirmDiscard(false)}
-      onDiscard={() => {
-        setConfirmDiscard(false);
-        close();
-      }}
-    />
     </>
   );
 }

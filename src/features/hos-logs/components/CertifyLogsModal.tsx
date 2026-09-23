@@ -5,10 +5,10 @@
 // can only be re-selected when it changed after signing (§395.8 re-certification, WB-062), and the
 // write is audited server-side. There is no realtime event for
 // certification (§7.4), so the mutation invalidates the log keys by hand.
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { formatInTimeZone } from 'date-fns-tz';
-import { Modal } from '@/shared/ui/Modal';
+import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { Badge } from '@/shared/ui/Badge';
 import { useToast } from '@/shared/ui/Toast';
@@ -58,6 +58,8 @@ export function CertifyLogsModal({
   const { toast } = useToast();
   const mutation = useCertifyLogs(driverId);
   const [banner, setBanner] = useState<string | null>(null);
+  // WB-146 — same-tick guard: one click, one certification batch.
+  const inFlight = useRef(false);
 
   const ordered = useMemo(() => [...days].sort((a, b) => (a.date < b.date ? 1 : -1)), [days]);
   const recertify = useMemo(() => new Set(recertificationDates ?? []), [recertificationDates]);
@@ -78,7 +80,9 @@ export function CertifyLogsModal({
   }
 
   function submit() {
+    if (inFlight.current || mutation.isPending) return;
     setBanner(null);
+    inFlight.current = true;
     mutation.mutate(selected, {
       onSuccess: () => {
         toast({ kind: 'success', ...TOAST_COPY.certified(selected.length, driverName) });
@@ -86,6 +90,9 @@ export function CertifyLogsModal({
       },
       onError: (error) =>
         setBanner(error instanceof ApiError ? error.userMessage : 'Something went wrong.'),
+      onSettled: () => {
+        inFlight.current = false;
+      },
     });
   }
 
@@ -94,13 +101,14 @@ export function CertifyLogsModal({
       open
       onClose={onClose}
       size="md"
+      // WB-198 — the day selection is the whole form here: Esc/overlay/X used to drop every
+      // toggled day without asking. Only a real deviation from the defaults counts as dirty.
+      isDirty={Object.keys(choices).length > 0}
       title="Certify logs"
       subtitle={`${driverName} · select the days to certify on the driver behalf`}
       footer={
         <>
-          <Button variant="secondary" size="lg" onClick={onClose}>
-            Cancel
-          </Button>
+          <ModalCancelButton disabled={mutation.isPending} />
           <Button
             variant="primary"
             size="lg"

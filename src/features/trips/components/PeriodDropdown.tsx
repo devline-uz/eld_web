@@ -193,16 +193,22 @@ export function PeriodDropdown({ filters, onApply }: PeriodDropdownProps) {
               </div>
             ) : null}
             <div className={cn('flex justify-between px-2', showCustom && 'mt-2')}>
-              <button
-                type="button"
-                onClick={() => {
-                  onApply({ departFrom: null, departTo: null });
-                  setOpen(false);
-                }}
-                className="text-caption font-medium text-primary hover:underline"
-              >
-                Clear
-              </button>
+              {/* With no period applied `Clear` was a no-op that still took a click target. */}
+              {filters.departFrom || filters.departTo ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onApply({ departFrom: null, departTo: null });
+                    setOpen(false);
+                  }}
+                  // Stage 3 — was ~29×16; now a full small-button target (h-btn-sm, 32px).
+                  className="inline-flex h-btn-sm min-w-btn-sm items-center justify-center rounded-md px-2 text-caption font-medium text-primary hover:bg-bg-subtle hover:underline"
+                >
+                  Clear
+                </button>
+              ) : (
+                <span />
+              )}
               {showCustom ? (
                 <Button
                   variant="primary"

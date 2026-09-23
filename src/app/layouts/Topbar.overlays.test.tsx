@@ -9,6 +9,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { expectNoBlockingA11yViolations } from '../../../tests/setup/axe';
 import { fail, server, url } from '@/mocks/server';
 import { resetShellGapState } from '@/mocks/handlers/shellGaps';
+import { DRIVERS, VEHICLES } from '@/mocks/handlers/mockState';
 import { endpoints } from '@/shared/api/endpoints';
 import type { NotificationsPage } from '@/shared/api/notifications';
 import { qk } from '@/shared/api/queryKeys';
@@ -139,7 +140,10 @@ describe('11.28 Command palette', () => {
       'Send FMCSA pack to inspector',
       'Add a vehicle',
     ]);
-    expect(dialog).toHaveTextContent('Searching 69 units · 58 drivers · 1,284 logs');
+    // WB-176 — derived from the fixture, not a pinned literal.
+    expect(dialog).toHaveTextContent(
+      `Searching ${VEHICLES.length} units · ${DRIVERS.length} drivers · 1,284 logs`,
+    );
     await expectNoBlockingA11yViolations(dialog);
 
     const combobox = within(dialog).getByRole('combobox');

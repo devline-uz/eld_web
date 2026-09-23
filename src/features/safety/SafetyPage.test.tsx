@@ -203,3 +203,117 @@ describe('SafetyPage', () => {
     expect(await screen.findByRole('button', { name: /retry/i })).toBeInTheDocument();
   });
 });
+
+// WB-167…WB-170 — stage-2 fixes: the dead `View profile ›`, the export that ignored the screen,
+// the hardcoded verdict and the verb agreement under the fleet-score gauge.
+describe('SafetyPage — stage-2 fixes', () => {
+  const scorecard = {
+    items: [
+      { driverId: 'drv_1', rank: 1, score: 76, harshCount: 2, speedingCount: 1, milesDriven: 4200 },
+      { driverId: 'drv_2', rank: 2, score: 60, harshCount: 9, speedingCount: 4, milesDriven: 3100 },
+    ],
+    periodStart: '2026-08-12',
+    periodEnd: '2026-09-11',
+  };
+
+  function useScorecardFixture() {
+    server.use(
+      http.get(url(endpoints.safety.scorecard), () => ok(scorecard)),
+      http.get(url(endpoints.safety.events), () => ok({ items: [], page: 1, limit: 500, total: 0, totalPages: 1 })),
+    );
+  }
+
+  it('derives the fleet-score verdict instead of always claiming "Good standing"', async () => {
+    useScorecardFixture();
+    renderPage();
+    // Mean of 76 and 60 is 68 — below this card's own 70-point threshold.
+    expect(await screen.findAllByText('68')).not.toHaveLength(0);
+    expect((await screen.findAllByText('Below coaching threshold')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Good standing')).not.toBeInTheDocument();
+  });
+
+  it('agrees the verb with the count under the gauge', async () => {
+    useScorecardFixture();
+    renderPage();
+    expect((await screen.findAllByText(/1 driver is below the\s+70-point coaching threshold\./)).length).toBeGreaterThan(0);
+  });
+
+  it('`View profile ›` is a real button that opens the driver', async () => {
+    useScorecardFixture();
+    const user = userEvent.setup();
+    renderPage();
+    const buttons = await screen.findAllByRole('button', { name: 'View profile ›' });
+    expect(buttons).toHaveLength(2);
+    await user.click(buttons[0]!);
+    // `useNavigate` inside MemoryRouter — the click is handled, not a dead span.
+    expect(buttons[0]).toBeEnabled();
+  });
+
+  it('`View profile ›` is absent (not disabled) without `drivers` READ', async () => {
+    mockCan = (key) => key !== 'drivers';
+    useScorecardFixture();
+    renderPage();
+    await screen.findAllByText('Driver scorecard');
+    expect(screen.queryByRole('button', { name: 'View profile ›' })).not.toBeInTheDocument();
+  });
+
+  it('Export writes a CSV of the rows the current tab lists, not the whole raw feed', async () => {
+    const hourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    server.use(
+      http.get(url(endpoints.safety.scorecard), () => ok(scorecard)),
+      http.get(url(endpoints.safety.events), () =>
+        ok({
+          items: [
+            { id: 'evt_a', type: 'HARSH_BRAKING', status: 'NEW', occurredAt: hourAgo, vehicleId: 'veh_1', driverId: null, locationName: 'I-80', gForce: '0.42' },
+            { id: 'evt_b', type: 'SPEEDING', status: 'NEW', occurredAt: hourAgo, vehicleId: 'veh_2', driverId: null, locationName: 'I-75', speedMph: 71, speedLimitMph: 65 },
+          ],
+          page: 1,
+          limit: 500,
+          total: 2,
+          totalPages: 1,
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    let csv = '';
+    let name = '';
+    const createObjectURL = vi.fn((blob: Blob) => {
+      void blob.text().then((t) => {
+        csv = t;
+      });
+      return 'blob:mock';
+    });
+    const originalCreate = URL.createObjectURL;
+    const originalRevoke = URL.revokeObjectURL;
+    URL.createObjectURL = createObjectURL as unknown as typeof URL.createObjectURL;
+    URL.revokeObjectURL = vi.fn();
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, 'click')
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        name = this.download;
+      });
+    try {
+      renderPage();
+      await screen.findByRole('table', { name: 'Safety events' });
+      await user.click(screen.getByRole('button', { name: 'Export' }));
+      expect(name).toBe('safety-events-export.csv');
+      // Labels, not raw enums, and both listed rows.
+      await vi.waitFor(() => expect(csv).toContain('event,driver,unit,date & time,location,severity'));
+      expect(csv).toContain('Harsh braking');
+      expect(csv).toContain('Speeding');
+      expect(csv).not.toContain('HARSH_BRAKING');
+
+      // Now narrow the screen: the export must follow the search, not dump the raw feed.
+      csv = '';
+      await user.type(screen.getByRole('textbox', { name: 'Search driver, unit' }), 'zzz-no-match');
+      await user.click(screen.getByRole('button', { name: 'Export' }));
+      await vi.waitFor(() => expect(csv).not.toBe(''));
+      expect(csv.split('\r\n')).toHaveLength(1);
+      expect(click).toHaveBeenCalledTimes(2);
+    } finally {
+      click.mockRestore();
+      URL.createObjectURL = originalCreate;
+      URL.revokeObjectURL = originalRevoke;
+    }
+  });
+});

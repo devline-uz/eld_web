@@ -2,10 +2,11 @@
 // Design: web/roles and screens/admin panel/Harsh driving, speeding, fleet score, scorecard.jpg
 // Route `/safety` · Perm `safety` READ · absent for DISPATCHER (router.tsx already blocks it).
 import { useMemo, useRef, useState, type KeyboardEvent } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import type { ColumnDef } from '@tanstack/react-table';
 import { Filter, Search, Upload, ShieldCheck, AlertTriangle, Gauge, Users } from 'lucide-react';
 import { Can } from '@/shared/auth/Can';
+import { usePermission } from '@/shared/auth/usePermission';
 import { useDynamicSubtitle } from '@/app/layouts/Topbar';
 import { useRoom } from '@/shared/realtime/useRoom';
 import { useQueryClient } from '@tanstack/react-query';
@@ -13,6 +14,7 @@ import { qkRoot } from '@/shared/api/queryKeys';
 import { Button } from '@/shared/ui/Button';
 import { Card, SectionHeader } from '@/shared/ui/Card';
 import { Badge } from '@/shared/ui/Badge';
+import { cn } from '@/shared/ui/cn';
 import { Avatar } from '@/shared/ui/Avatar';
 import { DataTable } from '@/shared/ui/DataTable';
 import { Pagination } from '@/shared/ui/Pagination';
@@ -23,18 +25,20 @@ import { formatLocal } from '@/shared/format/datetime';
 import { useNowTick } from '@/shared/format/useRelativeTime';
 import { formatGForce } from '@/shared/format/numbers';
 import { orDash } from '@/shared/format/empty';
+import { toCsv } from '@/shared/lib/csv';
 import { useSafetyEventsList, useScorecard, type SafetyEventTableRow, type ScorecardTableRow } from '@/shared/api/safety';
 import { AssignCoachingModal } from './components/AssignCoachingModal';
 import { SafetyFiltersDrawer, SafetyFilterChips } from './components/SafetyFiltersDrawer';
-import { parseSafetyFilters, writeSafetyFilters, matchesSafetyFilters, EMPTY_SAFETY_FILTERS, countActiveSafetyFilters } from './lib/filters';
+import { parseSafetyFilters, writeSafetyFilters, matchesSafetyFilters, EMPTY_SAFETY_FILTERS, countActiveSafetyFilters, safetyEventLabel } from './lib/filters';
 
-const EVENT_LABEL: Record<string, string> = {
-  HARSH_BRAKING: 'Harsh braking',
-  HARSH_ACCEL: 'Harsh accel.',
-  HARSH_TURN: 'Harsh turn',
-  SPEEDING: 'Speeding',
-  SEATBELT: 'Seatbelt',
-};
+/** Fleet-score verdict bands — the same 90 / 70 cut-offs as the driver SCORE badge. */
+const FLEET_VERDICT = {
+  good: { label: 'Good standing', className: 'text-success' },
+  watch: { label: 'Needs attention', className: 'text-warning' },
+  below: { label: 'Below coaching threshold', className: 'text-danger' },
+} as const;
+
+const verdictBand = (score: number): keyof typeof FLEET_VERDICT => (score >= 90 ? 'good' : score >= 70 ? 'watch' : 'below');
 
 const EVENT_TONE: Record<string, 'danger' | 'violet' | 'warning'> = {
   HARSH_BRAKING: 'danger',
@@ -153,7 +157,7 @@ const EVENT_BASE_COLUMNS: ColumnDef<SafetyEventTableRow, unknown>[] = [
   {
     id: 'event',
     header: 'EVENT',
-    cell: ({ row }) => <Badge tone={EVENT_TONE[row.original.type] ?? 'neutral'}>{EVENT_LABEL[row.original.type] ?? row.original.type}</Badge>,
+    cell: ({ row }) => <Badge tone={EVENT_TONE[row.original.type] ?? 'neutral'}>{safetyEventLabel(row.original.type)}</Badge>,
   },
   {
     id: 'driver',
@@ -261,9 +265,25 @@ const SCORECARD_COLUMNS: ColumnDef<ScorecardTableRow, unknown>[] = [
   {
     id: 'view',
     header: '',
-    cell: () => <span className="text-body text-primary">View profile ›</span>,
+    cell: ({ row }) => <ViewProfileCell driverId={row.original.driverId} />,
   },
 ];
+
+/**
+ * WB-168 — this used to be a styled `<span>`: no handler, no href, not reachable from the
+ * keyboard. It is a real button now, and it is absent (not disabled) for a role without
+ * `drivers` READ, which is the only rule §12 allows.
+ */
+function ViewProfileCell({ driverId }: { driverId: string }) {
+  const navigate = useNavigate();
+  const { can } = usePermission();
+  if (!can('drivers')) return null;
+  return (
+    <Button variant="link" onClick={() => navigate(`/drivers/${driverId}`)}>
+      View profile ›
+    </Button>
+  );
+}
 
 export default function SafetyPage() {
   useDynamicSubtitle('Harsh driving, speeding and coaching · last 30 days');
@@ -371,11 +391,58 @@ export default function SafetyPage() {
   }, [currentEvents]);
   const maxTypeCount = Math.max(1, ...eventsByType.map((r) => r.count));
 
-  async function handleExport() {
-    const blob = new Blob([JSON.stringify(events.rows, null, 2)], { type: 'application/json' });
+  /**
+   * WB-169 — the export used to dump every loaded row as raw JSON under one fixed file name,
+   * ignoring the tab, the search box and the drawer filters, so what the user saw and what they
+   * got were different data sets. It now writes exactly the rows the current tab lists, as CSV
+   * (RFC 4180 via `toCsv`, like the audit log), with the matching columns.
+   */
+  function handleExport() {
+    const driverOf = (r: SafetyEventTableRow) => (r.driver ? `${r.driver.firstName} ${r.driver.lastName}` : 'Unassigned');
+    const rows: (string | number | null)[][] =
+      tab === 'scorecards'
+        ? [
+            ['rank', 'driver', 'score', 'harsh events', 'speeding', 'miles driven'],
+            ...visibleScorecard.map((r) => [
+              r.rank ?? '',
+              r.driver ? `${r.driver.firstName} ${r.driver.lastName}` : r.driverId,
+              r.score,
+              r.harshCount,
+              r.speedingCount,
+              r.milesDriven,
+            ]),
+          ]
+        : tab === 'coaching'
+          ? [
+              ['event', 'driver', 'unit', 'date & time', 'coached', 'note'],
+              ...tableEvents.map((r) => [
+                safetyEventLabel(r.type),
+                driverOf(r),
+                r.vehicle?.unitNumber ?? '',
+                formatLocal(r.occurredAt, 'dateTime'),
+                r.coachedAt ? formatLocal(r.coachedAt, 'dateTime') : '',
+                r.coachingNote ?? '',
+              ]),
+            ]
+          : [
+              ['event', 'driver', 'unit', 'date & time', 'location', 'severity'],
+              ...tableEvents.map((r) => [
+                safetyEventLabel(r.type),
+                driverOf(r),
+                r.vehicle?.unitNumber ?? '',
+                formatLocal(r.occurredAt, 'dateTime'),
+                r.locationName ?? '',
+                r.speedMph != null && r.speedLimitMph != null
+                  ? `${r.speedMph} / ${r.speedLimitMph} mph`
+                  : toNum(r.gForce) != null
+                    ? formatGForce(toNum(r.gForce) as number)
+                    : '',
+              ]),
+            ];
+    const blob = new Blob([toCsv(rows)], { type: 'text/csv' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = 'safety-events-export.json';
+    link.download = `safety-${tab}-export.csv`;
     link.click();
     URL.revokeObjectURL(link.href);
   }
@@ -423,9 +490,15 @@ export default function SafetyPage() {
         <div className="mt-3 flex items-center gap-4">
           <ScoreGauge score={fleetScore} />
           <div>
-            <p className="text-label font-semibold text-success">Good standing</p>
+            {/* WB-170 — the verdict used to read `Good standing` in success green at any score,
+                including the 68 the mock fleet actually scores, against this card's own 70-point
+                threshold. It is derived now, on the same bands the SCORE badge uses. */}
+            <p className={cn('text-label font-semibold', FLEET_VERDICT[verdictBand(fleetScore)].className)}>
+              {FLEET_VERDICT[verdictBand(fleetScore)].label}
+            </p>
             <p className="mt-1 text-caption text-text-muted">
-              {belowThreshold} driver{belowThreshold === 1 ? '' : 's'} are below the 70-point coaching threshold.
+              {belowThreshold} driver{belowThreshold === 1 ? '' : 's'} {belowThreshold === 1 ? 'is' : 'are'} below the
+              70-point coaching threshold.
             </p>
           </div>
         </div>
@@ -580,7 +653,7 @@ export default function SafetyPage() {
                     {eventsByType.map((row) => (
                       <div key={row.type}>
                         <div className="flex items-center justify-between text-body">
-                          <span className="text-text">{EVENT_LABEL[row.type]}</span>
+                          <span className="text-text">{safetyEventLabel(row.type)}</span>
                           <span className="tabular-nums font-semibold text-text">{row.count}</span>
                         </div>
                         <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-bg-subtle">

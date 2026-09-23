@@ -8,6 +8,7 @@
 //          carries no `counts` the panel renders only `All` (web/decisions.md WD-055).
 import { useMutation, useQuery, useQueryClient, type QueryClient, type QueryKey } from '@tanstack/react-query';
 import { client } from './client';
+import { ApiError } from './errors';
 import { endpoints } from './endpoints';
 import { qk, qkRoot } from './queryKeys';
 import { typedCachePolicy } from './queryPolicy';
@@ -89,14 +90,40 @@ export function useMarkAllNotificationsRead() {
   });
 }
 
-/** ⛔ GAP B-56 — served by MSW only. On the live API it fails and the item simply stays unread;
- * the panel never pretends a `readAt` was stored. */
-export function useMarkNotificationRead() {
+/** ⛔ GAP B-56 — `POST /notifications/:id/read` is served by MSW only. The hook is deliberately
+ * not optimistic: the item keeps `readAt: null` until the server stores one, so a failure leaves
+ * nothing to roll back and the row never pretends to be read. A 404/405 means the route does not
+ * exist on this backend — that is remembered for the session (WB-244) and the panel stops calling
+ * it. Every failure is reported to `onFailure` (the panel turns it into one notice per session). */
+let singleMarkReadUnavailable = false;
+
+/** False once the live API has answered 404/405 for the single-item mark-read (B-56). */
+export function isSingleMarkReadAvailable(): boolean {
+  return !singleMarkReadUnavailable;
+}
+
+/** Test hook — forget a remembered 404/405. */
+export function resetSingleMarkReadAvailability(): void {
+  singleMarkReadUnavailable = false;
+}
+
+export interface MarkNotificationReadOptions {
+  /** Hook-level, so it still runs after the panel closed on navigation. */
+  onFailure?: (error: unknown) => void;
+}
+
+export function useMarkNotificationRead({ onFailure }: MarkNotificationReadOptions = {}) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) =>
       client.post<{ id: string; readAt: string }>(endpoints.notificationItem.markRead(id)),
     onSuccess: (result, id) => applyNotificationRead(queryClient, id, result?.readAt ?? new Date().toISOString()),
+    onError: (error) => {
+      if (error instanceof ApiError && (error.status === 404 || error.status === 405)) {
+        singleMarkReadUnavailable = true;
+      }
+      onFailure?.(error);
+    },
   });
 }
 

@@ -14,8 +14,9 @@ import { ConfirmDelete } from '@/shared/ui/Modal';
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
 import { useToast } from '@/shared/ui/Toast';
 import { ApiError } from '@/shared/api/errors';
-import { useAlertRulesList, useUpdateAlertRule, useDeleteAlertRule, type AlertRuleRow, type AlertSeverity } from '@/shared/api/settingsAdmin';
+import { useAlertRulesList, useUpdateAlertRule, useDeleteAlertRule, useCarrier, type AlertRuleRow, type AlertSeverity } from '@/shared/api/settingsAdmin';
 import { NewAlertRuleModal } from './components/NewAlertRuleModal';
+import { SETTINGS_REASON, SETTINGS_TOAST } from './lib/copy';
 
 type Segment = 'ALL' | 'ACTIVE' | 'MUTED';
 
@@ -24,6 +25,9 @@ const SEVERITY_ICON: Record<AlertSeverity, ReactNode> = {
   WARNING: <ShieldCheck size={16} strokeWidth={1.75} className="text-warning" />,
   INFO: <Info size={16} strokeWidth={1.75} className="text-info" />,
 };
+/** ⛔ GAP B-87 — shown next to the two organisation-level switches. */
+const CHANNEL_DISABLED_REASON = SETTINGS_REASON.orgChannels;
+
 const SEVERITY_BG: Record<AlertSeverity, string> = {
   CRITICAL: 'bg-danger-soft',
   WARNING: 'bg-warning-soft',
@@ -35,12 +39,14 @@ export default function AlertRulesPage() {
   const canFull = can('alertRules', 'FULL');
   const { toast } = useToast();
   const rulesQuery = useAlertRulesList();
+  const carrierQuery = useCarrier();
   const updateRule = useUpdateAlertRule();
   const deleteRule = useDeleteAlertRule();
 
   const [segment, setSegment] = useState<Segment>('ALL');
   const [search, setSearch] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<{ rule: AlertRuleRow; mode: 'edit' | 'duplicate' } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AlertRuleRow | null>(null);
 
   const rows = rulesQuery.rows;
@@ -79,16 +85,36 @@ export default function AlertRulesPage() {
       </div>
 
       <Card>
-        <SectionHeader title="Notification channels" subtitle="Where alerts are delivered for this organisation" className="mb-3" />
+        {/* ⛔ GAP B-87 — there is no organisation-level notification-channel resource
+            (`GET/PATCH /notification-channels`). The Email and Webhook rows used to be `<span>`s
+            painted to look exactly like the working per-rule switch below, so they read as live
+            controls and did nothing (WB-216). They are now real, visibly disabled switches with
+            the reason on screen, and the Email row shows the carrier's real compliance address
+            instead of a hardcoded one. Per-rule delivery is set on each rule. */}
+        <SectionHeader
+          title="Notification channels"
+          subtitle="Set per rule below — organisation-wide channel defaults are not available yet"
+          className="mb-3"
+        />
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between rounded-md border border-border p-3">
             <div>
               <p className="text-body-strong text-text">Email</p>
-              <p className="text-caption text-text-muted">compliance@universal-logistics.com · 4 recipients</p>
+              <p className="text-caption text-text-muted">
+                {carrierQuery.data?.complianceEmail ?? 'No compliance email set on the company profile'}
+              </p>
             </div>
-            <span className="relative inline-flex h-6 w-10 items-center rounded-full bg-primary">
-              <span className="absolute right-0.5 size-5 rounded-full bg-bg-surface" />
-            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked
+              aria-label="Email channel"
+              disabled
+              title={CHANNEL_DISABLED_REASON}
+              className="relative h-6 w-10 shrink-0 cursor-not-allowed rounded-full bg-primary opacity-60"
+            >
+              <span className="absolute right-0.5 top-0.5 size-5 rounded-full bg-bg-surface" />
+            </button>
           </div>
           <div className="flex items-center justify-between rounded-md border border-border p-3" title="SMS is not available">
             <div>
@@ -106,13 +132,22 @@ export default function AlertRulesPage() {
           <div className="flex items-center justify-between rounded-md border border-border p-3">
             <div>
               <p className="text-body-strong text-text">Webhook</p>
-              <p className="text-caption text-text-muted">POST https://tms.universal-logistics.com/hooks/eld · last delivery 200 OK</p>
+              <p className="text-caption text-text-muted">Configured under Settings · Integrations</p>
             </div>
-            <span className="relative inline-flex h-6 w-10 items-center rounded-full bg-border">
-              <span className="absolute left-0.5 size-5 rounded-full bg-bg-surface" />
-            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={false}
+              aria-label="Webhook channel"
+              disabled
+              title={CHANNEL_DISABLED_REASON}
+              className="relative h-6 w-10 shrink-0 cursor-not-allowed rounded-full bg-border opacity-60"
+            >
+              <span className="absolute left-0.5 top-0.5 size-5 rounded-full bg-bg-surface" />
+            </button>
           </div>
         </div>
+        <p className="mt-2 text-caption text-text-muted">{CHANNEL_DISABLED_REASON}</p>
       </Card>
 
       <div className="flex items-center justify-between">
@@ -137,7 +172,14 @@ export default function AlertRulesPage() {
         </div>
         <div className="flex h-input items-center gap-2 rounded-md border border-border bg-bg-surface px-3">
           <Search size={16} strokeWidth={1.75} className="text-text-muted" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search rule…" className="w-56 bg-transparent text-body outline-none" />
+          <input
+            type="search"
+            aria-label="Search rule"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search rule…"
+            className="w-56 bg-transparent text-body outline-none"
+          />
         </div>
       </div>
 
@@ -190,11 +232,33 @@ export default function AlertRulesPage() {
                       </DropdownMenu.Trigger>
                       <DropdownMenu.Portal>
                         <DropdownMenu.Content align="end" className="z-50 min-w-40 rounded-md border border-border bg-bg-surface p-1 shadow-pop">
-                          <DropdownMenu.Item className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">Edit rule</DropdownMenu.Item>
-                          <DropdownMenu.Item className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">Duplicate</DropdownMenu.Item>
+                          <DropdownMenu.Item
+                            onSelect={() => setEditTarget({ rule, mode: 'edit' })}
+                            className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle"
+                          >
+                            Edit rule
+                          </DropdownMenu.Item>
+                          <DropdownMenu.Item
+                            onSelect={() => setEditTarget({ rule, mode: 'duplicate' })}
+                            className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle"
+                          >
+                            Duplicate
+                          </DropdownMenu.Item>
                           {/* ⛔ GAP B-9 — `Test rule` needs `POST /alert-rules/:id/test`, which
                               does not exist on the live API; omitted rather than shown disabled. */}
-                          <DropdownMenu.Item className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">Mute for 24 h</DropdownMenu.Item>
+                          {/* ⛔ GAP B-86 — a timed mute needs a `mutedUntil` field on the rule.
+                              `PATCH /alert-rules/:id` only has the boolean `enabled`, so a
+                              "24 h" mute would never un-mute itself. Disabled with the reason
+                              rather than silently muting for ever (WB-218). */}
+                          <DropdownMenu.Item
+                            disabled
+                            className="cursor-not-allowed rounded-md px-2 py-1.5 text-body text-text-muted outline-none"
+                          >
+                            Mute for 24 h
+                          </DropdownMenu.Item>
+                          <p className="px-2 pb-1 text-caption text-text-muted">
+                            {SETTINGS_REASON.timedMute}
+                          </p>
                           <DropdownMenu.Separator className="my-1 h-px bg-border" />
                           <DropdownMenu.Item
                             onSelect={() => setDeleteTarget(rule)}
@@ -214,6 +278,14 @@ export default function AlertRulesPage() {
       </Card>
 
       {createOpen && <NewAlertRuleModal onClose={() => setCreateOpen(false)} />}
+      {editTarget && (
+        <NewAlertRuleModal
+          key={`${editTarget.mode}-${editTarget.rule.id}`}
+          rule={editTarget.rule}
+          mode={editTarget.mode}
+          onClose={() => setEditTarget(null)}
+        />
+      )}
       <ConfirmDelete
         open={Boolean(deleteTarget)}
         onClose={() => setDeleteTarget(null)}
@@ -221,7 +293,7 @@ export default function AlertRulesPage() {
           if (!deleteTarget) return;
           deleteRule.mutate(deleteTarget.id, {
             onSuccess: () => {
-              toast({ kind: 'success', title: `Rule ${deleteTarget.name} deleted` });
+              toast({ kind: 'success', ...SETTINGS_TOAST.alertRuleDeleted(deleteTarget.name) });
               setDeleteTarget(null);
             },
             onError: (error) => {

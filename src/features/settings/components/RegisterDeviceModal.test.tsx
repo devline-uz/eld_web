@@ -38,22 +38,26 @@ beforeEach(() => {
 });
 
 describe('RegisterDeviceModal — 11.20', () => {
-  it('shows the pairing success banner after Open scanner', async () => {
+  // Not a backend gap — there is no scanner; the button no longer paints a success banner.
+  it('Open scanner is disabled with the reason on screen and never claims a pairing', async () => {
     const user = userEvent.setup();
     renderModal();
-    await user.click(screen.getByRole('button', { name: 'Open scanner' }));
-    expect(await screen.findByText(/Device responded to the pairing request/)).toBeInTheDocument();
+    const scanner = screen.getByRole('button', { name: 'Open scanner' });
+    expect(scanner).toBeDisabled();
+    expect(screen.getByText(/Not available in the web panel/)).toBeInTheDocument();
+    await user.click(scanner);
+    expect(screen.queryByText(/Device responded to the pairing request/)).not.toBeInTheDocument();
   });
 
-  it('toggles both preference switches', async () => {
-    const user = userEvent.setup();
+  // ⛔ GAP B-88 — `POST /devices` has no firmware-policy or diagnostics field.
+  it('the two device-preference switches are disabled rather than collected and dropped', async () => {
     renderModal();
     const switches = screen.getAllByRole('switch');
     expect(switches).toHaveLength(2);
-    await user.click(switches[0]!);
-    await user.click(switches[1]!);
-    expect(switches[0]).toHaveAttribute('aria-checked', 'false');
-    expect(switches[1]).toHaveAttribute('aria-checked', 'true');
+    for (const s of switches) {
+      expect(s).toBeDisabled();
+      expect(s).toHaveAttribute('aria-checked', 'false');
+    }
   });
 
   it('registers and pairs to a unit in one submit, sending the picker-selected vehicle id', async () => {
@@ -103,5 +107,47 @@ describe('RegisterDeviceModal — 11.20', () => {
     const { onClose } = renderModal();
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(onClose).toHaveBeenCalled();
+  });
+});
+
+describe('RegisterDeviceModal — double submit and dirty close', () => {
+  it('registers exactly one device on a double click', async () => {
+    const user = userEvent.setup();
+    const posts: unknown[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    server.use(
+      http.post(url(endpoints.devices.create), async ({ request }) => {
+        posts.push(await request.json());
+        await gate;
+        return ok({ id: 'dev_9', serial: 'PT30_1C4F', model: 'PT30', status: 'UNASSIGNED', bleState: 'DISCONNECTED' }, 201);
+      }),
+    );
+
+    renderModal();
+    await user.type(screen.getByPlaceholderText('PT30_1C4F'), 'PT30_1C4F');
+    const submit = screen.getByRole('button', { name: 'Register device' });
+    await user.click(submit);
+    await user.click(submit);
+
+    await waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts).toHaveLength(1);
+    release();
+  });
+
+  it('closes untouched silently, and confirms after a real edit', async () => {
+    const user = userEvent.setup();
+    const { onClose, unmount } = renderModal();
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByText('Discard changes?')).not.toBeInTheDocument();
+    expect(onClose).toHaveBeenCalled();
+    unmount();
+
+    const second = renderModal();
+    await user.type(screen.getByPlaceholderText('PT30_1C4F'), 'PT30_1C4F');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(await screen.findByText('Discard changes?')).toBeInTheDocument();
+    expect(second.onClose).not.toHaveBeenCalled();
   });
 });

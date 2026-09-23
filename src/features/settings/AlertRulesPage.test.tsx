@@ -100,7 +100,7 @@ describe('AlertRulesPage — W-21', () => {
     await screen.findByText('HOS violation');
     expect(screen.getByText('—')).toBeInTheDocument();
     expect(screen.getByText('Muted')).toBeInTheDocument();
-    expect(screen.getByRole('switch')).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByRole('switch', { name: 'Enable HOS violation' })).toHaveAttribute('aria-checked', 'false');
   });
 
   it('renders a populated rule and removes the toggle/menu for a READ-only caller', async () => {
@@ -109,7 +109,7 @@ describe('AlertRulesPage — W-21', () => {
     renderPage();
     expect(await screen.findByText('HOS violation')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /new rule/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+    expect(screen.queryByRole('switch', { name: /^Enable / })).not.toBeInTheDocument();
   });
 
   it('toggles a rule enabled/disabled', async () => {
@@ -125,7 +125,7 @@ describe('AlertRulesPage — W-21', () => {
 
     renderPage();
     await screen.findByText('HOS violation');
-    await user.click(screen.getByRole('switch'));
+    await user.click(screen.getByRole('switch', { name: 'Enable HOS violation' }));
 
     await waitFor(() => expect(patched).toEqual({ enabled: false }));
   });
@@ -194,5 +194,73 @@ describe('AlertRulesPage — W-21', () => {
     await waitFor(() => expect(created).not.toBeNull());
     const body = created as { channels: string[] };
     expect(body.channels).not.toContain('SMS');
+  });
+});
+
+/* ------------------------------------------------------------------ stage-2 row actions */
+
+describe('AlertRulesPage — stage-2 row actions', () => {
+  it('the two organisation channel switches are disabled with a visible reason (B-87)', async () => {
+    server.use(http.get(url(endpoints.alertRules.list), () => ok([])));
+    renderPage();
+    await screen.findByText('No alert rules yet');
+    expect(screen.getByRole('switch', { name: 'Email channel' })).toBeDisabled();
+    expect(screen.getByRole('switch', { name: 'Webhook channel' })).toBeDisabled();
+    expect(
+      screen.getByText('Organisation-wide channel defaults are not available yet — choose the channels on each rule.'),
+    ).toBeInTheDocument();
+  });
+
+  it('gives the search box an accessible name', async () => {
+    server.use(http.get(url(endpoints.alertRules.list), () => ok([RULE])));
+    renderPage();
+    await screen.findByText('HOS violation');
+    expect(screen.getByRole('searchbox', { name: 'Search rule' })).toBeInTheDocument();
+  });
+
+  it('Edit rule opens the modal prefilled and PATCHes the rule', async () => {
+    const user = userEvent.setup();
+    let patched: { name?: string } | null = null;
+    server.use(
+      http.get(url(endpoints.alertRules.list), () => ok([RULE])),
+      http.patch(url(endpoints.alertRules.update(RULE.id)), async ({ request }) => {
+        patched = (await request.json()) as { name?: string };
+        return ok(RULE);
+      }),
+    );
+    renderPage();
+    await screen.findByText('HOS violation');
+
+    await user.click(screen.getByRole('button', { name: 'Rule actions' }));
+    await user.click(await screen.findByText('Edit rule'));
+    const name = await screen.findByDisplayValue('HOS violation');
+    await user.clear(name);
+    await user.type(name, 'HOS violation v2');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(patched!.name).toBe('HOS violation v2'));
+  });
+
+  it('Duplicate opens a create modal seeded with "(copy)"', async () => {
+    const user = userEvent.setup();
+    server.use(http.get(url(endpoints.alertRules.list), () => ok([RULE])));
+    renderPage();
+    await screen.findByText('HOS violation');
+
+    await user.click(screen.getByRole('button', { name: 'Rule actions' }));
+    await user.click(await screen.findByText('Duplicate'));
+    expect(await screen.findByDisplayValue('HOS violation (copy)')).toBeInTheDocument();
+  });
+
+  it('Mute for 24 h is disabled with a visible reason (B-86)', async () => {
+    const user = userEvent.setup();
+    server.use(http.get(url(endpoints.alertRules.list), () => ok([RULE])));
+    renderPage();
+    await screen.findByText('HOS violation');
+
+    await user.click(screen.getByRole('button', { name: 'Rule actions' }));
+    const item = await screen.findByText('Mute for 24 h');
+    expect(item).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByText(/Timed mute is not available yet/)).toBeInTheDocument();
   });
 });

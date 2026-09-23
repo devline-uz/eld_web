@@ -1,7 +1,7 @@
 // owner: web-dvir-safety — WB-074 · W-09 Schedules tab, `…` `Edit`. `maintenance` FULL.
 // `PATCH /maintenance-schedules/:id` (`endpoints.maintenanceSchedules.update`), a real endpoint.
 import { useState } from 'react';
-import { Modal } from '@/shared/ui/Modal';
+import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
 import { TOAST_COPY } from '@/shared/ui/copy';
@@ -22,15 +22,29 @@ export function EditScheduleModal({ schedule, onClose }: { schedule: ScheduleTab
   const [serverError, setServerError] = useState<string | null>(null);
 
   const valid = name.trim() !== '' && (intervalMi.trim() !== '' || intervalDays.trim() !== '');
+  // WB-150 — plain state, so `isDirty` compares against the row the modal opened with.
+  const isDirty =
+    name !== schedule.name ||
+    intervalMi !== (schedule.intervalMi != null ? String(schedule.intervalMi) : '') ||
+    intervalDays !== (schedule.intervalDays != null ? String(schedule.intervalDays) : '') ||
+    lastServiceMi !== (schedule.lastServiceMi != null ? String(schedule.lastServiceMi) : '') ||
+    lastServiceAt !== (schedule.lastServiceAt ? schedule.lastServiceAt.slice(0, 10) : '') ||
+    enabled !== schedule.enabled;
 
   function submit() {
+    // WB-149 — an emptied interval or last-service field used to send `undefined`, which a PATCH
+    // reads as "leave it alone": dropping a mileage interval in favour of a day interval silently
+    // kept both. All four columns are nullable on `MaintenanceScheduleRow`, so an emptied field
+    // now sends `null`. `name` and "at least one interval" stay required (`valid`), because the
+    // row cannot hold a null name or a schedule with no interval at all.
+    setServerError(null);
     mutation.mutate(
       {
         name: name.trim(),
-        intervalMi: intervalMi ? Number(intervalMi) : undefined,
-        intervalDays: intervalDays ? Number(intervalDays) : undefined,
-        lastServiceMi: lastServiceMi ? Number(lastServiceMi) : undefined,
-        lastServiceAt: lastServiceAt ? new Date(lastServiceAt).toISOString() : undefined,
+        intervalMi: intervalMi.trim() ? Number(intervalMi) : null,
+        intervalDays: intervalDays.trim() ? Number(intervalDays) : null,
+        lastServiceMi: lastServiceMi.trim() ? Number(lastServiceMi) : null,
+        lastServiceAt: lastServiceAt ? new Date(lastServiceAt).toISOString() : null,
         enabled,
       },
       {
@@ -48,13 +62,12 @@ export function EditScheduleModal({ schedule, onClose }: { schedule: ScheduleTab
       open
       onClose={onClose}
       title="Edit schedule"
+      isDirty={isDirty}
       subtitle={`Unit ${schedule.vehicle?.unitNumber ?? '—'}`}
       size="md"
       footer={
         <>
-          <Button variant="secondary" size="lg" onClick={onClose} disabled={mutation.isPending}>
-            Cancel
-          </Button>
+          <ModalCancelButton disabled={mutation.isPending} />
           <Button variant="primary" size="lg" disabled={!valid} loading={mutation.isPending} onClick={submit}>
             Save changes
           </Button>
@@ -97,7 +110,11 @@ export function EditScheduleModal({ schedule, onClose }: { schedule: ScheduleTab
         </label>
 
         {!valid && <p className="text-caption text-text-muted">Set a mileage interval, a day interval, or both.</p>}
-        {serverError && <p className="text-body text-danger">{serverError}</p>}
+        {serverError && (
+          <p role="alert" className="rounded-md bg-danger-soft p-3 text-body text-danger">
+            {serverError}
+          </p>
+        )}
       </div>
     </Modal>
   );

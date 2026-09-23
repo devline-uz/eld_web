@@ -17,6 +17,8 @@ import { ErrorState, LoadingState } from '@/shared/ui/states';
 import { formatDistance, formatSpeed, formatFuelWasted } from '@/shared/format/numbers';
 import { formatDuration } from '@/shared/format/duration';
 import { formatLocal } from '@/shared/format/datetime';
+import { toCsv } from '@/shared/lib/csv';
+import { REPLAY_UNAVAILABLE_REASON } from './lib/copy';
 
 type SegmentFilter = 'ALL' | 'DRIVE' | 'STOP' | 'IDLE';
 
@@ -31,7 +33,6 @@ export default function UnitHistoriesPage() {
   const [params, setParams] = useSearchParams();
   const date = params.get('date') ?? new Date().toISOString().slice(0, 10);
   const [segmentFilter, setSegmentFilter] = useState<SegmentFilter>('ALL');
-  const [playing, setPlaying] = useState(false);
 
   const vehicleQuery = useVehicle(id);
   const historiesQuery = useVehicleHistories(id, date);
@@ -56,6 +57,27 @@ export default function UnitHistoriesPage() {
     stop: segments.filter((s) => s.type === 'STOP').length,
     idle: segments.filter((s) => s.type === 'IDLE').length,
   };
+
+  function exportSegments() {
+    const csv = toCsv([
+      ['type', 'start', 'end', 'durationSec', 'location', 'distanceMi', 'odometerMi', 'driver'],
+      ...filteredSegments.map((s) => [
+        s.type,
+        s.startAt,
+        s.endAt,
+        s.durationSec,
+        s.location,
+        s.distanceMi ?? '',
+        s.odometerMi,
+        s.driverName,
+      ]),
+    ]);
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    link.download = `unit-histories-${vehicleQuery.data?.unitNumber ?? id}-${date}.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -113,7 +135,15 @@ export default function UnitHistoriesPage() {
               </button>
             ))}
           </div>
-          <Button variant="secondary" iconLeft={<Download size={16} strokeWidth={1.75} />}>
+          {/* The button had no `onClick` at all. There is no histories export endpoint (B-4
+              covers the read itself), so the file is built from the segments on screen — the
+              active segment filter included. */}
+          <Button
+            variant="secondary"
+            iconLeft={<Download size={16} strokeWidth={1.75} />}
+            disabled={filteredSegments.length === 0}
+            onClick={exportSegments}
+          >
             Export
           </Button>
         </div>
@@ -158,11 +188,23 @@ export default function UnitHistoriesPage() {
               title="Route replay"
               subtitle={`${formatLocal(historiesQuery.data.firstMovementAt, 'monthDay')} · ${formatLocal(historiesQuery.data.firstMovementAt, 'time')} → ${formatLocal(historiesQuery.data.lastMovementAt, 'time')} · ${formatDistance(historiesQuery.data.distanceMi)} mi`}
               action={
-                <Button variant="secondary" size="sm" iconLeft={<Play size={14} strokeWidth={1.75} />} onClick={() => setPlaying((p) => !p)}>
-                  {playing ? 'Pause' : 'Play'}
+                // WB-243 / B-4 — Play only flipped its own label: there is no track to replay.
+                // Disabled, with the reason as tooltip, accessible description and caption.
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  iconLeft={<Play size={14} strokeWidth={1.75} />}
+                  disabled
+                  title={REPLAY_UNAVAILABLE_REASON}
+                  aria-describedby="route-replay-unavailable"
+                >
+                  Play
                 </Button>
               }
             />
+            <p id="route-replay-unavailable" className="mt-1 text-caption text-text-muted">
+              {REPLAY_UNAVAILABLE_REASON}
+            </p>
             <div className="mt-3 flex h-route-preview flex-col items-center justify-center gap-2 rounded-md border border-dashed border-border bg-bg-subtle text-center">
               <p className="text-card-sub text-text-muted">
                 Map preview unavailable in this environment — {segments.length} segments recorded.

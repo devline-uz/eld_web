@@ -1,11 +1,11 @@
 // owner: web-dashboard-fleet — overlay 11.1 · Create a geofence (web/tz.md §11.1).
 // `liveFleet` FULL only; the trigger button is absent from the DOM otherwise (§12.2).
-import { useState } from 'react';
+import { useRef, useState, type BaseSyntheticEvent } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { MapPin } from 'lucide-react';
-import { Modal } from '@/shared/ui/Modal';
+import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { FilterCheckbox } from '@/shared/ui/FilterDrawer';
 // Direct file imports, not the `@/shared/ui` barrel (web/decisions.md WD-021).
@@ -17,7 +17,17 @@ import { qk } from '@/shared/api/queryKeys';
 import { geofenceSchema, type GeofenceFormValues } from '@/shared/forms/schemas';
 import { ApiError } from '@/shared/api/errors';
 
+import { GEOFENCE_ADDRESS_SHAPE_REASON } from '../lib/copy';
+
 const SHAPE_SEGMENTS = ['Circle', 'Rectangle', 'Polygon', 'Address'] as const;
+type ShapeSegment = (typeof SHAPE_SEGMENTS)[number];
+/** What each segment sends. Rectangle and Polygon are both a `POLYGON` on the wire; `Address`
+ * has no shape on the API at all (B-93), so it is disabled. */
+const SEGMENT_TYPE: Record<Exclude<ShapeSegment, 'Address'>, 'CIRCLE' | 'POLYGON'> = {
+  Circle: 'CIRCLE',
+  Rectangle: 'POLYGON',
+  Polygon: 'POLYGON',
+};
 
 export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const queryClient = useQueryClient();
@@ -27,16 +37,21 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
   // `watch()` — react-hook-form's `watch()` cannot be safely memoized (its subscription changes
   // every render), so any component reading it opts the whole tree out of React Compiler
   // memoization. `setValue` below keeps react-hook-form's own copy in sync for validation/submit.
-  const [shape, setShape] = useState<'CIRCLE' | 'POLYGON'>('POLYGON');
+  // Stage 3 — the pressed state tracks the segment, not the wire type: Rectangle and Polygon both
+  // send `POLYGON`, so deriving `active` from the type left Polygon never pressed.
+  const [segment, setSegment] = useState<Exclude<ShapeSegment, 'Address'>>('Rectangle');
   const [countAsYardMove, setCountAsYardMove] = useState(false);
   const [alertOnEnter, setAlertOnEnter] = useState(true);
   const [alertOnExit, setAlertOnExit] = useState(true);
+  /** Anything the server refused that could not be mapped onto a field (§6.1 rule 6). */
+  const [serverError, setServerError] = useState<string | null>(null);
 
   const {
     register,
     handleSubmit,
     setValue,
-    formState: { errors, isSubmitting, isDirty },
+    setError,
+    formState: { errors, isDirty },
   } = useForm<GeofenceFormValues>({
     resolver: zodResolver(geofenceSchema),
     mode: 'onBlur',
@@ -65,11 +80,42 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
       onClose();
     },
     onError: (error) => {
-      if (!(error instanceof ApiError) || error.status !== 422) {
-        toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+      // WB — a 422 used to be swallowed whole: the toast was suppressed for it but `details` was
+      // never fed into `setError`, so an invalid geofence failed in complete silence. Mapped
+      // fields go to the inputs, anything unmapped goes to the in-modal banner (§6.1 rule 6).
+      setServerError(null);
+      if (error instanceof ApiError) {
+        const fieldErrors = error.fieldErrors;
+        const known = Object.keys(fieldErrors).filter((field) => field in geofenceSchema.shape);
+        for (const field of known) {
+          setError(field as keyof GeofenceFormValues, { message: fieldErrors[field] as string });
+        }
+        if (error.status === 422) {
+          if (known.length === Object.keys(fieldErrors).length && known.length > 0) return;
+          setServerError(error.userMessage);
+          return;
+        }
       }
+      toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
     },
   });
+
+  // Stage 3 — `mutation.mutate` is fire-and-forget, so RHF's `isSubmitting` cleared before the
+  // request resolved and Save could be clicked again mid-flight. `isPending` covers the request.
+  // The ref also covers two clicks landing before the re-render that disables the button.
+  const isPending = mutation.isPending;
+  const inFlight = useRef(false);
+  function onSave(event?: BaseSyntheticEvent) {
+    return handleSubmit((values) => {
+      if (inFlight.current) return;
+      inFlight.current = true;
+      mutation.mutate(values, {
+        onSettled: () => {
+          inFlight.current = false;
+        },
+      });
+    })(event);
+  }
 
   return (
     <Modal
@@ -90,22 +136,20 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
             }}
           />
           <div className="ml-auto flex gap-2">
-            <Button variant="secondary" size="lg" onClick={onClose} disabled={isSubmitting}>
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              size="lg"
-              loading={isSubmitting}
-              onClick={handleSubmit((values) => mutation.mutate(values))}
-            >
+            <ModalCancelButton disabled={isPending} />
+            <Button variant="primary" size="lg" loading={isPending} onClick={() => void onSave()}>
               Save geofence
             </Button>
           </div>
         </>
       }
     >
-      <form className="flex flex-col gap-5" onSubmit={handleSubmit((values) => mutation.mutate(values))}>
+      <form className="flex flex-col gap-5" onSubmit={(event) => void onSave(event)}>
+        {serverError && (
+          <p role="alert" className="rounded-md bg-danger-soft p-3 text-body text-danger">
+            {serverError}
+          </p>
+        )}
         <div className="grid grid-cols-3 gap-4">
           <label className="flex flex-col gap-1">
             <span className="text-label text-text">
@@ -114,7 +158,7 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
             <input
               {...register('name')}
               placeholder="Columbus terminal"
-              disabled={isSubmitting}
+              disabled={isPending}
               aria-invalid={Boolean(errors.name)}
               aria-describedby={errors.name ? 'geofence-name-error' : undefined}
               className="h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text"
@@ -129,7 +173,7 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
             <span className="text-label text-text">Type</span>
             <select
               {...register('category')}
-              disabled={isSubmitting}
+              disabled={isPending}
               className="h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text"
             >
               <option value="TERMINAL">Terminal / yard</option>
@@ -143,7 +187,7 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
             <span className="text-label text-text">Colour</span>
             <select
               {...register('colour')}
-              disabled={isSubmitting}
+              disabled={isPending}
               className="h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text"
             >
               <option value="BLUE">Blue</option>
@@ -156,18 +200,36 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
         </div>
 
         <div className="flex flex-col gap-2">
-          <div className="flex h-9 w-fit overflow-hidden rounded-md border border-border">
+          <div
+            role="group"
+            aria-label="Shape"
+            className="flex h-9 w-fit overflow-hidden rounded-md border border-border"
+          >
             {SHAPE_SEGMENTS.map((seg) => {
-              const segShape = seg === 'Circle' ? 'CIRCLE' : 'POLYGON';
-              const active = seg === 'Rectangle' ? shape === 'POLYGON' : seg === 'Circle' && shape === 'CIRCLE';
+              if (seg === 'Address') {
+                return (
+                  <button
+                    key={seg}
+                    type="button"
+                    disabled
+                    aria-pressed={false}
+                    aria-describedby="geofence-address-shape-reason"
+                    className="cursor-not-allowed bg-bg-surface px-3 text-body text-text-muted"
+                  >
+                    {seg}
+                  </button>
+                );
+              }
+              const active = segment === seg;
               return (
                 <button
                   key={seg}
                   type="button"
                   aria-pressed={active}
+                  disabled={isPending}
                   onClick={() => {
-                    setShape(segShape);
-                    setValue('type', segShape, { shouldDirty: true });
+                    setSegment(seg);
+                    setValue('type', SEGMENT_TYPE[seg], { shouldDirty: true });
                   }}
                   className={
                     active
@@ -180,6 +242,9 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
               );
             })}
           </div>
+          <p id="geofence-address-shape-reason" className="text-caption text-text-muted">
+            {GEOFENCE_ADDRESS_SHAPE_REASON}
+          </p>
           <div className="flex h-geofence-preview items-center justify-center rounded-md border border-dashed border-border bg-bg-subtle text-center">
             <div className="flex flex-col items-center gap-1 text-text-muted">
               <MapPin size={20} strokeWidth={1.75} aria-hidden="true" />
@@ -196,7 +261,7 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
             <input
               {...register('address')}
               placeholder="4517 Washington Ave., Columbus, OH 43004"
-              disabled={isSubmitting}
+              disabled={isPending}
               className="h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text"
             />
           </label>
@@ -212,7 +277,7 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
                   setValueAs: (v: string) => (v === '' ? undefined : Number(v)),
                 })}
                 placeholder="0.8"
-                disabled={isSubmitting}
+                disabled={isPending}
                 className="h-input w-full rounded-md border border-border bg-bg-surface px-3 text-body text-text"
               />
               <span className="text-body text-text-muted">mi</span>
@@ -222,7 +287,7 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
             <span className="text-label text-text">Applies to</span>
             <select
               {...register('appliesTo')}
-              disabled={isSubmitting}
+              disabled={isPending}
               className="h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text"
             >
               <option>All vehicle groups</option>

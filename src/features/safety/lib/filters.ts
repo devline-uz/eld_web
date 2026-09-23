@@ -14,6 +14,19 @@
 import type { CoachingStatus, SafetyEventTableRow, SafetyEventType } from '@/shared/api/safety';
 
 export const SAFETY_EVENT_TYPE_OPTIONS: SafetyEventType[] = ['HARSH_BRAKING', 'HARSH_ACCEL', 'HARSH_TURN', 'SPEEDING', 'SEATBELT'];
+
+/** WB-167 — the one short event label used by the W-10 table, the export and the coaching modal
+ *  (the filter drawer keeps its own long form for the checkbox list). */
+export const SAFETY_EVENT_LABEL: Record<string, string> = {
+  HARSH_BRAKING: 'Harsh braking',
+  HARSH_ACCEL: 'Harsh accel.',
+  HARSH_TURN: 'Harsh turn',
+  SPEEDING: 'Speeding',
+  SEATBELT: 'Seatbelt',
+};
+
+/** The raw enum is never shown to a user: an unknown type falls back to its own value. */
+export const safetyEventLabel = (type: string): string => SAFETY_EVENT_LABEL[type] ?? type;
 export type SafetySeverityBucket = 'CRITICAL' | 'MAJOR' | 'MINOR';
 export const SAFETY_SEVERITY_OPTIONS: SafetySeverityBucket[] = ['CRITICAL', 'MAJOR', 'MINOR'];
 export const SAFETY_COACHING_STATUS_OPTIONS: CoachingStatus[] = ['NEW', 'REVIEWED', 'COACHED', 'DISMISSED'];

@@ -1,7 +1,7 @@
 // owner: web-vehicles-drivers — 11.5 Calibrate odometer (web/tz.md §11.5). Audited write —
 // server refusals surface verbatim. `vehicles` FULL only.
 import { useMemo, useState } from 'react';
-import { Modal } from '@/shared/ui/Modal';
+import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
 import { useCalibrateOdometer, totalVehicleMiles, type VehicleRow } from '@/shared/api/vehicles';
@@ -18,8 +18,22 @@ export function CalibrateOdometerModal({ vehicle, onClose }: { vehicle: VehicleR
   const dashValue = Number(dashOdometer);
   const valid = dashOdometer.trim() !== '' && Number.isFinite(dashValue) && dashValue >= 0;
   const newOffset = valid && vehicle.deviceOdometerMi != null ? dashValue - vehicle.deviceOdometerMi : null;
-  const delta = useMemo(() => (valid ? Math.abs(dashValue - totalVehicleMiles(vehicle)) : 0), [valid, dashValue, vehicle]);
-  const needsExtraConfirm = delta > 5000;
+
+  // WB — the >5,000 mi guard used to fail OPEN: with no ELD reading (`deviceOdometerMi == null`,
+  // or a row whose odometer is missing) the delta came out `NaN`, `NaN > 5000` is `false`, and the
+  // extra confirmation silently never appeared. It now fails CLOSED: `delta` is `null` whenever it
+  // cannot be computed from a known reading, and an uncomputable delta demands the confirmation
+  // just like a large one.
+  const delta = useMemo(() => {
+    if (!valid) return null;
+    if (vehicle.deviceOdometerMi == null) return null;
+    const reference = totalVehicleMiles(vehicle);
+    if (!Number.isFinite(reference)) return null;
+    const computed = Math.abs(dashValue - reference);
+    return Number.isFinite(computed) ? computed : null;
+  }, [valid, dashValue, vehicle]);
+  const deltaUnknown = valid && delta === null;
+  const needsExtraConfirm = valid && (delta === null || delta > 5000);
 
   return (
     <Modal
@@ -28,11 +42,11 @@ export function CalibrateOdometerModal({ vehicle, onClose }: { vehicle: VehicleR
       title="Calibrate odometer"
       subtitle={`Unit ${vehicle.unitNumber} · ${[vehicle.make, vehicle.model].filter(Boolean).join(' ')}`}
       size="sm"
+      // A typed dashboard reading is a real edit — closing confirms first, from Cancel as from Esc.
+      isDirty={dashOdometer.trim() !== ''}
       footer={
         <>
-          <Button variant="secondary" size="lg" onClick={onClose} disabled={mutation.isPending}>
-            Cancel
-          </Button>
+          <ModalCancelButton disabled={mutation.isPending} />
           <Button
             variant="primary"
             size="lg"
@@ -109,7 +123,9 @@ export function CalibrateOdometerModal({ vehicle, onClose }: { vehicle: VehicleR
               checked={confirmedLargeDelta}
               onChange={(e) => setConfirmedLargeDelta(e.target.checked)}
             />
-            This is more than 5,000 mi from the current reading — I confirm this value is correct.
+            {deltaUnknown
+              ? 'This unit has no ELD odometer reading, so the change cannot be checked against a known value — I confirm this value is correct.'
+              : 'This is more than 5,000 mi from the current reading — I confirm this value is correct.'}
           </label>
         )}
         <p className="text-caption text-text-muted">

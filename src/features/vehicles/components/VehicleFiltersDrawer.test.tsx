@@ -30,7 +30,7 @@ describe('VehicleFiltersDrawer — 11.23', () => {
     expect(screen.getByText('Year')).toBeInTheDocument();
     expect(screen.getByText('Home terminal')).toBeInTheDocument();
     expect(screen.getByText('Condition')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Apply 0 filters/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeInTheDocument();
   });
 
   it('toggles every group and applies the accumulated draft', async () => {
@@ -71,7 +71,7 @@ describe('VehicleFiltersDrawer — 11.23', () => {
 
     expect(screen.getByRole('button', { name: /Apply 2 filters/ })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Reset all' }));
-    expect(screen.getByRole('button', { name: /Apply 0 filters/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeInTheDocument();
   });
 });
 
@@ -103,5 +103,57 @@ describe('VehicleFilterChips — 11.23', () => {
 
     await user.click(screen.getByText('Clear all'));
     expect(onClearAll).toHaveBeenCalled();
+  });
+});
+
+// WB — the drawer never passed `isDirty` to `FilterDrawer`, so a user who edited the filter groups
+// and then pressed Esc / X / Cancel lost the edit silently. Draft ≠ applied is now a dirty close.
+describe('VehicleFiltersDrawer — 11.30 dirty close', () => {
+  it('closes an untouched drawer with no confirm', async () => {
+    const user = userEvent.setup();
+    const { onClose } = renderDrawer(EMPTY_VEHICLE_FILTERS);
+
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+
+    expect(screen.queryByText('Discard changes?')).not.toBeInTheDocument();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('confirms before dropping an edited draft', async () => {
+    const user = userEvent.setup();
+    const { onClose } = renderDrawer(EMPTY_VEHICLE_FILTERS);
+
+    await user.click(screen.getByLabelText('Driving'));
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+
+    expect(await screen.findByText('Discard changes?')).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'Discard' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('a draft toggled back to the applied filters is clean again', async () => {
+    const user = userEvent.setup();
+    const { onClose } = renderDrawer(EMPTY_VEHICLE_FILTERS);
+
+    await user.click(screen.getByLabelText('Driving'));
+    await user.click(screen.getByLabelText('Driving'));
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+
+    expect(screen.queryByText('Discard changes?')).not.toBeInTheDocument();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('applying does not ask to discard — Apply is not a loss', async () => {
+    const user = userEvent.setup();
+    const { onApply, onClose } = renderDrawer(EMPTY_VEHICLE_FILTERS);
+
+    await user.click(screen.getByLabelText('Driving'));
+    await user.click(screen.getByRole('button', { name: /Apply 1 filters/ }));
+
+    expect(screen.queryByText('Discard changes?')).not.toBeInTheDocument();
+    expect(onApply).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

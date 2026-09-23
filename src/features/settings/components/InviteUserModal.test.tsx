@@ -103,17 +103,17 @@ describe('InviteUserModal — 11.18', () => {
     expect(await screen.findByText('Enter a valid email address.')).toBeInTheDocument();
   });
 
-  it('shows a generic error toast for a non-conflict failure', async () => {
+  it('shows a generic error toast and an in-modal banner for a non-conflict failure', async () => {
     const user = userEvent.setup();
     server.use(http.post(url(endpoints.users.create), () => fail(500, 'INTERNAL_ERROR', 'Boom')));
 
     renderModal();
     await user.type(screen.getByPlaceholderText('Anna Weiss'), 'Anna Weiss');
     await user.type(screen.getByPlaceholderText('anna.weiss@example.com'), 'anna.weiss@example.com');
-    await user.selectOptions(screen.getByDisplayValue('All terminals'), 'Barrie, ON');
     await user.click(screen.getByRole('button', { name: 'Send invitation' }));
 
-    expect(await screen.findByText('Something went wrong on our side. Try again.')).toBeInTheDocument();
+    // Visible twice on purpose: the toast (§13.3) and the banner inside the modal (rule 6).
+    expect(await screen.findAllByText('Something went wrong on our side. Try again.')).toHaveLength(2);
   });
 
   it('closes through the discard-changes confirmation once the form is dirty', async () => {
@@ -126,5 +126,101 @@ describe('InviteUserModal — 11.18', () => {
     expect(await screen.findByText('Discard changes?')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Discard' }));
     expect(onClose).toHaveBeenCalled();
+  });
+});
+
+describe('InviteUserModal — role error, double submit and dirty close', () => {
+  // No DISPATCHER in the list, so `roleKey` starts empty and validation rejects the submit.
+  const ROLES_WITHOUT_DEFAULT = [
+    { id: 'rol_fm', key: 'FLEET_MANAGER', name: 'Fleet manager', isSystem: true, permissions: {}, userCount: 5 },
+    { id: 'rol_view', key: 'VIEWER', name: 'Viewer', isSystem: true, permissions: {}, userCount: 1 },
+  ] as never;
+
+  function renderWithRoles(roles: typeof ROLES_WITHOUT_DEFAULT) {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const onClose = vi.fn();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <InviteUserModal roles={roles} onClose={onClose} />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+    return { onClose };
+  }
+
+  it('shows the role error under the role group instead of failing silently', async () => {
+    const user = userEvent.setup();
+    let posted = 0;
+    server.use(http.post(url(endpoints.users.create), () => { posted += 1; return ok({}, 201); }));
+
+    renderWithRoles(ROLES_WITHOUT_DEFAULT);
+    await user.type(screen.getByPlaceholderText('Anna Weiss'), 'Anna Weiss');
+    await user.type(screen.getByPlaceholderText('anna.weiss@example.com'), 'anna.weiss@example.com');
+    await user.click(screen.getByRole('button', { name: 'Send invitation' }));
+
+    const error = await screen.findByText('This field is required.');
+    expect(error).toHaveAttribute('id', 'invite-role-error');
+    const group = screen.getByRole('radiogroup');
+    expect(group).toHaveAttribute('aria-invalid', 'true');
+    expect(group).toHaveAttribute('aria-describedby', 'invite-role-error');
+    expect(posted).toBe(0);
+  });
+
+  it('sends exactly one invitation on a double click', async () => {
+    const user = userEvent.setup();
+    const posts: unknown[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    server.use(
+      http.post(url(endpoints.users.create), async ({ request }) => {
+        posts.push(await request.json());
+        await gate;
+        return ok({ user: { id: 'usr_9', status: 'INVITED' }, inviteToken: 'tok' }, 201);
+      }),
+    );
+
+    renderModal();
+    await user.type(screen.getByPlaceholderText('Anna Weiss'), 'Anna Weiss');
+    await user.type(screen.getByPlaceholderText('anna.weiss@example.com'), 'anna.weiss@example.com');
+    const send = screen.getByRole('button', { name: 'Send invitation' });
+    await user.click(send);
+    await user.click(send);
+
+    await waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts).toHaveLength(1);
+    release();
+  });
+
+  it('closes an untouched form with no confirm, and confirms from Cancel once edited', async () => {
+    const user = userEvent.setup();
+    const { onClose } = renderModal();
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByText('Discard changes?')).not.toBeInTheDocument();
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('routes Cancel through the discard confirm once the form is dirty', async () => {
+    const user = userEvent.setup();
+    const { onClose } = renderModal();
+    await user.type(screen.getByPlaceholderText('Anna Weiss'), 'Anna');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(await screen.findByText('Discard changes?')).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Discard' }));
+    expect(onClose).toHaveBeenCalled();
+  });
+});
+
+/* ------------------------------------------------------------------ stage-2 (B-85) */
+
+describe('InviteUserModal — fields the invite API cannot carry', () => {
+  it('Terminal access and Message are disabled with the reason on screen', () => {
+    renderModal();
+    expect(screen.getByRole('combobox')).toBeDisabled();
+    expect(screen.getByRole('textbox', { name: /message/i })).toBeDisabled();
+    expect(screen.getByText(/the invite API has no terminal field/i)).toBeInTheDocument();
+    expect(screen.getByText(/sends the standard invitation email only/i)).toBeInTheDocument();
   });
 });

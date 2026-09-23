@@ -2,19 +2,19 @@
 // Hard rule: an OUT_OF_SERVICE unit refuses assignment — show the reason, never a silent 409.
 import { useState } from 'react';
 import { Search } from 'lucide-react';
-import { Modal } from '@/shared/ui/Modal';
+import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { Avatar } from '@/shared/ui/Avatar';
 import { useToast } from '@/shared/ui/Toast';
 import { useAssignDriver, type VehicleRow } from '@/shared/api/vehicles';
 import { useDriversList } from '@/shared/api/drivers';
 import { ApiError } from '@/shared/api/errors';
+import { NOTIFY_REASON } from '../lib/copy';
 
 export function AssignDriverModal({ vehicle, onClose }: { vehicle: VehicleRow; onClose: () => void }) {
   const { toast } = useToast();
   const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [notify, setNotify] = useState(true);
   const outOfService = vehicle.status === 'OUT_OF_SERVICE';
 
   const driversQuery = useDriversList({ q: query || undefined, limit: 25 });
@@ -27,15 +27,19 @@ export function AssignDriverModal({ vehicle, onClose }: { vehicle: VehicleRow; o
       title={`Assign driver to unit ${vehicle.unitNumber}`}
       subtitle={[vehicle.make, vehicle.model, vehicle.year].filter(Boolean).join(' ')}
       size="md"
+      // Picking a driver is a real edit — closing then routes through the 11.30 discard confirm,
+      // from Cancel exactly as from Esc / X.
+      isDirty={selectedId !== null}
       footer={
         <>
-          <label className="mr-auto flex items-center gap-2 text-body text-text-secondary">
-            <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} />
-            Notify the driver in the app
+          {/* B-74 — `POST /vehicles/:id/assign-driver` takes `{ driverId, effectiveAt }` only.
+              The tick used to be kept in local state and thrown away, so the modal implied a
+              push notification that was never requested. Disabled with the reason visible. */}
+          <label className="mr-auto flex items-center gap-2 text-body text-text-muted" title={NOTIFY_REASON}>
+            <input type="checkbox" disabled title={NOTIFY_REASON} />
+            Notify the driver in the app — {NOTIFY_REASON}
           </label>
-          <Button variant="secondary" size="lg" onClick={onClose} disabled={mutation.isPending}>
-            Cancel
-          </Button>
+          <ModalCancelButton disabled={mutation.isPending} />
           <Button
             variant="primary"
             size="lg"
@@ -78,13 +82,15 @@ export function AssignDriverModal({ vehicle, onClose }: { vehicle: VehicleRow; o
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              aria-label="Search driver by name, username or licence"
               placeholder="Search driver by name, username or licence…"
               className="h-full flex-1 bg-transparent text-body outline-none"
             />
           </div>
           <ul className="flex max-h-80 flex-col gap-1 overflow-y-auto">
             {(driversQuery.data?.items ?? []).map((driver) => {
-              const name = `${driver.firstName} ${driver.lastName}`;
+              // A roster row missing a name rendered literally as "undefined undefined".
+              const name = [driver.firstName, driver.lastName].filter(Boolean).join(' ') || driver.username || 'Unnamed driver';
               return (
                 <li key={driver.id}>
                   <button

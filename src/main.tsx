@@ -4,6 +4,7 @@ import { AppProviders } from './app/providers';
 import { AppRouter } from './app/router';
 import { captureError, initObservability } from '@/shared/observability/sentry';
 import '@/shared/ui/tokens.css';
+import '@/shared/ui/print.css';
 
 const container = document.getElementById('root');
 if (!container) throw new Error('#root is missing from index.html');

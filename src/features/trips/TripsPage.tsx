@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { ColumnDef } from '@tanstack/react-table';
-import { Search, Plus, Filter, Users, MapPin } from 'lucide-react';
+import { Search, Plus, Filter, Users, MapPin, X } from 'lucide-react';
 import { usePermission } from '@/shared/auth/usePermission';
 import { Can } from '@/shared/auth/Can';
 import { useDynamicSubtitle } from '@/app/layouts/Topbar';
@@ -280,9 +280,29 @@ export default function TripsPage() {
                 setSearch(e.target.value);
                 setPage(1);
               }}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape' && search) {
+                  setSearch('');
+                  setPage(1);
+                }
+              }}
+              aria-label="Search trips"
               placeholder="Search trip, driver, city…"
               className="w-56 bg-transparent text-body outline-none"
             />
+            {search && (
+              <button
+                type="button"
+                aria-label="Clear search"
+                onClick={() => {
+                  setSearch('');
+                  setPage(1);
+                }}
+                className="flex size-6 items-center justify-center rounded-md text-text-muted hover:bg-bg-subtle hover:text-text"
+              >
+                <X size={14} strokeWidth={1.75} aria-hidden="true" />
+              </button>
+            )}
           </div>
           <PeriodDropdown filters={filters} onApply={(patch) => applyFilters({ ...filters, ...patch })} />
           <Button

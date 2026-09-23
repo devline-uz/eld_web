@@ -13,7 +13,7 @@ import { Avatar } from '@/shared/ui/Avatar';
 import { Button } from '@/shared/ui/Button';
 import { Badge } from '@/shared/ui/Badge';
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
-import { EMPTY_STATE_COPY } from '@/shared/ui/copy';
+import { EMPTY_STATE_COPY, searchEmptyState } from '@/shared/ui/copy';
 import { useToast } from '@/shared/ui/Toast';
 import { formatRelativeShort } from '@/shared/format/relative';
 import { formatLocal } from '@/shared/format/datetime';
@@ -267,6 +267,7 @@ export default function MessagesPage() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search driver…"
+              aria-label="Search conversations"
               className="h-full flex-1 bg-transparent text-body outline-none"
             />
           </div>
@@ -296,10 +297,26 @@ export default function MessagesPage() {
         </div>
         <div className="flex-1 overflow-y-auto">
           {filteredConversations.length === 0 ? (
-            <EmptyState
-              {...EMPTY_STATE_COPY.messages}
-              actions={can('messaging', 'FULL') ? [{ label: 'New', onClick: () => setNewOpen(true) }] : undefined}
-            />
+            // WB-171 — a search or segment that matches nothing is not an empty inbox: the
+            // generic "no conversations yet" copy told the user to start a conversation when
+            // the fix is to clear the search.
+            search.trim() ? (
+              <EmptyState
+                {...searchEmptyState(search.trim())}
+                actions={[{ label: 'Clear search', onClick: () => setSearch('') }]}
+              />
+            ) : segment !== 'ALL' ? (
+              <EmptyState
+                title={segment === 'UNREAD' ? 'No unread conversations' : 'No group conversations'}
+                description="Every conversation is in the All tab."
+                actions={[{ label: 'Show all', onClick: () => setSegment('ALL') }]}
+              />
+            ) : (
+              <EmptyState
+                {...EMPTY_STATE_COPY.messages}
+                actions={can('messaging', 'FULL') ? [{ label: 'New', onClick: () => setNewOpen(true) }] : undefined}
+              />
+            )
           ) : (
             filteredConversations.map((conversation) => {
               const name = conversationName(conversation);
@@ -471,9 +488,31 @@ export default function MessagesPage() {
             <p className="text-card-title font-semibold text-text">{conversationName(selected)}</p>
             <p className="text-caption text-text-muted">Unit {driverUnit?.unitNumber ?? '—'} · @{selected.driver.username}</p>
             <div className="mt-2 flex gap-2">
-              <Button variant="secondary" size="sm" iconLeft={<Phone size={14} strokeWidth={1.75} />}>
-                Call
-              </Button>
+              {/* WB-172 — `Call` had no handler at all. There is no click-to-call service on the
+                  backend and none is invented here: it places the call through the operator's own
+                  phone via `tel:`, and says why it cannot when the driver has no number on file. */}
+              {selected.driver.phone ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  iconLeft={<Phone size={14} strokeWidth={1.75} />}
+                  onClick={() => {
+                    window.location.href = `tel:${selected.driver!.phone!.replace(/[^\d+]/g, '')}`;
+                  }}
+                >
+                  Call
+                </Button>
+              ) : (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled
+                  title="No phone number on file for this driver"
+                  iconLeft={<Phone size={14} strokeWidth={1.75} />}
+                >
+                  Call
+                </Button>
+              )}
               <Button variant="secondary" size="sm" iconLeft={<User size={14} strokeWidth={1.75} />} onClick={() => navigate(`/drivers/${selected.driver!.id}`)}>
                 Profile
               </Button>

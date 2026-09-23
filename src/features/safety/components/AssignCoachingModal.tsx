@@ -5,12 +5,13 @@
 // endpoint (web/decisions.md WD-034). This picks a driver, then one of that driver's open
 // events, before submitting.
 import { useMemo, useState } from 'react';
-import { Modal } from '@/shared/ui/Modal';
+import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
 import { useSafetyEventsList, useAssignCoaching, type ScorecardTableRow } from '@/shared/api/safety';
 import { ApiError } from '@/shared/api/errors';
 import { formatLocal } from '@/shared/format/datetime';
+import { safetyEventLabel } from '../lib/filters';
 
 const inputClass = 'h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text';
 
@@ -35,17 +36,19 @@ export function AssignCoachingModal({ driver, onClose }: { driver: ScorecardTabl
       title="Assign coaching"
       subtitle={`${driverName} · score ${driver.score}`}
       size="md"
+      isDirty={Boolean(eventId) || note !== ''}
       footer={
         <>
-          <Button variant="secondary" size="lg" onClick={onClose} disabled={mutation.isPending}>
-            Cancel
-          </Button>
+          <ModalCancelButton disabled={mutation.isPending} />
           <Button
             variant="primary"
             size="lg"
-            disabled={!eventId}
+            disabled={!eventId || mutation.isPending}
             loading={mutation.isPending}
-            onClick={() =>
+            onClick={() => {
+              // `mutate()` returns immediately — without this a double click coaches twice.
+              if (!eventId || mutation.isPending) return;
+              setServerError(null);
               mutation.mutate(
                 { eventId, note: note || undefined },
                 {
@@ -55,8 +58,8 @@ export function AssignCoachingModal({ driver, onClose }: { driver: ScorecardTabl
                   },
                   onError: (error) => setServerError(error instanceof ApiError ? error.userMessage : 'Something went wrong.'),
                 },
-              )
-            }
+              );
+            }}
           >
             Assign coaching
           </Button>
@@ -77,7 +80,8 @@ export function AssignCoachingModal({ driver, onClose }: { driver: ScorecardTabl
               <option value="">Select an event…</option>
               {openEvents.map((e) => (
                 <option key={e.id} value={e.id}>
-                  {e.type} · {formatLocal(e.occurredAt, 'dateTime')}
+                  {/* WB-167 — the raw enum (`HARSH_BRAKING · —`) used to reach the user. */}
+                  {safetyEventLabel(e.type)} · {formatLocal(e.occurredAt, 'dateTime')}
                 </option>
               ))}
             </select>
@@ -93,7 +97,11 @@ export function AssignCoachingModal({ driver, onClose }: { driver: ScorecardTabl
             className="rounded-md border border-border bg-bg-surface px-3 py-2 text-body text-text"
           />
         </label>
-        {serverError && <p className="text-body text-danger">{serverError}</p>}
+        {serverError && (
+          <p role="alert" className="rounded-md bg-danger-soft p-3 text-body text-danger">
+            {serverError}
+          </p>
+        )}
       </div>
     </Modal>
   );

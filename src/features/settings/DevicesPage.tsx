@@ -31,6 +31,9 @@ import {
   type BleState,
 } from '@/shared/api/settingsAdmin';
 import { RegisterDeviceModal } from './components/RegisterDeviceModal';
+import { PairDeviceModal } from './components/PairDeviceModal';
+import { UpdateFirmwareModal } from './components/UpdateFirmwareModal';
+import { SETTINGS_TOAST } from './lib/copy';
 
 type Segment = 'ALL' | 'CONNECTED' | 'DISCONNECTED' | 'UNASSIGNED';
 
@@ -55,6 +58,8 @@ export default function DevicesPage() {
   const [limit, setLimit] = useState(25);
   const [registerOpen, setRegisterOpen] = useState(false);
   const [retireTarget, setRetireTarget] = useState<DeviceRow | null>(null);
+  const [pairTarget, setPairTarget] = useState<DeviceRow | null>(null);
+  const [firmwareTarget, setFirmwareTarget] = useState<DeviceRow | null>(null);
 
   const statusFilter: DeviceStatus | undefined = segment === 'UNASSIGNED' ? 'UNASSIGNED' : undefined;
   // A new search term or segment re-pages the list from the start, and the page is clamped to the
@@ -94,14 +99,35 @@ export default function DevicesPage() {
     return rows;
   }, [rows, segment]);
 
+  const [exporting, setExporting] = useState(false);
+
+  // A failed export used to be an unhandled promise rejection — the button did nothing visible.
   async function handleExport() {
-    const data = await client.get(endpoints.devices.export);
+    if (exporting) return;
+    setExporting(true);
+    let data: unknown;
+    try {
+      data = await client.get(endpoints.devices.export);
+    } catch {
+      toast({ kind: 'error', ...SETTINGS_TOAST.devicesExportFailed });
+      return;
+    } finally {
+      setExporting(false);
+    }
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
     link.download = 'devices-export.json';
     link.click();
     URL.revokeObjectURL(link.href);
+  }
+
+  // `Unpair` used to fire with no feedback at all, success or failure.
+  function handleUnpair(device: DeviceRow) {
+    unpairDevice.mutate(device.id, {
+      onSuccess: () => toast({ kind: 'success', ...SETTINGS_TOAST.deviceUnpaired(device.serial) }),
+      onError: (error) => toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }),
+    });
   }
 
   const columns: ColumnDef<DeviceRow, unknown>[] = [
@@ -171,7 +197,7 @@ export default function DevicesPage() {
       <div className="grid grid-cols-3 gap-4">
         <KpiCard label="Connected now" value={connected} chip={{ text: total ? `${Math.round((connected / total) * 100)}%` : '0%', tone: 'success' }} icon={Wifi} iconTone="success" />
         <KpiCard label="Disconnected > 24 h" value={disconnected} chip={{ text: 'needs action', tone: 'danger' }} icon={WifiOff} iconTone="danger" />
-        <KpiCard label="Firmware out of date" value={outdated} chip={{ text: 'L113 available', tone: 'info' }} icon={RefreshCw} iconTone="info" />
+        <KpiCard label="Firmware out of date" value={outdated} chip={{ text: 'update from the row menu', tone: 'info' }} icon={RefreshCw} iconTone="info" />
       </div>
 
       <div className="flex items-center justify-between">
@@ -199,13 +225,21 @@ export default function DevicesPage() {
           <div className="flex h-input items-center gap-2 rounded-md border border-border bg-bg-surface px-3">
             <Search size={16} strokeWidth={1.75} className="text-text-muted" />
             <input
+              type="search"
+              aria-label="Search serial or unit"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search serial or unit…"
               className="w-56 bg-transparent text-body outline-none"
             />
           </div>
-          <Button variant="secondary" iconLeft={<Download size={16} strokeWidth={1.75} />} onClick={handleExport}>
+          <Button
+            variant="secondary"
+            iconLeft={<Download size={16} strokeWidth={1.75} />}
+            loading={exporting}
+            disabled={exporting}
+            onClick={() => void handleExport()}
+          >
             Export
           </Button>
         </div>
@@ -233,18 +267,24 @@ export default function DevicesPage() {
                 canFull
                   ? (row) => (
                       <>
-                        <DropdownMenu.Item className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                        <DropdownMenu.Item
+                          onSelect={() => setPairTarget(row)}
+                          className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle"
+                        >
                           Pair to unit
                         </DropdownMenu.Item>
                         {row.vehicleId && (
                           <DropdownMenu.Item
-                            onSelect={() => unpairDevice.mutate(row.id)}
+                            onSelect={() => handleUnpair(row)}
                             className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle"
                           >
                             Unpair
                           </DropdownMenu.Item>
                         )}
-                        <DropdownMenu.Item className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                        <DropdownMenu.Item
+                          onSelect={() => setFirmwareTarget(row)}
+                          className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle"
+                        >
                           Update firmware
                         </DropdownMenu.Item>
                         {/* ⛔ GAP B-8 — `View diagnostics` needs `GET /devices/:id/diagnostics`,
@@ -279,6 +319,8 @@ export default function DevicesPage() {
       </Card>
 
       {registerOpen && <RegisterDeviceModal onClose={() => setRegisterOpen(false)} />}
+      {pairTarget && <PairDeviceModal device={pairTarget} onClose={() => setPairTarget(null)} />}
+      {firmwareTarget && <UpdateFirmwareModal device={firmwareTarget} onClose={() => setFirmwareTarget(null)} />}
       <ConfirmDelete
         open={Boolean(retireTarget)}
         onClose={() => setRetireTarget(null)}
@@ -286,7 +328,7 @@ export default function DevicesPage() {
           if (!retireTarget) return;
           removeDevice.mutate(retireTarget.id, {
             onSuccess: () => {
-              toast({ kind: 'success', title: `Device ${retireTarget.serial} retired` });
+              toast({ kind: 'success', ...SETTINGS_TOAST.deviceRetired(retireTarget.serial) });
               setRetireTarget(null);
             },
             onError: (error) => {

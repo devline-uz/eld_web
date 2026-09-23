@@ -6,10 +6,10 @@
 //   1. `Driving` is disabled while the chosen interval covers an automatic `D` record, and
 //   2. when the server still answers `422 DRIVING_TIME_IMMUTABLE` the refusal is shown verbatim
 //      and the request is NEVER retried or trimmed to make it pass.
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz';
-import { Modal } from '@/shared/ui/Modal';
+import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
 import { TOAST_COPY } from '@/shared/ui/copy';
@@ -69,6 +69,9 @@ export function RequestLogEditModal({
 }: RequestLogEditModalProps) {
   const { toast } = useToast();
   const mutation = useCreateEditRequest(driverId);
+  // WB-146 — `mutation.isPending` only turns true on the next render, so a real double click
+  // would post two §395.30 proposals. The ref closes that same-tick window.
+  const inFlight = useRef(false);
 
   const startDefault = event ? formatInTimeZone(new Date(event.eventDateTime), timezone, 'HH:mm:ss') : '';
   const [startTime, setStartTime] = useState(startDefault);
@@ -90,10 +93,6 @@ export function RequestLogEditModal({
   const [odometer, setOdometer] = useState(odometerDefault);
   const [engineHours, setEngineHours] = useState('');
   const [reason, setReason] = useState('');
-  // The backend's CreateEditRequestDto has no notify flag; the proposal always reaches the
-  // driver's app (gap B-39). The checkbox is kept because the design draws it and it states the
-  // default truthfully.
-  const [notifyDriver, setNotifyDriver] = useState(true);
   const [banner, setBanner] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
@@ -123,6 +122,7 @@ export function RequestLogEditModal({
   const reasonTooShort = reason.trim().length < LIMITS.annotationMin;
 
   function submit() {
+    if (inFlight.current || mutation.isPending) return;
     setBanner(null);
     setFieldErrors({});
     if (!event) {
@@ -158,6 +158,7 @@ export function RequestLogEditModal({
       setFieldErrors({ reason: VALIDATION_MESSAGES.annotation });
       return;
     }
+    inFlight.current = true;
     mutation.mutate(
       {
         originalEventId: event.id,
@@ -184,6 +185,9 @@ export function RequestLogEditModal({
             return;
           }
           setBanner('Something went wrong.');
+        },
+        onSettled: () => {
+          inFlight.current = false;
         },
       },
     );
@@ -221,18 +225,20 @@ export function RequestLogEditModal({
       isDirty={isDirty}
       footer={
         <div className="flex w-full items-center justify-between">
-          <label className="flex items-center gap-2 text-body text-text-secondary">
-            <input
-              type="checkbox"
-              checked={notifyDriver}
-              onChange={(e) => setNotifyDriver(e.target.checked)}
-            />
-            Notify the driver immediately
-          </label>
+          {/* WB-200 — unchecking this did nothing: the proposal always reaches the driver's app
+              (gap B-39). The control states the fixed behaviour instead of offering a choice. */}
+          <span className="flex flex-col gap-0.5">
+            <label className="flex items-center gap-2 text-body text-text-muted">
+              <input type="checkbox" checked disabled aria-describedby="log-edit-notify-note" />
+              Notify the driver immediately
+            </label>
+            <span id="log-edit-notify-note" className="max-w-80 text-caption text-text-muted">
+              Always on — the driver must accept the proposal in the app before the log changes.
+            </span>
+          </span>
           <div className="flex gap-2">
-            <Button variant="secondary" size="lg" onClick={onClose}>
-              Cancel
-            </Button>
+            {/* WB-145 — closes through 11.30 Discard changes, exactly like Esc and X. */}
+            <ModalCancelButton disabled={mutation.isPending} />
             <Button variant="primary" size="lg" onClick={submit} loading={mutation.isPending}>
               Send edit request
             </Button>
@@ -315,6 +321,12 @@ export function RequestLogEditModal({
             Driving time can never be shortened, deleted or restatused (49 CFR §395.30).
           </p>
         )}
+        {/* WB-199 — YM and PC are permanently disabled (gap B-39) but only said so when the
+            driving-time rule happened to be showing too. The reason is now always on screen. */}
+        <p className="mt-2 text-caption text-text-muted">
+          Yard move and Personal conveyance cannot be proposed — a log edit request carries only
+          OFF, SB, D or ON.
+        </p>
       </fieldset>
 
       <div className="mt-4 grid grid-cols-3 gap-4">

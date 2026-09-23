@@ -1,5 +1,5 @@
 // web/tz.md §11.19 — template copy, permission segment toggles, checkboxes, and the request body.
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http } from 'msw';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -77,6 +77,32 @@ describe('CreateRoleModal — 11.19', () => {
     expect(await screen.findByText('Role created')).toBeInTheDocument();
   });
 
+  // WB-234 — one checkbox for the one `reportsTransfer` key; there is no separate transfers checkbox.
+  it('shows a single FMCSA export / data transfers checkbox that drives reportsTransfer', async () => {
+    const user = userEvent.setup();
+    let body: unknown = null;
+    server.use(
+      http.post(url(endpoints.roles.create), async ({ request }) => {
+        body = await request.json();
+        return ok({ id: 'rol_11' }, 201);
+      }),
+    );
+
+    renderModal();
+    expect(screen.queryByRole('checkbox', { name: 'Can send data transfers' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: 'Can export FMCSA / DOT pack' })).not.toBeInTheDocument();
+    const merged = screen.getByRole('checkbox', { name: 'Can export FMCSA / DOT pack and send data transfers' });
+    expect(merged).toBeChecked();
+    expect(screen.getAllByRole('checkbox')).toHaveLength(1);
+
+    await user.click(merged);
+    await user.type(screen.getByPlaceholderText('Compliance auditor'), 'No transfers');
+    await user.click(screen.getByRole('button', { name: 'Create role' }));
+
+    await waitFor(() => expect(body).not.toBeNull());
+    expect((body as { permissions: Record<string, string> }).permissions.reportsTransfer).toBe('NONE');
+  });
+
   it('submits with the template as the permission base when one is selected', async () => {
     const user = userEvent.setup();
     let body: unknown = null;
@@ -108,5 +134,64 @@ describe('CreateRoleModal — 11.19', () => {
     await user.click(screen.getByRole('button', { name: 'Create role' }));
 
     expect(await screen.findByText('A role with this name already exists.')).toBeInTheDocument();
+  });
+});
+
+describe('CreateRoleModal — double submit and dirty close', () => {
+  it('creates exactly one role on a double click', async () => {
+    const user = userEvent.setup();
+    const posts: unknown[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    server.use(
+      http.post(url(endpoints.roles.create), async ({ request }) => {
+        posts.push(await request.json());
+        await gate;
+        return ok({ id: 'rol_9' }, 201);
+      }),
+    );
+
+    renderModal();
+    await user.type(screen.getByPlaceholderText('Compliance auditor'), 'Compliance auditor');
+    const submit = screen.getByRole('button', { name: 'Create role' });
+    await user.click(submit);
+    await user.click(submit);
+
+    await waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts).toHaveLength(1);
+    release();
+  });
+
+  it('closes an untouched form silently but confirms after a permission change', async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { unmount } = render(
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <CreateRoleModal templates={TEMPLATES} onClose={onClose} />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByText('Discard changes?')).not.toBeInTheDocument();
+    expect(onClose).toHaveBeenCalled();
+    unmount();
+
+    onClose.mockClear();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <CreateRoleModal templates={TEMPLATES} onClose={onClose} />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+    // A permission segment lives outside react-hook-form — it still has to count as an edit.
+    const driversRow = screen.getByText('Drivers').closest('div')!;
+    await user.click(within(driversRow).getByRole('button', { name: 'Full' }));
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(await screen.findByText('Discard changes?')).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

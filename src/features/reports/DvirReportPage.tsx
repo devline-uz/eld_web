@@ -49,7 +49,7 @@ import {
   refusalText,
   visibleReportRoutes,
 } from './reportMeta';
-import { useExportWhenReady, useReportReadyToasts } from './useReportJobs';
+import { useExportWhenReady, useGuardedMutate, useReportReadyToasts, useTrackedReport } from './useReportJobs';
 import { useReportRange } from './useReportRange';
 
 const TYPE_LABEL: Record<string, string> = { PRE_TRIP: 'Pre-trip', POST_TRIP: 'Post-trip', INTERMEDIATE: 'Intermediate' };
@@ -81,7 +81,11 @@ export default function DvirReportPage() {
 
   const data = useDvirReportRows(unit, from);
   const vehicles = useReportVehicles();
-  const generate = useGenerateReport();
+  // WB-146 — single-flight: `isPending` alone still lets a real double click queue two reports.
+  const generate = useGuardedMutate(useGenerateReport());
+  // WB-166 — this screen has no `Recently generated` card, so without following the queued job
+  // `Download PDF` confirmed nothing at all unless a `report.ready` frame happened to arrive.
+  const pdfJob = useTrackedReport();
   const exportCsv = useExportWhenReady();
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -263,13 +267,16 @@ export default function DvirReportPage() {
           <Button
             variant="primary"
             iconLeft={<Download size={16} strokeWidth={1.75} />}
-            loading={generate.isPending}
-            disabled={generate.isPending}
+            loading={generate.isPending || pdfJob.isPending}
+            disabled={generate.isPending || pdfJob.isPending}
             onClick={() => {
               setPdfError(null);
               generate.mutate(
                 { type: 'DVIR', format: 'PDF', params: { from, to, ...(unit ? { vehicleId: unit } : {}) } },
-                { onError: (error) => setPdfError(refusalText(error)) },
+                {
+                  onSuccess: (queued) => pdfJob.track(queued.reportId),
+                  onError: (error) => setPdfError(refusalText(error)),
+                },
               );
             }}
           >
@@ -286,9 +293,10 @@ export default function DvirReportPage() {
       )}
 
       <ActionAlert
-        message={pdfError ?? exportCsv.error}
+        message={pdfError ?? pdfJob.error ?? exportCsv.error}
         onDismiss={() => {
           setPdfError(null);
+          pdfJob.clearError();
           exportCsv.clearError();
         }}
       />
