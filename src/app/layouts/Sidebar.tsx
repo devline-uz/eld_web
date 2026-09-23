@@ -8,6 +8,7 @@ import { usePermission } from '@/shared/auth/usePermission';
 import { useCarrier } from '@/shared/api/settingsAdmin';
 import { vehiclesCountQuery } from '@/shared/api/vehicles';
 import { cn } from '@/shared/ui/cn';
+import { DevlineLogo } from '@/shared/ui/DevlineLogo';
 import { NAV_SECTIONS, isNavItemVisible } from '../navigation';
 import { createRouteWarmer } from '../routePrefetch';
 
@@ -115,6 +116,8 @@ function OrganisationCard({ collapsed }: { collapsed: boolean }) {
         >
           {initials}
         </span>
+        {/* Vendor signature under the company — only the "D" tile fits the 64px rail. */}
+        <DevlineLogo variant="mark" className="mt-2 w-full justify-center" />
       </div>
     );
   }
@@ -132,6 +135,8 @@ function OrganisationCard({ collapsed }: { collapsed: boolean }) {
           )}
         </span>
       </div>
+      {/* Vendor signature sits under the company name (brand screenshot 2026-09-23). */}
+      <DevlineLogo className="mt-3 w-full justify-center" />
     </div>
   );
 }

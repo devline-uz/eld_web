@@ -23,3 +23,4 @@ export * from './FilterDrawer';
 export * from './DateRangePicker';
 export * from './DriverPicker';
 export * from './PagePlaceholder';
+export * from './DevlineLogo';
