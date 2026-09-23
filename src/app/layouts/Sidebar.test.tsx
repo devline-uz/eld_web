@@ -62,6 +62,23 @@ describe('Sidebar', () => {
     expect(screen.queryByText(/DOT #/)).toBeNull();
   });
 
+  it('signs the organisation card with the Devline logo under the company name', async () => {
+    const user = userEvent.setup();
+    renderSidebar();
+    const name = await screen.findByText('Northway Freight');
+    const logo = screen.getByRole('img', { name: 'Powered by Devline' });
+    // Under the company name, not above it.
+    expect(name.compareDocumentPosition(logo) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(logo).toHaveTextContent(/Powered by/i);
+    expect(logo).toHaveTextContent('evline');
+
+    // Collapsed rail: only the "D" tile, still named for assistive tech.
+    await user.click(screen.getByRole('button', { name: 'Collapse sidebar' }));
+    const mark = screen.getByRole('img', { name: 'Powered by Devline' });
+    expect(mark).not.toHaveTextContent(/Powered by/i);
+    expect(mark.querySelector('svg')).not.toBeNull();
+  });
+
   it('collapses to the 64px state and remembers the choice', async () => {
     const user = userEvent.setup();
     const { unmount } = renderSidebar();
