@@ -2,7 +2,7 @@
 //   • the toolbar opens a usable form (the day's latest active record, its start pre-filled),
 //   • `Send edit request` really posts, toasts §13.3 verbatim and closes,
 //   • a double click posts exactly one §395.30 proposal,
-//   • a day with no record disables the action and says why, instead of opening a dead form.
+//   • a day with no record proposes a NEW record via `POST /logs/:driverId/events` (B-72).
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http } from 'msw';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -215,17 +215,46 @@ describe('11.11 · Add / edit event, end to end', () => {
     expect(bodies).toHaveLength(1);
   });
 
-  it('WB-147 · a day with no record disables the action and says why', async () => {
+  it('B-72 · a day with no record proposes a new one (inert until the driver accepts)', async () => {
     server.use(...baseHandlers([]));
+    const proposals: Array<Record<string, unknown>> = [];
+    const editRequests = captureEditRequests();
+    server.use(
+      http.post(url(endpoints.logs.proposeEvent(DRIVER_ID)), async ({ request }) => {
+        proposals.push((await request.json()) as Record<string, unknown>);
+        return ok({ id: '9901', status: 'PENDING', kind: 'INSERT', recordStatus: 3, applied: false }, 201);
+      }),
+    );
     renderPage();
 
     const button = await screen.findByRole('button', { name: /Add \/ edit event/ });
-    await waitFor(() => expect(button).toBeDisabled());
-    expect(
-      screen.getByText(
-        'A log edit is proposed against an existing record (49 CFR §395.30). This day has no duty record yet.',
-      ),
-    ).toBeInTheDocument();
-    expect(button).toHaveAttribute('aria-describedby', 'hos-edit-unavailable');
+    await waitFor(() => expect(button).toBeEnabled());
+    expect(screen.queryByText(/This day has no duty record yet/)).not.toBeInTheDocument();
+    await userEvent.click(button);
+    const dialog = await screen.findByRole('dialog');
+    // §395.30 banner stays: a carrier only suggests.
+    expect(within(dialog).getByText(/a carrier may only suggest an edit/)).toBeInTheDocument();
+    expect(within(dialog).getByText('No record on this day')).toBeInTheDocument();
+
+    await userEvent.type(within(dialog).getByRole('textbox', { name: /Start time/ }), '08:00:00');
+    await userEvent.type(within(dialog).getByRole('textbox', { name: /End time/ }), '09:30:00');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Personal' }));
+    await userEvent.type(
+      within(dialog).getByRole('textbox', { name: /Reason for the edit/ }),
+      'Driver drove home off duty.',
+    );
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Send edit request' }));
+
+    await waitFor(() => expect(proposals).toHaveLength(1));
+    expect(editRequests).toHaveLength(0);
+    expect(proposals[0]).toEqual({
+      status: 'OFF',
+      proposedSpecial: 'PC',
+      eventDateTime: '2026-09-10T12:00:00.000Z',
+      endDateTime: '2026-09-10T13:30:00.000Z',
+      annotation: 'Driver drove home off duty.',
+      notifyDriver: true,
+    });
+    expect(await screen.findByText(TOAST_COPY.editRequestSent('John Smith').title)).toBeInTheDocument();
   });
 });

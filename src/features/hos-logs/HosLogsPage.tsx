@@ -47,12 +47,8 @@ import { certificationNote, rodsDayStart, unassignedInDay, validDayKey, zoneLabe
 
 const DAY_MS = 86_400_000;
 
-/** Shown under the toolbar when there is no record to propose an edit against (WB-147). */
 /** `Export PDF` opens the browser print dialog on the log region only (`shared/ui/print.css`). */
 const PRINT_LOG_HINT = 'Prints this driver log only — choose "Save as PDF" in the print dialog.';
-
-const EDIT_NEEDS_A_RECORD =
-  'A log edit is proposed against an existing record (49 CFR §395.30). This day has no duty record yet.';
 
 /** `2026-09-12` in a given zone — never the browser's. */
 function dayKeyIn(timezone: string, at: Date = new Date()): string {
@@ -173,7 +169,8 @@ export default function HosLogsPage() {
     () => events.filter((event) => event.recordStatus === RECORD_STATUS.active && event.status !== null),
     [events],
   );
-  // The record a proposal is made against: the day's latest active duty change (WB-147).
+  // The record a proposal is made against: the day's latest active duty change (WB-147). With none,
+  // `Add / edit event` proposes a new record instead (B-72) — still only a §395.30 suggestion.
   const editableEvent = activeDutyEvents[activeDutyEvents.length - 1] ?? null;
   const pendingEditCount = useMemo(
     () => events.filter((event) => event.recordStatus === RECORD_STATUS.proposed).length,
@@ -262,10 +259,8 @@ export default function HosLogsPage() {
           <Can perm="hosEdit" level="FULL">
             <Button
               variant="secondary"
-              disabled={!editableEvent}
-              aria-describedby={editableEvent ? undefined : 'hos-edit-unavailable'}
+              disabled={!driverId}
               onClick={() => {
-                if (!editableEvent) return;
                 setEditTarget(editableEvent);
                 setEditOpen(true);
               }}
@@ -293,16 +288,6 @@ export default function HosLogsPage() {
           </Can>
         </div>
       </div>
-
-      {/* WB-147 — §395.30 lets a carrier only PROPOSE a change to an existing record, and
-          `POST /logs/:driverId/edit-requests` requires `originalEventId`. With no record on the
-          day there is nothing to propose against, so the action is disabled with its reason
-          rather than opening a form that can never be sent (backend gap B-39). */}
-      {driverId && can('hosEdit', 'FULL') && !editableEvent && (
-        <p id="hos-edit-unavailable" className="text-caption text-text-muted">
-          {EDIT_NEEDS_A_RECORD}
-        </p>
-      )}
 
       {!driverId ? (
         <Card>

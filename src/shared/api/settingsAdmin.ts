@@ -15,49 +15,12 @@ import { endpoints } from './endpoints';
 import { qk, qkRoot } from './queryKeys';
 import { typedCachePolicy } from './queryPolicy';
 import type { OffsetPage } from './types';
+import type { CarrierRow } from './carrier';
 import type { PermissionKey, PermissionLevel } from '@/shared/auth/permissions';
 
 /* ------------------------------------------------------------------ Carrier — W-17 */
 
-export type HosRuleset =
-  | 'US_70_8_PROPERTY'
-  | 'US_60_7_PROPERTY'
-  | 'US_70_8_PASSENGER'
-  | 'US_60_7_PASSENGER';
-
-export interface CarrierRow {
-  id: string;
-  name: string;
-  dotNumber: string;
-  mcNumber?: string | null;
-  ein?: string | null;
-  timezone: string;
-  hosRuleset?: HosRuleset;
-  distanceUnit?: 'MILES' | 'KILOMETERS';
-  cycleRestart?: boolean;
-  unassignedThresholdMin?: number;
-  dvirRetentionMonths?: number;
-  allowPersonalConveyance?: boolean;
-  allowYardMove?: boolean;
-  addressLine1?: string | null;
-  city?: string | null;
-  state?: string | null;
-  zip?: string | null;
-  phone?: string | null;
-  complianceEmail?: string | null;
-  eldIdentifier?: string | null;
-  eldRegistrationId?: string | null;
-  erodsMode: 'TEST' | 'PRODUCTION';
-}
-
-export function useCarrier() {
-  return useQuery({
-    queryKey: qk.carrier,
-    queryFn: ({ signal }) => client.get<CarrierRow>(endpoints.carrier.root, { signal }),
-    ...typedCachePolicy<CarrierRow>('reference'),
-  });
-}
-
+export { useCarrier, type CarrierRow, type HosRuleset } from './carrier';
 export function useUpdateCarrier() {
   const qc = useQueryClient();
   return useMutation({

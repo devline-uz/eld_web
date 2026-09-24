@@ -231,11 +231,25 @@ async function userEventClickWithin(container: Element, name: RegExp, user: Retu
 /* ------------------------------------------------------------------ stage-2 */
 
 describe('IntegrationsPage — stage-2', () => {
-  it('Browse marketplace is disabled with a visible reason (B-89)', async () => {
-    server.use(http.get(url(endpoints.apiKeys.list), () => ok([])));
+  it('Browse marketplace opens the catalog modal (B-89, shipped)', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(url(endpoints.apiKeys.list), () => ok([])),
+      http.get(url(endpoints.integrations.catalog), () =>
+        ok([
+          { provider: 'mcleod', name: 'McLeod PowerBroker', description: 'TMS', category: 'Dispatch', available: true },
+          { provider: 'geotab', name: 'Geotab', description: 'Telematics', category: 'ELD', available: false },
+        ]),
+      ),
+    );
     renderPage();
-    expect(await screen.findByRole('button', { name: /browse marketplace/i })).toBeDisabled();
-    expect(screen.getByText('The integration marketplace is not available yet.')).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: /browse marketplace/i }));
+    const dialog = await screen.findByRole('dialog', { name: /integration marketplace/i });
+    expect(within(dialog).getByText('Geotab')).toBeInTheDocument();
+    const geotabConnect = within(dialog)
+      .getAllByRole('button', { name: 'Connect' })
+      .find((b) => b.closest('div')?.textContent?.includes('Geotab'));
+    expect(geotabConnect).toBeDisabled();
   });
 
   it('Edit scopes PATCHes the new scope set and refuses an empty one', async () => {

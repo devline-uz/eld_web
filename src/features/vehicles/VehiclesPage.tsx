@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import type { ColumnDef } from '@tanstack/react-table';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
 import { Search, Plus, Download, Filter, Upload, X } from 'lucide-react';
 import { liveFleetHref } from '@/shared/lib/liveFleetHref';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
@@ -12,7 +12,7 @@ import { usePermission } from '@/shared/auth/usePermission';
 import { useIsOffline, OFFLINE_TOOLTIP } from '@/shared/realtime/RealtimeProvider';
 import { useDynamicSubtitle } from '@/app/layouts/Topbar';
 import { useLiveFleet } from '@/shared/api/liveFleet';
-import { useVehiclesList, useVehicleCounts, joinVehicles, totalVehicleMiles, type VehicleTableRow } from '@/shared/api/vehicles';
+import { useVehiclesList, useVehicleCounts, useBulkVehicleStatus, joinVehicles, totalVehicleMiles, type VehicleTableRow } from '@/shared/api/vehicles';
 import { useVehiclesLookup } from '@/shared/api/lookups';
 import { client } from '@/shared/api/client';
 import { endpoints } from '@/shared/api/endpoints';
@@ -24,7 +24,6 @@ import { Pagination } from '@/shared/ui/Pagination';
 import { Card } from '@/shared/ui/Card';
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
 import { EMPTY_STATE_COPY, TOAST_COPY, searchEmptyState } from '@/shared/ui/copy';
-import { qkRoot } from '@/shared/api/queryKeys';
 import { toCsv } from '@/shared/lib/csv';
 import { ApiError } from '@/shared/api/errors';
 import { useToast } from '@/shared/ui/Toast';
@@ -61,7 +60,6 @@ function positiveIntParam(raw: string | null, fallback: number): number {
 
 export default function VehiclesPage() {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const { can } = usePermission();
   const isOffline = useIsOffline();
   const { toast } = useToast();
@@ -234,31 +232,21 @@ export default function VehiclesPage() {
     saveBlob(new Blob([csv], { type: 'text/csv' }), 'vehicles-selected.csv');
   }
 
-  // WB — the bulk `Set inactive` used to fire the success toast without touching the network, so
-  // the selected units stayed ACTIVE. There is no bulk-status endpoint (`backend-gaps.md`): the
-  // real write is `PATCH /vehicles/:id { status }`, fanned out one request per selected unit.
-  // `allSettled`, not `all`, so one rejection cannot hide the units that did change; the failed
-  // count is reported instead of being swallowed.
+  // B-71 shipped — `PATCH /vehicles/bulk-status`, one atomic-per-row request; `failed` is read,
+  // never hidden. Replaces the earlier per-id `PATCH /vehicles/:id` fan-out.
+  const bulkStatus = useBulkVehicleStatus();
   const setInactiveMutation = useMutation({
-    mutationFn: async (ids: string[]) => {
-      const results = await Promise.allSettled(
-        ids.map((id) => client.patch(endpoints.vehicles.update(id), { status: 'INACTIVE' })),
-      );
-      const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
-      return { total: ids.length, succeeded: ids.length - rejected.length, firstError: rejected[0]?.reason as unknown };
-    },
-    onSuccess: ({ total, succeeded, firstError }) => {
-      void queryClient.invalidateQueries({ queryKey: qkRoot.vehicles });
-      if (succeeded > 0) setSelection([]);
-      if (succeeded === total) {
-        toast({ kind: 'success', ...TOAST_COPY.unitsSetInactive(succeeded) });
+    mutationFn: (ids: string[]) => bulkStatus.mutateAsync({ ids, status: 'INACTIVE' }),
+    onSuccess: (result, ids) => {
+      if (result.updated.length > 0) setSelection([]);
+      if (result.failed.length === 0) {
+        toast({ kind: 'success', ...TOAST_COPY.unitsSetInactive(result.updated.length) });
         return;
       }
       toast({
         kind: 'error',
-        ...TOAST_COPY.unitsSetInactiveFailed(total - succeeded, total),
-        description:
-          firstError instanceof ApiError ? firstError.userMessage : TOAST_COPY.unitsSetInactiveFailed(total - succeeded, total).description,
+        ...TOAST_COPY.unitsSetInactiveFailed(result.failed.length, ids.length),
+        description: result.failed[0]?.error ?? TOAST_COPY.unitsSetInactiveFailed(result.failed.length, ids.length).description,
       });
     },
     onError: (error) => {

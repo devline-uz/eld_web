@@ -51,6 +51,12 @@ export type ReportWindow = 'PREVIOUS_WEEK' | 'PREVIOUS_MONTH' | 'PREVIOUS_QUARTE
 export type ReportStatus = 'QUEUED' | 'RUNNING' | 'READY' | 'FAILED';
 export type ReportFormat = 'CSV' | 'PDF' | 'XLSX';
 
+/** `requestedBy: { id, name }` embedded on `GET /reports` and `GET /transfers` (B-46). */
+export interface RequestedBy {
+  id: string;
+  name: string;
+}
+
 export interface ReportRow {
   id: string;
   type: ReportType;
@@ -62,6 +68,8 @@ export interface ReportRow {
   rowCount: number | null;
   error: string | null;
   requestedById: string;
+  /** B-46 (shipped) — embedded on read; `null` when the user row is gone. */
+  requestedBy?: RequestedBy | null;
   requestedAt: string;
   completedAt: string | null;
   expiresAt: string | null;
@@ -134,12 +142,13 @@ export function useGenerateReport() {
 /**
  * The `GET /reports/{ifta,activity,dvir,fmcsa-pack}` shortcuts queue a job with READ permission
  * (`reports` READ; the pack needs `reportsTransfer` READ) — this is what `Export CSV` uses, so the
- * read-only roles keep their export (§12.2).
+ * read-only roles keep their export (§12.2). B-96 (shipped 2026-09-24) added `format=PDF` on these
+ * same shortcuts, so `Download PDF` also works at READ — VIEWER keeps it (WB-247 gate lifted).
  */
 export type QueueShortcutInput =
-  | { kind: 'ifta'; params: { quarter: string } }
-  | { kind: 'activity'; params: { from: string; to: string; driverId?: string } }
-  | { kind: 'dvir'; params: { from: string; to: string; vehicleId?: string } }
+  | { kind: 'ifta'; params: { quarter: string; format?: ReportFormat } }
+  | { kind: 'activity'; params: { from: string; to: string; driverId?: string; format?: ReportFormat } }
+  | { kind: 'dvir'; params: { from: string; to: string; vehicleId?: string; format?: ReportFormat } }
   | {
       kind: 'fmcsaPack';
       /** B-48 — `vehicleId` narrows WHICH drivers are in the pack; `include` limits the sections
@@ -155,15 +164,8 @@ export function useQueueReport() {
   });
 }
 
-/** One-shot read for the `report.ready` handler (the event carries no size). */
-export function fetchReport(id: string): Promise<ReportRow> {
-  return client.get<ReportRow>(endpoints.reports.detail(id));
-}
-
-/** A fresh 7-day presigned URL, fetched at click time — never cached, never logged (§17). */
-export function fetchReportDownload(id: string): Promise<ReportDownload> {
-  return client.get<ReportDownload>(endpoints.reports.download(id));
-}
+// WB-249 — the two one-shot reads live in `reportFiles.ts` (eager, shell `report.ready` toast).
+export { fetchReport, fetchReportDownload } from './reportFiles';
 
 export interface ReportScheduleRow {
   id: string;
@@ -273,6 +275,8 @@ export interface TransferRow {
   responseBody: string | null;
   attempts: number;
   requestedById: string | null;
+  /** B-46 (shipped) — a USER or a DRIVER (polymorphic `requestedByType`), embedded on read. */
+  requestedBy?: RequestedBy | null;
   createdAt: string;
   sentAt: string | null;
 }
@@ -326,7 +330,7 @@ export function useTransfer(id: string | null | undefined) {
 }
 
 /**
- * `POST /transfers` — `reportsTransfer` FULL. Compliance write: no optimistic update, no retry.
+ * `POST /transfers` — `dataTransfer` FULL (B-95; list/detail/download stay on `reportsTransfer`). Compliance write: no optimistic update, no retry.
  * Warnings (`UNCERTIFIED_LOGS`, `UNRESOLVED_UNIDENTIFIED`, `ACTIVE_MALFUNCTION`, `ERODS_TEST_MODE`)
  * come back on the 2xx body and are shown verbatim; refusals come back as 422 and are shown verbatim.
  */

@@ -207,13 +207,13 @@ describe('W-03 Vehicles', () => {
     expect(screen.getByRole('button', { name: 'Import Units' })).toBeInTheDocument();
   });
 
-  it('WB — bulk "Set inactive" PATCHes every selected unit instead of faking the toast', async () => {
+  it('B-71 shipped — bulk "Set inactive" calls PATCH /vehicles/bulk-status instead of faking the toast', async () => {
     usePopulatedFleet();
-    const patched: Array<{ id: string; body: unknown }> = [];
+    let body: unknown;
     server.use(
-      http.patch(url(endpoints.vehicles.update(':id')), async ({ params, request }) => {
-        patched.push({ id: String(params.id), body: await request.json() });
-        return ok({ id: String(params.id), status: 'INACTIVE' });
+      http.patch(url(endpoints.vehicles.bulkStatus), async ({ request }) => {
+        body = await request.json();
+        return ok({ updated: ['veh_1'], failed: [] });
       }),
     );
     const user = userEvent.setup();
@@ -225,17 +225,14 @@ describe('W-03 Vehicles', () => {
 
     // The real write happened, and the toast is singular ("1 unit", not "1 units").
     expect(await screen.findByText('1 unit set inactive')).toBeInTheDocument();
-    expect(patched).toEqual([{ id: 'veh_1', body: { status: 'INACTIVE' } }]);
+    expect(body).toEqual({ ids: ['veh_1'], status: 'INACTIVE' });
   });
 
-  it('WB — a failing bulk "Set inactive" reports the failure instead of claiming success', async () => {
+  it('B-71 shipped — a failing bulk "Set inactive" reports the failure instead of claiming success', async () => {
     usePopulatedFleet();
     server.use(
-      http.patch(url(endpoints.vehicles.update(':id')), () =>
-        HttpResponse.json(
-          { statusCode: 500, code: 'INTERNAL', message: 'boom', traceId: 't1' },
-          { status: 500 },
-        ),
+      http.patch(url(endpoints.vehicles.bulkStatus), () =>
+        ok({ updated: [], failed: [{ id: 'veh_1', error: 'VEHICLE_HAS_OPEN_CRITICAL_DEFECTS' }] }),
       ),
     );
     const user = userEvent.setup();

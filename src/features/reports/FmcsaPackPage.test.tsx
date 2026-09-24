@@ -115,7 +115,7 @@ describe('W-15 Reports · FMCSA / DOT audit pack', () => {
       ['Driver log edits and annotations', 'Original value, edited value, reason and approver', true],
       ['Vehicle and ELD identification', 'VIN, unit number, ELD serial and firmware version', true],
       ['DVIRs and defect corrections', 'Pre-trip, post-trip and mechanic signatures', true],
-      // WB-177 — checked: the pack is always built in full, and 11.14's `Includes` line says so.
+      // WB-177 / WD-091 — ticked by default: the full pack is the default request (B-48).
       ['Malfunction and diagnostic events', 'Power, engine sync, timing and data-recording events', true],
     ];
     for (const [name, description, checked] of rows) {
@@ -124,6 +124,41 @@ describe('W-15 Reports · FMCSA / DOT audit pack', () => {
       else expect(box).not.toBeChecked();
       expect(screen.getByText(description)).toBeInTheDocument();
     }
+  });
+
+  it('B-48 — Unit and unticked sections reach GET /reports/fmcsa-pack as vehicleId + include[]', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    const requests: URL[] = [];
+    server.events.on('request:start', ({ request }) => {
+      if (request.url.includes('/reports/fmcsa-pack')) requests.push(new URL(request.url));
+    });
+    renderPage(<FmcsaPackPage />, `${ROUTE}&unit=veh_101`);
+    const box = screen.getByRole('checkbox', { name: 'Malfunction and diagnostic events' });
+    await user.click(box);
+    expect(box).not.toBeChecked();
+    await user.click(screen.getByRole('button', { name: 'Generate pack' }));
+    await waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0]?.searchParams.get('vehicleId')).toBe('veh_101');
+    expect(requests[0]?.searchParams.getAll('include')).toEqual(['RODS', 'UNIDENTIFIED', 'EDITS', 'ELD_ID', 'DVIR']);
+    expect(screen.getByText(/not narrowed to the unit/)).toBeInTheDocument();
+    server.events.removeAllListeners('request:start');
+  });
+
+  it('sends no include for the full pack, and refuses to generate with no section ticked', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    const requests: URL[] = [];
+    server.events.on('request:start', ({ request }) => {
+      if (request.url.includes('/reports/fmcsa-pack')) requests.push(new URL(request.url));
+    });
+    renderPage(<FmcsaPackPage />, ROUTE);
+    await user.click(screen.getByRole('button', { name: 'Generate pack' }));
+    await waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0]?.searchParams.has('include')).toBe(false);
+    expect(requests[0]?.searchParams.has('vehicleId')).toBe(false);
+    for (const box of screen.getAllByRole('checkbox')) await user.click(box);
+    expect(screen.getByText('Select at least one section.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Generate pack' })).toBeDisabled();
+    server.events.removeAllListeners('request:start');
   });
 
   it('⬜ Resolve now goes to the unassigned-driving flow', async () => {
@@ -137,14 +172,28 @@ describe('W-15 Reports · FMCSA / DOT audit pack', () => {
     expect(screen.getByTestId('location')).toHaveTextContent('/hos-logs?unassigned=1');
   });
 
-  it('⬜ shows the TEST banner when eRODS mode is not readable (FLEET_MANAGER, B-45)', () => {
+  it('⬜ shows the TEST banner from GET /carrier/transfer-config for FLEET_MANAGER (B-45)', async () => {
+    server.use(
+      http.get(url(endpoints.carrier.transferConfig), () =>
+        ok({ timezone: 'America/New_York', eldIdentifier: 'OBK1', eldRegistrationId: null, erodsMode: 'TEST' }),
+      ),
+    );
     renderPage(<FmcsaPackPage />, ROUTE);
+    expect(card('Data transfer').getByText('eRODS · TEST mode')).toBeInTheDocument();
+    // Still TEST once the config has actually been read — not just the loading default.
+    await new Promise((r) => setTimeout(r, 50));
     expect(card('Data transfer').getByText('eRODS · TEST mode')).toBeInTheDocument();
   });
 
-  it('hides the banner only when the carrier is positively PRODUCTION (ADMIN)', async () => {
-    mocks.role = 'ADMIN';
+  it.each(['ADMIN', 'FLEET_MANAGER'])('hides the banner only when the carrier is positively PRODUCTION (%s)', async (role) => {
+    mocks.role = role;
+    server.use(
+      http.get(url(endpoints.carrier.transferConfig), () =>
+        ok({ timezone: 'America/New_York', eldIdentifier: 'OBK1', eldRegistrationId: 'REG1', erodsMode: 'PRODUCTION' }),
+      ),
+    );
     renderPage(<FmcsaPackPage />, ROUTE);
+    expect(screen.getByText('eRODS · TEST mode')).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByText('eRODS · TEST mode')).toBeNull());
   });
 
@@ -258,14 +307,24 @@ describe('W-15 Reports · FMCSA / DOT audit pack', () => {
     expect(await screen.findByText('Validation failed')).toBeInTheDocument();
   });
 
-  it('⬜ reportsTransfer gates every transfer control (READ keeps the history, drops the actions)', async () => {
+  it('⬜ reportsTransfer READ drops Generate pack and makes the sections read-only; the history stays', async () => {
     mocks.overrides = { permissions: { ...ROLE_PERMISSIONS.FLEET_MANAGER, reportsTransfer: 'READ' } };
     renderPage(<FmcsaPackPage />, ROUTE);
+    await screen.findByRole('row', { name: /ROADSIDE OH-4471/ });
+    expect(screen.queryByRole('button', { name: 'Generate pack' })).toBeNull();
+    expect(screen.getByRole('checkbox', { name: 'Records of duty status (RODS)' })).toBeDisabled();
+    expect(screen.getByRole('heading', { name: 'Previous transfers' })).toBeInTheDocument();
+  });
+
+  it('B-95 — dataTransfer (not reportsTransfer) gates Send to inspector, Retry and 11.14', async () => {
+    mocks.overrides = { permissions: { ...ROLE_PERMISSIONS.FLEET_MANAGER, dataTransfer: 'NONE' } };
+    renderPage(<FmcsaPackPage />, `${ROUTE}&transfer=1`);
     const failed = await screen.findByRole('row', { name: /ROADSIDE OH-4471/ });
     expect(within(failed).queryByRole('button', { name: 'Retry' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Send to inspector' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Generate pack' })).toBeNull();
-    expect(screen.getByRole('heading', { name: 'Previous transfers' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Send logs to a safety official' })).toBeNull();
+    // Generating the pack is still a reportsTransfer right.
+    expect(screen.getByRole('button', { name: 'Generate pack' })).toBeInTheDocument();
   });
 
   it('renders ForbiddenState for a plain 403', async () => {

@@ -11,7 +11,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
 import { useDynamicSubtitle } from '@/app/layouts/Topbar';
-import { useDriverRoster, useDriverRosterCounts, useDriverRosterWindow, type DriverRosterEntry } from '@/shared/api/drivers';
+import { useDriverRoster, useDriverRosterCounts, useDriverRosterWindow, useResetDriverPassword, type DriverRosterEntry } from '@/shared/api/drivers';
 import { useQueueReport } from '@/shared/api/reports';
 import { client } from '@/shared/api/client';
 import { ApiError } from '@/shared/api/errors';
@@ -34,7 +34,7 @@ import { BulkMessageModal } from './components/BulkMessageModal';
 import { ImportDriversModal } from './components/ImportDriversModal';
 import { DriverFiltersDrawer, DriverFilterChips } from './components/DriverFiltersDrawer';
 import { parseDriverFilters, writeDriverFilters, matchesDriverFilters, EMPTY_DRIVER_FILTERS, countActiveDriverFilters } from './lib/filters';
-import { DRIVER_TOAST, NO_PASSWORD_RESET } from './lib/copy';
+import { DRIVER_TOAST } from './lib/copy';
 import { messagesHref } from '@/shared/lib/messagesHref';
 import { tripsHrefForDriver } from './lib/links';
 
@@ -244,6 +244,16 @@ export default function DriversPage() {
       toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
     },
   });
+
+  // B-81 shipped — `POST /drivers/:id/reset-password`, `drivers` FULL, audited.
+  const resetPassword = useResetDriverPassword();
+  function runResetPassword(driverId: string) {
+    if (resetPassword.isPending) return;
+    resetPassword.mutate(driverId, {
+      onSuccess: (result) => toast({ kind: 'success', ...DRIVER_TOAST.passwordReset(result) }),
+      onError: (error) => toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }),
+    });
+  }
 
   const canExportRods = can('reportsTransfer');
   const canBroadcast = can('messaging', 'FULL');
@@ -500,13 +510,12 @@ export default function DriversPage() {
                             </DropdownMenu.Item>
                           </Can>
                           <DropdownMenu.Separator className="my-1 h-px bg-border" />
-                          {/* ⛔ GAP B-81 — no carrier-side password reset for a driver account. The
-                              item stays visible with its reason rather than firing a toast for a
-                              request that was never made. */}
-                          <DropdownMenu.Item disabled className="rounded-md px-2 py-1.5 text-body text-text-muted outline-none data-[disabled]:cursor-not-allowed">
+                          <DropdownMenu.Item
+                            onSelect={() => runResetPassword(row.driver.id)}
+                            className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle"
+                          >
                             Reset app password
                           </DropdownMenu.Item>
-                          <p className="px-2 pb-1 text-caption text-text-muted">{NO_PASSWORD_RESET}</p>
                           <DropdownMenu.Item
                             onSelect={() => setDeactivateTargets([row.driver.id])}
                             className="cursor-pointer rounded-md px-2 py-1.5 text-body text-danger outline-none hover:bg-danger-soft"

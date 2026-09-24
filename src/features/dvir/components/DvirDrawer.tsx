@@ -1,13 +1,21 @@
 // owner: web-dvir-safety — 11.15 DVIR detail (web/tz.md §11.15). `dvir` READ; footer's
 // `Create work order` needs `maintenance` FULL, mechanic sign-off needs `dvir` FULL.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { EyeOff } from 'lucide-react';
 import { Drawer } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { SeverityBadge } from '@/shared/ui/Badge';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
-import { useDvir, useMechanicSignoff, type DvirDetail, type RepairStatus } from '@/shared/api/dvir';
+import {
+  useDvir,
+  useMechanicSignoff,
+  fetchDvirPdf,
+  fetchAttachmentUrl,
+  type AttachmentRow,
+  type DvirDetail,
+  type RepairStatus,
+} from '@/shared/api/dvir';
 import { LoadingState, ErrorState } from '@/shared/ui/states';
 import { formatLocal } from '@/shared/format/datetime';
 import { formatOdometer } from '@/shared/format/numbers';
@@ -15,11 +23,6 @@ import { orDash } from '@/shared/format/empty';
 import { useToast } from '@/shared/ui/Toast';
 import { ApiError } from '@/shared/api/errors';
 import { printDvir } from '../lib/printDvir';
-
-/** B-75 — there is no per-DVIR PDF endpoint. */
-const EXPORT_PDF_REASON = 'PDF export is not available yet.';
-/** B-41 — no attachment presign endpoint, so a photo cannot be fetched or opened. */
-const PHOTO_REASON = 'Photos were uploaded by the driver but cannot be shown here yet.';
 
 const DVIR_TYPE_LABEL: Record<string, string> = {
   PRE_TRIP: 'Pre-trip',
@@ -42,6 +45,66 @@ function deriveRepairStatus(defects: DvirDetail['defects']): RepairStatus {
   if (defects.some((d) => d.status === 'OPEN' || d.status === 'IN_PROGRESS')) return 'PENDING';
   if (defects.every((d) => d.status === 'DEFERRED')) return 'DEFERRED';
   return 'REPAIRED';
+}
+
+/** B-41 (shipped 2026-09-24) — `GET /attachments/:id/presign`. Fetched at render time for the
+ * thumbnail `src` itself and again at click time before opening it in a new tab, so an old URL
+ * that outlived its 15-minute expiry is never reused. Never put in the query cache, never logged. */
+function DvirPhotoThumbnail({ photo }: { photo: AttachmentRow }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [opening, setOpening] = useState(false);
+
+  useEffect(() => {
+    // The list keys each tile by `photo.id` (`key={photo.id}`), so a new photo remounts this
+    // component instead of reusing it — no reset of `url`/`failed` is needed here.
+    const controller = new AbortController();
+    fetchAttachmentUrl(photo.id, controller.signal)
+      .then((res) => setUrl(res.url))
+      .catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+        setFailed(true);
+      });
+    return () => controller.abort();
+  }, [photo.id]);
+
+  function open() {
+    if (opening) return;
+    setOpening(true);
+    fetchAttachmentUrl(photo.id)
+      .then((res) => {
+        window.open(res.url, '_blank', 'noopener,noreferrer');
+      })
+      .catch(() => setFailed(true))
+      .finally(() => setOpening(false));
+  }
+
+  if (failed) {
+    return (
+      <div className="flex h-24 flex-col items-center justify-center gap-1 rounded-md bg-bg-subtle px-2 text-center text-text-muted">
+        <EyeOff size={20} strokeWidth={1.75} />
+        <span className="text-caption">Preview unavailable</span>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={open}
+      disabled={!url || opening}
+      aria-label="Open photo"
+      className="h-24 overflow-hidden rounded-md bg-bg-subtle disabled:cursor-wait"
+    >
+      {url ? (
+        <img src={url} alt="" loading="lazy" className="size-full object-cover" />
+      ) : (
+        <div className="flex size-full animate-pulse items-center justify-center text-text-muted">
+          <EyeOff size={20} strokeWidth={1.75} />
+        </div>
+      )}
+    </button>
+  );
 }
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
@@ -70,6 +133,8 @@ export function DvirDrawer({
   const [mechanicName, setMechanicName] = useState('');
   const [repairStatus, setRepairStatus] = useState<RepairStatus | null>(null);
   const canFull = can('dvir', 'FULL');
+  const [pdfError, setPdfError] = useState<string | null>(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
 
   const dvir: DvirDetail | undefined = data;
   const openDefects = (dvir?.defects ?? []).filter((d) => d.status === 'OPEN');
@@ -128,12 +193,31 @@ export function DvirDrawer({
             >
               Print
             </Button>
-            {/* B-75 — no `GET /dvir/:id/pdf`; the button had no `onClick` at all. Disabled with
-                the reason on screen rather than pretending to produce a file. */}
-            <Button variant="secondary" disabled title={EXPORT_PDF_REASON}>
+            {/* B-75 (shipped 2026-09-24) — `GET /dvir/:id/pdf`. Fetched at click time, never cached. */}
+            <Button
+              variant="secondary"
+              disabled={!dvir}
+              loading={pdfLoading}
+              onClick={() => {
+                if (!dvir) return;
+                setPdfError(null);
+                setPdfLoading(true);
+                fetchDvirPdf(dvir.id)
+                  .then((blob) => {
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = `dvir-${dvir.id.slice(0, 8)}.pdf`;
+                    link.click();
+                    URL.revokeObjectURL(url);
+                  })
+                  .catch((error: unknown) => setPdfError(error instanceof ApiError ? error.userMessage : 'Something went wrong.'))
+                  .finally(() => setPdfLoading(false));
+              }}
+            >
               Export PDF
             </Button>
-            <span className="text-caption text-text-muted">{EXPORT_PDF_REASON}</span>
+            {pdfError && <span className="text-caption text-danger">{pdfError}</span>}
           </div>
           <Can perm="maintenance" level="FULL">
             {dvir && (
@@ -195,24 +279,11 @@ export function DvirDrawer({
             {!dvir.photos || dvir.photos.length === 0 ? (
               <p className="text-body text-text-muted">None</p>
             ) : (
-              <>
-                <div className="grid grid-cols-2 gap-2">
-                  {dvir.photos.map((photo) => (
-                    // ⛔ GAP B-41 — no `GET /attachments/:id/presign` endpoint exists yet
-                    // (web/backend-gaps.md), so nothing can be fetched or opened. The tile used
-                    // to be a `<button>` that looked clickable and did nothing; it is now plain
-                    // static markup that says why there is no preview.
-                    <div
-                      key={photo.id}
-                      className="flex h-24 flex-col items-center justify-center gap-1 rounded-md bg-bg-subtle px-2 text-center text-text-muted"
-                    >
-                      <EyeOff size={20} strokeWidth={1.75} />
-                      <span className="text-caption">No preview</span>
-                    </div>
-                  ))}
-                </div>
-                <p className="mt-2 text-caption text-text-muted">{PHOTO_REASON}</p>
-              </>
+              <div className="grid grid-cols-2 gap-2">
+                {dvir.photos.map((photo) => (
+                  <DvirPhotoThumbnail key={photo.id} photo={photo} />
+                ))}
+              </div>
             )}
           </section>
 

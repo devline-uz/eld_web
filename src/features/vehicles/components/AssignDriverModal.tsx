@@ -9,12 +9,12 @@ import { useToast } from '@/shared/ui/Toast';
 import { useAssignDriver, type VehicleRow } from '@/shared/api/vehicles';
 import { useDriversList } from '@/shared/api/drivers';
 import { ApiError } from '@/shared/api/errors';
-import { NOTIFY_REASON } from '../lib/copy';
 
 export function AssignDriverModal({ vehicle, onClose }: { vehicle: VehicleRow; onClose: () => void }) {
   const { toast } = useToast();
   const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [notify, setNotify] = useState(true);
   const outOfService = vehicle.status === 'OUT_OF_SERVICE';
 
   const driversQuery = useDriversList({ q: query || undefined, limit: 25 });
@@ -32,12 +32,10 @@ export function AssignDriverModal({ vehicle, onClose }: { vehicle: VehicleRow; o
       isDirty={selectedId !== null}
       footer={
         <>
-          {/* B-74 — `POST /vehicles/:id/assign-driver` takes `{ driverId, effectiveAt }` only.
-              The tick used to be kept in local state and thrown away, so the modal implied a
-              push notification that was never requested. Disabled with the reason visible. */}
-          <label className="mr-auto flex items-center gap-2 text-body text-text-muted" title={NOTIFY_REASON}>
-            <input type="checkbox" disabled title={NOTIFY_REASON} />
-            Notify the driver in the app — {NOTIFY_REASON}
+          {/* B-74 shipped — `POST /vehicles/:id/assign-driver` now takes `notify`. */}
+          <label className="mr-auto flex items-center gap-2 text-body text-text-secondary">
+            <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} />
+            Notify the driver in the app
           </label>
           <ModalCancelButton disabled={mutation.isPending} />
           <Button
@@ -48,7 +46,7 @@ export function AssignDriverModal({ vehicle, onClose }: { vehicle: VehicleRow; o
             onClick={() => {
               if (!selectedId) return;
               mutation.mutate(
-                { driverId: selectedId },
+                { driverId: selectedId, notify },
                 {
                   onSuccess: () => {
                     toast({ kind: 'success', title: 'Driver assigned' });

@@ -132,7 +132,7 @@ export function LogEventsCard({
         header: 'ENGINE HRS',
         meta: { numeric: true },
         enableSorting: false,
-        // ⛔ B-38 — `toEventView()` drops `totalEngineHours`; the column shows `—` until it ships.
+        // B-38 (shipped) — Appendix A total engine hours; `—` only when the record has none.
         cell: ({ row }) => formatEngineHours(row.original.totalEngineHours ?? null),
       },
       { id: 'origin', header: 'ORIGIN', enableSorting: false, cell: ({ row }) => originCell(row.original) },

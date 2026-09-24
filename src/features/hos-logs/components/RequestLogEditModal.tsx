@@ -1,8 +1,10 @@
 // owner: web-hos-logs — ⭐ 11.11 Request a log edit (web/tz.md §11.11). `hosEdit` FULL.
 //
 // §395.30 in one sentence: a carrier may only SUGGEST. The proposal is stored with
-// recordStatus = 3 and changes nothing until the driver accepts it in the mobile app. Two hard
-// rules live here:
+// recordStatus = 3 and changes nothing until the driver accepts it in the mobile app. With a
+// record to correct it goes to `POST /logs/:driverId/edit-requests`; on a day with no duty record
+// (`event === null`) the same form proposes a NEW record via `POST /logs/:driverId/events` (B-72) —
+// equally inert until the driver accepts. Two hard rules live here:
 //   1. `Driving` is disabled while the chosen interval covers an automatic `D` record, and
 //   2. when the server still answers `422 DRIVING_TIME_IMMUTABLE` the refusal is shown verbatim
 //      and the request is NEVER retried or trimmed to make it pass.
@@ -20,17 +22,33 @@ import * as inputFilters from '@/shared/forms/inputFilters';
 import { geocodingEnabled, PLACE_QUERY_MIN, usePlaceSearch, type Place } from '@/shared/map/geocode';
 import {
   useCreateEditRequest,
+  useProposeLogEvent,
   type LogEventView,
+  type ProposalLocation,
+  type ProposedSpecial,
   type RodsDutyStatus,
   type RodsGraphSegment,
 } from '@/shared/api/hosLogs';
 
+/** `ProposalLocationDto.name` — trimmed, 1–120 characters. */
+const LOCATION_NAME_MAX = 120;
+
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d:[0-5]\d$/;
 
+type ChipValue = RodsDutyStatus | 'YM' | 'PC';
+
 interface Chip {
-  value: RodsDutyStatus | 'YM' | 'PC';
+  value: ChipValue;
   label: string;
   dot: string;
+}
+
+/** B-39 — §395.1(e): PC is an OFF-duty category, YM an ON-duty one. The chip maps to the pair the
+ * server validates (`proposedSpecial` PC ⇒ status OFF, YM ⇒ ON). */
+function chipToProposal(chip: ChipValue): { status: RodsDutyStatus; special: ProposedSpecial } {
+  if (chip === 'PC') return { status: 'OFF', special: 'PC' };
+  if (chip === 'YM') return { status: 'ON', special: 'YM' };
+  return { status: chip, special: 'NONE' };
 }
 
 /** The six chips the design draws, in its order. */
@@ -50,7 +68,8 @@ export interface RequestLogEditModalProps {
   date: string;
   dateLabel: string;
   timezone: string;
-  /** The record the proposal is made against — §395.30 needs an original. */
+  /** The record the proposal is made against. `null` ⇒ the day has no duty record and the form
+   * proposes a new one (B-72, `POST /logs/:driverId/events`). */
   event: LogEventView | null;
   /** Today's graph, used to keep the proposal off automatic driving time. */
   graph: RodsGraphSegment[];
@@ -68,7 +87,9 @@ export function RequestLogEditModal({
   onClose,
 }: RequestLogEditModalProps) {
   const { toast } = useToast();
-  const mutation = useCreateEditRequest(driverId);
+  const editMutation = useCreateEditRequest(driverId);
+  const proposeMutation = useProposeLogEvent(driverId);
+  const isPending = editMutation.isPending || proposeMutation.isPending;
   // WB-146 — `mutation.isPending` only turns true on the next render, so a real double click
   // would post two §395.30 proposals. The ref closes that same-tick window.
   const inFlight = useRef(false);
@@ -76,11 +97,12 @@ export function RequestLogEditModal({
   const startDefault = event ? formatInTimeZone(new Date(event.eventDateTime), timezone, 'HH:mm:ss') : '';
   const [startTime, setStartTime] = useState(startDefault);
   const [endTime, setEndTime] = useState('');
-  const statusDefault: RodsDutyStatus = event?.status ?? 'ON';
-  const [status, setStatus] = useState<RodsDutyStatus>(statusDefault);
-  // WB-070 / B-39 — `CreateEditRequestDto.location` needs lat/lon, so a typed name is geocoded and
-  // only a place picked from the suggestions is sent. Without a geocoder key the field stays
-  // read-only and says it is not sent, instead of looking like a correction.
+  const statusDefault: ChipValue = event?.status ?? 'ON';
+  const [chipValue, setChipValue] = useState<ChipValue>(statusDefault);
+  const { status, special } = chipToProposal(chipValue);
+  const [notifyDriver, setNotifyDriver] = useState(true);
+  // B-39 (shipped) — a location may be a name only. A place picked from the geocoder adds its
+  // coordinates; a typed name that was never picked is sent as `{ name }`.
   const locationDefault = event?.locationName ?? '';
   const [locationText, setLocationText] = useState(locationDefault);
   const [place, setPlace] = useState<Place | null>(null);
@@ -122,13 +144,9 @@ export function RequestLogEditModal({
   const reasonTooShort = reason.trim().length < LIMITS.annotationMin;
 
   function submit() {
-    if (inFlight.current || mutation.isPending) return;
+    if (inFlight.current || isPending) return;
     setBanner(null);
     setFieldErrors({});
-    if (!event) {
-      setBanner('Select a record in `Log events` to propose an edit against.');
-      return;
-    }
     if (!startIso) {
       setFieldErrors({ startAt: VALIDATION_MESSAGES.time });
       return;
@@ -150,38 +168,34 @@ export function RequestLogEditModal({
       setFieldErrors({ engineHours: VALIDATION_MESSAGES.engineHours });
       return;
     }
-    if (locationChanged && locationText.trim() && !place) {
-      setFieldErrors({ location: VALIDATION_MESSAGES.placePick });
-      return;
-    }
     if (reasonTooShort) {
       setFieldErrors({ reason: VALIDATION_MESSAGES.annotation });
       return;
     }
-    inFlight.current = true;
-    mutation.mutate(
-      {
-        originalEventId: event.id,
-        proposedStatus: status,
-        proposedStart: startIso,
-        proposedEnd: endIso ?? undefined,
-        odometerMi: odometer ? Number(odometer) : undefined,
-        engineHours: engineHours ? Number(engineHours) : undefined,
-        // `LocationDto` needs lat/lon — only a geocoded place carries them; an untouched field
-        // sends nothing rather than a half-filled location (gap B-39).
-        location: place ? { lat: place.lat, lon: place.lon, name: place.name } : undefined,
-        reason: reason.trim(),
-      },
-      {
+    // An untouched field sends nothing; a picked place carries coordinates; a typed name alone is
+    // sent as a name-only correction (B-39). A cleared field sends nothing either.
+    const location: ProposalLocation | undefined = place
+      ? { lat: place.lat, lon: place.lon, name: place.name }
+      : locationChanged && locationText.trim()
+        ? { name: locationText.trim() }
+        : undefined;
+    const common = {
+      odometerMi: odometer ? Number(odometer) : undefined,
+      engineHours: engineHours ? Number(engineHours) : undefined,
+      location,
+      proposedSpecial: special,
+      notifyDriver,
+    };
+    const callbacks = {
         onSuccess: () => {
           toast({ kind: 'success', ...TOAST_COPY.editRequestSent(driverName) });
           onClose();
         },
-        onError: (error) => {
+        onError: (error: Error) => {
           if (error instanceof ApiError) {
             // ⛔ Verbatim, once. No retry, no client-side trimming of the interval (§14.3).
             setBanner(error.userMessage);
-            setFieldErrors(error.fieldErrors);
+            setFieldErrors(toFormFields(error.fieldErrors));
             return;
           }
           setBanner('Something went wrong.');
@@ -189,8 +203,32 @@ export function RequestLogEditModal({
         onSettled: () => {
           inFlight.current = false;
         },
-      },
-    );
+      };
+    inFlight.current = true;
+    if (event) {
+      editMutation.mutate(
+        {
+          originalEventId: event.id,
+          proposedStatus: status,
+          proposedStart: startIso,
+          proposedEnd: endIso ?? undefined,
+          reason: reason.trim(),
+          ...common,
+        },
+        callbacks,
+      );
+    } else {
+      proposeMutation.mutate(
+        {
+          status,
+          eventDateTime: startIso,
+          endDateTime: endIso ?? undefined,
+          annotation: reason.trim(),
+          ...common,
+        },
+        callbacks,
+      );
+    }
   }
 
   // WB-069 — every controlled field counts, so Esc on a changed status/odometer/engine-hours goes
@@ -199,7 +237,8 @@ export function RequestLogEditModal({
     reason.length > 0 ||
     startTime !== startDefault ||
     endTime.length > 0 ||
-    status !== statusDefault ||
+    chipValue !== statusDefault ||
+    !notifyDriver ||
     odometer !== odometerDefault ||
     engineHours.length > 0 ||
     locationChanged;
@@ -225,21 +264,29 @@ export function RequestLogEditModal({
       isDirty={isDirty}
       footer={
         <div className="flex w-full items-center justify-between">
-          {/* WB-200 — unchecking this did nothing: the proposal always reaches the driver's app
-              (gap B-39). The control states the fixed behaviour instead of offering a choice. */}
+          {/* B-39 — `notifyDriver: false` suppresses the push/email only; the proposal still waits
+              in the driver app and changes nothing until the driver accepts it (§395.30). */}
           <span className="flex flex-col gap-0.5">
-            <label className="flex items-center gap-2 text-body text-text-muted">
-              <input type="checkbox" checked disabled aria-describedby="log-edit-notify-note" />
+            <label className="flex items-center gap-2 text-body text-text">
+              <input
+                type="checkbox"
+                checked={notifyDriver}
+                disabled={isPending}
+                onChange={(e) => setNotifyDriver(e.target.checked)}
+                aria-describedby={notifyDriver ? undefined : 'log-edit-notify-note'}
+              />
               Notify the driver immediately
             </label>
-            <span id="log-edit-notify-note" className="max-w-80 text-caption text-text-muted">
-              Always on — the driver must accept the proposal in the app before the log changes.
-            </span>
+            {!notifyDriver && (
+              <span id="log-edit-notify-note" className="max-w-80 text-caption text-text-muted">
+                The proposal still waits in the driver app until the driver accepts it.
+              </span>
+            )}
           </span>
           <div className="flex gap-2">
             {/* WB-145 — closes through 11.30 Discard changes, exactly like Esc and X. */}
-            <ModalCancelButton disabled={mutation.isPending} />
-            <Button variant="primary" size="lg" onClick={submit} loading={mutation.isPending}>
+            <ModalCancelButton disabled={isPending} />
+            <Button variant="primary" size="lg" onClick={submit} loading={isPending}>
               Send edit request
             </Button>
           </div>
@@ -289,21 +336,18 @@ export function RequestLogEditModal({
         <div className="mt-1 flex flex-wrap gap-2">
           {CHIPS.map((chip) => {
             // WB-059 — §395.30: automatic driving time can never be shortened, deleted or
-            // restatused, so while the interval covers it every NON-driving status (`OFF`/`SB`/`ON`)
-            // is refused and `D` stays the one selectable chip. `YM`/`PC` have no representation in
-            // CreateEditRequestDto at all (gap B-39, WB-021) — always disabled rather than silently
-            // sending something else. The server's `DRIVING_TIME_IMMUTABLE` stays the final word.
-            const restatesDriving =
-              touchesAutomaticDriving && (chip.value === 'OFF' || chip.value === 'SB' || chip.value === 'ON');
-            const disabled = restatesDriving || chip.value === 'YM' || chip.value === 'PC';
-            const selected = chip.value === status;
+            // restatused, so while the interval covers it every NON-driving chip (`OFF`/`SB`/`ON`,
+            // and `YM`/`PC`, which sit on ON/OFF) is refused and `D` stays the one selectable chip.
+            // The server's `DRIVING_TIME_IMMUTABLE` stays the final word.
+            const disabled = touchesAutomaticDriving && chip.value !== 'D';
+            const selected = chip.value === chipValue;
             return (
               <button
                 key={chip.value}
                 type="button"
                 aria-pressed={selected}
                 disabled={disabled}
-                onClick={() => setStatus(chip.value as RodsDutyStatus)}
+                onClick={() => setChipValue(chip.value)}
                 className={cn(
                   'flex h-input items-center gap-2 rounded-md border px-3 text-body',
                   selected ? 'border-primary text-text' : 'border-border text-text-secondary',
@@ -321,19 +365,17 @@ export function RequestLogEditModal({
             Driving time can never be shortened, deleted or restatused (49 CFR §395.30).
           </p>
         )}
-        {/* WB-199 — YM and PC are permanently disabled (gap B-39) but only said so when the
-            driving-time rule happened to be showing too. The reason is now always on screen. */}
-        <p className="mt-2 text-caption text-text-muted">
-          Yard move and Personal conveyance cannot be proposed — a log edit request carries only
-          OFF, SB, D or ON.
-        </p>
       </fieldset>
 
       <div className="mt-4 grid grid-cols-3 gap-4">
         {geocodingEnabled ? (
           <Field
             label="Location"
-            hint={place ? undefined : `Type ${PLACE_QUERY_MIN}+ letters and pick a place from the list.`}
+            hint={
+              place
+                ? undefined
+                : `Type a place name — pick a suggestion (${PLACE_QUERY_MIN}+ letters) to add its coordinates.`
+            }
             error={fieldErrors.location}
           >
             <input
@@ -376,8 +418,14 @@ export function RequestLogEditModal({
             )}
           </Field>
         ) : (
-          <Field label="Location" hint="Not sent with the request — a location correction needs coordinates.">
-            <input readOnly value={locationDefault} className={cn(inputClass, 'bg-bg-subtle')} />
+          <Field label="Location" error={fieldErrors.location}>
+            <input
+              value={locationText}
+              maxLength={LOCATION_NAME_MAX}
+              onChange={(e) => setLocationText(e.target.value)}
+              aria-invalid={Boolean(fieldErrors.location)}
+              className={inputClass}
+            />
           </Field>
         )}
         <Field label="Odometer" suffix="mi" error={fieldErrors.odometerMi}>
@@ -421,19 +469,36 @@ export function RequestLogEditModal({
         <div className="rounded-md bg-bg-subtle p-3">
           <p className="text-table-head font-semibold uppercase tracking-wide text-text-muted">Before</p>
           <p className="tabular mt-1 text-body text-text">
-            {event?.status ?? '—'} {startDefault ? startDefault.slice(0, 5) : '—'} → {originalEnd ?? '—'}
+            {event
+              ? `${event.status ?? '—'} ${startDefault ? startDefault.slice(0, 5) : '—'} → ${originalEnd ?? '—'}`
+              : 'No record on this day'}
           </p>
         </div>
         <div className="rounded-md bg-bg-subtle p-3">
           <p className="text-table-head font-semibold uppercase tracking-wide text-text-muted">After</p>
           <p className="tabular mt-1 text-body text-primary">
-            {status} {startTime ? startTime.slice(0, 5) : '—'} → {endTime ? endTime.slice(0, 5) : '—'}{' '}
-            (annotated)
+            {special === 'NONE' ? status : `${status} · ${special}`} {startTime ? startTime.slice(0, 5) : '—'} →{' '}
+            {endTime ? endTime.slice(0, 5) : '—'} (annotated)
           </p>
         </div>
       </div>
     </Modal>
   );
+}
+
+/** Both DTOs land on the same inputs: `ProposeEventDto` names them differently. */
+const SERVER_FIELD: Record<string, string> = {
+  proposedStart: 'startAt',
+  eventDateTime: 'startAt',
+  proposedEnd: 'endAt',
+  endDateTime: 'endAt',
+  annotation: 'reason',
+};
+
+function toFormFields(fields: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, message] of Object.entries(fields)) out[SERVER_FIELD[key] ?? key] = message;
+  return out;
 }
 
 const inputClass = 'h-input w-full rounded-md border border-border bg-bg-surface px-3 text-body text-text';

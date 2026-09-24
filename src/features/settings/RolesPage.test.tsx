@@ -274,9 +274,10 @@ describe('RolesPage — stage-2', () => {
     expect(screen.queryByText(/Last changed by/)).not.toBeInTheDocument();
   });
 
-  // WB-234 — the matrix row and the create-role checkbox name the same single key.
-  it('labels the reportsTransfer row as covering both the pack export and data transfers', async () => {
+  // B-95 (shipped) — `dataTransfer` is its own 23rd key; the matrix carries a separate row.
+  it('shows separate rows for the pack export and data transfer keys', async () => {
     renderPage();
-    expect(await screen.findByText('Export FMCSA / DOT pack & send data transfers')).toBeInTheDocument();
+    expect(await screen.findByText('Export FMCSA / DOT pack')).toBeInTheDocument();
+    expect(screen.getByText('Send data transfers to an inspector')).toBeInTheDocument();
   });
 });

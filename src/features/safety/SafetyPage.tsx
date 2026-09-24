@@ -4,7 +4,7 @@
 import { useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import type { ColumnDef } from '@tanstack/react-table';
-import { Filter, Search, Upload, ShieldCheck, AlertTriangle, Gauge, Users } from 'lucide-react';
+import { Filter, Search, Upload, ShieldCheck, AlertTriangle, Gauge, Users, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
 import { useDynamicSubtitle } from '@/app/layouts/Topbar';
@@ -258,9 +258,21 @@ const SCORECARD_COLUMNS: ColumnDef<ScorecardTableRow, unknown>[] = [
   {
     id: 'trend',
     header: 'TREND',
-    // ⛔ No period-over-period baseline is exposed by `GET /safety/scorecard`
-    // (web/decisions.md) — trend is left blank rather than fabricated.
-    cell: () => <span className="text-text-muted">—</span>,
+    // B-44 (shipped 2026-09-24) — `previousScore`/`trend` are server-computed against the prior
+    // period of the same length; `null` (no prior-period row) renders `—`, never a fabricated arrow.
+    cell: ({ row }) => {
+      const { trend, previousScore } = row.original;
+      if (trend == null || previousScore == null) return <span className="text-text-muted">—</span>;
+      const Icon = trend > 0 ? TrendingUp : trend < 0 ? TrendingDown : Minus;
+      const tone = trend > 0 ? 'text-success' : trend < 0 ? 'text-danger' : 'text-text-muted';
+      return (
+        <span className={cn('flex items-center gap-1 tabular-nums', tone)}>
+          <Icon size={16} strokeWidth={1.75} aria-hidden="true" />
+          {trend > 0 ? '+' : ''}
+          {trend}
+        </span>
+      );
+    },
   },
   {
     id: 'view',

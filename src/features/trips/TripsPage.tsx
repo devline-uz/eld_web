@@ -13,8 +13,8 @@ import {
   useTripsBoard,
   useUnassignedLoads,
   useAutoAssignTrips,
+  usePublishTrip,
   tripsActiveSliceQuery,
-  tripsCountQuery,
   tripsKpiQuery,
   type TripTableRow,
   type TripRow,
@@ -86,6 +86,8 @@ export default function TripsPage() {
   });
   const unassigned = useUnassignedLoads();
   const autoAssign = useAutoAssignTrips();
+  const publishTrip = usePublishTrip();
+  const [publishingId, setPublishingId] = useState<string | null>(null);
 
   const driverOptions = useMemo(
     () =>
@@ -125,7 +127,8 @@ export default function TripsPage() {
       // (§16.3 — never invalidate the whole list).
       void queryClient.invalidateQueries({ queryKey: tripsActiveSliceQuery('ASSIGNED').queryKey });
       void queryClient.invalidateQueries({ queryKey: tripsActiveSliceQuery('IN_PROGRESS').queryKey });
-      void queryClient.invalidateQueries({ queryKey: tripsCountQuery('PLANNED').queryKey });
+      void queryClient.invalidateQueries({ queryKey: tripsActiveSliceQuery('DRAFT').queryKey });
+      void queryClient.invalidateQueries({ queryKey: tripsActiveSliceQuery('PLANNED').queryKey });
       void queryClient.invalidateQueries({ queryKey: tripsKpiQuery().queryKey });
     },
   });
@@ -214,9 +217,40 @@ export default function TripsPage() {
       header: 'STATUS',
       cell: ({ row }) => {
         const status = row.original.displayStatus;
-        const tone = status === 'Late' ? 'danger' : status === 'Loading' ? 'warning' : status === 'Cancelled' ? 'neutral' : 'success';
+        const tone =
+          status === 'Late' ? 'danger' : status === 'Loading' || status === 'Draft' ? 'warning' : status === 'Cancelled' ? 'neutral' : 'success';
         return <Badge tone={tone}>{status}</Badge>;
       },
+    },
+  ];
+
+  // B-73 — a `Scheduled`-segment DRAFT row publishes in place (`PATCH /trips/:id { status: 'PLANNED' }`);
+  // a PLANNED row already went through `AssignLoadModal`/`CreateTripModal`, so it renders nothing here.
+  const scheduledColumns: ColumnDef<TripTableRow, unknown>[] = [
+    ...columns,
+    {
+      id: 'publish',
+      header: '',
+      cell: ({ row }) =>
+        row.original.status === 'DRAFT' ? (
+          <Can perm="trips" level="FULL">
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={publishTrip.isPending && publishingId === row.original.id}
+              onClick={() => {
+                setPublishingId(row.original.id);
+                publishTrip.mutate(row.original.id, {
+                  onSuccess: () => toast({ kind: 'success', title: `Trip ${row.original.number} published` }),
+                  onError: () => toast({ kind: 'error', title: 'Something went wrong.' }),
+                  onSettled: () => setPublishingId(null),
+                });
+              }}
+            >
+              Publish
+            </Button>
+          </Can>
+        ) : null,
     },
   ];
 
@@ -423,8 +457,8 @@ export default function TripsPage() {
                 <div className="xl:min-h-0 xl:overflow-y-auto">
                   <DataTable
                     data={filteredRows}
-                    columns={columns}
-                    caption="Active trips"
+                    columns={segment === 'SCHEDULED' ? scheduledColumns : columns}
+                    caption={segment === 'SCHEDULED' ? 'Scheduled trips' : 'Active trips'}
                     getRowId={(r) => r.id}
                     onRowClick={(row) => setSelectedTripId(row.id)}
                   />

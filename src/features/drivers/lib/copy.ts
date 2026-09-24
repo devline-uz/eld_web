@@ -36,15 +36,14 @@ export const DRIVER_TOAST = {
   driverUpdated: (name: string): ToastCopy => ({
     title: `${name} updated`,
   }),
+  /** B-81 shipped — `POST /drivers/:id/reset-password`. `code` only exists in dev
+   * (`DEV_ECHO_SECRETS`); it is shown once here and never logged or persisted. */
+  passwordReset: (result: { emailedTo: string | null; code?: string }): ToastCopy =>
+    result.emailedTo
+      ? { title: 'Password reset emailed', description: `Sent to ${result.emailedTo}.` }
+      : { title: 'One-time code', description: result.code ?? 'Ask the driver to sign in again.' },
+  verificationSent: (email: string): ToastCopy => ({
+    title: 'Verification email sent',
+    description: `Sent to ${email}.`,
+  }),
 } as const;
-
-/** B-81 — there is no carrier-side password reset for a driver account (web/backend-gaps.md). */
-export const NO_PASSWORD_RESET =
-  'No carrier-side reset yet — the driver resets the app password from the sign-in screen.';
-
-/**
- * B-94 (tz.md §20 B-16) — the API stores no driver documents (no S3 upload or metadata
- * endpoint), so the W-07 `Documents` tab stays disabled with this reason on screen (WB-236).
- */
-export const DRIVER_DOCUMENTS_REASON =
-  'Driver documents are not available yet — the API has no document storage for drivers.';

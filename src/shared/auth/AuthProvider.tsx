@@ -107,6 +107,11 @@ export interface AuthContextValue {
    * `/sign-in?reason=expired` itself (WD-015) — the reason travels in context instead.
    */
   sessionEndedReason?: 'expired' | 'idle' | null;
+  /**
+   * Re-reads `GET /auth/me` so the topbar chip (name, avatar, carrier) follows a W-26 profile or
+   * avatar change without a reload. Optional so test doubles of the context need not supply it.
+   */
+  refreshUser?: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -120,16 +125,16 @@ export function samePermissions(a: PermissionMap, b: PermissionMap): boolean {
   return true;
 }
 
-function toAuthUser(me: MeResponse, profile: Record<string, unknown> | null): AuthUser {
-  const first = (profile?.firstName as string | undefined) ?? me.firstName ?? '';
-  const last = (profile?.lastName as string | undefined) ?? me.lastName ?? '';
-  const fullName = (me.fullName ?? `${first} ${last}`.trim()) || 'OneBook user';
+/** The topbar chip reads the enriched `GET /auth/me` only (B-34) — no second `/me/profile` call. */
+function toAuthUser(me: MeResponse): AuthUser {
+  const fullName =
+    (me.fullName ?? `${me.firstName ?? ''} ${me.lastName ?? ''}`.trim()) || 'OneBook user';
   return {
     id: me.id,
     fullName,
-    email: (profile?.email as string | undefined) ?? me.email ?? '',
+    email: me.email ?? '',
     role: isRole(me.role) ? me.role : 'VIEWER',
-    avatarUrl: (profile?.avatarUrl as string | null | undefined) ?? me.avatarUrl ?? null,
+    avatarUrl: me.avatarUrl ?? null,
     carrierName: me.carrierName ?? '',
     homeTerminalTimezone: me.homeTerminalTimezone ?? 'America/Chicago',
   };
@@ -151,7 +156,7 @@ function initialSession(): {
   const me = snapshot.me as unknown as MeResponse;
   return {
     status: 'authenticated',
-    user: toAuthUser(me, null),
+    user: toAuthUser(me),
     permissions: toPermissionMap(me.permissions),
   };
 }
@@ -177,14 +182,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    */
   const sessionGeneration = useRef(0);
 
-  /** GET /auth/me — the only permission source. `/me/profile` only decorates the display. */
+  /** GET /auth/me — the only permission source, and (enriched, B-34) the topbar display fields. */
   const loadSession = useCallback(async (token: string) => {
     const me = await fetchMe(token);
     // Keep the object identity when nothing changed: `AppRouter` rebuilds the whole router on a
     // new `permissions` reference, which would remount the current screen (web/bugs.md WB-034).
     const next = toPermissionMap(me.permissions);
     setPermissions((prev) => (samePermissions(prev, next) ? prev : next));
-    setUser(toAuthUser(me, null));
+    setUser(toAuthUser(me));
     setStatus('authenticated');
     writeSessionSnapshot({ me, accessTokenExpiresAt: getAccessTokenExpiry() });
     return me;
@@ -409,6 +414,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [completeSignIn],
   );
 
+  const refreshUser = useCallback(async () => {
+    const token = getAccessToken();
+    if (!token) return;
+    await loadSession(token);
+  }, [loadSession]);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       status,
@@ -419,6 +430,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signInWithPassword,
       signInWithGoogleToken,
       sessionEndedReason,
+      refreshUser,
     }),
     [
       status,
@@ -428,6 +440,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signInWithPassword,
       signInWithGoogleToken,
       sessionEndedReason,
+      refreshUser,
     ],
   );
 

@@ -1,13 +1,13 @@
 // owner: web-vehicles-drivers — W-05 Unit histories / route replay (web/tz.md §10 W-05).
 // Design: web/roles and screens/admin panel/Route replay, drive : stop : idle segments.jpg
 //
-// ⛔ GAP B-4 — `GET /vehicles/:id/histories?date=` does not exist on the real backend. Per
-// web/tz.md this screen "does not ship for real without it" (a client-side telemetry fan-out
-// would pull ~60,000 points into the browser, explicitly rejected by the spec). Built and
-// reviewable against the documented shape from MSW; not production-live.
-import { useState } from 'react';
+// B-4 shipped 2026-09-24 (web/backend-gaps.md handoff table) — `GET /vehicles/:id/histories?date=`
+// is real and returns server-side segmented DRIVE/STOP/IDLE with a lat/lon per segment marker.
+// Route replay renders that track as a lightweight SVG polyline (no MapLibre tiles needed for a
+// single day's coarse marker path) and animates a dot along it at 1x/2x/4x with a scrub slider.
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, ChevronRight as Crumb, Download, Play, Route, Clock, Timer, Fuel } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronRight as Crumb, Download, Pause, Play, Route, Clock, Timer, Fuel } from 'lucide-react';
 import { useVehicle, useVehicleHistories, type RouteSegment } from '@/shared/api/vehicles';
 import { Badge } from '@/shared/ui/Badge';
 import { Button } from '@/shared/ui/Button';
@@ -18,7 +18,6 @@ import { formatDistance, formatSpeed, formatFuelWasted } from '@/shared/format/n
 import { formatDuration } from '@/shared/format/duration';
 import { formatLocal } from '@/shared/format/datetime';
 import { toCsv } from '@/shared/lib/csv';
-import { REPLAY_UNAVAILABLE_REASON } from './lib/copy';
 
 type SegmentFilter = 'ALL' | 'DRIVE' | 'STOP' | 'IDLE';
 
@@ -27,6 +26,8 @@ const SEGMENT_TONE: Record<RouteSegment['type'], 'success' | 'danger' | 'warning
   STOP: 'danger',
   IDLE: 'warning',
 };
+
+const REPLAY_SPEEDS = [1, 2, 4] as const;
 
 export default function UnitHistoriesPage() {
   const { id } = useParams<{ id: string }>();
@@ -49,7 +50,7 @@ export default function UnitHistoriesPage() {
     setDate(d.toISOString().slice(0, 10));
   }
 
-  const segments = historiesQuery.data?.segments ?? [];
+  const segments = useMemo(() => historiesQuery.data?.segments ?? [], [historiesQuery.data]);
   const filteredSegments = segmentFilter === 'ALL' ? segments : segments.filter((s) => s.type === segmentFilter);
   const counts = {
     all: segments.length,
@@ -57,6 +58,107 @@ export default function UnitHistoriesPage() {
     stop: segments.filter((s) => s.type === 'STOP').length,
     idle: segments.filter((s) => s.type === 'IDLE').length,
   };
+
+  /* ------------------------------------------------------------------ route replay */
+  const trackStartMs = historiesQuery.data?.firstMovementAt ? new Date(historiesQuery.data.firstMovementAt).getTime() : 0;
+  const trackEndMs = historiesQuery.data?.lastMovementAt ? new Date(historiesQuery.data.lastMovementAt).getTime() : 0;
+  const trackDurationMs = Math.max(trackEndMs - trackStartMs, 0);
+  const hasTrack = segments.length > 0 && trackDurationMs > 0;
+
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [replaySpeed, setReplaySpeed] = useState<(typeof REPLAY_SPEEDS)[number]>(1);
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [hoveredMarker, setHoveredMarker] = useState<string | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const lastTickRef = useRef<number | null>(null);
+
+  // A new day resets the scrubber and stops playback — adjusted during render (React's documented
+  // pattern for resetting state on a prop/key change) rather than in an effect, which would cause
+  // an extra commit.
+  const dayKey = `${id ?? ''}-${date}`;
+  const [prevDayKey, setPrevDayKey] = useState(dayKey);
+  if (prevDayKey !== dayKey) {
+    setPrevDayKey(dayKey);
+    setIsPlaying(false);
+    setElapsedMs(0);
+  }
+
+  useEffect(() => {
+    if (!isPlaying || !hasTrack) return undefined;
+    const tick = (now: number) => {
+      const last = lastTickRef.current ?? now;
+      lastTickRef.current = now;
+      setElapsedMs((prev) => {
+        const next = prev + (now - last) * replaySpeed;
+        if (next >= trackDurationMs) {
+          setIsPlaying(false);
+          lastTickRef.current = null;
+          return trackDurationMs;
+        }
+        return next;
+      });
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      lastTickRef.current = null;
+    };
+  }, [isPlaying, hasTrack, replaySpeed, trackDurationMs]);
+
+  function togglePlay() {
+    if (!hasTrack) return;
+    if (!isPlaying && elapsedMs >= trackDurationMs) setElapsedMs(0);
+    setIsPlaying((v) => !v);
+  }
+
+  const currentTimeMs = trackStartMs + elapsedMs;
+  // Marker currently "active" — the last segment whose window has started.
+  const activeMarker = useMemo(() => {
+    if (!hasTrack) return null;
+    let active = segments[0];
+    for (const s of segments) {
+      if (new Date(s.startAt).getTime() <= currentTimeMs) active = s;
+    }
+    return active;
+  }, [segments, hasTrack, currentTimeMs]);
+
+  // Normalise lat/lon into a 300x140 SVG viewbox.
+  const mapGeometry = useMemo(() => {
+    if (!hasTrack) return null;
+    const lats = segments.map((s) => s.lat);
+    const lons = segments.map((s) => s.lon);
+    const minLat = Math.min(...lats);
+    const maxLat = Math.max(...lats);
+    const minLon = Math.min(...lons);
+    const maxLon = Math.max(...lons);
+    const padX = 20;
+    const padY = 20;
+    const w = 300 - padX * 2;
+    const h = 140 - padY * 2;
+    const spanLat = maxLat - minLat || 1;
+    const spanLon = maxLon - minLon || 1;
+    const project = (lat: number, lon: number) => ({
+      x: padX + ((lon - minLon) / spanLon) * w,
+      // lat grows north; SVG y grows down.
+      y: padY + (1 - (lat - minLat) / spanLat) * h,
+    });
+    return { points: segments.map((s) => ({ marker: s.marker, type: s.type, ...project(s.lat, s.lon) })) };
+  }, [segments, hasTrack]);
+
+  const markerPosition = useMemo(() => {
+    if (!hasTrack || !mapGeometry) return null;
+    const idx = segments.findIndex((s) => s.marker === activeMarker?.marker);
+    if (idx < 0) return mapGeometry.points[0] ?? null;
+    const curr = mapGeometry.points[idx];
+    const next = mapGeometry.points[idx + 1];
+    const seg = segments[idx];
+    if (!next || !curr || !seg) return curr ?? null;
+    const segStart = new Date(seg.startAt).getTime();
+    const segEnd = new Date(seg.endAt).getTime();
+    const frac = segEnd > segStart ? Math.min(Math.max((currentTimeMs - segStart) / (segEnd - segStart), 0), 1) : 1;
+    return { ...curr, x: curr.x + (next.x - curr.x) * frac, y: curr.y + (next.y - curr.y) * frac };
+  }, [hasTrack, mapGeometry, segments, activeMarker, currentTimeMs]);
 
   function exportSegments() {
     const csv = toCsv([
@@ -188,45 +290,126 @@ export default function UnitHistoriesPage() {
               title="Route replay"
               subtitle={`${formatLocal(historiesQuery.data.firstMovementAt, 'monthDay')} · ${formatLocal(historiesQuery.data.firstMovementAt, 'time')} → ${formatLocal(historiesQuery.data.lastMovementAt, 'time')} · ${formatDistance(historiesQuery.data.distanceMi)} mi`}
               action={
-                // WB-243 / B-4 — Play only flipped its own label: there is no track to replay.
-                // Disabled, with the reason as tooltip, accessible description and caption.
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  iconLeft={<Play size={14} strokeWidth={1.75} />}
-                  disabled
-                  title={REPLAY_UNAVAILABLE_REASON}
-                  aria-describedby="route-replay-unavailable"
-                >
-                  Play
-                </Button>
+                <div className="flex items-center gap-2">
+                  <div className="flex h-8 overflow-hidden rounded-md border border-border">
+                    {REPLAY_SPEEDS.map((speed) => (
+                      <button
+                        key={speed}
+                        type="button"
+                        aria-pressed={replaySpeed === speed}
+                        onClick={() => setReplaySpeed(speed)}
+                        disabled={!hasTrack}
+                        className={`px-2 text-caption font-semibold ${
+                          replaySpeed === speed ? 'bg-bg-inverse text-text-inverse' : 'bg-bg-surface text-text-secondary hover:bg-bg-subtle'
+                        }`}
+                      >
+                        {speed}×
+                      </button>
+                    ))}
+                  </div>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    iconLeft={isPlaying ? <Pause size={14} strokeWidth={1.75} /> : <Play size={14} strokeWidth={1.75} />}
+                    disabled={!hasTrack}
+                    title={hasTrack ? undefined : 'No track to replay — this day has no movement segments.'}
+                    onClick={togglePlay}
+                  >
+                    {isPlaying ? 'Pause' : 'Play'}
+                  </Button>
+                </div>
               }
             />
-            <p id="route-replay-unavailable" className="mt-1 text-caption text-text-muted">
-              {REPLAY_UNAVAILABLE_REASON}
-            </p>
-            <div className="mt-3 flex h-route-preview flex-col items-center justify-center gap-2 rounded-md border border-dashed border-border bg-bg-subtle text-center">
-              <p className="text-card-sub text-text-muted">
-                Map preview unavailable in this environment — {segments.length} segments recorded.
-              </p>
-              <div className="flex items-center gap-3 text-caption text-text-muted">
-                <span className="flex items-center gap-1">
-                  <span className="size-2 rounded-full bg-success" /> Start
-                </span>
-                <span className="flex items-center gap-1">
-                  <span className="size-2 rounded-full bg-danger" /> Stop
-                </span>
-                <span className="flex items-center gap-1">
-                  <span className="size-2 rounded-full bg-danger" /> End
-                </span>
-              </div>
-            </div>
+            {!hasTrack ? (
+              <p className="mt-1 text-caption text-text-muted">No track to replay — this day has no movement segments.</p>
+            ) : (
+              <>
+                <input
+                  type="range"
+                  min={0}
+                  max={trackDurationMs}
+                  step={1}
+                  value={elapsedMs}
+                  aria-label="Replay position"
+                  onChange={(e) => {
+                    setIsPlaying(false);
+                    setElapsedMs(Number(e.target.value));
+                  }}
+                  className="mt-3 w-full accent-primary"
+                />
+                <div className="mt-3 h-route-preview rounded-md border border-dashed border-border bg-bg-subtle p-2">
+                  <svg viewBox="0 0 300 140" className="size-full">
+                    {mapGeometry && mapGeometry.points.length > 1 && (
+                      <polyline
+                        points={mapGeometry.points.map((p) => `${p.x},${p.y}`).join(' ')}
+                        fill="none"
+                        stroke="var(--color-primary)"
+                        strokeWidth={3}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    )}
+                    {mapGeometry?.points.map((p, i) => {
+                      const isStart = i === 0;
+                      const isEnd = i === mapGeometry.points.length - 1;
+                      const fill =
+                        isEnd && !isStart
+                          ? 'var(--color-danger)'
+                          : isStart
+                            ? 'var(--color-success)'
+                            : `var(--color-${SEGMENT_TONE[p.type]})`;
+                      return (
+                        <g
+                          key={p.marker}
+                          onMouseEnter={() => setHoveredMarker(p.marker)}
+                          onMouseLeave={() => setHoveredMarker((m) => (m === p.marker ? null : m))}
+                        >
+                          <circle
+                            cx={p.x}
+                            cy={p.y}
+                            r={hoveredMarker === p.marker ? 8 : 6}
+                            fill={fill}
+                            stroke="var(--color-bg-surface)"
+                            strokeWidth={1.5}
+                          />
+                          <text x={p.x} y={p.y + 3} textAnchor="middle" fontSize={7} fill="var(--color-text-inverse)">
+                            {p.marker}
+                          </text>
+                        </g>
+                      );
+                    })}
+                    {markerPosition && (
+                      <circle cx={markerPosition.x} cy={markerPosition.y} r={4} fill="var(--color-bg-inverse)" stroke="var(--color-bg-surface)" strokeWidth={1} />
+                    )}
+                  </svg>
+                </div>
+                <div className="mt-2 flex items-center gap-3 text-caption text-text-muted">
+                  <span className="flex items-center gap-1">
+                    <span className="size-2 rounded-full bg-success" /> Start
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="size-2 rounded-full bg-danger" /> Stop
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="size-2 rounded-full bg-danger" /> End
+                  </span>
+                  <span className="ml-auto tabular-nums">
+                    {formatLocal(new Date(currentTimeMs).toISOString(), 'time')}
+                  </span>
+                </div>
+              </>
+            )}
           </Card>
 
           <div className="grid grid-cols-[1fr_348px] gap-4">
             <Card padded={false}>
-              <div className="p-card pb-0">
+              <div className="flex items-center justify-between p-card pb-0">
                 <SectionHeader title="Movement segments" subtitle={`${segments.length} segments today · drive, stop and idle`} />
+                {hasTrack && (
+                  <Button variant="ghost" size="sm" onClick={() => setHoveredMarker(hoveredMarker ? null : (segments[0]?.marker ?? null))}>
+                    View on map
+                  </Button>
+                )}
               </div>
               <table className="mt-2 w-full text-body">
                 <thead>
@@ -243,7 +426,12 @@ export default function UnitHistoriesPage() {
                 </thead>
                 <tbody>
                   {filteredSegments.map((s) => (
-                    <tr key={`${s.marker}-${s.startAt}`} className="border-t border-border hover:bg-bg-subtle">
+                    <tr
+                      key={`${s.marker}-${s.startAt}`}
+                      className={`border-t border-border hover:bg-bg-subtle ${hoveredMarker === s.marker ? 'bg-bg-subtle' : ''}`}
+                      onMouseEnter={() => setHoveredMarker(s.marker)}
+                      onMouseLeave={() => setHoveredMarker((m) => (m === s.marker ? null : m))}
+                    >
                       <td className="p-3">
                         <span className="mr-2 inline-flex size-5 items-center justify-center rounded-full bg-bg-subtle text-caption font-semibold">
                           {s.marker}

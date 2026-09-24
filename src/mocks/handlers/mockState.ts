@@ -127,6 +127,9 @@ function seedDrivers(): DriverRow[] {
       appVersion: d.appVersion,
       appPlatform: i % 2 === 0 ? 'iOS' : 'Android',
       registeredAt: daysAgo(300 - i * 2),
+      // B-31 shipped — most seeded drivers have a verified email; every 9th one does not, to
+      // exercise the "Email not verified" badge without making it the majority state.
+      emailVerifiedAt: i % 9 === 0 ? null : daysAgo(250 - i * 2),
     };
   });
 }

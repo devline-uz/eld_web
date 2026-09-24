@@ -17,7 +17,7 @@ import { usePermission } from '@/shared/auth/usePermission';
 import type { ApiError } from '@/shared/api/errors';
 import {
   useActivitySummary,
-  useCarrierTransferConfig,
+  useTransferConfig,
   useReportDrivers,
   type ActivitySummaryItem,
 } from '@/shared/api/reports';
@@ -74,7 +74,9 @@ export default function ActivityReportPage() {
   const navigate = useNavigate();
   const { can } = usePermission();
   const { user } = useAuth();
-  const carrier = useCarrierTransferConfig(can('carrierSettings'));
+  // B-45 (shipped) — `GET /carrier/transfer-config` is `reports` READ, so FLEET_MANAGER reads the
+  // real carrier zone and eRODS mode too.
+  const carrier = useTransferConfig();
   const timezone = carrier.data?.timezone ?? CARRIER_TZ_FALLBACK;
   const { from, to, params, setRange, setParam } = useReportRange(timezone);
   const terminal = params.get('terminal');

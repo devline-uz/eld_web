@@ -23,7 +23,6 @@ import { resetAnnouncedReports } from './useReportJobs';
 const mocks = vi.hoisted(() => ({
   role: 'FLEET_MANAGER' as string,
   overrides: {} as Record<string, unknown>,
-  room: null as string | null,
   handlers: {} as Record<string, (payload: unknown) => void>,
 }));
 
@@ -35,11 +34,10 @@ vi.mock('@/shared/auth/AuthProvider', async (importOriginal) => {
     useAuth: () => buildMockAuthContext(mocks.role as Role, mocks.overrides as Partial<AuthContextValue>),
   };
 });
-vi.mock('@/shared/realtime/useRoom', () => ({
-  useRoom: (room: string | null, handlers: Record<string, (payload: unknown) => void>) => {
-    mocks.room = room;
-    mocks.handlers = handlers ?? {};
-    return { joined: true };
+// `useReportReadyToasts` (WD-094) listens with `useRealtimeEvent`, not a room subscription.
+vi.mock('@/shared/realtime/useRealtimeEvent', () => ({
+  useRealtimeEvent: (event: string, handler: (payload: unknown) => void) => {
+    mocks.handlers[event] = handler;
   },
 }));
 
@@ -110,7 +108,8 @@ describe('W-12 Reports · IFTA', () => {
       expect(library.getByText(name)).toBeInTheDocument();
       expect(library.getByText(description)).toBeInTheDocument();
     }
-    expect(mocks.room).toBe('user:usr_fleet_manager');
+    // WD-094 — `report.ready` is heard via `useRealtimeEvent` (no room subscription of its own).
+    expect(mocks.handlers['report.ready']).toBeInstanceOf(Function);
   });
 
   describe('B-46 · GET /reports/ifta/summary', () => {
@@ -286,16 +285,19 @@ describe('W-12 Reports · IFTA', () => {
     expect(HTMLAnchorElement.prototype.click).toHaveBeenCalled();
   });
 
-  it('removes Generate report, Schedule a report and Download IFTA PDF for VIEWER, keeps Export CSV', async () => {
+  it('removes Generate report and Schedule a report for VIEWER, keeps Export CSV and Download IFTA PDF (B-96)', async () => {
     mocks.role = 'VIEWER';
     renderPage(<IftaReportPage />, ROUTE);
     await screen.findByRole('row', { name: /IFTA mileage report/ });
     expect(screen.queryByRole('button', { name: 'Generate report' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Schedule a report' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Download IFTA PDF' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Download IFTA PDF' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Export CSV' })).toBeInTheDocument();
     // reportsTransfer NONE — the pack entry is absent, not disabled.
     expect(within(cardOf('Report library')).queryByText('FMCSA / DOT audit pack')).toBeNull();
+    // RODS / Idle & fuel generate a PDF (`reports` FULL) — absent for a read-only role (§12.2).
+    expect(within(cardOf('Report library')).queryByText('Driver logs (RODS)')).toBeNull();
+    expect(within(cardOf('Report library')).queryByText('Idle & fuel report')).toBeNull();
   });
 
   it.each(['FLEET_MANAGER', 'VIEWER'])('shows the §13.2 empty state verbatim (%s)', async (role) => {
@@ -315,15 +317,22 @@ describe('W-12 Reports · IFTA', () => {
     expect(screen.getByText('Report library')).toBeInTheDocument();
   });
 
-  it('queues the IFTA CSV with the quarter and shows a refusal verbatim', async () => {
+  it('queues the IFTA CSV via Generate report and shows a Download IFTA PDF refusal verbatim (B-96, READ shortcut)', async () => {
     const bodies: unknown[] = [];
+    let pdfParams: Record<string, string> = {};
     server.use(
       http.post(url(endpoints.reports.generate), async ({ request }) => {
         const body = (await request.json()) as { format: string };
         bodies.push(body);
-        return body.format === 'PDF'
-          ? fail(422, 'VALIDATION_FAILED', 'IFTA reports are generated as CSV in this version (streaming export, TZ §15).')
-          : ok({ reportId: 'rpt_generated', status: 'QUEUED' }, 202);
+        return ok({ reportId: 'rpt_generated', status: 'QUEUED' }, 202);
+      }),
+      http.get(url(endpoints.reports.ifta), ({ request }) => {
+        const params = Object.fromEntries(new URL(request.url).searchParams);
+        if (params.format === 'PDF') {
+          pdfParams = params;
+          return fail(422, 'VALIDATION_FAILED', 'IFTA reports are generated as CSV in this version (streaming export, TZ §15).');
+        }
+        return ok({ reportId: 'rpt_export_ifta', status: 'QUEUED' }, 202);
       }),
     );
     renderPage(<IftaReportPage />, ROUTE);
@@ -334,7 +343,8 @@ describe('W-12 Reports · IFTA', () => {
     expect(
       await screen.findByText('IFTA reports are generated as CSV in this version (streaming export, TZ §15).'),
     ).toBeInTheDocument();
-    expect(bodies).toHaveLength(2);
+    expect(pdfParams).toEqual({ quarter: '2026-Q3', format: 'PDF' });
+    expect(bodies).toHaveLength(1);
   });
 
   it('Export CSV queues through the READ shortcut and saves the file once READY', async () => {
@@ -364,15 +374,43 @@ describe('W-12 Reports · IFTA', () => {
     expect(screen.queryByText('The report is still being generated.')).toBeNull();
   });
 
-  it('opens the Activity report for Driver logs (RODS) and keeps Idle & fuel inert (B-14)', async () => {
+  it.each([
+    ['Driver logs (RODS)', 'RODS'],
+    ['Idle & fuel report', 'IDLE_FUEL'],
+  ])('B-14 — %s queues a real %s PDF from the library and follows it', async (name, type) => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    const bodies: { type: string; format: string; params: Record<string, unknown> }[] = [];
+    server.use(
+      http.post(url(endpoints.reports.generate), async ({ request }) => {
+        bodies.push((await request.json()) as (typeof bodies)[number]);
+        return ok({ reportId: 'rpt_library', status: 'QUEUED' }, 202);
+      }),
+    );
     renderPage(<IftaReportPage />, ROUTE);
-    const library = within(cardOf('Report library'));
-    const idle = library.getByText('Idle & fuel report').closest('button') as HTMLButtonElement;
-    expect(idle).toHaveAttribute('aria-disabled', 'true');
-    await userEvent.click(idle);
+    await user.click(within(cardOf('Report library')).getByText(name));
+    // A generate form, not a redirect to the Activity report.
     expect(screen.getByTestId('location')).toHaveTextContent(ROUTE);
-    await userEvent.click(library.getByText('Driver logs (RODS)'));
-    expect(screen.getByTestId('location')).toHaveTextContent('/reports/activity');
+    const dialog = within(await screen.findByRole('dialog', { name }));
+    expect(dialog.getByText(/· PDF$/)).toBeInTheDocument();
+    expect(dialog.queryByRole('combobox', { name: 'Unit' }) !== null).toBe(type === 'IDLE_FUEL');
+    await user.click(dialog.getByRole('button', { name: 'Generate report' }));
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    expect(bodies[0]?.type).toBe(type);
+    expect(bodies[0]?.format).toBe('PDF');
+    // Default range: the 8 carrier-zone days ending today.
+    const { from, to } = bodies[0]?.params as { from: string; to: string };
+    expect((Date.parse(to) - Date.parse(from)) / 86_400_000).toBe(7);
+    await waitFor(() => expect(screen.queryByRole('dialog', { name })).toBeNull());
+  });
+
+  it('shows the library generate refusal verbatim inside the form', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    server.use(http.post(url(endpoints.reports.generate), () => fail(422, 'VALIDATION_FAILED', 'Range exceeds 62 days.')));
+    renderPage(<IftaReportPage />, ROUTE);
+    await user.click(within(cardOf('Report library')).getByText('Driver logs (RODS)'));
+    const dialog = within(await screen.findByRole('dialog', { name: 'Driver logs (RODS)' }));
+    await user.click(dialog.getByRole('button', { name: 'Generate report' }));
+    expect(await dialog.findByText('Range exceeds 62 days.')).toBeInTheDocument();
   });
 
   it('falls back to the current carrier-zone quarter for a malformed ?quarter=', () => {
@@ -408,12 +446,35 @@ describe('W-12 Reports · IFTA', () => {
     expect(body).toEqual({
       reportType: 'IFTA',
       format: 'CSV',
-      params: { quarter: '2026-Q3' },
+      // B-48 — a rolling period by default, resolved by the scheduler on every run.
+      params: { window: 'PREVIOUS_QUARTER' },
       cron: '0 6 * * 1',
       timezone: 'America/New_York',
       recipients: ['ops@universal-logistics.example', 'safety@universal-logistics.example'],
       enabled: true,
     });
+  });
+
+  it('B-48 — pins the selected quarter with This selection and offers the PDF format', async () => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 });
+    let body: Record<string, unknown> | null = null;
+    server.use(
+      http.post(url(endpoints.reports.schedules), async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>;
+        return ok({ id: 'sch_2' }, 201);
+      }),
+    );
+    renderPage(<IftaReportPage />, ROUTE);
+    await user.click(screen.getByRole('button', { name: 'Schedule a report' }));
+    const dialog = within(await screen.findByRole('dialog'));
+    const period = dialog.getByRole('combobox', { name: /Period/ });
+    expect(within(period).getAllByRole('option').map((o) => o.textContent)).toEqual(['Previous quarter', 'This selection · Q3 2026']);
+    await user.selectOptions(period, 'FIXED');
+    await user.selectOptions(dialog.getByRole('combobox', { name: /Format/ }), 'PDF');
+    await user.type(dialog.getByRole('textbox'), 'ops@universal-logistics.example');
+    await user.click(dialog.getByRole('button', { name: 'Schedule' }));
+    await waitFor(() => expect(body).not.toBeNull());
+    expect(body).toMatchObject({ reportType: 'IFTA', format: 'PDF', params: { quarter: '2026-Q3' } });
   });
 
   it('confirms before discarding a dirty schedule, and shows a refusal in the modal', async () => {

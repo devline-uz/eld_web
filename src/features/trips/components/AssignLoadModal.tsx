@@ -8,12 +8,14 @@ import { useToast } from '@/shared/ui/Toast';
 import { useDriversList } from '@/shared/api/drivers';
 import { useAssignTrip, blocksAssignment, type TripRow } from '@/shared/api/trips';
 import { ApiError } from '@/shared/api/errors';
-import { NOTIFY_REASON } from '../lib/copy';
 
 export function AssignLoadModal({ load, onClose }: { load: TripRow; onClose: () => void }) {
   const { toast } = useToast();
   const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // B-74 (shipped) — `POST /trips/:id/assign` now takes `notify` (server default `true`); starts
+  // checked so an untouched submit keeps the previous (only) behaviour.
+  const [notify, setNotify] = useState(true);
   const listRef = useRef<HTMLDivElement>(null);
 
   const driversQuery = useDriversList({ q: query || undefined, limit: 25 });
@@ -28,15 +30,12 @@ export function AssignLoadModal({ load, onClose }: { load: TripRow; onClose: () 
       onClose={onClose}
       title={`Assign driver to load ${load.number}`}
       size="md"
-      isDirty={Boolean(selectedId) || query !== ''}
+      isDirty={Boolean(selectedId) || query !== '' || !notify}
       footer={
         <>
-          {/* B-74 — `POST /trips/:id/assign` takes `{ driverId, vehicleId, trailerId }` only, so
-              this tick was read by nothing. Disabled with the reason visible instead of implying
-              a notification that never left the browser. */}
-          <label className="mr-auto flex items-center gap-2 text-body text-text-muted" title={NOTIFY_REASON}>
-            <input type="checkbox" disabled title={NOTIFY_REASON} />
-            Notify the driver in the app — {NOTIFY_REASON}
+          <label className="mr-auto flex items-center gap-2 text-body text-text-secondary">
+            <input type="checkbox" checked={notify} onChange={(e) => setNotify(e.target.checked)} />
+            Notify the driver in the app
           </label>
           <ModalCancelButton disabled={mutation.isPending} />
           <Button
@@ -48,7 +47,7 @@ export function AssignLoadModal({ load, onClose }: { load: TripRow; onClose: () 
               // `mutate()` returns immediately — without this a double click assigns twice.
               if (!selectedId || mutation.isPending) return;
               mutation.mutate(
-                { driverId: selectedId },
+                { driverId: selectedId, notify },
                 {
                   onSuccess: () => {
                     toast({ kind: 'success', title: `Load ${load.number} assigned` });

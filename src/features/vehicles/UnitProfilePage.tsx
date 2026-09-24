@@ -13,12 +13,15 @@ import { useRoom } from '@/shared/realtime/useRoom';
 import {
   useVehicle,
   useVehicleAssignedDriver,
-  useVehicleDevice,
+  useDevicesForVehicle,
   useVehicleDtc,
   useVehicleActivities,
+  useVehicleTelemetry,
+  useCoDriverPairings,
   totalVehicleMiles,
 } from '@/shared/api/vehicles';
-import { qk } from '@/shared/api/queryKeys';
+import { useDriversLookup } from '@/shared/api/lookups';
+import { qk, qkRoot } from '@/shared/api/queryKeys';
 import { Badge } from '@/shared/ui/Badge';
 import { Button } from '@/shared/ui/Button';
 import { Card, SectionHeader } from '@/shared/ui/Card';
@@ -71,15 +74,19 @@ export default function UnitProfilePage() {
 
   const vehicleQuery = useVehicle(id);
   const driverQuery = useVehicleAssignedDriver(id);
-  const deviceQuery = useVehicleDevice(id);
+  const deviceQuery = useDevicesForVehicle(id);
   const dtcQuery = useVehicleDtc(tab === 'diagnostics' ? id : undefined);
   const activitiesQuery = useVehicleActivities(tab === 'overview' || tab === 'activity' ? id : undefined);
+  const telemetryQuery = useVehicleTelemetry(tab === 'overview' ? id : undefined, { limit: 1 });
+  const coDriverQuery = useCoDriverPairings({ vehicleId: id, active: true, limit: 1 }, Boolean(id));
+  const driversLookupQuery = useDriversLookup(Boolean(coDriverQuery.data?.items.length));
 
   useDynamicSubtitle(vehicleQuery.data ? `Vehicles › Unit ${vehicleQuery.data.unitNumber}` : null);
 
   useRoom(id ? `vehicle:${id}` : null, {
+    // `vehicleTelemetry` nests under `['vehicles', id, ...]`, so invalidating the vehicle root covers it.
     'telemetry.point': () => void queryClient.invalidateQueries({ queryKey: qk.vehicle(id ?? '') }),
-    'device.ble_state': () => void queryClient.invalidateQueries({ queryKey: qk.vehicleDevice(id ?? '') }),
+    'device.ble_state': () => void queryClient.invalidateQueries({ queryKey: qkRoot.devices }),
     'eld.events_ingested': () => void queryClient.invalidateQueries({ queryKey: qk.vehicleActivities(id ?? '') }),
   });
 
@@ -96,9 +103,15 @@ export default function UnitProfilePage() {
 
   const vehicle = vehicleQuery.data;
   const driver = driverQuery.data;
-  const device = deviceQuery.data;
+  const device = deviceQuery.data?.items[0] ?? null;
   const activeDtcCount = dtcQuery.data?.items.filter((d) => !d.clearedAt).length ?? 0;
   const total = totalVehicleMiles(vehicle);
+  const telemetry = telemetryQuery.data?.items[0] ?? null;
+  const coDriverPairing = coDriverQuery.data?.items[0] ?? null;
+  const coDriver = coDriverPairing
+    ? (driversLookupQuery.data?.items.find((d) => d.id === coDriverPairing.coDriverId) ?? null)
+    : null;
+  const num = (v: number | string | null | undefined) => (v == null ? null : typeof v === 'string' ? Number(v) : v);
 
   function setTab(next: Tab) {
     const nextParams = new URLSearchParams(params);
@@ -212,23 +225,33 @@ export default function UnitProfilePage() {
                 title="Live status"
                 subtitle={vehicleQuery.dataUpdatedAt ? `Updated ${updatedAgo}` : undefined}
                 action={
-                  <Can perm="vehicles" level="FULL">
-                    <Button variant="secondary" size="sm" onClick={() => setCalibrateOpen(true)}>
-                      Calibrate odometer
-                    </Button>
-                  </Can>
+                  <div className="flex items-center gap-2">
+                    {telemetry?.speedMph != null && (
+                      <Badge tone={telemetry.speedMph > 0 ? 'success' : 'neutral'} dot>
+                        {Math.round(telemetry.speedMph)} mph
+                      </Badge>
+                    )}
+                    <Can perm="vehicles" level="FULL">
+                      <Button variant="secondary" size="sm" onClick={() => setCalibrateOpen(true)}>
+                        Calibrate odometer
+                      </Button>
+                    </Can>
+                  </div>
                 }
               />
-              {/* ⛔ GAP — no `GET /vehicles/:id/telemetry` read; live cells fall back to the last
-                  odometer/engine-hours known from the vehicle row itself. */}
+              {/* `GET /vehicles/:id/telemetry?limit=1` (Phase 13) — newest point for the live cells. */}
               <div className="mt-4 grid grid-cols-4 gap-3">
                 <TelemetryCell label="Odometer" value={`${formatOdometer(total)} mi`} />
                 <TelemetryCell label="Engine hours" value={formatEngineHoursLong(Number(vehicle.engineHours))} />
-                <TelemetryCell label="Fuel level" value="—" />
-                <TelemetryCell label="Coolant temp" value="—" />
+                <TelemetryCell label="Fuel level" value={telemetry?.fuelPct != null ? `${telemetry.fuelPct}%` : '—'} />
+                <TelemetryCell
+                  label="Coolant temp"
+                  value={telemetry?.coolantTempC != null ? `${telemetry.coolantTempC} °C` : '—'}
+                  danger={telemetry?.coolantTempC != null && telemetry.coolantTempC > 100}
+                />
                 <TelemetryCell label="Oil level" value="—" />
-                <TelemetryCell label="Battery" value="—" />
-                <TelemetryCell label="DEF level" value="—" />
+                <TelemetryCell label="Battery" value={num(telemetry?.voltage) != null ? `${num(telemetry?.voltage)} V` : '—'} />
+                <TelemetryCell label="DEF level" value={telemetry?.defPct != null ? `${telemetry.defPct}%` : '—'} />
                 <TelemetryCell label="Bus type" value={vehicle.busType ?? '—'} />
               </div>
               <p className="mt-2 text-caption text-text-muted">
@@ -322,7 +345,7 @@ export default function UnitProfilePage() {
               <DetailRow label="Sleeper berth" value={vehicle.sleeperBerth ? 'Available' : 'Not available'} />
               <DetailRow label="Primary driver" value={driver ? `${driver.firstName} ${driver.lastName}` : 'Unassigned'} />
               {/* ⛔ GAP B-7 — no /co-driver-pairings endpoint; always "—" until it lands. */}
-              <DetailRow label="Co-driver" value="—" />
+              <DetailRow label="Co-driver" value={coDriver ? `${coDriver.firstName} ${coDriver.lastName}` : '—'} />
             </div>
           </Card>
         </div>

@@ -110,12 +110,12 @@ describe('11.4 Assign driver', () => {
     expect(screen.getByRole('button', { name: 'Assign driver' })).toBeDisabled();
   });
 
-  // WB-158 / B-74 — the tick was kept in local state and never sent.
-  it('the "Notify the driver" checkbox is disabled with a visible reason', () => {
+  // B-74 shipped — `notify` now rides on `POST /vehicles/:id/assign-driver`, ticked by default.
+  it('the "Notify the driver" checkbox is enabled and checked by default', () => {
     renderWithProviders(<AssignDriverModal vehicle={VEHICLE} onClose={() => {}} />);
     const notify = screen.getByRole('checkbox', { name: /Notify the driver in the app/ });
-    expect(notify).toBeDisabled();
-    expect(screen.getByText(/the assign endpoint sends no notification/)).toBeInTheDocument();
+    expect(notify).toBeEnabled();
+    expect(notify).toBeChecked();
   });
 
   it('assigns the selected driver', async () => {
@@ -367,11 +367,10 @@ describe('11.6 Import vehicles — no invented state', () => {
     expect(screen.getByText(/1 rows detected/)).toBeInTheDocument();
   });
 
-  it('disables the options the import endpoint cannot accept, with the reason on screen', () => {
+  it('B-69 shipped — the import options are real, enabled controls', () => {
     renderWithProviders(<ImportVehiclesModal onClose={() => {}} />);
 
-    expect(screen.getByText(/the import endpoint does not accept this option/)).toBeInTheDocument();
-    for (const box of screen.getAllByRole('checkbox')) expect(box).toBeDisabled();
-    for (const select of screen.getAllByRole('combobox')) expect(select).toBeDisabled();
+    for (const box of screen.getAllByRole('checkbox')) expect(box).toBeEnabled();
+    for (const select of screen.getAllByRole('combobox')) expect(select).toBeEnabled();
   });
 });

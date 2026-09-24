@@ -15,6 +15,7 @@ import { typedCachePolicy } from './queryPolicy';
 import { useDevicesLookup, useDriversLookup, useVehiclesLookup, vehiclesLookupQuery } from './lookups';
 import { compactParams, pagePolicy, usePagedQuery, type PageQueryOptions } from './paging';
 import type { OffsetPage } from './types';
+import { vehiclesCountQuery } from './vehicleCounts';
 
 /** The real, raw `Vehicle` row (backend/prisma/schema.prisma `model Vehicle`). */
 export interface VehicleRow {
@@ -65,6 +66,8 @@ export interface DriverRow {
   appVersion: string | null;
   appPlatform: string | null;
   registeredAt: string;
+  /** B-31 (shipped) — null until `send-verification` + `verify-email` complete. */
+  emailVerifiedAt: string | null;
 }
 
 export interface DeviceRow {
@@ -120,12 +123,7 @@ export const vehiclesPageQuery = (params: VehiclesPageParams): PageQueryOptions<
   ...pagePolicy('list'),
 });
 
-/** `total` of a status slice via `limit: 1` — the same keys the Dashboard KPI tiles use. */
-export const vehiclesCountQuery = (status?: 'ACTIVE' | 'INACTIVE' | 'OUT_OF_SERVICE'): PageQueryOptions<VehicleRow> => ({
-  queryKey: qk.vehicles(compactParams({ status, limit: 1 })),
-  queryFn: ({ signal }) => client.list<VehicleRow>(endpoints.vehicles.list, compactParams({ status, limit: 1 }), { signal }),
-  ...pagePolicy('list'),
-});
+export { vehiclesCountQuery };
 
 export function joinVehicles(vehicles: VehicleRow[], drivers: DriverRow[], devices: DeviceRow[]): VehicleTableRow[] {
   const driverByVehicle = new Map(drivers.filter((d) => d.assignedVehicleId).map((d) => [d.assignedVehicleId as string, d]));

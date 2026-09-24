@@ -110,4 +110,27 @@ describe('useRoom', () => {
     render(<Probe room="fleet" onEvent={vi.fn()} />);
     expect(screen.getByTestId('joined')).toHaveTextContent('false');
   });
+
+  it('WB-248: the auto-joined user:{id} room is never (un)subscribed, but its events still arrive', async () => {
+    const socket = fakeSocket();
+    vi.spyOn(RealtimeProviderModule, 'useRealtime').mockReturnValue({
+      getSocket: () => socket as never,
+      connected: true,
+      isOffline: false,
+    });
+    const onReady = vi.fn();
+    function UserProbe() {
+      const { joined } = useRoom('user:u1', { 'report.ready': onReady });
+      return <div data-testid="joined">{String(joined)}</div>;
+    }
+
+    const { unmount } = render(<UserProbe />);
+    expect(screen.getByTestId('joined')).toHaveTextContent('true');
+    socket.trigger('report.ready', { reportId: 'r1', type: 'IFTA', status: 'READY' });
+    expect(onReady).toHaveBeenCalledWith({ reportId: 'r1', type: 'IFTA', status: 'READY' });
+
+    unmount();
+    expect(socket.emit).not.toHaveBeenCalled();
+    expect(socket.off).toHaveBeenCalled();
+  });
 });

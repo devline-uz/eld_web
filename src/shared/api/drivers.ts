@@ -70,7 +70,8 @@ export interface DriverRosterEntry {
   unit: { id: string; unitNumber: string } | null;
   hos: { driveRemainingSec: number; shiftRemainingSec: number; cycleRemainingSec: number };
   openViolations: number;
-  emailVerified: boolean | null; // ⛔ GAP B-31 — no verification state exists yet; always null today.
+  /** B-31 shipped — `null` when the driver has no email on file, else the real verified state. */
+  emailVerified: boolean | null;
 }
 
 export interface DriverRosterResponse {

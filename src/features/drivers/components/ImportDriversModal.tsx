@@ -6,9 +6,10 @@ import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { Badge } from '@/shared/ui/Badge';
 import { useToast } from '@/shared/ui/Toast';
-import { useImportDrivers } from '@/shared/api/drivers';
+import { useImportDrivers, type ImportDriversOptions } from '@/shared/api/drivers';
 import { ApiError } from '@/shared/api/errors';
 import { parseCsv } from '@/shared/lib/csv';
+import { TERMINALS } from '../lib/terminals';
 
 const MAX_BYTES = 5 * 1024 * 1024;
 const MAX_ROWS = 500;
@@ -24,6 +25,10 @@ export function ImportDriversModal({ onClose }: { onClose: () => void }) {
   // warnings), so the "N valid" figure was fabricated.
   const [rowsNeedingAttention, setRowsNeedingAttention] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [duplicateStrategy, setDuplicateStrategy] = useState<NonNullable<ImportDriversOptions['duplicateStrategy']>>('SKIP');
+  const [defaultHomeTerminalName, setDefaultHomeTerminalName] = useState<string>(TERMINALS[0].name);
+  const [sendInvitations, setSendInvitations] = useState(true);
+  const [applyDefaultExemptions, setApplyDefaultExemptions] = useState(true);
   const mutation = useImportDrivers();
 
   function handleFile(selected: File) {
@@ -86,7 +91,10 @@ export function ImportDriversModal({ onClose }: { onClose: () => void }) {
             loading={mutation.isPending}
             onClick={() =>
               mutation.mutate(
-                { drivers: rows },
+                {
+                  drivers: rows,
+                  options: { duplicateStrategy, defaultHomeTerminalName, sendInvitations, applyDefaultExemptions },
+                },
                 {
                   onSuccess: (summary) => {
                     const total = summary.imported + summary.updated;
@@ -183,37 +191,45 @@ export function ImportDriversModal({ onClose }: { onClose: () => void }) {
             ))}
           </div>
         )}
-        {/* `POST /drivers/import` takes the parsed rows and nothing else — it has no duplicate
-            strategy, default terminal, invitation or exemption option (backend gap reported).
-            The controls stay visible so the screen still matches the design, but they are
-            disabled with the reason on screen rather than pretending to steer the import. */}
-        <fieldset disabled className="flex flex-col gap-4 opacity-60">
+        {/* B-69 shipped — `ImportDriversOptionsDto` rides alongside the parsed rows. */}
+        <fieldset className="flex flex-col gap-4" disabled={mutation.isPending}>
           <div className="grid grid-cols-2 gap-4">
             <label className="flex flex-col gap-1">
               <span className="text-label text-text">Duplicate handling</span>
-              <select className="h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text">
-                <option>Skip existing usernames</option>
+              <select
+                value={duplicateStrategy}
+                onChange={(e) => setDuplicateStrategy(e.target.value as typeof duplicateStrategy)}
+                className="h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text"
+              >
+                <option value="SKIP">Skip existing usernames</option>
+                <option value="UPDATE">Update existing drivers</option>
+                <option value="CREATE">Always create new</option>
               </select>
             </label>
             <label className="flex flex-col gap-1">
               <span className="text-label text-text">Default terminal</span>
-              <select className="h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text">
-                <option>Columbus, OH</option>
+              <select
+                value={defaultHomeTerminalName}
+                onChange={(e) => setDefaultHomeTerminalName(e.target.value)}
+                className="h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text"
+              >
+                {TERMINALS.map((t) => (
+                  <option key={t.name} value={t.name}>
+                    {t.label}
+                  </option>
+                ))}
               </select>
             </label>
           </div>
           <label className="flex items-center gap-2 text-body text-text">
-            <input type="checkbox" checked readOnly />
+            <input type="checkbox" checked={sendInvitations} onChange={(e) => setSendInvitations(e.target.checked)} />
             Send app invitations after import — each driver receives an email with a one-time sign-in code
           </label>
           <label className="flex items-center gap-2 text-body text-text">
-            <input type="checkbox" checked readOnly />
+            <input type="checkbox" checked={applyDefaultExemptions} onChange={(e) => setApplyDefaultExemptions(e.target.checked)} />
             Apply default HOS exemptions — personal conveyance and yard move enabled
           </label>
         </fieldset>
-        <p className="text-caption text-text-muted">
-          Import options are not available yet — the import endpoint applies the carrier defaults to every row.
-        </p>
       </div>
     </Modal>
   );

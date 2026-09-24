@@ -1,14 +1,14 @@
 // owner: web-dispatch-messaging — W-11 Dispatch & Trips + 11.10 Create trip.
 //
-// `GET /trips` returns the raw Prisma `Trip` row (plus its `stops`, always included by the
-// repository) — there is no driver/vehicle name join (web/backend-gaps.md B-36). This module is
-// the single place that (a) types the real response and (b) joins one server page against the
-// session-wide `/drivers` and `/vehicles` lookups (`shared/api/lookups.ts`) — fetched once per
-// session, never per page and never per row (WD-073).
+// `GET /trips` returns the raw Prisma `Trip` row plus `stops` and a minimal `driver`/`vehicle`
+// name join (B-36, shipped 2026-09-24 — `trips.repository.ts` `NAME_JOIN`). This module still
+// joins against the session-wide `/drivers` and `/vehicles` lookups (`shared/api/lookups.ts`) for
+// the full `DriverRow`/`VehicleRow` shape the board needs (home terminal, status, etc.) — the
+// server join alone only carries `{ id, firstName, lastName }` / `{ id, unitNumber }`.
 //
-// `GET /trips/unassigned-loads` does NOT include `stops` (`trips.repository.ts`
-// `unassignedLoads()` has no `include`) — pickup/delivery/window render as unavailable for that
-// list until the backend adds the join (same B-36).
+// `GET /trips/unassigned-loads` now includes `stops` (ordered by `sequence`) and the same
+// `driver`/`vehicle` name join (B-36) — pickup/delivery/window and a pre-assigned unit render for
+// real; `driver` is always `null` here by definition (`unassignedLoads()` filters `driverId: null`).
 import { useCallback, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { client } from './client';
@@ -74,12 +74,14 @@ export interface TripRow {
 
 /** The design's STATUS column — computed, not a `Trip.status` value (web/tz.md §10 W-11).
  * `Loading` wins while the driver is stopped at the pickup; otherwise `onTime` (or a passed
- * `etaAt`) decides `Late` vs `On time` (web/decisions.md WD-029). */
-export type TripDisplayStatus = 'On time' | 'Late' | 'Loading' | 'Delivered' | 'Cancelled' | 'Planned';
+ * `etaAt`) decides `Late` vs `On time` (web/decisions.md WD-029). `Draft` (B-73) is its own state:
+ * a draft never has a driver yet, so it never reaches the pickup/onTime branches below. */
+export type TripDisplayStatus = 'On time' | 'Late' | 'Loading' | 'Delivered' | 'Cancelled' | 'Planned' | 'Draft';
 
 export function computeDisplayStatus(trip: Pick<TripRow, 'status' | 'onTime' | 'etaAt' | 'stops'>): TripDisplayStatus {
   if (trip.status === 'DELIVERED') return 'Delivered';
   if (trip.status === 'CANCELLED') return 'Cancelled';
+  if (trip.status === 'DRAFT') return 'Draft';
   if (trip.status === 'PLANNED') return 'Planned';
   const pickup = trip.stops.find((s) => s.type === 'PICKUP');
   if (pickup && pickup.arrivedAt && !pickup.departedAt) return 'Loading';
@@ -127,12 +129,13 @@ export const tripsPageQuery = (params: TripsPageParams): PageQueryOptions<TripRo
   ...pagePolicy('list'),
 });
 
-/** The `Active` segment is ASSIGNED ∪ IN_PROGRESS; `status` takes one value (B-59), so the two
- * slices are fetched side by side. Both are bounded working sets (a dispatch board, not history)
- * — 200 rows each is the API maximum and far above any real active count. */
+/** The `Active` segment is ASSIGNED ∪ IN_PROGRESS, and `Scheduled` is DRAFT ∪ PLANNED (B-73);
+ * `status` takes one value (B-59), so each pair is fetched side by side. Every slice is a bounded
+ * working set (a dispatch board, not history) — 200 rows each is the API maximum and far above any
+ * real active/scheduled count. */
 export const TRIPS_ACTIVE_STATUSES = ['ASSIGNED', 'IN_PROGRESS'] as const satisfies readonly TripStatus[];
 export const ACTIVE_SLICE_LIMIT = 200;
-export const tripsActiveSliceQuery = (status: (typeof TRIPS_ACTIVE_STATUSES)[number]) =>
+export const tripsActiveSliceQuery = (status: TripStatus) =>
   tripsPageQuery({ page: 1, limit: ACTIVE_SLICE_LIMIT, status });
 
 /** `total` of one lifecycle status via `limit: 1`. */
@@ -175,10 +178,9 @@ export function useActiveTripRows({ enabled = true }: { enabled?: boolean } = {}
 }
 
 export type TripSegment = 'ACTIVE'| 'SCHEDULED' | 'COMPLETED' | 'UNASSIGNED';
-const SEGMENT_STATUS: Record<Exclude<TripSegment, 'ACTIVE' | 'UNASSIGNED'>, TripStatus> = {
-  SCHEDULED: 'PLANNED',
-  COMPLETED: 'DELIVERED',
-};
+/** `SCHEDULED` is `DRAFT ∪ PLANNED` (B-73) — a draft is a saved-not-dispatched trip, same tab as a
+ * dispatched-but-not-started one; it publishes in place via `usePublishTrip`. */
+export const SCHEDULED_STATUSES = ['DRAFT', 'PLANNED'] as const satisfies readonly TripStatus[];
 
 export function joinTrips(trips: TripRow[], driverById: Map<string, DriverRow>, vehicleById: Map<string, VehicleRow>): TripTableRow[] {
   return trips.map((t) => joinTrip(t, driverById, vehicleById));
@@ -202,15 +204,17 @@ export interface TripsBoardInput {
   filter: (rows: TripTableRow[]) => TripTableRow[];
 }
 
-/** W-11 board (WD-073): Active = two bounded slices (exact, filtered in memory); Scheduled and
- * Completed = one server page per render; driver/unit names from the session-wide lookups. */
+/** W-11 board (WD-073): Active = two bounded slices (exact, filtered in memory); Scheduled is the
+ * same pattern over `DRAFT ∪ PLANNED` (B-73 — the status param takes one value, B-59); Completed =
+ * one server page per render; driver/unit names from the session-wide lookups. */
 export function useTripsBoard({ segment, page, limit, search, useWindow, filter }: TripsBoardInput) {
   const { map: driverById, query: driversQuery } = useDriverMap();
   const { map: vehicleById, query: vehiclesQuery } = useVehicleMap();
 
   const assignedQuery = useQuery(tripsActiveSliceQuery('ASSIGNED'));
   const inProgressQuery = useQuery(tripsActiveSliceQuery('IN_PROGRESS'));
-  const plannedCount = useQuery(tripsCountQuery('PLANNED'));
+  const draftQuery = useQuery(tripsActiveSliceQuery('DRAFT'));
+  const plannedQuery = useQuery(tripsActiveSliceQuery('PLANNED'));
   const kpiQuery = useQuery(tripsKpiQuery());
 
   const needle = search.trim().toLowerCase();
@@ -238,7 +242,17 @@ export function useTripsBoard({ segment, page, limit, search, useWindow, filter 
     [assignedQuery.data, inProgressQuery.data, driverById, vehicleById],
   );
 
-  const historyStatus = segment === 'SCHEDULED' || segment === 'COMPLETED' ? SEGMENT_STATUS[segment] : undefined;
+  const scheduledRows = useMemo(
+    () =>
+      joinTrips(
+        [...(draftQuery.data?.items ?? []), ...(plannedQuery.data?.items ?? [])].sort(byPlannedStartDesc),
+        driverById,
+        vehicleById,
+      ),
+    [draftQuery.data, plannedQuery.data, driverById, vehicleById],
+  );
+
+  const historyStatus = segment === 'COMPLETED' ? 'DELIVERED' : undefined;
   const history = usePagedQuery<TripRow>({
     server: tripsPageQuery({ page, limit, status: historyStatus, q: needle || undefined }),
     window: tripsPageQuery({ page: 1, limit: FILTER_WINDOW, status: historyStatus }),
@@ -250,16 +264,18 @@ export function useTripsBoard({ segment, page, limit, search, useWindow, filter 
   });
 
   const activeFiltered = useMemo(() => filter(activeRows.filter(matchesSearch)), [activeRows, filter, matchesSearch]);
+  const scheduledFiltered = useMemo(() => filter(scheduledRows.filter(matchesSearch)), [scheduledRows, filter, matchesSearch]);
   const historyRows = useMemo(() => joinTrips(history.items, driverById, vehicleById), [history.items, driverById, vehicleById]);
 
   let rows: TripTableRow[];
   let total: number;
   let totalPages: number;
-  if (segment === 'ACTIVE') {
-    total = activeFiltered.length;
+  if (segment === 'ACTIVE' || segment === 'SCHEDULED') {
+    const source = segment === 'ACTIVE' ? activeFiltered : scheduledFiltered;
+    total = source.length;
     totalPages = Math.max(1, Math.ceil(total / limit));
     const safePage = Math.min(page, totalPages);
-    rows = activeFiltered.slice((safePage - 1) * limit, safePage * limit);
+    rows = source.slice((safePage - 1) * limit, safePage * limit);
   } else {
     rows = historyRows;
     total = history.total;
@@ -269,17 +285,21 @@ export function useTripsBoard({ segment, page, limit, search, useWindow, filter 
   const delivered = kpiQuery.data?.items ?? [];
   const onTimeDelivered = delivered.filter((t) => t.onTime !== false).length;
   const activeTotal = (assignedQuery.data?.total ?? 0) + (inProgressQuery.data?.total ?? 0);
+  const scheduledTotal = (draftQuery.data?.total ?? 0) + (plannedQuery.data?.total ?? 0);
 
   const isActiveLoading = assignedQuery.isLoading || inProgressQuery.isLoading;
+  const isScheduledLoading = draftQuery.isLoading || plannedQuery.isLoading;
   return {
     rows,
     total,
     totalPages,
     /** Every active trip (joined) — the route panel and the drawer read from it. */
     activeRows,
+    /** Every DRAFT ∪ PLANNED trip (joined) — the route panel reads from it too. */
+    scheduledRows,
     counts: {
       active: activeTotal,
-      scheduled: plannedCount.data?.total ?? 0,
+      scheduled: scheduledTotal,
       completed: kpiQuery.data?.total ?? 0,
     },
     kpis: {
@@ -287,13 +307,21 @@ export function useTripsBoard({ segment, page, limit, search, useWindow, filter 
       onTimeWindow: delivered.length,
       lateCount: activeRows.filter((t) => t.displayStatus === 'Late').length,
     },
-    isLoading: segment === 'ACTIVE' ? isActiveLoading : history.isLoading,
-    isKpiLoading: isActiveLoading || kpiQuery.isLoading || plannedCount.isLoading,
-    isError: segment === 'ACTIVE' ? (assignedQuery.isError || inProgressQuery.isError) && !assignedQuery.data && !inProgressQuery.data : history.isError,
+    isLoading: segment === 'ACTIVE' ? isActiveLoading : segment === 'SCHEDULED' ? isScheduledLoading : history.isLoading,
+    isKpiLoading: isActiveLoading || isScheduledLoading || kpiQuery.isLoading,
+    isError:
+      segment === 'ACTIVE'
+        ? (assignedQuery.isError || inProgressQuery.isError) && !assignedQuery.data && !inProgressQuery.data
+        : segment === 'SCHEDULED'
+          ? (draftQuery.isError || plannedQuery.isError) && !draftQuery.data && !plannedQuery.data
+          : history.isError,
     refetch: () => {
       if (segment === 'ACTIVE') {
         void assignedQuery.refetch();
         void inProgressQuery.refetch();
+      } else if (segment === 'SCHEDULED') {
+        void draftQuery.refetch();
+        void plannedQuery.refetch();
       } else history.refetch();
     },
     driversLookup: driversQuery,

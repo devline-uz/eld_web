@@ -1,13 +1,16 @@
-// owner: web-auth-rbac — W-26 `Profile` card. `PATCH /me/profile` accepts firstName, lastName
-// and phone only (UpdateMyProfileDto), so `Job title` is read-only and the photo has no
-// Upload/Remove until B-51 (web/decisions.md WD-049). `Work email` is managed by the admin.
+// owner: web-auth-rbac — W-26 `Profile` card. `PATCH /me/profile` takes firstName, lastName,
+// jobTitle and phone (UpdateMyProfileDto, B-51 shipped); the photo is `POST/DELETE /me/avatar`
+// (PNG/JPG, ≥ 256 × 256 px, ≤ 5 MB — checked here first, the server re-checks). Every change
+// re-reads `GET /auth/me` so the topbar chip follows. `Work email` is managed by the admin.
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { UseQueryResult } from '@tanstack/react-query';
-import { Mail, Phone } from 'lucide-react';
-import { useId, useState, type ReactNode } from 'react';
+import { Mail, Phone, Trash2, Upload } from 'lucide-react';
+import { useId, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { isApiError, toUserMessage } from '@/shared/api/errors';
+import { useDeleteAvatar, useUploadAvatar } from '@/shared/api/me';
+import { useAuth } from '@/shared/auth/AuthProvider';
 import { fields, inputFilters, profileSchema } from '@/shared/forms';
 import { Avatar } from '@/shared/ui/Avatar';
 import { Button } from '@/shared/ui/Button';
@@ -17,10 +20,103 @@ import { cn } from '@/shared/ui/cn';
 import { ErrorState, LoadingState } from '@/shared/ui/states';
 import { useToast } from '@/shared/ui/Toast';
 import { useUpdateProfile, type MyProfile } from '../api';
+import { avatarProblem } from '../avatar';
 
-const schema = profileSchema.extend({ phone: z.union([z.literal(''), fields.phone()]) });
+const JOB_TITLE_MAX = 120;
+const schema = profileSchema.extend({
+  jobTitle: z.string().max(JOB_TITLE_MAX, `Job title must be ${JOB_TITLE_MAX} characters or fewer.`),
+  phone: z.union([z.literal(''), fields.phone()]),
+});
 type ProfileValues = z.infer<typeof schema>;
-const EDITABLE = ['firstName', 'lastName', 'phone'] as const;
+const EDITABLE = ['firstName', 'lastName', 'jobTitle', 'phone'] as const;
+
+function ProfilePhoto({ profile }: { profile: MyProfile }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const errorId = useId();
+  const { toast } = useToast();
+  const { refreshUser } = useAuth();
+  const upload = useUploadAvatar();
+  const remove = useDeleteAvatar();
+  const [problem, setProblem] = useState<string | null>(null);
+  const busy = upload.isPending || remove.isPending;
+
+  const done = () => {
+    setProblem(null);
+    toast({ kind: 'success', ...TOAST_COPY.settingsSaved });
+    void refreshUser?.().catch(() => undefined);
+  };
+
+  async function onFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = ''; // picking the same file again must fire `change` again
+    if (!file) return;
+    const local = await avatarProblem(file);
+    if (local) {
+      setProblem(local);
+      return;
+    }
+    upload.mutate(file, { onSuccess: done, onError: (error) => setProblem(toUserMessage(error)) });
+  }
+
+  return (
+    <div className="flex items-center gap-4">
+      <Avatar
+        name={`${profile.firstName} ${profile.lastName}`}
+        src={profile.avatarUrl ?? undefined}
+        size="xl"
+      />
+      <div className="min-w-0 flex-1">
+        <p className="text-body-strong text-text">Profile photo</p>
+        <p className="text-caption text-text-muted">
+          PNG or JPG, at least 256 × 256 px. Appears on your signature block.
+        </p>
+        {problem ? (
+          <p id={errorId} role="alert" className="mt-1 text-caption text-danger">
+            {problem}
+          </p>
+        ) : null}
+      </div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/png,image/jpeg"
+        className="sr-only"
+        tabIndex={-1}
+        aria-hidden="true"
+        data-testid="avatar-file-input"
+        onChange={(event) => void onFile(event)}
+      />
+      <div className="flex shrink-0 gap-2">
+        <Button
+          variant="secondary"
+          iconLeft={<Upload size={16} strokeWidth={1.75} aria-hidden="true" />}
+          loading={upload.isPending}
+          disabled={busy && !upload.isPending}
+          aria-describedby={problem ? errorId : undefined}
+          onClick={() => inputRef.current?.click()}
+        >
+          Upload
+        </Button>
+        {profile.avatarUrl ? (
+          <Button
+            variant="danger-outline"
+            iconLeft={<Trash2 size={16} strokeWidth={1.75} aria-hidden="true" />}
+            loading={remove.isPending}
+            disabled={busy && !remove.isPending}
+            onClick={() =>
+              remove.mutate(undefined, {
+                onSuccess: done,
+                onError: (error) => setProblem(toUserMessage(error)),
+              })
+            }
+          >
+            Remove
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
 
 const INPUT =
   'h-input w-full rounded-md border bg-bg-surface px-3 text-body text-text disabled:bg-bg-subtle read-only:bg-bg-subtle read-only:text-text-secondary';
@@ -64,10 +160,12 @@ function ProfileForm({ profile }: { profile: MyProfile }) {
   const uid = useId();
   const { toast } = useToast();
   const update = useUpdateProfile();
+  const { refreshUser } = useAuth();
   const [banner, setBanner] = useState<string | null>(null);
   const defaults: ProfileValues = {
     firstName: profile.firstName,
     lastName: profile.lastName,
+    jobTitle: profile.jobTitle ?? '',
     phone: profile.phone ?? '',
   };
   const {
@@ -90,10 +188,17 @@ function ProfileForm({ profile }: { profile: MyProfile }) {
       const saved = await update.mutateAsync({
         firstName: values.firstName.trim(),
         lastName: values.lastName.trim(),
+        jobTitle: values.jobTitle.trim(),
         phone: values.phone,
       });
-      reset({ firstName: saved.firstName, lastName: saved.lastName, phone: saved.phone ?? '' });
+      reset({
+        firstName: saved.firstName,
+        lastName: saved.lastName,
+        jobTitle: saved.jobTitle ?? '',
+        phone: saved.phone ?? '',
+      });
       toast({ kind: 'success', ...TOAST_COPY.settingsSaved });
+      void refreshUser?.().catch(() => undefined);
     } catch (error) {
       const fieldErrors = isApiError(error) ? error.fieldErrors : {};
       const mapped = EDITABLE.filter((key) => fieldErrors[key]);
@@ -113,19 +218,7 @@ function ProfileForm({ profile }: { profile: MyProfile }) {
         </p>
       ) : null}
 
-      <div className="flex items-center gap-4">
-        <Avatar
-          name={`${profile.firstName} ${profile.lastName}`}
-          src={profile.avatarUrl ?? undefined}
-          size="xl"
-        />
-        <div>
-          <p className="text-body-strong text-text">Profile photo</p>
-          <p className="text-caption text-text-muted">
-            PNG or JPG, at least 256 × 256 px. Appears on your signature block.
-          </p>
-        </div>
-      </div>
+      <ProfilePhoto profile={profile} />
 
       <fieldset disabled={isSubmitting} className="contents">
         <div className="grid grid-cols-3 gap-4">
@@ -149,12 +242,15 @@ function ProfileForm({ profile }: { profile: MyProfile }) {
               {...register('lastName')}
             />
           </Field>
-          <Field id={`${uid}-jobTitle`} label="Job title">
+          <Field id={`${uid}-jobTitle`} label="Job title" error={errors.jobTitle?.message}>
             <input
               id={`${uid}-jobTitle`}
-              readOnly
-              value={profile.jobTitle ?? ''}
-              className={cn(INPUT, 'border-border')}
+              autoComplete="organization-title"
+              maxLength={JOB_TITLE_MAX}
+              aria-invalid={errors.jobTitle ? true : undefined}
+              aria-describedby={describe('jobTitle', Boolean(errors.jobTitle))}
+              className={cn(INPUT, errors.jobTitle ? 'border-danger' : 'border-border')}
+              {...register('jobTitle')}
             />
           </Field>
         </div>

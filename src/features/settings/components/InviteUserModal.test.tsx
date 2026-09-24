@@ -215,12 +215,24 @@ describe('InviteUserModal — role error, double submit and dirty close', () => 
 
 /* ------------------------------------------------------------------ stage-2 (B-85) */
 
-describe('InviteUserModal — fields the invite API cannot carry', () => {
-  it('Terminal access and Message are disabled with the reason on screen', () => {
+describe('InviteUserModal — Terminal access and Message (B-85, shipped)', () => {
+  it('sends checked terminalIds and a trimmed message', async () => {
+    const user = userEvent.setup();
+    let body: unknown = null;
+    server.use(
+      http.post(url(endpoints.users.create), async ({ request }) => {
+        body = await request.json();
+        return ok({ user: { id: 'usr_1' }, inviteToken: 'tok' }, 201);
+      }),
+    );
     renderModal();
-    expect(screen.getByRole('combobox')).toBeDisabled();
-    expect(screen.getByRole('textbox', { name: /message/i })).toBeDisabled();
-    expect(screen.getByText(/the invite API has no terminal field/i)).toBeInTheDocument();
-    expect(screen.getByText(/sends the standard invitation email only/i)).toBeInTheDocument();
+    await user.type(screen.getByPlaceholderText('Anna Weiss'), 'Anna Weiss');
+    await user.type(screen.getByPlaceholderText('anna.weiss@example.com'), 'anna.weiss@example.com');
+    await user.click(screen.getByRole('checkbox', { name: /Columbus, OH/i }));
+    await user.type(screen.getByRole('textbox', { name: /message/i }), 'Welcome aboard!');
+    await user.click(screen.getByRole('button', { name: 'Send invitation' }));
+
+    await waitFor(() => expect(body).not.toBeNull());
+    expect(body).toMatchObject({ terminalIds: ['Columbus, OH'], message: 'Welcome aboard!' });
   });
 });

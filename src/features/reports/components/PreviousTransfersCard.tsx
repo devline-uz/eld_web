@@ -50,7 +50,8 @@ function ResultCell({ row, onRetry }: { row: TransferRow; onRetry: (row: Transfe
         {badge.label}
       </Badge>
       {status === 'FAILED' && (
-        <Can perm="reportsTransfer" level="FULL">
+        // B-95 — re-sending is a `POST /transfers`, gated on `dataTransfer` FULL.
+        <Can perm="dataTransfer" level="FULL">
           <Button variant="link" onClick={() => onRetry(row)}>
             Retry
           </Button>
@@ -112,16 +113,20 @@ export function PreviousTransfersCard({ timezone, onRetry }: PreviousTransfersCa
       {
         id: 'sentBy',
         header: 'Sent by',
-        // ⛔ B-46: the row carries `requestedById` only; `/users` is ADMIN-only.
-        cell: ({ row }) =>
-          userId && userName && row.original.requestedById === userId ? (
+        // B-46 (shipped) — `requestedBy: { id, name }` is embedded on read (a USER or a DRIVER who
+        // sent from the app); the signed-in user's own name covers a row read before the embed existed.
+        cell: ({ row }) => {
+          const name =
+            row.original.requestedBy?.name ?? (userId && userName && row.original.requestedById === userId ? userName : null);
+          return name ? (
             <span className="flex items-center gap-2">
-              <Avatar name={userName} size="sm" />
-              {userName}
+              <Avatar name={name} size="sm" />
+              {name}
             </span>
           ) : (
             <span className="text-text-muted">{EMPTY.dash}</span>
-          ),
+          );
+        },
       },
       {
         id: 'result',
@@ -223,6 +228,7 @@ function TransferDrawer({ id, timezone, onClose }: { id: string | null; timezone
           <Detail label="eRODS mode" value={t.erodsMode === 'TEST' ? 'TEST' : 'PRODUCTION'} />
           <Detail label="Created" value={formatCarrier(t.createdAt, timezone, 'MMM dd, yyyy HH:mm:ss')} />
           <Detail label="Sent at" value={t.sentAt ? formatCarrier(t.sentAt, timezone, 'MMM dd, yyyy HH:mm:ss') : EMPTY.dash} />
+          <Detail label="Sent by" value={t.requestedBy?.name ?? EMPTY.dash} />
           <Detail label="Reference" value={t.referenceId ?? EMPTY.dash} />
           <Detail label="Response" value={t.responseCode ?? EMPTY.dash} />
           <Detail label="Attempts" value={String(t.attempts)} />

@@ -6,8 +6,9 @@
 // KPIs are real: `Daily logs included` / `Uncertified logs` come from ONE request — the picked driver's
 // `GET /logs/:driverId/range`, or `GET /reports/activity/summary` for all drivers; never one range call
 // per driver (web/bugs.md WB-048, WD-070). `DVIRs included` the inspections in range, `Unassigned
-// segments` the PENDING unidentified segments. The six "contains" rows describe the Appendix A file,
-// which the backend always builds in full — they are not request options (gap B-48).
+// segments` the PENDING unidentified segments. B-48 (shipped): `All units ▾` sends `vehicleId` (the
+// pack keeps only drivers who operated that unit) and the six "contains" rows are real `include[]`
+// options — all six ticked sends no `include` at all, i.e. the full pack (web/decisions.md WD-091).
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AlertTriangle, ClipboardCheck, Eye, FileText, PenLine, Send } from 'lucide-react';
@@ -18,13 +19,15 @@ import { usePermission } from '@/shared/auth/usePermission';
 import {
   useReportDrivers,
   fetchReportDownload,
-  useCarrierTransferConfig,
+  useTransferConfig,
   useDvirReportRows,
   usePackRodsCounts,
   usePendingUnassignedCount,
   useQueueReport,
   useReport,
   useReportsList,
+  useReportVehicles,
+  type FmcsaPackSection,
   type ReportRow,
   type TransferMethod,
   type TransferRow,
@@ -61,43 +64,75 @@ import { TEST_BANNER_TEXT, transferRangeFor } from './sendLogs';
 import { useAnnounceReport, useGuardedMutate, useReportReadyToasts } from './useReportJobs';
 import { useReportRange } from './useReportRange';
 
-const PACK_CONTENTS: { name: string; description: string; checked: boolean }[] = [
-  { name: 'Records of duty status (RODS)', description: 'Graph grid + event list for every driver and day', checked: true },
-  { name: 'Unidentified driving records', description: 'All unassigned segments and their resolution', checked: true },
-  { name: 'Driver log edits and annotations', description: 'Original value, edited value, reason and approver', checked: true },
-  { name: 'Vehicle and ELD identification', description: 'VIN, unit number, ELD serial and firmware version', checked: true },
-  { name: 'DVIRs and defect corrections', description: 'Pre-trip, post-trip and mechanic signatures', checked: true },
-  // WB-177 — this row rendered unchecked while the backend always builds the pack in full and
-  // 11.14's own `Includes` line lists ELD malfunctions: the list contradicted itself and told the
-  // operator the pack was short of a §395.8 section it in fact contains.
-  { name: 'Malfunction and diagnostic events', description: 'Power, engine sync, timing and data-recording events', checked: true },
+const PACK_CONTENTS: { section: FmcsaPackSection; name: string; description: string }[] = [
+  { section: 'RODS', name: 'Records of duty status (RODS)', description: 'Graph grid + event list for every driver and day' },
+  { section: 'UNIDENTIFIED', name: 'Unidentified driving records', description: 'All unassigned segments and their resolution' },
+  { section: 'EDITS', name: 'Driver log edits and annotations', description: 'Original value, edited value, reason and approver' },
+  { section: 'ELD_ID', name: 'Vehicle and ELD identification', description: 'VIN, unit number, ELD serial and firmware version' },
+  { section: 'DVIR', name: 'DVIRs and defect corrections', description: 'Pre-trip, post-trip and mechanic signatures' },
+  // WB-177 / WD-091 — ticked by default although the image draws it unticked: §395.8 malfunction
+  // and data-diagnostic records belong in an audit pack and FMCSA outranks the screenshot. The
+  // operator can still untick it now that `include[]` is real (B-48).
+  { section: 'MALFUNCTIONS', name: 'Malfunction and diagnostic events', description: 'Power, engine sync, timing and data-recording events' },
 ];
+const ALL_SECTIONS: FmcsaPackSection[] = PACK_CONTENTS.map((c) => c.section);
+
+/** `include` for the request: omitted for the full pack (the backend default), else the ticked sections in drawn order. */
+function packInclude(selected: ReadonlySet<FmcsaPackSection>): FmcsaPackSection[] | undefined {
+  if (selected.size === ALL_SECTIONS.length) return undefined;
+  return ALL_SECTIONS.filter((s) => selected.has(s));
+}
+
+const sameSections = (a: unknown, b: FmcsaPackSection[] | undefined): boolean => {
+  const left = Array.isArray(a) ? [...(a as string[])].sort().join(',') : '';
+  const right = b ? [...b].sort().join(',') : '';
+  return left === right;
+};
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-function packMatches(report: ReportRow, from: string, to: string, driverId: string | null): boolean {
-  const p = report.params as { from?: string; to?: string; driverId?: string };
-  return p.from === from && p.to === to && (p.driverId ?? null) === driverId;
+function packMatches(
+  report: ReportRow,
+  from: string,
+  to: string,
+  driverId: string | null,
+  vehicleId: string | null,
+  include: FmcsaPackSection[] | undefined,
+): boolean {
+  const p = report.params as { from?: string; to?: string; driverId?: string; vehicleId?: string; include?: unknown };
+  return (
+    p.from === from &&
+    p.to === to &&
+    (p.driverId ?? null) === driverId &&
+    (p.vehicleId ?? null) === vehicleId &&
+    sameSections(p.include, include)
+  );
 }
 
 export default function FmcsaPackPage() {
   const navigate = useNavigate();
   const { can } = usePermission();
   const { user } = useAuth();
-  const carrier = useCarrierTransferConfig(can('carrierSettings'));
+  // B-45 (shipped) — `GET /carrier/transfer-config` is `reports` READ, so FLEET_MANAGER reads the
+  // real carrier zone and eRODS mode too.
+  const carrier = useTransferConfig();
   const timezone = carrier.data?.timezone ?? CARRIER_TZ_FALLBACK;
   const erodsMode = carrier.data?.erodsMode;
   const testMode = erodsMode !== 'PRODUCTION';
   const { from, to, params, setRange, setParam, update } = useReportRange(timezone);
   const driverFilter = params.get('driver');
+  const unitFilter = params.get('unit');
+  const [sections, setSections] = useState<ReadonlySet<FmcsaPackSection>>(() => new Set(ALL_SECTIONS));
+  const include = useMemo(() => packInclude(sections), [sections]);
 
   useReportReadyToasts();
   const announce = useAnnounceReport();
 
   const totals = usePackRodsCounts(from, to, driverFilter, daysInRange(from, to));
-  const dvirs = useDvirReportRows(undefined, from);
+  const dvirs = useDvirReportRows(unitFilter ?? undefined, from);
   const unassigned = usePendingUnassignedCount(from, to);
   const drivers = useReportDrivers();
+  const vehicles = useReportVehicles();
   const packs = useReportsList({ type: 'FMCSA_PACK', limit: 10 });
   // WB-146 — single-flight: `isPending` alone still lets a real double click queue two packs.
   const queue = useGuardedMutate(useQueueReport());
@@ -120,9 +155,9 @@ export default function FmcsaPackPage() {
 
   const latestPack = useMemo(() => {
     const tracked = trackedPack.data;
-    if (tracked && packMatches(tracked, from, to, driverFilter)) return tracked;
-    return (packs.data?.items ?? []).find((r) => packMatches(r, from, to, driverFilter));
-  }, [trackedPack.data, packs.data, from, to, driverFilter]);
+    if (tracked && packMatches(tracked, from, to, driverFilter, unitFilter, include)) return tracked;
+    return (packs.data?.items ?? []).find((r) => packMatches(r, from, to, driverFilter, unitFilter, include));
+  }, [trackedPack.data, packs.data, from, to, driverFilter, unitFilter, include]);
 
   // A pack generated here is announced once READY, even if `report.ready` never arrived.
   useEffect(() => {
@@ -192,6 +227,18 @@ export default function FmcsaPackPage() {
     { value: 'all', label: 'All drivers' },
     ...(drivers.data?.items ?? []).map((d) => ({ value: d.id, label: `${d.firstName} ${d.lastName}` })),
   ];
+  const unitOptions = [
+    { value: 'all', label: 'All units' },
+    ...(vehicles.data?.items ?? []).map((v) => ({ value: v.id, label: `#${v.unitNumber}` })),
+  ];
+  const toggleSection = (section: FmcsaPackSection) =>
+    setSections((prev) => {
+      const next = new Set(prev);
+      if (next.has(section)) next.delete(section);
+      else next.add(section);
+      return next;
+    });
+  const noSections = sections.size === 0;
   const kpiLoading = totals.isLoading || dvirs.isLoading || unassigned.isLoading;
 
   return (
@@ -208,8 +255,13 @@ export default function FmcsaPackPage() {
           options={driverOptions}
           onSelect={(value) => setParam('driver', value === 'all' ? null : value)}
         />
-        {/* `FmcsaPackParamsDto` has no unit filter (B-48). */}
-        <SelectMenu name="Unit" value="all" options={[{ value: 'all', label: 'All units' }]} disabled />
+        {/* B-48 — `vehicleId` keeps only the drivers who operated that unit in the range. */}
+        <SelectMenu
+          name="Unit"
+          value={unitFilter ?? 'all'}
+          options={unitOptions}
+          onSelect={(value) => setParam('unit', value === 'all' ? null : value)}
+        />
         <div className="ml-auto flex items-center gap-2">
           <Button
             variant="secondary"
@@ -230,11 +282,21 @@ export default function FmcsaPackPage() {
               variant="primary"
               iconLeft={<FileText size={16} strokeWidth={1.75} />}
               loading={queue.isPending || (trackedPack.data ? trackedPack.data.status === 'QUEUED' || trackedPack.data.status === 'RUNNING' : Boolean(packId))}
-              disabled={queue.isPending}
+              disabled={queue.isPending || noSections}
+              aria-describedby={noSections ? 'pack-sections-error' : undefined}
               onClick={() => {
                 setActionError(null);
                 queue.mutate(
-                  { kind: 'fmcsaPack', params: { from, to, ...(driverFilter ? { driverId: driverFilter } : {}) } },
+                  {
+                    kind: 'fmcsaPack',
+                    params: {
+                      from,
+                      to,
+                      ...(driverFilter ? { driverId: driverFilter } : {}),
+                      ...(unitFilter ? { vehicleId: unitFilter } : {}),
+                      ...(include ? { include } : {}),
+                    },
+                  },
                   {
                     onSuccess: (queued) => setPackId(queued.reportId),
                     onError: (error) => setActionError(refusalText(error)),
@@ -286,6 +348,14 @@ export default function FmcsaPackPage() {
         </div>
       )}
 
+      {unitFilter && (
+        // The RODS counts come from the fleet-wide activity summary, which has no unit filter; the
+        // pack itself is narrowed server-side. Said out loud rather than shown as a unit count.
+        <p className="text-caption text-text-muted" role="note">
+          Daily log and uncertified counts are not narrowed to the unit; the pack keeps only drivers who operated it.
+        </p>
+      )}
+
       <div className="grid grid-cols-[minmax(0,1fr)_var(--spacing-side-panel)] items-start gap-card-gap">
         <Card>
           <SectionHeader
@@ -301,15 +371,31 @@ export default function FmcsaPackPage() {
           />
           <ul className="mt-4 flex flex-col gap-3">
             {PACK_CONTENTS.map((item) => (
-              <li key={item.name} className="flex items-start gap-3">
-                <input type="checkbox" checked={item.checked} readOnly disabled aria-label={item.name} className="mt-1" />
-                <span>
-                  <span className="block text-body font-medium text-text">{item.name}</span>
-                  <span className="block text-card-sub text-text-muted">{item.description}</span>
-                </span>
+              <li key={item.section}>
+                <label className="flex cursor-pointer items-start gap-3">
+                  {/* Choosing sections only shapes what `Generate pack` requests — READ roles see them read-only (§12.2). */}
+                  <input
+                    type="checkbox"
+                    checked={sections.has(item.section)}
+                    onChange={() => toggleSection(item.section)}
+                    readOnly={!can('reportsTransfer', 'FULL')}
+                    disabled={!can('reportsTransfer', 'FULL')}
+                    aria-label={item.name}
+                    className="mt-1"
+                  />
+                  <span>
+                    <span className="block text-body font-medium text-text">{item.name}</span>
+                    <span className="block text-card-sub text-text-muted">{item.description}</span>
+                  </span>
+                </label>
               </li>
             ))}
           </ul>
+          {noSections && (
+            <p id="pack-sections-error" role="alert" className="mt-2 text-card-sub text-danger">
+              Select at least one section.
+            </p>
+          )}
           {!kpiLoading && !totals.isError && !unassigned.isError && (pendingSegments > 0 || kpi.uncertified > 0) && (
             <div className="mt-4 flex items-center gap-3 rounded-md bg-warning-soft px-4 py-3 text-body text-warning">
               <AlertTriangle size={18} strokeWidth={1.75} className="shrink-0" />
@@ -401,7 +487,8 @@ export default function FmcsaPackPage() {
                 Given to you by the safety official. Max 60 characters.
               </span>
             </label>
-            <Can perm="reportsTransfer" level="FULL">
+            {/* B-95 — sending is `POST /transfers`, gated on `dataTransfer` FULL. */}
+            <Can perm="dataTransfer" level="FULL">
               <Button
                 variant="primary"
                 size="lg"
@@ -435,7 +522,7 @@ export default function FmcsaPackPage() {
 
       <PreviousTransfersCard timezone={timezone} onRetry={retryTransfer} />
 
-      <Can perm="reportsTransfer" level="FULL">
+      <Can perm="dataTransfer" level="FULL">
         {modalState && (
           <SendLogsModal
             key={modalState.key}

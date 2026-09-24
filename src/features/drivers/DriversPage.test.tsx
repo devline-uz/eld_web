@@ -503,17 +503,17 @@ describe('W-06 Drivers', () => {
     expect(assignedTo).toBeTruthy();
   });
 
-  it('B-81 · `Reset app password` is disabled and says why instead of faking a reset', async () => {
+  it('B-81 shipped · `Reset app password` calls POST /drivers/:id/reset-password', async () => {
+    server.use(http.post(url(endpoints.drivers.resetPassword('drv_1')), () => ok({ emailedTo: 'john.smith@example.com' })));
     const user = userEvent.setup();
     renderPage();
     await screen.findByText('John Smith');
 
     await user.click(screen.getAllByRole('button', { name: 'Row actions' })[0]!);
     const item = await screen.findByText('Reset app password');
-    expect(item).toHaveAttribute('data-disabled');
-    expect(
-      screen.getByText('No carrier-side reset yet — the driver resets the app password from the sign-in screen.'),
-    ).toBeInTheDocument();
+    expect(item).not.toHaveAttribute('data-disabled');
+    await user.click(item);
+    expect(await screen.findByText('Password reset emailed')).toBeInTheDocument();
   });
 
   it('WB-180 · `Assign trip` carries the driver into the Trips filter (`fDriver`)', async () => {

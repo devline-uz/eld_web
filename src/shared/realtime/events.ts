@@ -3,7 +3,10 @@
 // Verified against backend/src/modules/realtime/realtime.gateway.ts and every
 // `EventBusService.publish('realtime.push', { room, event, payload })` call site
 // (trips.service.ts, messaging.service.ts, ingest.service.ts, safety-detect.processor.ts,
-// alert.processor.ts, report.processor.ts) — not against backend/tz.md.
+// alert.processor.ts, alert-rules.service.ts, report.processor.ts, logs.service.ts,
+// unidentified.service.ts) — not against backend/tz.md. Worker-side pushes reach the gateway over
+// the Redis bridge (backend `realtime-pubsub.service.ts`, B-49), so `report.ready`,
+// `notification.new`, `safety.event_created` really arrive now.
 
 /** Rooms the gateway's `ALLOWED_ROOM_PATTERN` accepts. `user:{id}` / `driver:{id}` are joined
  * automatically on connect; everything else needs an explicit `subscribe`. */
@@ -15,7 +18,8 @@ export type RoomName =
   | `user:${string}`
   | `conversation:${string}`;
 
-/** §7.3 — the nine events the backend actually emits today. */
+/** §7.3 — the nine events the web panel handles (the backend emits eleven; the other two are
+ * `DRIVER_ONLY_REALTIME_EVENTS`). */
 export interface RealtimeEventPayloads {
   /** room: `user:{id}` (or `driver:{id}`) */
   'notification.new': {
@@ -118,6 +122,16 @@ export const PHANTOM_REALTIME_EVENTS = [
 ] as const;
 
 export type PhantomRealtimeEvent = (typeof PHANTOM_REALTIME_EVENTS)[number];
+
+/**
+ * Emitted by the backend, but only to `driver:{id}` for the driver app (re-checked 2026-09-24 —
+ * `logs.service.ts` edit requests with `notifyDriver`, `unidentified.service.ts` assign with
+ * `requireDriverConfirmation`). A web user can be in `driver:{id}` (HOS Logs, Driver detail) and so
+ * may receive them; the panel deliberately has no handler — the carrier side learns of these
+ * through its own mutation's response, and the driver's answer through the edit-request /
+ * unidentified lists. Not part of `REALTIME_EVENTS`, so `useRoom` never listens for them.
+ */
+export const DRIVER_ONLY_REALTIME_EVENTS = ['log.edit_requested', 'unidentified.confirmation_requested'] as const;
 
 /** High-frequency events that must go through the 200 ms throttle (§7.2) before any
  * `setQueryData` patch — currently just `telemetry.point`; `fleet.position` will join this list

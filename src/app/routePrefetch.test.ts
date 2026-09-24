@@ -20,27 +20,27 @@ beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
 describe('warmRoute', () => {
-  it('prefetches exactly the keys the Vehicles page mounts with (page 1, default filters)', () => {
+  it('prefetches exactly the keys the Vehicles page mounts with (page 1, default filters)', async () => {
     const { queryClient, prefetch } = clientWithSpy();
-    warmRoute('/vehicles', queryClient);
+    await warmRoute('/vehicles', queryClient);
     const keys = keysOf(prefetch);
     expect(keys).toContain(JSON.stringify(vehiclesPageQuery(VEHICLES_DEFAULT_PAGE).queryKey));
     expect(keys).toContain(JSON.stringify(driversLookupQuery().queryKey));
   });
 
-  it('prefetches both active trip slices for /trips and the recent-DVIR window for /dvir', () => {
+  it('prefetches both active trip slices for /trips and the recent-DVIR window for /dvir', async () => {
     const { queryClient, prefetch } = clientWithSpy();
-    warmRoute('/trips', queryClient);
-    warmRoute('/dvir', queryClient);
+    await warmRoute('/trips', queryClient);
+    await warmRoute('/dvir', queryClient);
     const keys = keysOf(prefetch);
     expect(keys).toContain(JSON.stringify(tripsActiveSliceQuery('ASSIGNED').queryKey));
     expect(keys).toContain(JSON.stringify(tripsActiveSliceQuery('IN_PROGRESS').queryKey));
     expect(keys).toContain(JSON.stringify(recentDvirsQuery().queryKey));
   });
 
-  it('is a no-op for a route without a loader and never throws', () => {
+  it('is a no-op for a route without a loader and never throws', async () => {
     const { queryClient, prefetch } = clientWithSpy();
-    expect(() => warmRoute('/settings', queryClient)).not.toThrow();
+    await expect(warmRoute('/settings', queryClient)).resolves.toBeUndefined();
     expect(prefetch).not.toHaveBeenCalled();
   });
 
@@ -50,7 +50,7 @@ describe('warmRoute', () => {
 });
 
 describe('createRouteWarmer', () => {
-  it('debounces: sweeping across three links fires only the one the pointer settles on', () => {
+  it('debounces: sweeping across three links fires only the one the pointer settles on', async () => {
     const { queryClient, prefetch } = clientWithSpy();
     const warmer = createRouteWarmer(queryClient);
     warmer.schedule('/vehicles');
@@ -59,17 +59,19 @@ describe('createRouteWarmer', () => {
     vi.advanceTimersByTime(WARM_DEBOUNCE_MS - 1);
     expect(prefetch).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
+    await vi.dynamicImportSettled();
     const keys = keysOf(prefetch);
     expect(keys).toContain(JSON.stringify(recentDvirsQuery().queryKey));
     expect(keys).not.toContain(JSON.stringify(vehiclesPageQuery(VEHICLES_DEFAULT_PAGE).queryKey));
   });
 
-  it('cancel() before the debounce elapses fires nothing', () => {
+  it('cancel() before the debounce elapses fires nothing', async () => {
     const { queryClient, prefetch } = clientWithSpy();
     const warmer = createRouteWarmer(queryClient);
     warmer.schedule('/vehicles');
     warmer.cancel();
     vi.advanceTimersByTime(WARM_DEBOUNCE_MS * 2);
+    await vi.dynamicImportSettled();
     expect(prefetch).not.toHaveBeenCalled();
   });
 });

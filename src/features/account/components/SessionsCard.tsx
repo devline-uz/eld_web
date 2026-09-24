@@ -1,10 +1,12 @@
-// owner: web-auth-rbac — W-26 `Active sessions` (GET /me/sessions, DELETE /me/sessions/:id).
-// ⛔ GAP B-50: rows carry no `current` flag and no location. Until they do, no row is marked
-// `● Current`, every row offers `Sign out`, and LOCATION shows `—` (web/decisions.md WD-048).
-// `Sign out everywhere` revokes every listed session — this one included — then signs out here.
+// owner: web-auth-rbac — W-26 `Active sessions` (GET /me/sessions, DELETE /me/sessions[/:id]).
+// B-50 (shipped): the server flags this browser's row `current` → `● Current` badge and no
+// `Sign out` button on it; LOCATION shows the server's value or `—`. `Sign out everywhere` is one
+// `DELETE /me/sessions` (every OTHER session), then this session signs out through the normal
+// `/auth/logout` path — so "everywhere" really includes this device (web/decisions.md WD-092).
 import { LogOut } from 'lucide-react';
 import { useState } from 'react';
 import { toUserMessage } from '@/shared/api/errors';
+import { useSignOutOtherSessions } from '@/shared/api/me';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { EMPTY, formatRelative, useNowTick } from '@/shared/format';
 import { Badge } from '@/shared/ui/Badge';
@@ -13,7 +15,7 @@ import { Card, SectionHeader } from '@/shared/ui/Card';
 import { Modal } from '@/shared/ui/Modal';
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
 import { useToast } from '@/shared/ui/Toast';
-import { useMySessions, useRevokeAllSessions, useRevokeSession } from '../api';
+import { useMySessions, useRevokeSession } from '../api';
 import { deviceLabel } from '../userAgent';
 
 const HEAD = 'px-4 text-left text-table-head text-text-muted uppercase';
@@ -21,7 +23,7 @@ const HEAD = 'px-4 text-left text-table-head text-text-muted uppercase';
 export function SessionsCard() {
   const sessions = useMySessions();
   const revoke = useRevokeSession();
-  const revokeAll = useRevokeAllSessions();
+  const revokeAll = useSignOutOtherSessions();
   const { signOut } = useAuth();
   const { toast } = useToast();
   const now = useNowTick();
@@ -39,7 +41,7 @@ export function SessionsCard() {
 
   async function signOutEverywhere() {
     try {
-      await revokeAll.mutateAsync(rows.map((row) => row.id));
+      await revokeAll.mutateAsync();
       setConfirmAll(false);
       signOut();
     } catch (error) {

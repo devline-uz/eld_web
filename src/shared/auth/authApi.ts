@@ -79,8 +79,9 @@ export function logoutSession(refreshToken: string, accessToken: string | null):
 
 /**
  * ⭐ The only source of permissions. The JWT is never decoded, even though it carries `per`.
- * The live response is `{ id, type, role, permissions }` — no name, email or
- * carrier (see web/backend-gaps.md B-34), so the display fields fall back to the id.
+ * For a `user` subject the response is enriched (B-34, shipped): `fullName`, `email`,
+ * `avatarUrl` (presigned, may be null), `carrierName` (null without a carrier) and
+ * `homeTerminalTimezone` — the topbar chip reads these, never a second `/me/profile` call.
  */
 export interface MeResponse {
   id: string;
@@ -92,7 +93,7 @@ export interface MeResponse {
   firstName?: string;
   lastName?: string;
   avatarUrl?: string | null;
-  carrierName?: string;
+  carrierName?: string | null;
   homeTerminalTimezone?: string;
 }
 

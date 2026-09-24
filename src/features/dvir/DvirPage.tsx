@@ -36,12 +36,14 @@ import {
   useCancelWorkOrder,
   useCompleteSchedule,
   useDeleteSchedule,
+  useAssignDefect,
   type DvirTableRow,
   type DefectTableRow,
   type WorkOrderTableRow,
   type ScheduleTableRow,
 } from '@/shared/api/dvir';
 import { useVehiclesLookup } from '@/shared/api/lookups';
+import { useUsersList } from '@/shared/api/settingsAdmin';
 import { useDebouncedValue } from '@/shared/hooks/useDebouncedValue';
 import { DvirDrawer } from './components/DvirDrawer';
 import { DVIR_TOAST_COPY } from './lib/copy';
@@ -204,18 +206,16 @@ export default function DvirPage() {
     setParams(next, { replace: true });
   }
 
-  // The 48 h + search window, before the severity/type/repair-status filters and the 10-row
-  // slice — WB-078 needs this to know how many of the DVIRs a severity filter *could* match are
-  // being silently dropped because their defects sit outside the loaded window (B-66).
-  const recentDvirsWindow = useMemo(() => {
-    const cutoff = nowTick - 48 * 60 * 60 * 1000;
-    return dvirs.rows.filter(
-      (d) =>
-        new Date(d.submittedAt).getTime() >= cutoff &&
-        matchesSearch(d.vehicle?.unitNumber, ...d.defects.map((x) => x.category)),
-    );
+  // B-47 — the server now applies the 48 h bound (`recentDvirsFrom`, `GET /dvir?from=`), so this
+  // is only the search filter, before the severity/type/repair-status filters and the 10-row
+  // slice. WB-078 needs the pre-filter set to know how many of the DVIRs a severity filter
+  // *could* match are being silently dropped because their defects sit outside the loaded
+  // window (B-66).
+  const recentDvirsWindow = useMemo(
+    () => dvirs.rows.filter((d) => matchesSearch(d.vehicle?.unitNumber, ...d.defects.map((x) => x.category))),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dvirs.rows, needle, nowTick]);
+    [dvirs.rows, needle],
+  );
 
   const recentDvirsFiltered = useMemo(
     () =>
@@ -650,6 +650,41 @@ interface ServerPageProps {
   onLimitChange: (limit: number) => void;
 }
 
+/** B-40 — inline assignee picker on the Open defects table. `dvir` FULL only; a READ-only role
+ * sees the resolved name (or `Unassigned`), never an editable control (§12.2). */
+function AssignedToCell({ defect }: { defect: DefectTableRow }) {
+  const { can } = usePermission();
+  const { rows: users } = useUsersList();
+  const assign = useAssignDefect(defect.id);
+  const assignee = users.find((u) => u.id === defect.assigneeId);
+  const assigneeLabel = assignee ? `${assignee.firstName} ${assignee.lastName}` : null;
+
+  if (!can('dvir', 'FULL')) {
+    return <span className="text-text-muted">{orUnassigned(assigneeLabel)}</span>;
+  }
+
+  return (
+    <select
+      value={defect.assigneeId ?? ''}
+      disabled={assign.isPending}
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => {
+        e.stopPropagation();
+        assign.mutate(e.target.value === '' ? null : e.target.value);
+      }}
+      aria-label={`Assign defect ${defect.category}`}
+      className="h-8 rounded-md border border-border bg-bg-surface px-2 text-body text-text"
+    >
+      <option value="">Unassigned</option>
+      {users.map((u) => (
+        <option key={u.id} value={u.id}>
+          {u.firstName} {u.lastName}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function OpenDefectsTable({
   rows,
   total,
@@ -697,9 +732,8 @@ function OpenDefectsTable({
           {
             id: 'assignedTo',
             header: 'ASSIGNED TO',
-            // ⛔ GAP B-36 — `Defect` has no assignee/shop field; fall back to the linked work
-            // order's vendor if one exists, else `Unassigned` (web/backend-gaps.md).
-            cell: () => <span className="text-text-muted">{orUnassigned(null)}</span>,
+            // B-40 (shipped 2026-09-24) — `PATCH /defects/:id/assign`.
+            cell: ({ row }) => <AssignedToCell defect={row.original} />,
           },
           {
             id: 'status',

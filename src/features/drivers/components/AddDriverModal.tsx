@@ -12,6 +12,7 @@ import { driverSchema, type DriverFormValues } from '@/shared/forms/schemas';
 import { useCreateDriver } from '@/shared/api/drivers';
 import { useVehiclesPicker } from '@/shared/api/vehicles';
 import { ApiError } from '@/shared/api/errors';
+import { TERMINALS } from '../lib/terminals';
 
 /** WB-187 — the list used to hold ten states, so a CDL from any other one could not be recorded. */
 const US_STATES = [
@@ -20,21 +21,6 @@ const US_STATES = [
   'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA',
   'WV', 'WI', 'WY',
 ];
-
-/** ⛔ GAP B-82 — `POST /drivers` has no `sendInvitation` flag; the server always emails. */
-const INVITATION_ALWAYS_SENT =
-  'The invitation is always sent — the create-driver API has no way to hold it back.';
-
-/**
- * WB — `homeTerminalName` used to be written with the IANA zone, and "Raleigh, NC (Eastern)"
- * mapped to `America/Chicago`. The terminal name is what the roster, W-07 and the 11.23 terminal
- * filter read; the zone is what `formatRods` renders HOS/RODS in, so the two are kept apart here.
- * Every entry is checked against the city it names: Eastern → `America/New_York`.
- */
-const TERMINALS = [
-  { name: 'Columbus, OH', label: 'Columbus, OH (Eastern)', timezone: 'America/New_York' },
-  { name: 'Raleigh, NC', label: 'Raleigh, NC (Eastern)', timezone: 'America/New_York' },
-] as const;
 
 const DEFAULT_TERMINAL = TERMINALS[0];
 
@@ -67,6 +53,7 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
   // showed nothing, so a screen reader never learned which input was wrong.
   const [eldExemptReasonError, setEldExemptReasonError] = useState<string | null>(null);
   const [terminalName, setTerminalName] = useState<string>(DEFAULT_TERMINAL.name);
+  const [sendInvitation, setSendInvitation] = useState(true);
   const [banner, setBanner] = useState<string | null>(null);
 
   const vehiclesQuery = useVehiclesPicker();
@@ -143,6 +130,7 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
         splitSleeperEnabled,
         eldExempt,
         eldExemptReason: eldExempt ? eldExemptReason : undefined,
+        sendInvitation,
       },
       {
         onSuccess: () => {
@@ -181,18 +169,11 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
       isDirty={isDirty || extrasDirty}
       footer={
         <>
-          {/* WB-189 — `sendInvitation` never reached the request body: the checkbox claimed a
-              choice that does not exist. It is disabled, checked, with its reason on screen
-              (gap B-82), the same disclosure stage 1 used for the import options (B-69). */}
-          <span className="mr-auto flex flex-col gap-0.5">
-            <label className="flex items-center gap-2 text-body text-text-muted">
-              <input type="checkbox" checked disabled aria-describedby="add-driver-invitation-note" />
-              Send invitation now
-            </label>
-            <span id="add-driver-invitation-note" className="text-caption text-text-muted">
-              {INVITATION_ALWAYS_SENT}
-            </span>
-          </span>
+          {/* B-82 shipped — `sendInvitation` rides on `POST /drivers`. */}
+          <label className="mr-auto flex items-center gap-2 text-body text-text-secondary">
+            <input type="checkbox" checked={sendInvitation} onChange={(e) => setSendInvitation(e.target.checked)} disabled={isPending} />
+            Send invitation now
+          </label>
           <ModalCancelButton disabled={isPending} />
           <Button variant="primary" size="lg" loading={isPending} disabled={isPending} onClick={handleSubmit(onSubmit)}>
             Save driver
@@ -357,7 +338,9 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <p className="rounded-md bg-info-soft p-3 text-body text-info">
-          The driver receives an email with the app download link and a one-time sign-in code.
+          {sendInvitation
+            ? 'The driver receives an email with the app download link and a one-time sign-in code.'
+            : 'No invitation email is sent — share the mobile password with the driver directly.'}
         </p>
       </form>
     </Modal>

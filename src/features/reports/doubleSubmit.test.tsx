@@ -86,8 +86,8 @@ describe('WB-146 · one click, one report', () => {
     expect(calls).toHaveLength(1);
   });
 
-  it('W-12 IFTA `Download IFTA PDF` queues once on a double click', async () => {
-    const calls = countSlow('post', endpoints.reports.generate, QUEUED);
+  it('W-12 IFTA `Download IFTA PDF` queues once on a double click (B-96, READ shortcut)', async () => {
+    const calls = countSlow('get', endpoints.reports.ifta, QUEUED);
     renderPage(<IftaReportPage />, '/reports/ifta');
     const button = await screen.findByRole('button', { name: 'Download IFTA PDF' });
     fireEvent.click(button);
@@ -97,8 +97,8 @@ describe('WB-146 · one click, one report', () => {
     expect(calls).toHaveLength(1);
   });
 
-  it('W-14 DVIR `Download PDF` queues once on a double click', async () => {
-    const calls = countSlow('post', endpoints.reports.generate, QUEUED);
+  it('W-14 DVIR `Download PDF` queues once on a double click (B-96, READ shortcut)', async () => {
+    const calls = countSlow('get', endpoints.reports.dvir, QUEUED);
     renderPage(<DvirReportPage />, '/reports/dvir');
     const button = await screen.findByRole('button', { name: 'Download PDF' });
     fireEvent.click(button);

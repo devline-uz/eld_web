@@ -22,9 +22,21 @@ export interface UseRoomResult {
  * with a static top-level room like `fleet` and leave it mounted globally — it is meant to track
  * the lifetime of the screen that needs it.
  */
+/**
+ * `user:{id}` is the identity room the gateway joins on connect (web users never own a
+ * `driver:{id}` identity). Emitting `unsubscribe` for it makes the gateway `leave` it, which
+ * silenced the bell and `report.ready` for the rest of the session after one Reports screen
+ * unmounted (web/bugs.md WB-248) — so for it we only attach listeners, never (un)subscribe.
+ */
+export function isIdentityRoom(room: RoomName): boolean {
+  return room.startsWith('user:');
+}
+
 export function useRoom(room: RoomName | null, handlers: RoomHandlers = {}): UseRoomResult {
   const { getSocket, connected } = useRealtime();
-  const [joined, setJoined] = useState(false);
+  const [subscribed, setJoined] = useState(false);
+  const identity = room !== null && isIdentityRoom(room);
+  const joined = identity ? connected : subscribed;
 
   const dispatch = useEffectEvent((event: RealtimeEventName, payload: unknown) => {
     handlers[event]?.(payload as never);
@@ -35,9 +47,12 @@ export function useRoom(room: RoomName | null, handlers: RoomHandlers = {}): Use
     if (!socket || !connected || !room) return;
 
     let cancelled = false;
-    socket.emit('subscribe', room, (ack: { ok: boolean } | undefined) => {
-      if (!cancelled) setJoined(Boolean(ack?.ok));
-    });
+    const identityRoom = isIdentityRoom(room);
+    if (!identityRoom) {
+      socket.emit('subscribe', room, (ack: { ok: boolean } | undefined) => {
+        if (!cancelled) setJoined(Boolean(ack?.ok));
+      });
+    }
 
     const listeners = REALTIME_EVENTS.map((event) => {
       const listener = (payload: unknown) => dispatch(event, payload);
@@ -48,6 +63,7 @@ export function useRoom(room: RoomName | null, handlers: RoomHandlers = {}): Use
     return () => {
       cancelled = true;
       for (const [event, listener] of listeners) socket.off(event, listener);
+      if (identityRoom) return;
       socket.emit('unsubscribe', room);
       setJoined(false);
     };

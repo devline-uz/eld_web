@@ -78,7 +78,7 @@ describe('CreateRoleModal — 11.19', () => {
   });
 
   // WB-234 — one checkbox for the one `reportsTransfer` key; there is no separate transfers checkbox.
-  it('shows a single FMCSA export / data transfers checkbox that drives reportsTransfer', async () => {
+  it('shows two separate checkboxes driving reportsTransfer and dataTransfer (B-95, shipped)', async () => {
     const user = userEvent.setup();
     let body: unknown = null;
     server.use(
@@ -89,18 +89,19 @@ describe('CreateRoleModal — 11.19', () => {
     );
 
     renderModal();
-    expect(screen.queryByRole('checkbox', { name: 'Can send data transfers' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('checkbox', { name: 'Can export FMCSA / DOT pack' })).not.toBeInTheDocument();
-    const merged = screen.getByRole('checkbox', { name: 'Can export FMCSA / DOT pack and send data transfers' });
-    expect(merged).toBeChecked();
-    expect(screen.getAllByRole('checkbox')).toHaveLength(1);
+    const pack = screen.getByRole('checkbox', { name: 'Can export FMCSA / DOT pack' });
+    const transfer = screen.getByRole('checkbox', { name: 'Can send data transfers to an inspector' });
+    expect(pack).toBeChecked();
+    expect(transfer).toBeChecked();
 
-    await user.click(merged);
-    await user.type(screen.getByPlaceholderText('Compliance auditor'), 'No transfers');
+    await user.click(pack);
+    await user.type(screen.getByPlaceholderText('Compliance auditor'), 'No pack export');
     await user.click(screen.getByRole('button', { name: 'Create role' }));
 
     await waitFor(() => expect(body).not.toBeNull());
-    expect((body as { permissions: Record<string, string> }).permissions.reportsTransfer).toBe('NONE');
+    const permissions = (body as { permissions: Record<string, string> }).permissions;
+    expect(permissions.reportsTransfer).toBe('NONE');
+    expect(permissions.dataTransfer).toBe('FULL');
   });
 
   it('submits with the template as the permission base when one is selected', async () => {

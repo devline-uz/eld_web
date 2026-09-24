@@ -49,9 +49,11 @@ export function CreateRoleModal({
   const editing = role !== undefined;
   const seededLevels = role ? levelsOf(role) : DEFAULT_SEGMENT_LEVELS;
   const seededExport = role ? role.permissions.reportsTransfer === 'FULL' : true;
+  const seededDataTransfer = role ? role.permissions.dataTransfer === 'FULL' : true;
   const [copyFrom, setCopyFrom] = useState<string>('');
   const [segmentLevels, setSegmentLevels] = useState<Record<string, PermissionLevel>>(seededLevels);
   const [canExportFmcsa, setCanExportFmcsa] = useState(seededExport);
+  const [canSendDataTransfer, setCanSendDataTransfer] = useState(seededDataTransfer);
 
   const {
     register,
@@ -71,6 +73,7 @@ export function CreateRoleModal({
     isDirty ||
     copyFrom !== '' ||
     canExportFmcsa !== seededExport ||
+    canSendDataTransfer !== seededDataTransfer ||
     SEGMENT_ROWS.some((row) => segmentLevels[row.label] !== seededLevels[row.label]);
 
   function applyTemplate(roleId: string) {
@@ -101,9 +104,10 @@ export function CreateRoleModal({
     for (const row of SEGMENT_ROWS) {
       for (const key of row.keys) base[key] = segmentLevels[row.label] ?? 'NONE';
     }
-    // WB-234 — FMCSA export and data transfers share the one `reportsTransfer` key (gap B-95 asks
-    // for a separate key), so they are one checkbox, not two that silently wrote the same key.
+    // B-95 (shipped 2026-09-24) — `dataTransfer` is its own 23rd key; the pack export and the
+    // inspector transfer are two independent checkboxes again.
     base.reportsTransfer = canExportFmcsa ? 'FULL' : 'NONE';
+    base.dataTransfer = canSendDataTransfer ? 'FULL' : 'NONE';
     base.hosCertifyOnBehalf = base.hosCertifyOnBehalf ?? 'NONE';
     base.carrierSettings = base.carrierSettings ?? 'NONE';
 
@@ -217,7 +221,16 @@ export function CreateRoleModal({
 
         <label className="flex items-center gap-2 text-body text-text">
           <input type="checkbox" checked={canExportFmcsa} onChange={(e) => setCanExportFmcsa(e.target.checked)} disabled={submitting} />
-          {ROLE_COPY.transferCheckbox}
+          {ROLE_COPY.fmcsaPackCheckbox}
+        </label>
+        <label className="flex items-center gap-2 text-body text-text">
+          <input
+            type="checkbox"
+            checked={canSendDataTransfer}
+            onChange={(e) => setCanSendDataTransfer(e.target.checked)}
+            disabled={submitting}
+          />
+          {ROLE_COPY.dataTransferCheckbox}
         </label>
       </form>
     </Modal>

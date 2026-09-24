@@ -61,6 +61,9 @@ export function UnassignedDrivingModal({
   );
   const [choice, setChoice] = useState<Record<string, string>>({});
   const [annotation, setAnnotation] = useState('');
+  // B-83 — drawn checked (§11.13). On: nothing is attributed until the driver confirms in the app
+  // (status PENDING_CONFIRMATION); off: the segment moves to the driver's log immediately.
+  const [askDriver, setAskDriver] = useState(true);
   const [banner, setBanner] = useState<string | null>(null);
   const [annotationError, setAnnotationError] = useState<string | null>(null);
   // WB-146 — same-tick guard: one click, one assignment batch.
@@ -90,7 +93,13 @@ export function UnassignedDrivingModal({
       if (value === ANNOTATE) {
         actions.push({ kind: 'annotate', id, annotation: annotation.trim() });
       } else {
-        actions.push({ kind: 'assign', id, driverId: value, annotation: annotation.trim() });
+        actions.push({
+          kind: 'assign',
+          id,
+          driverId: value,
+          annotation: annotation.trim(),
+          requireDriverConfirmation: askDriver,
+        });
       }
     }
     if (actions.length === 0) {
@@ -100,7 +109,14 @@ export function UnassignedDrivingModal({
     inFlight.current = true;
     mutation.mutate(actions, {
       onSuccess: () => {
-        toast({ kind: 'success', ...TOAST_COPY.segmentsAssigned(actions.length) });
+        const awaiting = actions.filter((action) => action.kind === 'assign' && askDriver).length;
+        // A confirmation request recalculates nothing yet, so it must not claim it did (WD-089).
+        toast({
+          kind: 'success',
+          ...(awaiting > 0
+            ? TOAST_COPY.segmentsAwaitingConfirmation(awaiting)
+            : TOAST_COPY.segmentsAssigned(actions.length)),
+        });
         onClose();
       },
       onError: (error) => {
@@ -130,22 +146,20 @@ export function UnassignedDrivingModal({
       size="lg"
       title="Unassigned driving"
       subtitle={`${segments.length} segment${segments.length === 1 ? '' : 's'} recorded with no driver logged in · ${formatHosHours(totalSec)} total`}
-      isDirty={annotation.length > 0}
+      isDirty={annotation.length > 0 || !askDriver}
       footer={
         <div className="flex w-full items-center justify-between">
-          {/* WB-197 — `askDriver` was never part of the posted actions: the checkbox promised the
-              driver would be asked to confirm and nothing ever asked them.
-              `POST /unidentified/:id/assign` takes `driverId` + `annotation` only (gap B-83), so
-              the control is disabled with its reason on screen instead of lying. */}
-          <span className="flex flex-col gap-0.5">
-            <label className="flex items-center gap-2 text-body text-text-muted">
-              <input type="checkbox" checked={false} disabled aria-describedby="unassigned-confirm-note" />
-              Ask each driver to confirm in the app
-            </label>
-            <span id="unassigned-confirm-note" className="max-w-80 text-caption text-text-muted">
-              Not available yet — assigning a segment does not ask the driver to confirm it.
-            </span>
-          </span>
+          {/* B-83 — sent as `requireDriverConfirmation` on every `assign` action (annotations are
+              not driver assignments and are unaffected). */}
+          <label className="flex items-center gap-2 text-body text-text">
+            <input
+              type="checkbox"
+              checked={askDriver}
+              disabled={mutation.isPending}
+              onChange={(e) => setAskDriver(e.target.checked)}
+            />
+            Ask each driver to confirm in the app
+          </label>
           <div className="flex gap-2">
             <ModalCancelButton disabled={mutation.isPending} />
             <Button

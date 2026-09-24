@@ -27,7 +27,15 @@ export function EditWorkOrderModal({ workOrder, onClose }: { workOrder: WorkOrde
   const [dueDate, setDueDate] = useState(workOrder.dueAt ? workOrder.dueAt.slice(0, 10) : '');
   const [cost, setCost] = useState(workOrder.costUsd != null ? String(workOrder.costUsd) : '');
   const [odometer, setOdometer] = useState(workOrder.odometerMi != null ? String(workOrder.odometerMi) : '');
+  const [estimatedLaborHours, setEstimatedLaborHours] = useState(
+    workOrder.estimatedLaborHours != null ? String(workOrder.estimatedLaborHours) : '',
+  );
   const [description, setDescription] = useState(workOrder.description ?? '');
+  // B-42 (shipped 2026-09-24) — real `UpdateWorkOrderDto` flags; default from the row (the
+  // create modal's own default only applies when the work order is created).
+  const [keepOutOfService, setKeepOutOfService] = useState(workOrder.keepOutOfService ?? true);
+  const [notifyDriver, setNotifyDriver] = useState(workOrder.notifyDriver ?? true);
+  const [blockDispatchAssignment, setBlockDispatchAssignment] = useState(workOrder.blockDispatchAssignment ?? true);
   const [serverError, setServerError] = useState<string | null>(null);
 
   const valid = title.trim() !== '';
@@ -39,7 +47,11 @@ export function EditWorkOrderModal({ workOrder, onClose }: { workOrder: WorkOrde
     dueDate !== (workOrder.dueAt ? workOrder.dueAt.slice(0, 10) : '') ||
     cost !== (workOrder.costUsd != null ? String(workOrder.costUsd) : '') ||
     odometer !== (workOrder.odometerMi != null ? String(workOrder.odometerMi) : '') ||
-    description !== (workOrder.description ?? '');
+    estimatedLaborHours !== (workOrder.estimatedLaborHours != null ? String(workOrder.estimatedLaborHours) : '') ||
+    description !== (workOrder.description ?? '') ||
+    keepOutOfService !== (workOrder.keepOutOfService ?? true) ||
+    notifyDriver !== (workOrder.notifyDriver ?? true) ||
+    blockDispatchAssignment !== (workOrder.blockDispatchAssignment ?? true);
 
   function submit() {
     // WB-149 — an emptied field used to send `undefined`, which a PATCH reads as "leave it
@@ -55,7 +67,11 @@ export function EditWorkOrderModal({ workOrder, onClose }: { workOrder: WorkOrde
         vendor: vendor.trim() || null,
         costUsd: cost.trim() ? Number(cost) : null,
         odometerMi: odometer.trim() ? Number(odometer) : null,
+        estimatedLaborHours: estimatedLaborHours.trim() ? Number(estimatedLaborHours) : undefined,
         dueAt: dueDate ? new Date(dueDate).toISOString() : null,
+        keepOutOfService,
+        notifyDriver,
+        blockDispatchAssignment,
       },
       {
         onSuccess: () => {
@@ -115,7 +131,7 @@ export function EditWorkOrderModal({ workOrder, onClose }: { workOrder: WorkOrde
           </label>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-3 gap-4">
           <label className="flex flex-col gap-1">
             <span className="text-label text-text">Parts cost</span>
             <div className="flex items-center gap-2">
@@ -130,6 +146,13 @@ export function EditWorkOrderModal({ workOrder, onClose }: { workOrder: WorkOrde
               <span className="text-body text-text-muted">mi</span>
             </div>
           </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-label text-text">Estimated labor</span>
+            <div className="flex items-center gap-2">
+              <input type="number" min="0" step="0.1" value={estimatedLaborHours} onChange={(e) => setEstimatedLaborHours(e.target.value)} className={inputClass} />
+              <span className="text-body text-text-muted">h</span>
+            </div>
+          </label>
         </div>
 
         <label className="flex flex-col gap-1">
@@ -141,6 +164,21 @@ export function EditWorkOrderModal({ workOrder, onClose }: { workOrder: WorkOrde
             className="rounded-md border border-border bg-bg-surface px-3 py-2 text-body text-text"
           />
         </label>
+
+        <div className="flex flex-col gap-2">
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={keepOutOfService} onChange={(e) => setKeepOutOfService(e.target.checked)} />
+            <span className="text-body text-text">Keep the unit out of service until this work order closes</span>
+          </label>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={notifyDriver} onChange={(e) => setNotifyDriver(e.target.checked)} />
+            <span className="text-body text-text">Notify the driver</span>
+          </label>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={blockDispatchAssignment} onChange={(e) => setBlockDispatchAssignment(e.target.checked)} />
+            <span className="text-body text-text">Block dispatch assignment until resolved</span>
+          </label>
+        </div>
 
         {serverError && (
           <p role="alert" className="rounded-md bg-danger-soft p-3 text-body text-danger">

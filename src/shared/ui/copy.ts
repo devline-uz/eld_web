@@ -130,6 +130,11 @@ export const TOAST_COPY = {
     title: `${days} day${days === 1 ? '' : 's'} certified`,
     description: `Certified on behalf of ${driverName} · written to the audit log.`,
   }),
+  /** 11.13 with `Ask each driver to confirm` (B-83): nothing is attributed or recalculated yet. */
+  segmentsAwaitingConfirmation: (count: number): ToastCopy => ({
+    title: `${count} segment${count === 1 ? '' : 's'} sent for confirmation`,
+    description: 'Each driver must confirm in the app before the hours move to their log.',
+  }),
   segmentsAssigned: (count: number): ToastCopy => ({
     title: `${count} segment${count === 1 ? '' : 's'} assigned`,
     description: 'Hours were recalculated for the affected drivers.',

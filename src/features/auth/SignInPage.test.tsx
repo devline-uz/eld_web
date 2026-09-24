@@ -234,7 +234,7 @@ describe('W-00 · the dev block (VITE_AUTH_MODE=dev)', () => {
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Password sign-in is disabled. Use Continue with Google.',
+      'Password sign-in is turned off on this server (production mode). Sign in with Continue with Google above.',
     );
   });
 });

@@ -9,7 +9,7 @@ import { usePermission } from '@/shared/auth/usePermission';
 import { Button } from '@/shared/ui/Button';
 import { Badge } from '@/shared/ui/Badge';
 import { Card, SectionHeader } from '@/shared/ui/Card';
-import { ConfirmDelete } from '@/shared/ui/Modal';
+import { ConfirmDelete, Modal } from '@/shared/ui/Modal';
 import { DataTable } from '@/shared/ui/DataTable';
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
 import { useToast } from '@/shared/ui/Toast';
@@ -22,6 +22,7 @@ import {
   useDisconnectIntegration,
   useApiKeysList,
   useRevokeApiKey,
+  useIntegrationsCatalog,
   type IntegrationProvider,
   type ApiKeyRow,
   type IntegrationRow,
@@ -58,9 +59,6 @@ function integrationStatusLine(entry: CatalogEntry, record: IntegrationRow | und
   return record.lastSyncAt ? INTEGRATION_STATUS.lastSync(formatRelative(record.lastSyncAt)) : INTEGRATION_STATUS.connectedNoSync;
 }
 
-/** ⛔ GAP B-89 — shown under the disabled `Browse marketplace` button. */
-const MARKETPLACE_REASON = SETTINGS_REASON.marketplace;
-
 export default function IntegrationsPage() {
   const { can } = usePermission();
   const canFull = can('integrations', 'FULL');
@@ -74,6 +72,10 @@ export default function IntegrationsPage() {
   const [scopesTarget, setScopesTarget] = useState<ApiKeyRow | null>(null);
   const [disconnectTarget, setDisconnectTarget] = useState<CatalogEntry | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<ApiKeyRow | null>(null);
+  const [marketplaceOpen, setMarketplaceOpen] = useState(false);
+  // B-89 (shipped 2026-09-24) — `GET /integrations/catalog`. Fetched lazily, only while the
+  // marketplace modal is open.
+  const catalogQuery = useIntegrationsCatalog(marketplaceOpen);
 
   const byProvider = useMemo(
     () => Object.fromEntries(integrationsQuery.rows.map((i) => [i.provider, i])),
@@ -83,7 +85,7 @@ export default function IntegrationsPage() {
   const connectedCount = CATALOG.filter((c) => c.provider && byProvider[c.provider]?.status === 'CONNECTED').length;
   const availableCount = CATALOG.length - connectedCount;
 
-  function handleConnect(entry: CatalogEntry & { provider: IntegrationProvider }) {
+  function handleConnect(entry: { provider: IntegrationProvider | string; name: string }) {
     if (upsert.isPending) return;
     upsert.mutate(
       { provider: entry.provider, dto: { enabled: true, config: {} } },
@@ -155,15 +157,14 @@ export default function IntegrationsPage() {
             {connectedCount} connected · {availableCount} available
           </p>
         </div>
-        {/* ⛔ GAP B-89 — there is no integration marketplace or catalogue endpoint, and no
-            published marketplace URL to open. The button used to do nothing at all (WB-223);
-            it is disabled with the reason on screen instead. */}
-        <div className="flex flex-col items-end gap-1">
-          <Button variant="secondary" iconLeft={<ExternalLink size={16} strokeWidth={1.75} />} disabled title={MARKETPLACE_REASON}>
-            Browse marketplace
-          </Button>
-          <span className="text-caption text-text-muted">{MARKETPLACE_REASON}</span>
-        </div>
+        {/* B-89 (shipped 2026-09-24) — `GET /integrations/catalog`. */}
+        <Button
+          variant="secondary"
+          iconLeft={<ExternalLink size={16} strokeWidth={1.75} />}
+          onClick={() => setMarketplaceOpen(true)}
+        >
+          Browse marketplace
+        </Button>
       </div>
 
       {integrationsQuery.isLoading ? (
@@ -276,6 +277,55 @@ export default function IntegrationsPage() {
         )}
       </Card>
 
+      {marketplaceOpen && (
+        <Modal
+          open
+          onClose={() => setMarketplaceOpen(false)}
+          title="Integration marketplace"
+          subtitle="Every connector OneBook offers"
+          size="lg"
+          footer={
+            <Button variant="secondary" size="lg" onClick={() => setMarketplaceOpen(false)}>
+              Close
+            </Button>
+          }
+        >
+          {catalogQuery.isLoading ? (
+            <LoadingState rows={4} />
+          ) : catalogQuery.isError ? (
+            <ErrorState onRetry={() => catalogQuery.refetch()} />
+          ) : (catalogQuery.data ?? []).length === 0 ? (
+            <EmptyState title="No connectors listed" description="The marketplace has nothing to show right now." />
+          ) : (
+            <div className="flex flex-col gap-2">
+              {(catalogQuery.data ?? []).map((entry) => {
+                const connected = byProvider[entry.provider]?.status === 'CONNECTED';
+                return (
+                  <div key={entry.provider} className="flex items-center justify-between rounded-md border border-border p-3">
+                    <div>
+                      <p className="text-body-strong text-text">{entry.name}</p>
+                      <p className="text-caption text-text-muted">{entry.description} · {entry.category}</p>
+                    </div>
+                    {connected ? (
+                      <Badge tone="success">Connected</Badge>
+                    ) : (
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        disabled={!entry.available || !canFull || upsert.isPending}
+                        title={!entry.available ? 'Not yet available — this connector has no integration yet.' : undefined}
+                        onClick={() => handleConnect(entry)}
+                      >
+                        Connect
+                      </Button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Modal>
+      )}
       {createKeyOpen && <CreateApiKeyModal onClose={() => setCreateKeyOpen(false)} />}
       {scopesTarget && <EditApiKeyScopesModal apiKey={scopesTarget} onClose={() => setScopesTarget(null)} />}
       <ConfirmDelete

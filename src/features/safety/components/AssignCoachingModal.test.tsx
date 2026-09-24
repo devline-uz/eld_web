@@ -1,8 +1,9 @@
-// WB-167 — the event picker printed the raw enum and a bare `—` (`HARSH_BRAKING · —`) because it
-// kept its own formatting instead of the label map the W-10 table already uses.
+// B-43 (shipped 2026-09-24) — coaching is assigned directly by `driverId`; there is no longer an
+// open-events picker in this modal (WD-034 workaround retired).
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { http } from 'msw';
-import { render, screen } from '@testing-library/react';
+import { http, HttpResponse } from 'msw';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
 import { ok, url } from '@/mocks/envelope';
@@ -33,32 +34,29 @@ const DRIVER = {
 };
 
 describe('AssignCoachingModal', () => {
-  it('labels each event instead of showing the raw enum', async () => {
+  it('posts { driverId, note } and closes on success', async () => {
+    let body: unknown;
     server.use(
-      http.get(url(endpoints.safety.events), () =>
-        ok({
-          items: [
-            { id: 'evt_1', type: 'HARSH_BRAKING', status: 'NEW', occurredAt: null, vehicleId: 'veh_1', driverId: 'drv_1' },
-            { id: 'evt_2', type: 'SPEEDING', status: 'REVIEWED', occurredAt: '2026-09-12T15:00:00.000Z', vehicleId: 'veh_1', driverId: 'drv_1' },
-          ],
-          page: 1,
-          limit: 100,
-          total: 2,
-          totalPages: 1,
-        }),
-      ),
+      http.post(url(endpoints.safety.coaching), async ({ request }) => {
+        body = await request.json();
+        return HttpResponse.json(ok({ id: 'evt_1' }));
+      }),
     );
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const onClose = vi.fn();
     render(
       <QueryClientProvider client={client}>
         <ToastProvider>
-          <AssignCoachingModal driver={DRIVER as never} onClose={vi.fn()} />
+          <AssignCoachingModal driver={DRIVER as never} onClose={onClose} />
         </ToastProvider>
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByRole('option', { name: /^Harsh braking · / })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: /^Speeding · / })).toBeInTheDocument();
-    expect(screen.queryByRole('option', { name: /HARSH_BRAKING/ })).toBeNull();
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('Note'), 'Follow up next week');
+    await user.click(screen.getByRole('button', { name: 'Assign coaching' }));
+
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(body).toEqual({ driverId: 'drv_1', note: 'Follow up next week' });
   });
 });

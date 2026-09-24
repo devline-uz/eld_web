@@ -38,10 +38,10 @@ beforeEach(() => {
 });
 
 describe('AssignLoadModal — 11.4 load variant', () => {
-  it('disables the notify checkbox with its reason on screen (B-74)', () => {
+  it('starts the notify checkbox checked (B-74, shipped — server default is `true`)', () => {
     renderModal();
-    expect(screen.getByRole('checkbox', { name: /Notify the driver in the app/ })).toBeDisabled();
-    expect(screen.getByText(/the assign endpoint sends no notification/)).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: /Notify the driver in the app/ })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: /Notify the driver in the app/ })).toBeEnabled();
   });
 
   it('assigns the picked driver and sends only what the endpoint accepts', async () => {
@@ -70,7 +70,7 @@ describe('AssignLoadModal — 11.4 load variant', () => {
     await user.click(screen.getByRole('button', { name: 'Assign driver' }));
 
     expect(await screen.findByText('Load LD-9912 assigned')).toBeInTheDocument();
-    expect(posts).toEqual([{ driverId: 'drv_1' }]);
+    expect(posts).toEqual([{ driverId: 'drv_1', notify: true }]);
   });
 
   it('renders drivers as one native radio group — no radio nested in a button, arrow keys move the pick', async () => {

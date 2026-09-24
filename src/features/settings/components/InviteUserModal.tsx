@@ -10,7 +10,6 @@ import { ApiError } from '@/shared/api/errors';
 import { inviteUserSchema } from '@/shared/forms/schemas';
 import { useInviteUser, type RoleRow } from '@/shared/api/settingsAdmin';
 import { Field, inputClass } from './formKit';
-import { SETTINGS_REASON } from '../lib/copy';
 import type { z } from 'zod';
 
 type InviteUserFormValues = z.infer<typeof inviteUserSchema>;
@@ -19,6 +18,14 @@ type InviteUserFormValues = z.infer<typeof inviteUserSchema>;
 const FORM_FIELDS = new Set<keyof InviteUserFormValues>(['email', 'firstName', 'lastName', 'roleKey']);
 
 const INVITABLE_ROLES = ['FLEET_MANAGER', 'DISPATCHER', 'VIEWER'] as const;
+
+/** B-85 (shipped) — `POST /users` `terminalIds`. No Terminal table yet (backend D-090); home
+ * terminal names, same static list `AddDriverModal` seeds (features/* cannot import features/*,
+ * so this is its own copy). Empty selection = every terminal, per the field's own description. */
+const TERMINALS = [
+  { name: 'Columbus, OH', label: 'Columbus, OH' },
+  { name: 'Raleigh, NC', label: 'Raleigh, NC' },
+] as const;
 
 const ROLE_COPY: Record<(typeof INVITABLE_ROLES)[number], { title: string; description: string }> = {
   FLEET_MANAGER: { title: 'Fleet manager', description: 'Full access to vehicles, drivers, HOS and maintenance' },
@@ -40,6 +47,8 @@ export function InviteUserModal({ roles, onClose }: { roles: RoleRow[]; onClose:
   // Compiler memoization (same pattern as `CreateGeofenceModal`, web/decisions.md). `setValue`
   // keeps react-hook-form's own copy in sync for validation/submit.
   const [roleKey, setRoleKey] = useState(dispatcherRole?.id ?? '');
+  const [terminalIds, setTerminalIds] = useState<string[]>([]);
+  const [message, setMessage] = useState('');
 
   const {
     register,
@@ -65,7 +74,14 @@ export function InviteUserModal({ roles, onClose }: { roles: RoleRow[]; onClose:
     if (inviteMutation.isPending) return;
     setBanner(null);
     inviteMutation.mutate(
-      { email: values.email, firstName: values.firstName, lastName: values.lastName, roleId: values.roleKey },
+      {
+        email: values.email,
+        firstName: values.firstName,
+        lastName: values.lastName,
+        roleId: values.roleKey,
+        terminalIds: terminalIds.length > 0 ? terminalIds : undefined,
+        message: message.trim() || undefined,
+      },
       {
         onSuccess: () => {
           toast({ kind: 'success', title: 'Invitation sent', description: `An invitation was sent to ${values.email}.` });
@@ -96,9 +112,8 @@ export function InviteUserModal({ roles, onClose }: { roles: RoleRow[]; onClose:
     );
   }
 
-  // Every editable control is now inside react-hook-form (the two B-85 fields are read-only), so
-  // `formState.isDirty` is the whole dirty state for the 11.30 confirm.
-  const dirty = isDirty;
+  // `terminalIds`/`message` (B-85) live outside react-hook-form, same pattern as `roleKey`.
+  const dirty = isDirty || terminalIds.length > 0 || message.trim() !== '';
 
   return (
     <Modal
@@ -190,23 +205,39 @@ export function InviteUserModal({ roles, onClose }: { roles: RoleRow[]; onClose:
           )}
         </div>
 
-        {/* ⛔ GAP B-85 — `POST /users` takes
-            email/firstName/lastName/roleId/jobTitle/phone only. Both controls used to be collected
-            and silently dropped (WB-208); they are disabled
-            with the reason visible rather than pretending to carry the value. */}
-        <Field label="Terminal access" hint={SETTINGS_REASON.inviteTerminal}>
-          <select value="All terminals" disabled className={inputClass}>
-            <option>All terminals</option>
-          </select>
+        {/* B-85 (shipped 2026-09-24) — `POST /users` now takes `terminalIds`/`message`. */}
+        <Field
+          label="Terminal access"
+          hint="Stored on the user record only — it is not an access boundary yet; the user still sees every terminal's data. Leave every box unchecked to record no scope."
+        >
+          <div className="flex flex-col gap-1.5 rounded-md border border-border p-2">
+            {TERMINALS.map((t) => (
+              <label key={t.name} className="flex items-center gap-2 text-body text-text">
+                <input
+                  type="checkbox"
+                  checked={terminalIds.includes(t.name)}
+                  disabled={submitting}
+                  onChange={(e) =>
+                    setTerminalIds((prev) =>
+                      e.target.checked ? [...prev, t.name] : prev.filter((name) => name !== t.name),
+                    )
+                  }
+                />
+                {t.label}
+              </label>
+            ))}
+          </div>
         </Field>
 
-        <Field label="Message (optional)" hint={SETTINGS_REASON.inviteMessage}>
+        <Field label="Message (optional)">
           <textarea
-            value=""
-            readOnly
-            disabled
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            disabled={submitting}
             rows={3}
-            className="rounded-md border border-border bg-bg-subtle px-3 py-2 text-body text-text"
+            maxLength={500}
+            placeholder="A short note included in the invitation email."
+            className="rounded-md border border-border bg-bg-surface px-3 py-2 text-body text-text"
           />
         </Field>
       </form>

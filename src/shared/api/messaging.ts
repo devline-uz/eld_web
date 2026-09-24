@@ -74,9 +74,12 @@ function joinConversation(conversation: ConversationRow, driverById: Map<string,
   const driverParticipant = conversation.participants.find((p) => p.driverId);
   const driver = driverParticipant?.driverId ? driverById.get(driverParticipant.driverId) ?? null : null;
   const mine = conversation.participants.find((p) => p.userId === currentUserId);
-  const unread = Boolean(
-    conversation.lastMessageAt && (!mine?.lastReadAt || new Date(conversation.lastMessageAt) > new Date(mine.lastReadAt)),
-  );
+  // B-37 (shipped) — the server now sends a real `unreadCount`; prefer it. Fall back to the
+  // `lastReadAt` comparison only when it is absent (older fixtures, or a row not yet refetched).
+  const unread =
+    conversation.unreadCount != null
+      ? conversation.unreadCount > 0
+      : Boolean(conversation.lastMessageAt && (!mine?.lastReadAt || new Date(conversation.lastMessageAt) > new Date(mine.lastReadAt)));
   return { ...conversation, driver, unread };
 }
 
@@ -172,13 +175,11 @@ export function setMessageStatus(
   });
 }
 
-/** WB-117 — there is no `POST /conversations/:id/read` (or similar) on the wire; see
- * `web/backend-gaps.md` B-67. Rather than render an "Unread" badge/segment that can never clear
- * for the rest of the session (the previous behaviour), this patches the caller's own
- * `ConversationParticipant.lastReadAt` in the local cache the moment the conversation is opened —
- * an honest record of what the panel actually knows (the user did just view these messages), not
- * a fabricated server value. It does not persist: a refresh, another tab, or the backend's own
- * copy of `lastReadAt` still shows the conversation unread until B-67 ships a real write path. */
+/** B-67 (shipped 2026-09-24) — `POST /conversations/:id/read` persists the caller's `lastReadAt`
+ * server-side (see `useMarkConversationRead` below); this patches the local cache the moment the
+ * conversation opens, before the request lands, so the badge clears instantly. It updates both
+ * signals `joinConversation` reads: the caller's own `lastReadAt` (the pre-B-37 fallback) and
+ * `unreadCount` (zeroed, since opening the thread reads everything up to now). */
 export function markConversationRead(
   queryClient: ReturnType<typeof useQueryClient>,
   conversationId: string,
@@ -191,7 +192,11 @@ export function markConversationRead(
     return {
       items: prev.items.map((c) =>
         c.id === conversationId
-          ? { ...c, participants: c.participants.map((p) => (p.userId === currentUserId ? { ...p, lastReadAt: readAt } : p)) }
+          ? {
+              ...c,
+              unreadCount: 0,
+              participants: c.participants.map((p) => (p.userId === currentUserId ? { ...p, lastReadAt: readAt } : p)),
+            }
           : c,
       ),
     };

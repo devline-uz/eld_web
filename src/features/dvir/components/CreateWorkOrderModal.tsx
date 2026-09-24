@@ -32,7 +32,13 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
   const [dueDate, setDueDate] = useState('');
   const [partsCost, setPartsCost] = useState('');
   const [odometer, setOdometer] = useState('');
+  const [estimatedLaborHours, setEstimatedLaborHours] = useState('');
   const [description, setDescription] = useState('');
+  // B-42 (shipped 2026-09-24) — the three checkboxes are real `CreateWorkOrderDto` flags now;
+  // default checked, matching the design.
+  const [keepOutOfService, setKeepOutOfService] = useState(true);
+  const [notifyDriver, setNotifyDriver] = useState(true);
+  const [blockDispatchAssignment, setBlockDispatchAssignment] = useState(true);
   const [serverError, setServerError] = useState<string | null>(null);
 
   const vehicle = useMemo(
@@ -52,7 +58,11 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
     dueDate !== '' ||
     partsCost !== '' ||
     odometer !== '' ||
-    description !== '';
+    estimatedLaborHours !== '' ||
+    description !== '' ||
+    !keepOutOfService ||
+    !notifyDriver ||
+    !blockDispatchAssignment;
 
   // Stage 3 — the ticked defects belong to the unit they were listed for; switching the unit used
   // to keep them, so another vehicle's defect IDs could be submitted on this work order.
@@ -67,14 +77,8 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
   }
 
   function submit() {
-    // WB-148 — `Estimated labour` and the three trailing checkboxes (`Keep the unit out of
-    // service`, `Notify the driver`, `Block dispatch assignment`) were collected, defaulted to
-    // checked, and then never put on the wire: `CreateWorkOrderDto` has no labour-hours field and
-    // no `keepOutOfService`/`notifyDriver`/`blockDispatchAssignment` flags (web/backend-gaps.md
-    // B-42). Out-of-service state still follows only the "an open CRITICAL defect exists" rule,
-    // and nothing notifies the driver from here — so the controls are gone rather than left
-    // promising three effects the request cannot ask for. `Estimated parts cost` stays: it is a
-    // real DTO field (`costUsd`).
+    // B-42 (shipped 2026-09-24) — `estimatedLaborHours`, `keepOutOfService`, `notifyDriver` and
+    // `blockDispatchAssignment` are real `CreateWorkOrderDto` fields now.
     setServerError(null);
     mutation.mutate(
       {
@@ -85,8 +89,12 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
         vendor: vendor || undefined,
         costUsd: partsCost ? Number(partsCost) : undefined,
         odometerMi: odometer ? Number(odometer) : undefined,
+        estimatedLaborHours: estimatedLaborHours ? Number(estimatedLaborHours) : undefined,
         dueAt: dueDate ? new Date(dueDate).toISOString() : undefined,
         defectIds: selectedDefects.length > 0 ? selectedDefects : undefined,
+        keepOutOfService,
+        notifyDriver,
+        blockDispatchAssignment,
       },
       {
         onSuccess: (wo) => {
@@ -190,7 +198,7 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
           </label>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-3 gap-4">
           <label className="flex flex-col gap-1">
             <span className="text-label text-text">Estimated parts cost</span>
             <div className="flex items-center gap-2">
@@ -205,6 +213,13 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
               <span className="text-body text-text-muted">mi</span>
             </div>
           </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-label text-text">Estimated labor</span>
+            <div className="flex items-center gap-2">
+              <input type="number" min="0" step="0.1" value={estimatedLaborHours} onChange={(e) => setEstimatedLaborHours(e.target.value)} className={inputClass} />
+              <span className="text-body text-text-muted">h</span>
+            </div>
+          </label>
         </div>
 
         <label className="flex flex-col gap-1">
@@ -216,6 +231,21 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
             className="rounded-md border border-border bg-bg-surface px-3 py-2 text-body text-text"
           />
         </label>
+
+        <div className="flex flex-col gap-2">
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={keepOutOfService} onChange={(e) => setKeepOutOfService(e.target.checked)} />
+            <span className="text-body text-text">Keep the unit out of service until this work order closes</span>
+          </label>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={notifyDriver} onChange={(e) => setNotifyDriver(e.target.checked)} />
+            <span className="text-body text-text">Notify the driver</span>
+          </label>
+          <label className="flex items-center gap-2">
+            <input type="checkbox" checked={blockDispatchAssignment} onChange={(e) => setBlockDispatchAssignment(e.target.checked)} />
+            <span className="text-body text-text">Block dispatch assignment until resolved</span>
+          </label>
+        </div>
 
         {serverError && (
           <p role="alert" className="rounded-md bg-danger-soft p-3 text-body text-danger">

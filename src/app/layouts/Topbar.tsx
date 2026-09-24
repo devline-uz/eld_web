@@ -19,6 +19,7 @@ import { applyNotificationNew, useUnreadNotificationCount } from '@/shared/api/n
 import { useAuth } from '@/shared/auth/AuthProvider';
 import type { Role } from '@/shared/auth/permissions';
 import { usePermission } from '@/shared/auth/usePermission';
+import { useReportReadyShell } from '@/shared/realtime/reportReady';
 import { useRealtimeEvent } from '@/shared/realtime/useRealtimeEvent';
 import { useToast } from '@/shared/ui/Toast';
 import { buildPaletteConfig } from '../paletteCommands';
@@ -136,6 +137,10 @@ export function Topbar() {
       toast({ kind: 'error', title: notification.title, description: notification.body });
     }
   });
+
+  // §7.3 `report.ready` (worker → Redis bridge → `user:{id}`): invalidate reports everywhere,
+  // toast outside `/reports/*` (the report screens announce their own, WD-094).
+  useReportReadyShell();
 
   useEffect(() => {
     const timer = setTimeout(() => {

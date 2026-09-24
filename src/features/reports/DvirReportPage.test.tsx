@@ -46,7 +46,10 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'bypass' }));
 beforeEach(() => {
   setAuthBridge({ getAccessToken: () => 'test-token' });
   setAccessToken('test-token');
-  server.use(...reportScreenHandlers);
+  server.use(
+    ...reportScreenHandlers,
+    http.get(url(endpoints.dvir.compliance), () => ok({ expected: 2, submitted: 2, compliancePct: 100, missing: [] })),
+  );
   mocks.role = 'FLEET_MANAGER';
   vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
 });
@@ -79,14 +82,46 @@ describe('W-14 Reports · DVIR report', () => {
     expect(screen.getByText('2 records · showing 2')).toBeInTheDocument();
   });
 
-  it('computes the KPI row from the rows and leaves Missing pre-trip as a dash (B-47)', async () => {
+  it('computes the KPI row from the rows and the compliance schedule (B-47)', async () => {
     renderPage(<DvirReportPage />, ROUTE);
     await screen.findByRole('row', { name: /#110/ });
     expect(kpi('Inspections submitted').getByText('2')).toBeInTheDocument();
+    expect(kpi('Inspections submitted').getByText('100% compliance')).toBeInTheDocument();
     expect(kpi('With defects').getByText('1')).toBeInTheDocument();
     expect(kpi('With defects').getByText('1 critical')).toBeInTheDocument();
     expect(kpi('Average time to fix').getByText('1.0 days')).toBeInTheDocument();
-    expect(kpi('Missing pre-trip').getByText('—')).toBeInTheDocument();
+    expect(kpi('Missing pre-trip').getByText('0')).toBeInTheDocument();
+  });
+
+  it('B-47 — each missing pre-trip is a Missing / Not submitted row and counts in the KPI', async () => {
+    const seen: { query?: URLSearchParams } = {};
+    server.use(
+      http.get(url(endpoints.dvir.compliance), ({ request }) => {
+        seen.query = new URL(request.url).searchParams;
+        return ok({
+          expected: 4,
+          submitted: 2,
+          compliancePct: 50,
+          missing: [
+            { vehicleId: 'veh_101', unitNumber: '101', date: '2026-09-07' },
+            { vehicleId: 'veh_101', unitNumber: '101', date: '2026-09-08' },
+          ],
+        });
+      }),
+    );
+    renderPage(<DvirReportPage />, ROUTE);
+    await screen.findByRole('row', { name: /#110/ });
+    await waitFor(() => expect(kpi('Missing pre-trip').getByText('2')).toBeInTheDocument());
+    expect(seen.query?.get('from')).toBe('2026-09-01');
+    expect(seen.query?.get('to')).toBe('2026-09-12');
+    expect(kpi('Missing pre-trip').getByText('1 unit')).toBeInTheDocument();
+    expect(kpi('Inspections submitted').getByText('50% compliance')).toBeInTheDocument();
+    const missing = screen.getByRole('row', { name: /Sep 07, —/ });
+    for (const text of ['#101', 'Pre-trip', 'Not submitted', 'Missing']) {
+      expect(within(missing).getByText(text)).toBeInTheDocument();
+    }
+    expect(within(missing).getByText('Not submitted')).toHaveClass('text-warning');
+    expect(screen.getByText('4 records · showing 4')).toBeInTheDocument();
   });
 
   it('filters by defect type and passes the unit filter to the server', async () => {
@@ -135,7 +170,7 @@ describe('W-14 Reports · DVIR report', () => {
     expect(screen.getByText('2,000+ records · showing 10')).toBeInTheDocument();
   });
 
-  it('removes Schedule for VIEWER but keeps Export CSV and Download PDF', async () => {
+  it('removes Schedule for VIEWER (reports FULL) but keeps Export CSV and Download PDF (B-96, READ shortcut)', async () => {
     mocks.role = 'VIEWER';
     renderPage(<DvirReportPage />, ROUTE);
     await screen.findByRole('row', { name: /#110/ });
@@ -146,12 +181,15 @@ describe('W-14 Reports · DVIR report', () => {
 
   it('shows the Download PDF refusal verbatim and exports the CSV through the shortcut', async () => {
     let exported: Record<string, string> = {};
+    let pdfParams: Record<string, string> = {};
     server.use(
-      http.post(url(endpoints.reports.generate), () =>
-        fail(422, 'VALIDATION_FAILED', 'DVIR reports are generated as CSV in this version (streaming export, TZ §15).'),
-      ),
       http.get(url(endpoints.reports.dvir), ({ request }) => {
-        exported = Object.fromEntries(new URL(request.url).searchParams);
+        const params = Object.fromEntries(new URL(request.url).searchParams);
+        if (params.format === 'PDF') {
+          pdfParams = params;
+          return fail(422, 'VALIDATION_FAILED', 'DVIR reports are generated as CSV in this version (streaming export, TZ §15).');
+        }
+        exported = params;
         return ok({ reportId: 'rpt_export_dvir', status: 'QUEUED' }, 202);
       }),
     );
@@ -160,6 +198,7 @@ describe('W-14 Reports · DVIR report', () => {
     expect(
       await screen.findByText('DVIR reports are generated as CSV in this version (streaming export, TZ §15).'),
     ).toBeInTheDocument();
+    expect(pdfParams).toEqual({ from: '2026-09-01', to: '2026-09-12', vehicleId: 'veh_110', format: 'PDF' });
     await userEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
 
     await userEvent.click(screen.getByRole('button', { name: 'Export CSV' }));

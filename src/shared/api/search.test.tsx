@@ -18,7 +18,6 @@ const page = <T,>(items: T[]) => ({ items, page: 1, limit: 5, total: items.lengt
 describe('fetchGlobalSearch (B-10)', () => {
   it('uses GET /search and applies the permission scope', async () => {
     const all = await fetchGlobalSearch('smith', { drivers: true, vehicles: true });
-    expect(all.source).toBe('search');
     expect(all.drivers.map((d) => d.name)).toEqual(['John Smith', 'Smith Rodriguez']);
     expect(all.vehicles).toHaveLength(1);
     // WB-176 — derived from the fixture, not a pinned literal: the handler and the panel now
@@ -31,43 +30,37 @@ describe('fetchGlobalSearch (B-10)', () => {
     expect(vehiclesOnly.drivers).toEqual([]);
   });
 
-  it('falls back to /drivers?q= + /vehicles?q= when /search is 404 (live API today)', async () => {
+  it('makes exactly one /search call, never the /drivers + /vehicles fan-out (WD-093)', async () => {
     const seen: string[] = [];
     server.use(
-      http.get(url(endpoints.search.root), () => fail(404, 'NOT_FOUND', 'Cannot GET /api/search')),
-      http.get(url(endpoints.drivers.list), ({ request }) => {
-        seen.push(`drivers:${new URL(request.url).searchParams.get('q')}`);
-        return ok(page([{ id: 'd1', firstName: 'Walter', lastName: 'Smith', username: 'ws', homeTerminalName: 'Columbus, OH' }]));
+      http.get(url(endpoints.search.root), ({ request }) => {
+        const params = new URL(request.url).searchParams;
+        seen.push(`search:${params.get('q')}:${params.get('limit')}`);
+        // A section the caller may not read may be absent altogether.
+        return ok({ q: 'smith', drivers: [{ id: 'd1', name: 'Walter Smith', unitNumber: null, dutyStatus: null, openViolations: null, openWarnings: null, homeTerminalName: null }] });
       }),
-      http.get(url(endpoints.vehicles.list), ({ request }) => {
-        seen.push(`vehicles:${new URL(request.url).searchParams.get('q')}`);
-        return ok(page([{ id: 'v1', unitNumber: '101', make: null, model: null, vin: 'VIN1' }]));
+      http.get(url(endpoints.drivers.list), () => {
+        seen.push('drivers');
+        return ok(page([]));
+      }),
+      http.get(url(endpoints.vehicles.list), () => {
+        seen.push('vehicles');
+        return ok(page([]));
       }),
     );
     const result = await fetchGlobalSearch('smith', { drivers: true, vehicles: true });
-    expect(result.source).toBe('fallback');
-    expect(seen.sort()).toEqual(['drivers:smith', 'vehicles:smith']);
-    expect(result.drivers[0]).toMatchObject({ id: 'd1', name: 'Walter Smith', unitNumber: null, homeTerminalName: 'Columbus, OH' });
-    expect(result.vehicles[0]).toMatchObject({ id: 'v1', unitNumber: '101', driverName: null });
+    expect(seen).toEqual(['search:smith:5']);
+    expect(result.drivers[0]).toMatchObject({ id: 'd1', name: 'Walter Smith' });
+    expect(result.vehicles).toEqual([]);
     expect(result.scope).toBeUndefined();
-
-    const none = await fetchGlobalSearch('smith', { drivers: false, vehicles: false });
-    expect(none.drivers).toEqual([]);
-    expect(none.vehicles).toEqual([]);
   });
 
-  it('uses the username when a fallback driver has no name', async () => {
-    server.use(
-      http.get(url(endpoints.search.root), () => fail(404, 'NOT_FOUND', 'missing')),
-      http.get(url(endpoints.drivers.list), () =>
-        ok(page([{ id: 'd2', firstName: '', lastName: '', username: 'nobody', homeTerminalName: null }])),
-      ),
-    );
-    const result = await fetchGlobalSearch('nob', { drivers: true, vehicles: false });
-    expect(result.drivers[0]).toMatchObject({ name: 'nobody', homeTerminalName: null });
+  it('surfaces a 404 as an error instead of fanning out', async () => {
+    server.use(http.get(url(endpoints.search.root), () => fail(404, 'NOT_FOUND', 'Cannot GET /api/search')));
+    await expect(fetchGlobalSearch('smith', { drivers: true, vehicles: true })).rejects.toBeInstanceOf(ApiError);
   });
 
-  it('throws anything other than a 404 so the palette can show its error', async () => {
+  it('throws a 400 so the palette can show its error', async () => {
     server.use(http.get(url(endpoints.search.root), () => fail(400, 'VALIDATION_FAILED', 'bad q')));
     await expect(fetchGlobalSearch('x!', { drivers: true, vehicles: true })).rejects.toBeInstanceOf(ApiError);
   });

@@ -109,3 +109,7 @@ export function DriverPicker(props: PickerProps) {
 export function UnitPicker(props: PickerProps) {
   return <Picker {...props} />;
 }
+
+export function TrailerPicker(props: PickerProps) {
+  return <Picker {...props} />;
+}

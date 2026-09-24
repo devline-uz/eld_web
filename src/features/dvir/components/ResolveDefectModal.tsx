@@ -41,21 +41,31 @@ export function ResolveDefectModal({ defect, onClose }: { defect: DefectTableRow
   const [resolution, setResolution] = useState<Resolution>('REPAIRED');
   const [workOrderId, setWorkOrderId] = useState(initialWorkOrderId);
   const [notes, setNotes] = useState('');
+  const [correctedBy, setCorrectedBy] = useState('');
+  const [completedAt, setCompletedAt] = useState('');
+  const [laborHours, setLaborHours] = useState('');
+  const [partsCostUsd, setPartsCostUsd] = useState('');
   const [serverError, setServerError] = useState<string | null>(null);
 
   const isDeferred = resolution === 'DEFERRED';
   const valid = notes.trim() !== '';
   // WB-150 — every control in this modal is plain state, so `isDirty` is an explicit comparison
   // against the values the modal opened with; a freshly opened, untouched form is never dirty.
-  const isDirty = resolution !== 'REPAIRED' || workOrderId !== initialWorkOrderId || notes !== '';
+  const isDirty =
+    resolution !== 'REPAIRED' ||
+    workOrderId !== initialWorkOrderId ||
+    notes !== '' ||
+    correctedBy !== '' ||
+    completedAt !== '' ||
+    laborHours !== '' ||
+    partsCostUsd !== '';
   const isPending = mutation.isPending || linkWorkOrder.isPending;
 
   function submit() {
     // B-68 (shipped 2026-09-24, WD-121) — `resolutionType` carries the choice itself, so "No repair
     // needed" is `NOT_REQUIRED` and is never recorded as a repair; the WB-077 `[No repair needed]`
-    // note tag is gone. B-70 (`correctedBy`, `completedAt`, `laborHours`, `partsCostUsd`) is now
-    // accepted by `ResolveDefectPayload` — re-adding those inputs is a screen task (WB-151 removed
-    // them while the DTO could not carry them).
+    // note tag is gone. B-70 (shipped) — `correctedBy`/`completedAt`/`laborHours`/`partsCostUsd`
+    // are real `ResolveDefectPayload` fields now, sent only when filled in.
     const resolutionType = resolution;
     const resolutionNote = notes.trim();
     setServerError(null);
@@ -69,7 +79,16 @@ export function ResolveDefectModal({ defect, onClose }: { defect: DefectTableRow
         : Promise.resolve(null);
 
     void link
-      .then(() => mutation.mutateAsync({ resolutionType, resolutionNote }))
+      .then(() =>
+        mutation.mutateAsync({
+          resolutionType,
+          resolutionNote,
+          correctedBy: correctedBy.trim() || undefined,
+          completedAt: completedAt ? new Date(completedAt).toISOString() : undefined,
+          laborHours: laborHours.trim() ? Number(laborHours) : undefined,
+          partsCostUsd: partsCostUsd.trim() ? Number(partsCostUsd) : undefined,
+        }),
+      )
       .then(() => {
         toast({
           kind: 'success',
@@ -180,6 +199,31 @@ export function ResolveDefectModal({ defect, onClose }: { defect: DefectTableRow
             ))}
           </select>
         </label>
+
+        <div className="grid grid-cols-2 gap-4">
+          <label className="flex flex-col gap-1">
+            <span className="text-label text-text">Corrected by</span>
+            <input value={correctedBy} onChange={(e) => setCorrectedBy(e.target.value)} placeholder="Mike Rowan · Shop A" className={inputClass} />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-label text-text">Completed on</span>
+            <input type="date" value={completedAt} onChange={(e) => setCompletedAt(e.target.value)} className={inputClass} />
+          </label>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <label className="flex flex-col gap-1">
+            <span className="text-label text-text">Labor hours</span>
+            <input type="number" min="0" step="0.1" value={laborHours} onChange={(e) => setLaborHours(e.target.value)} className={inputClass} />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-label text-text">Parts cost</span>
+            <div className="flex items-center gap-2">
+              <input type="number" min="0" step="0.01" value={partsCostUsd} onChange={(e) => setPartsCostUsd(e.target.value)} className={inputClass} />
+              <span className="text-body text-text-muted">USD</span>
+            </div>
+          </label>
+        </div>
 
         <label className="flex flex-col gap-1">
           <span className="text-label text-text">

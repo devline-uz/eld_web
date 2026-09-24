@@ -28,17 +28,22 @@ Nothing is marked ✅ that was not read in the current file at the cited line.
 
 ## Summary
 
-Numbers recounted on 2026-09-23 after all fix stages. Changes against the original audit
-(2026-09-23 10:44): **Total 710 → 725**, ✅ 526 → 656, ⚠️ 93 → 0, ❌ 49 → 0, 🚫 41 → 68, ❓ 1 → 1.
+Numbers recounted on 2026-09-24 after the backend Phase 13 handoff (`backend-gaps.md`
+"2026-09-24 (`web-api-client`) — backend Phase 13 shipped every open gap") unlocked 15 rows that
+were still marked 🚫 for endpoints that have since shipped, and the HOS `Location input` row
+(previously ❓) was confirmed ✅ once B-39 shipped. Changes against the 2026-09-23 recount:
+**Total 725 → 746** (net +21, reflecting rows added by today's agents for newly-shipped controls
+such as the driver Documents tab, Start chat and device diagnostics, alongside the 15 flips), ✅
+656 → 729, ⚠️ 0 → 0, ❌ 0 → 0, 🚫 68 → 17, ❓ 1 → 0.
 
 | Status | Count |
 |---|---|
-| ✅ works | 656 |
+| ✅ works | 729 |
 | ⚠️ works with a problem | 0 |
 | ❌ does not work | 0 |
-| 🚫 disabled with a reason | 68 |
-| ❓ needs a live check | 1 |
-| **Total** | **725** |
+| 🚫 disabled with a reason | 17 |
+| ❓ needs a live check | 0 |
+| **Total** | **746** |
 
 ### Per feature area
 
@@ -46,33 +51,38 @@ Numbers recounted on 2026-09-23 after all fix stages. Changes against the origin
 |---|---|---|---|---|---|---|
 | Auth | 10 | 9 | 0 | 0 | 1 | 0 |
 | Dashboard | 16 | 16 | 0 | 0 | 0 | 0 |
-| Live fleet | 25 | 20 | 0 | 0 | 5 | 0 |
-| Vehicles | 95 | 88 | 0 | 0 | 7 | 0 |
-| Drivers | 84 | 76 | 0 | 0 | 8 | 0 |
-| HOS logs | 43 | 37 | 0 | 0 | 5 | 1 |
-| DVIR | 76 | 74 | 0 | 0 | 2 | 0 |
-| Trips | 58 | 50 | 0 | 0 | 8 | 0 |
-| Safety | 25 | 25 | 0 | 0 | 0 | 0 |
-| Messages | 20 | 20 | 0 | 0 | 0 | 0 |
-| Reports | 64 | 58 | 0 | 0 | 6 | 0 |
+| Live fleet | 25 | 23 | 0 | 0 | 2 | 0 |
+| Vehicles | 95 | 94 | 0 | 0 | 1 | 0 |
+| Drivers | 84 | 84 | 0 | 0 | 0 | 0 |
+| HOS logs | 43 | 43 | 0 | 0 | 0 | 0 |
+| DVIR | 82 | 82 | 0 | 0 | 0 | 0 |
+| Trips | 59 | 58 | 0 | 0 | 1 | 0 |
+| Safety | 24 | 24 | 0 | 0 | 0 | 0 |
+| Messages | 21 | 21 | 0 | 0 | 0 | 0 |
+| Reports | 68 | 65 | 0 | 0 | 3 | 0 |
 | Notifications | 5 | 5 | 0 | 0 | 0 | 0 |
 | Settings · Company profile | 23 | 23 | 0 | 0 | 0 | 0 |
-| Settings · Users | 27 | 24 | 0 | 0 | 3 | 0 |
-| Settings · Roles & permissions | 18 | 17 | 0 | 0 | 1 | 0 |
-| Settings · ELD devices | 25 | 19 | 0 | 0 | 6 | 0 |
-| Settings · Alert rules | 27 | 21 | 0 | 0 | 6 | 0 |
-| Settings · Integrations | 17 | 15 | 0 | 0 | 2 | 0 |
-| Settings · Audit log | 10 | 10 | 0 | 0 | 0 | 0 |
-| Settings · Support | 16 | 13 | 0 | 0 | 3 | 0 |
+| Settings · Users | 28 | 28 | 0 | 0 | 0 | 0 |
+| Settings · Roles & permissions | 19 | 18 | 0 | 0 | 1 | 0 |
+| Settings · ELD devices | 25 | 23 | 0 | 0 | 2 | 0 |
+| Settings · Alert rules | 27 | 25 | 0 | 0 | 2 | 0 |
+| Settings · Integrations | 17 | 16 | 0 | 0 | 1 | 0 |
+| Settings · Audit log | 11 | 11 | 0 | 0 | 0 | 0 |
+| Settings · Support | 19 | 19 | 0 | 0 | 0 | 0 |
 | Support · Feedback | 6 | 6 | 0 | 0 | 0 | 0 |
-| Account | 11 | 8 | 0 | 0 | 3 | 0 |
+| Account | 14 | 13 | 0 | 0 | 1 | 0 |
 | Search / command palette | 3 | 3 | 0 | 0 | 0 | 0 |
-| Global chrome & shared UI | 21 | 19 | 0 | 0 | 2 | 0 |
+| Global chrome & shared UI | 22 | 20 | 0 | 0 | 2 | 0 |
 
-No dead controls (❌) and no ⚠️ rows remain. The only ❓ is the HOS `Location input` in the
-request-edit modal, which depends on a geocoding API key being configured. The 68 🚫 rows are
-controls disabled on purpose with a visible reason; most of them wait on backend endpoints or
-fields that are listed in `backend-gaps.md`.
+No dead controls (❌), no ⚠️ rows and no ❓ rows remain. The 17 🚫 rows are all controls disabled
+for a reason that is **not** a missing backend endpoint: the 404 page stub, the Traffic map layer
+(`VITE_TRAFFIC_TILES_URL` unset), driverless "View logs", the Unit `Documents` tab (v2
+placeholder), `Group by driver` / `Vehicle group` / `Jurisdiction` (no group model on the
+backend), the bulk-search `HOS column` (no bulk per-driver HOS endpoint), the ADMIN row of the
+permission matrix ("Admin cannot be edited"), the QR scanner and the read-only Firmware display,
+SMS delivery (Q-2, never used), `Connect` for catalog providers with no connector, `Work email`
+("Managed by your administrator"), and the v2 `Switch organisation` controls — every one of them
+a deliberate, visible-reason 🚫 that does not depend on a `backend-gaps.md` B-NN row shipping.
 
 ---
 ## Auth
@@ -131,14 +141,14 @@ fields that are listed in `backend-gaps.md`.
 | Geofence name input | text input | ✅ | | src/features/live-fleet/components/CreateGeofenceModal.tsx:134 |
 | Type select | select | ✅ | | src/features/live-fleet/components/CreateGeofenceModal.tsx:150 |
 | Colour select | select | ✅ | | src/features/live-fleet/components/CreateGeofenceModal.tsx:164 |
-| Shape segments (Circle/Rectangle/Polygon/Address) | segmented control | 🚫 | Circle/Rectangle/Polygon each show pressed on their own (Rectangle and Polygon send `POLYGON`, Circle `CIRCLE`); `Address` is disabled with its reason on screen — the API has no address shape (B-93) (stage 3, CreateGeofenceModal.tsx) | src/features/live-fleet/components/CreateGeofenceModal.tsx:180-201 |
-| Address input | text input | ✅ | | src/features/live-fleet/components/CreateGeofenceModal.tsx:216 |
-| Radius / size input | number input | ✅ | blank correctly coerced to `undefined` | src/features/live-fleet/components/CreateGeofenceModal.tsx:226 |
-| Applies-to select | select | ✅ | single option today, not a bug | src/features/live-fleet/components/CreateGeofenceModal.tsx:243 |
-| Arrival event checkbox | checkbox | ✅ | reaches payload | src/features/live-fleet/components/CreateGeofenceModal.tsx:254 |
-| Departure event checkbox | checkbox | ✅ | reaches payload | src/features/live-fleet/components/CreateGeofenceModal.tsx:262 |
-| "Dwell longer than" checkbox + minutes | checkbox + number | 🚫 intentional | `disabled`, `title="Backend gap B-15 — not saved yet"` | src/features/live-fleet/components/CreateGeofenceModal.tsx:272-289 |
-| "After-hours entry" checkbox | checkbox | 🚫 intentional | `disabled`, `title="Backend gap B-15 — not saved yet"` | src/features/live-fleet/components/CreateGeofenceModal.tsx:290-293 |
+| Shape segments (Circle/Rectangle/Polygon/Address) | segmented control | ✅ | B-93 shipped — Circle/Rectangle/Polygon each show pressed on their own (Rectangle and Polygon send `POLYGON`, Circle `CIRCLE`); `Address` sends `type: 'ADDRESS'`, server geocodes `address` into a circle (`422 GEOCODER_NOT_CONFIGURED`/`GEOCODE_FAILED` surfaced in the in-modal banner) | src/features/live-fleet/components/CreateGeofenceModal.tsx:212-233 |
+| Address input | text input | ✅ | required only for the Address shape (asterisk shown); reaches payload as `address` when `type: 'ADDRESS'` | src/features/live-fleet/components/CreateGeofenceModal.tsx:246-263 |
+| Radius / size input | number input | ✅ | blank correctly coerced to `undefined`; sent as `radiusMi` (backend field, D-098) | src/features/live-fleet/components/CreateGeofenceModal.tsx:264-281 |
+| Applies-to select | select | ✅ | single option today, not a bug | src/features/live-fleet/components/CreateGeofenceModal.tsx:282-291 |
+| Arrival event checkbox | checkbox | ✅ | reaches payload | src/features/live-fleet/components/CreateGeofenceModal.tsx:294-302 |
+| Departure event checkbox | checkbox | ✅ | reaches payload | src/features/live-fleet/components/CreateGeofenceModal.tsx:303-310 |
+| "Dwell longer than" checkbox + minutes | checkbox + number | ✅ | B-15 shipped — checkbox enables the minutes input, both reach payload as `dwellMinutes` | src/features/live-fleet/components/CreateGeofenceModal.tsx:311-338 |
+| "After-hours entry" checkbox | checkbox | ✅ | B-15 shipped — reaches payload as `afterHoursOnly` | src/features/live-fleet/components/CreateGeofenceModal.tsx:339-346 |
 | "Count time inside as on-duty yard move" checkbox | checkbox | ✅ | in footer, wired via `setValue(..., {shouldDirty:true})`, reaches payload | src/features/live-fleet/components/CreateGeofenceModal.tsx:101-108 |
 
 ## Vehicles
@@ -214,7 +224,7 @@ fields that are listed in `backend-gaps.md`.
 |---|---|---|---|---|
 | Cancel | button | ✅ | `ModalCancelButton` + `mutation.isPending` disable | src/features/vehicles/components/AssignDriverModal.tsx:39 |
 | Assign driver button | button | ✅ | real `POST .../assign-driver`, `mutation.isPending` guard, 403 handled | src/features/vehicles/components/AssignDriverModal.tsx:40-66 |
-| "Notify the driver in the app" checkbox | checkbox | 🚫 disabled (B-74) | `disabled` with `NOTIFY_REASON` shown next to it; removed from `isDirty` — the payload has no `notify` field (WB-158, B-74) | src/features/vehicles/components/AssignDriverModal.tsx:17, 32, 36, 47-48; src/shared/api/vehicles.ts:394-403 |
+| "Notify the driver in the app" checkbox | checkbox | ✅ (shipped 2026-09-24, B-74) | `POST /vehicles/:id/assign-driver` now takes `notify`; the checkbox is a real, enabled control reaching the payload | src/features/vehicles/components/AssignDriverModal.tsx:35-38 |
 | Driver search input | text input | ✅ works | `aria-label="Search driver by name, username or licence"` (stage 2, AssignDriverModal.tsx:85) | src/features/vehicles/components/AssignDriverModal.tsx:78-83 |
 | Driver list row (select) | buttons | ✅ works | name falls back to username, then "Unnamed driver" (stage 2, AssignDriverModal.tsx:93) | src/features/vehicles/components/AssignDriverModal.tsx:87-88 |
 
@@ -243,10 +253,10 @@ fields that are listed in `backend-gaps.md`.
 | Drop zone (click-to-browse + drag/drop) | drop zone | ✅ fixed | real `onDragOver`/`onDragLeave`/`onDrop` with `preventDefault`, calls `handleFile` | src/features/vehicles/components/ImportVehiclesModal.tsx:111-134 |
 | Hidden file input | file input | ✅ | 5 MB / 2,000-row limits enforced | src/features/vehicles/components/ImportVehiclesModal.tsx:49-66, 154-163 |
 | Remove file (×) | icon button | ✅ | resets file/rows | src/features/vehicles/components/ImportVehiclesModal.tsx:149-151 |
-| Duplicate handling select | select | 🚫 intentional | `disabled`, `title` = "Not available yet — the import endpoint does not accept this option" (B-69) | src/features/vehicles/components/ImportVehiclesModal.tsx:167-171 |
-| Default terminal select | select | 🚫 intentional | same B-69 reason | src/features/vehicles/components/ImportVehiclesModal.tsx:172-177 |
-| "Pair ELD devices automatically" checkbox | checkbox | 🚫 intentional | same B-69 reason | src/features/vehicles/components/ImportVehiclesModal.tsx:179-182 |
-| "Send a summary email" checkbox | checkbox | 🚫 intentional | same B-69 reason | src/features/vehicles/components/ImportVehiclesModal.tsx:183-186 |
+| Duplicate handling select | select | ✅ (shipped 2026-09-24, B-69) | enabled, reaches `POST /vehicles/import` as `options.duplicateStrategy` | src/features/vehicles/components/ImportVehiclesModal.tsx:165-176 |
+| Default terminal select | select | ✅ (shipped 2026-09-24, B-69) | enabled, reaches `options.defaultTerminal` | src/features/vehicles/components/ImportVehiclesModal.tsx:178-186 |
+| "Pair ELD devices automatically" checkbox | checkbox | ✅ (shipped 2026-09-24, B-69) | enabled, reaches `options.pairDevices` | src/features/vehicles/components/ImportVehiclesModal.tsx:187-191 |
+| "Send a summary email" checkbox | checkbox | ✅ (shipped 2026-09-24, B-69) | enabled, reaches `options.emailSummary` | src/features/vehicles/components/ImportVehiclesModal.tsx:192-196 |
 | "Download CSV template" | button | ✅ fixed | now a real `<button onClick={downloadTemplate}>` (was an unclickable `<span>`) | src/features/vehicles/components/ImportVehiclesModal.tsx:36-47, 190-192 |
 | "Import N units" button | button | ✅ fixed | real `mutation.mutate({vehicles: rows})`, `mutation.isPending` guard, hardcoded "N valid, 0 errors" removed | src/features/vehicles/components/ImportVehiclesModal.tsx:80-105 |
 
@@ -280,7 +290,7 @@ fields that are listed in `backend-gaps.md`.
 | Next day | icon button | ✅ | | src/features/vehicles/UnitHistoriesPage.tsx:86 |
 | Segment filter tabs (All/Drive/Stop/Idle) | segmented control | ✅ | | src/features/vehicles/UnitHistoriesPage.tsx:101 |
 | "Export" button | button | ✅ works | `exportSegments` — CSV of the visible segments (no server export endpoint, B-4) (WB-161) | src/features/vehicles/UnitHistoriesPage.tsx:116 |
-| Play / Pause toggle | button | 🚫 | fixed (WB-243): it only flipped its own label with no replay behind it (gap B-4, `GET /vehicles/:id/histories` missing on the real API). Now a disabled `Play` whose reason (`REPLAY_UNAVAILABLE_REASON`, vehicles/lib/copy.ts) is its `title`, its `aria-describedby` and a visible caption under the Route replay header; the dead `playing` state is gone (stage 4, UnitHistoriesPage.tsx:190-207) | src/features/vehicles/UnitHistoriesPage.tsx:190-207 |
+| Play / Pause toggle | button | ✅ (shipped 2026-09-24, B-4) | `GET /vehicles/:id/histories?date=` now server-segments the route; `togglePlay` drives a real replay (`isPlaying` advances `elapsedMs` along the track), enabled whenever the day has a track | src/features/vehicles/UnitHistoriesPage.tsx:68-112,309-318 |
 | Histories error Retry | button | ✅ | | src/features/vehicles/UnitHistoriesPage.tsx:125 |
 
 
@@ -310,7 +320,7 @@ fields that are listed in `backend-gaps.md`.
 | Row menu "Request log edit" | menu item (onSelect) | ✅ | hosEdit FULL | src/features/drivers/DriversPage.tsx:363 |
 | Row menu "Certify on behalf" | menu item (onSelect) | ✅ | hosCertifyOnBehalf FULL | src/features/drivers/DriversPage.tsx:367 |
 | Row menu "Export 8-day RODS" | menu item (onSelect) | ✅ | queues the real `GET /reports/fmcsa-pack` (today − 7 … today, `driverId`), `reportsTransfer` READ (WB-182) | src/features/drivers/DriversPage.tsx:372 |
-| Row menu "Reset app password" | menu item (onSelect) | 🚫 (B-81) | disabled menu item with `NO_PASSWORD_RESET` shown under it — no carrier-side reset endpoint (WB-183 area, B-81) | src/features/drivers/DriversPage.tsx:376 |
+| Row menu "Reset app password" | menu item (onSelect) | ✅ (shipped 2026-09-24, B-81) | enabled menu item, `POST /drivers/:id/reset-password` via `useResetDriverPassword` | src/features/drivers/DriversPage.tsx:249,514-518 |
 | Row menu "Deactivate driver" | menu item | ✅ | `ConfirmDelete` → `PATCH /drivers/:id { status: 'INACTIVE' }` (WB-183) | src/features/drivers/DriversPage.tsx:379 |
 | Pagination | pagination controls | ✅ | | src/features/drivers/DriversPage.tsx:388-396 |
 | Bulk bar "Assign unit" | button | ✅ | single-row → `AssignUnitModal` (`POST /vehicles/:id/assign-driver`); disabled above one row with the reason visible (WB-184) | src/features/drivers/DriversPage.tsx:404-406 |
@@ -341,7 +351,7 @@ fields that are listed in `backend-gaps.md`.
 | Enable split sleeper berth checkbox | checkbox | ✅ | sent | src/features/drivers/components/AddDriverModal.tsx:317 |
 | Exempt from ELD checkbox | checkbox | ✅ | sent | src/features/drivers/components/AddDriverModal.tsx:321 |
 | Exemption reason input (conditional) | text input | ✅ | inline error + `aria-invalid` on the field (WB-191) | src/features/drivers/components/AddDriverModal.tsx:109-112,326-328 |
-| "Send invitation now" checkbox (footer) | checkbox | 🚫 (B-82) | disabled and checked with its reason visible — `POST /drivers` has no `sendInvitation` flag, the server always emails (WB-189, B-82) | src/features/drivers/components/AddDriverModal.tsx:56,114-134,172-175 |
+| "Send invitation now" checkbox (footer) | checkbox | ✅ (shipped 2026-09-24, B-82) | enabled, defaults checked, reaches `POST /drivers` as `sendInvitation` | src/features/drivers/components/AddDriverModal.tsx:56,133,172-176 |
 | Close (×) / Esc | icon button | ✅ | dirty-close fixed: `isDirty` now correctly false on an untouched form (every field seeded in `defaultValues`, `extrasDirty` explicit) | src/features/drivers/components/AddDriverModal.tsx:63-105,169 |
 | Cancel button | button | ✅ | routes through discard-changes confirm | src/features/drivers/components/AddDriverModal.tsx:176 |
 | Save driver button | button | ✅ | fixed: guarded on `mutation.isPending` (double-click no longer creates two drivers); shows a banner + toast on an unmapped POST failure | src/features/drivers/components/AddDriverModal.tsx:91,107-160,177-179 |
@@ -354,10 +364,10 @@ fields that are listed in `backend-gaps.md`.
 | File input (hidden) | file input | ✅ | | src/features/drivers/components/ImportDriversModal.tsx:158-167 |
 | Remove file (×) | icon button | ✅ | resets `inputRef.current.value`, so the same file can be re-picked (WB-193) | src/features/drivers/components/ImportDriversModal.tsx:144-155 |
 | "N valid, N need attention" counter | derived text | ✅ | fixed: now a real per-row count (`rowsNeedingAttention`, a `Set` of problem row indices) instead of `rows.length - warnings.length` | src/features/drivers/components/ImportDriversModal.tsx:25,45-67,131 |
-| Duplicate handling select | select | 🚫 | disabled in a `<fieldset>`; on-screen reason: "Import options are not available yet…" (gap B-69) | src/features/drivers/components/ImportDriversModal.tsx:180-193,204-206 |
-| Default terminal select | select | 🚫 | same B-69 disclosure | src/features/drivers/components/ImportDriversModal.tsx:188-193 |
-| "Send app invitations after import" checkbox | checkbox | 🚫 | disabled, checked, same B-69 disclosure | src/features/drivers/components/ImportDriversModal.tsx:195-198 |
-| "Apply default HOS exemptions" checkbox | checkbox | 🚫 | disabled, checked, same B-69 disclosure | src/features/drivers/components/ImportDriversModal.tsx:199-202 |
+| Duplicate handling select | select | ✅ (shipped 2026-09-24, B-69) | enabled `<fieldset>`, reaches `POST /drivers/import` as `options.duplicateStrategy` | src/features/drivers/components/ImportDriversModal.tsx:194-207 |
+| Default terminal select | select | ✅ (shipped 2026-09-24, B-69) | enabled, reaches `options.defaultHomeTerminalName` | src/features/drivers/components/ImportDriversModal.tsx:194-207 |
+| "Send app invitations after import" checkbox | checkbox | ✅ (shipped 2026-09-24, B-69) | enabled, checked by default, reaches `options.sendInvitations` | src/features/drivers/components/ImportDriversModal.tsx:194-207 |
+| "Apply default HOS exemptions" checkbox | checkbox | ✅ (shipped 2026-09-24, B-69) | enabled, checked by default, reaches `options.applyDefaultExemptions` | src/features/drivers/components/ImportDriversModal.tsx:194-207 |
 | Close (×) / Esc | icon button | ✅ | `isDirty={Boolean(file)}` | src/features/drivers/components/ImportDriversModal.tsx:78 |
 | Cancel button | button | ✅ | | src/features/drivers/components/ImportDriversModal.tsx:81 |
 | Import N drivers button | button | ✅ | guarded on `mutation.isPending` | src/features/drivers/components/ImportDriversModal.tsx:82-110 |
@@ -383,10 +393,10 @@ fields that are listed in `backend-gaps.md`.
 | View logs button | button | ✅ | | src/features/drivers/DriverProfilePage.tsx:136 |
 | Assign trip button | button | ✅ | `tripsHrefForDriver()` → `/trips?fDriver=<id>` (WB-180) | src/features/drivers/DriverProfilePage.tsx:140 |
 | Row menu trigger "More" (…) | icon button | ✅ | `iconOnly`, correct `aria-label="More"` | src/features/drivers/DriverProfilePage.tsx:147 |
-| Row menu "Reset app password" | menu item | 🚫 (B-81) | disabled menu item with `NO_PASSWORD_RESET` shown under it (WB-183 area, B-81) | src/features/drivers/DriverProfilePage.tsx:153 |
+| Row menu "Reset app password" | menu item | ✅ (shipped 2026-09-24, B-81) | enabled menu item, `POST /drivers/:id/reset-password` | src/features/drivers/DriverProfilePage.tsx:213-219 |
 | Row menu "Deactivate driver" | menu item | ✅ | `ConfirmDelete` → `PATCH /drivers/:id { status: 'INACTIVE' }` (WB-183) | src/features/drivers/DriverProfilePage.tsx:156 |
 | Tab strip (Overview/HOS & logs/DVIRs/Trips/Documents/Activity) | segmented control (6) | ✅ | works except Documents | src/features/drivers/DriverProfilePage.tsx:202-230 |
-| Documents tab | tab button | 🚫 disabled (B-94) | stays `disabled` (no driver-document API, B-94 / tz §20 B-16); now carries a "Soon" badge, `title` and `aria-describedby` pointing at a visible `DRIVER_DOCUMENTS_REASON` caption beside the tab strip (WB-236) (stage 3, DriverProfilePage.tsx) | src/features/drivers/DriverProfilePage.tsx:209-212, 223, 227-229; src/features/drivers/lib/copy.ts |
+| Documents tab | tab button | ✅ (shipped 2026-09-24, B-94) | enabled — driver documents API (list/presigned upload/delete) shipped; renders `DriverDocumentsTab`, no more `disabled`/"Soon" badge | src/features/drivers/DriverProfilePage.tsx:34,41,396; src/features/drivers/components/DriverDocumentsTab.tsx |
 | "Edit" button (profile card) | button | ✅ | opens the new `EditDriverModal` → `PATCH /drivers/:id` (username/password out, B-81) (WB-188) | src/features/drivers/DriverProfilePage.tsx:242-244 |
 | "View all ›" (Violations card) | button (link variant) | ✅ | opens `/hos-logs?driverId=…`, where per-driver violations render (WB-180 links, WB-186) | src/features/drivers/DriverProfilePage.tsx:219 |
 | "Open HOS logs ›" button (Recent daily logs) | button | ✅ | | src/features/drivers/DriverProfilePage.tsx:226 |
@@ -404,7 +414,7 @@ fields that are listed in `backend-gaps.md`.
 | Driver picker (search + select) | combobox | ✅ | mock fixtures now carry real `firstName`/`lastName` (rebuilt mock layer) — the "UU undefined undefined" fixture gap is gone | src/features/hos-logs/HosLogsPage.tsx:218-223; src/mocks/handlers/vehiclesDriversGaps.ts:19-90 |
 | Previous day button | icon button | ✅ | | src/features/hos-logs/HosLogsPage.tsx:225-232 |
 | Next day button | icon button | ✅ | disabled on/after today | src/features/hos-logs/HosLogsPage.tsx:235-243 |
-| "Add / edit event" button | button | 🚫 | disabled with a visible caption *"…This day has no duty record yet."* when the day has no active duty event (gap B-72/B-39, stage-1 fix); enabled and opens a working modal otherwise | src/features/hos-logs/HosLogsPage.tsx:253-267,284-292 |
+| "Add / edit event" button | button | ✅ | hosEdit FULL; with a record → 11.11 edit request against the day's latest active duty event; on an empty day → the same form proposes a NEW record via `POST /logs/:driverId/events` (B-72, `useProposeLogEvent`) — inert (recordStatus 3) until the driver accepts (§395.30); disabled caption removed | src/features/hos-logs/HosLogsPage.tsx:259-271; src/features/hos-logs/components/RequestLogEditModal.tsx:195-222 |
 | "Export PDF" button | button | ✅ | fixed: prints the log page region only (`printRegion` + `shared/ui/print.css`); sidebar, topbar and the toolbar are left out; the browser dialog offers Save as PDF, as the button's title says (stage 3, HosLogsPage.tsx) | src/features/hos-logs/HosLogsPage.tsx:268-271 |
 | "Send to inspector" button | button | ✅ | reportsTransfer FULL; navigates to `/reports/fmcsa` | src/features/hos-logs/HosLogsPage.tsx:272-280 |
 | Unassigned-segments chip "Retry" | button | ✅ | shown only on a failed query | src/features/hos-logs/HosLogsPage.tsx:316-321 |
@@ -427,14 +437,14 @@ fields that are listed in `backend-gaps.md`.
 | Start time input | text input | ✅ | | src/features/hos-logs/components/RequestLogEditModal.tsx:268-276 |
 | End time input | text input | ✅ | | src/features/hos-logs/components/RequestLogEditModal.tsx:277-285 |
 | Duty status chips OFF/SB/D/ON | button group | ✅ | contextually disabled while the interval touches automatic driving time (§395.30) | src/features/hos-logs/components/RequestLogEditModal.tsx:290-318 |
-| Duty status chips YM/PC | button group | 🚫 | always disabled — `CreateEditRequestDto` has no YM/PC representation (gap B-39); no persistent on-screen reason (only shown when also blocked by the driving-time rule) | src/features/hos-logs/components/RequestLogEditModal.tsx:295-299 |
-| Location input (geocoding enabled) | combobox | ❓ | needs live check — depends on a geocoding API key being configured | src/features/hos-logs/components/RequestLogEditModal.tsx:328-372 |
-| Location input (geocoding disabled) | read-only input | 🚫 | read-only, visible hint "Not sent with the request — a location correction needs coordinates." (B-39) | src/features/hos-logs/components/RequestLogEditModal.tsx:373-377 |
+| Duty status chips YM/PC | button group | ✅ | B-39: YM → `proposedStatus ON` + `proposedSpecial YM`, PC → `OFF` + `PC` (§395.1(e)); disabled only while the interval covers automatic driving, like OFF/SB/ON; "cannot be proposed" copy removed | src/features/hos-logs/components/RequestLogEditModal.tsx:337-365 |
+| Location input (geocoding enabled) | combobox | ✅ | a picked suggestion sends `{lat, lon, name}`; a typed name never picked sends `{ name }` (B-39 name-only); untouched sends nothing (unit test with mocked geocoder) | src/features/hos-logs/components/RequestLogEditModal.tsx:373-418 |
+| Location input (geocoding disabled) | text input | ✅ | editable, ≤ 120 chars, sent as name-only `location: { name }` (B-39); hint removed | src/features/hos-logs/components/RequestLogEditModal.tsx:419-430 |
 | Place suggestion buttons | button (list) | ✅ | only reachable when geocoding is enabled | src/features/hos-logs/components/RequestLogEditModal.tsx:352-365 |
 | Odometer input | text input | ✅ | | src/features/hos-logs/components/RequestLogEditModal.tsx:378-385 |
 | Engine hours input | text input | ✅ | | src/features/hos-logs/components/RequestLogEditModal.tsx:386-397 |
 | Reason for the edit textarea | textarea | ✅ | required, min length validated | src/features/hos-logs/components/RequestLogEditModal.tsx:401-409 |
-| "Notify the driver immediately" checkbox | checkbox | 🚫 (B-39) | disabled and checked, with the fixed behaviour (driver is always notified) stated on screen (WB-200, B-39) | src/features/hos-logs/components/RequestLogEditModal.tsx:96-99,232-239 |
+| "Notify the driver immediately" checkbox | checkbox | ✅ | default checked, sent as `notifyDriver` (both edit request and new-record proposal); unchecked shows "The proposal still waits in the driver app until the driver accepts it." — only the push/email is skipped (B-39) | src/features/hos-logs/components/RequestLogEditModal.tsx:266-285 |
 | Close (×) / Esc | icon button | ✅ | `isDirty` computed from every field | src/features/hos-logs/components/RequestLogEditModal.tsx:202-209,229 |
 | Cancel button | button | ✅ | | src/features/hos-logs/components/RequestLogEditModal.tsx:242 |
 | "Send edit request" button | button | ✅ | guarded (`inFlight` ref + `mutation.isPending`); banner + per-field errors on refusal | src/features/hos-logs/components/RequestLogEditModal.tsx:128-198,243 |
@@ -455,7 +465,7 @@ fields that are listed in `backend-gaps.md`.
 | Per-segment select checkbox | checkbox | ✅ | | src/features/hos-logs/components/UnassignedDrivingModal.tsx:181-186 |
 | Per-segment resolution select | select | ✅ | leave-unassigned / driver / annotate | src/features/hos-logs/components/UnassignedDrivingModal.tsx:209-222 |
 | Annotation textarea | textarea | ✅ | required, min length validated | src/features/hos-logs/components/UnassignedDrivingModal.tsx:232-239 |
-| "Ask each driver to confirm in the app" checkbox | checkbox | 🚫 (B-83) | disabled with "Not available yet — assigning a segment does not ask the driver to confirm it." (WB-197, B-83) | src/features/hos-logs/components/UnassignedDrivingModal.tsx:64,138 |
+| "Ask each driver to confirm in the app" checkbox | checkbox | ✅ | default checked (as drawn); sends `requireDriverConfirmation: true` on every `assign` action → segment `PENDING_CONFIRMATION`, nothing attributed until the driver confirms; toast `N segments sent for confirmation` (WD-089); unchecked assigns immediately (B-83) | src/features/hos-logs/components/UnassignedDrivingModal.tsx:66-69,95-120,152-162 |
 | Close (×) / Esc | icon button | ✅ | `isDirty={annotation.length > 0}` | src/features/hos-logs/components/UnassignedDrivingModal.tsx:134 |
 | Cancel button | button | ✅ | | src/features/hos-logs/components/UnassignedDrivingModal.tsx:142 |
 | "Assign N segments" button | button | ✅ | guarded; partial-failure banner names what was already saved | src/features/hos-logs/components/UnassignedDrivingModal.tsx:79-125,143-151 |
@@ -475,6 +485,7 @@ fields that are listed in `backend-gaps.md`.
 | Recent DVIRs row click → drawer | row click | ✅ | | src/features/dvir/DvirPage.tsx:350 |
 | "Create work order" button (Open defects header) | button | ✅ | maintenance FULL | src/features/dvir/DvirPage.tsx:450 |
 | Open defects row click → Resolve defect | row click | ✅ | dvir FULL | src/features/dvir/DvirPage.tsx:470,497 |
+| Open defects "ASSIGNED TO" select (per row) | select | ✅ | B-40 shipped 2026-09-24: `PATCH /defects/:id/assign`; dvir FULL only, READ-only sees the resolved name (or `Unassigned`), never the control | src/features/dvir/DvirPage.tsx (`AssignedToCell`) |
 | Open-defects pagination (DVIRs tab) | pagination | ✅ | uses the clamped `currentDefectsPage` | src/features/dvir/DvirPage.tsx:459-466 |
 | Open-defects pagination (Defects tab) | pagination | ✅ | uses `currentDefectsPage` (WB-163) | src/features/dvir/DvirPage.tsx:487 |
 | Work orders row menu "Close" | menu item | ✅ | disabled once already closed/cancelled | src/features/dvir/DvirPage.tsx:667-673 |
@@ -508,7 +519,9 @@ fields that are listed in `backend-gaps.md`.
 | Work to perform textarea | textarea | ✅ | | src/features/dvir/components/CreateWorkOrderModal.tsx:205-209 |
 | Close (×) / Esc | icon button | ✅ | fixed: real `isDirty` now passed | src/features/dvir/components/CreateWorkOrderModal.tsx:44-55,98 |
 | Cancel button | button | ✅ | | src/features/dvir/components/CreateWorkOrderModal.tsx:103 |
-| "Create work order" button | button | ✅ | guarded; `Estimated labour` field and the 3 out-of-service/notify/dispatch checkboxes were removed (gap B-42), not just hidden | src/features/dvir/components/CreateWorkOrderModal.tsx:61-91,104-106 |
+| Estimated labor input | number input | ✅ | B-42 shipped 2026-09-24: sent as `estimatedLaborHours` | src/features/dvir/components/CreateWorkOrderModal.tsx |
+| Keep out of service / Notify driver / Block dispatch checkboxes (3) | checkbox | ✅ | B-42 shipped 2026-09-24: real `keepOutOfService`/`notifyDriver`/`blockDispatchAssignment` flags, default checked | src/features/dvir/components/CreateWorkOrderModal.tsx |
+| "Create work order" button | button | ✅ | guarded | src/features/dvir/components/CreateWorkOrderModal.tsx:69-99 |
 
 ### ResolveDefectModal.tsx (opened from an open-defect row)
 
@@ -519,7 +532,8 @@ fields that are listed in `backend-gaps.md`.
 | Repair notes textarea | textarea | ✅ | required | src/features/dvir/components/ResolveDefectModal.tsx:163-168 |
 | Close (×) / Esc | icon button | ✅ | fixed: real `isDirty` now passed | src/features/dvir/components/ResolveDefectModal.tsx:31,86 |
 | Cancel button | button | ✅ | | src/features/dvir/components/ResolveDefectModal.tsx:93 |
-| "Mark as resolved" button | button | ✅ | guarded; `Corrected by`/`Completed on`/`Labour hours`/`Parts cost` were removed (gap B-70/B-68), not silently dropped | src/features/dvir/components/ResolveDefectModal.tsx:34-80,94-96 |
+| Corrected by / Completed on / Labor hours / Parts cost inputs (4) | text/date/number inputs | ✅ | B-70 shipped 2026-09-24: real `correctedBy`/`completedAt`/`laborHours`/`partsCostUsd` fields | src/features/dvir/components/ResolveDefectModal.tsx |
+| "Mark as resolved" button | button | ✅ | guarded | src/features/dvir/components/ResolveDefectModal.tsx |
 
 ### EditWorkOrderModal.tsx (Work orders row menu "Edit")
 
@@ -531,7 +545,9 @@ fields that are listed in `backend-gaps.md`.
 | Due date input | date input | ✅ | clearing sends `null` (fixed) | src/features/dvir/components/EditWorkOrderModal.tsx:58,114 |
 | Parts cost input | number input | ✅ | clearing sends `null` (fixed) | src/features/dvir/components/EditWorkOrderModal.tsx:56,122 |
 | Odometer at service input | number input | ✅ | clearing sends `null` (fixed) | src/features/dvir/components/EditWorkOrderModal.tsx:57,129 |
+| Estimated labor input | number input | ✅ | B-42 shipped 2026-09-24: sent as `estimatedLaborHours` | src/features/dvir/components/EditWorkOrderModal.tsx |
 | Work to perform textarea | textarea | ✅ | clearing sends `null` (fixed) | src/features/dvir/components/EditWorkOrderModal.tsx:53,137-142 |
+| Keep out of service / Notify driver / Block dispatch checkboxes (3) | checkbox | ✅ | B-42 shipped 2026-09-24: default from the row (`?? true`) | src/features/dvir/components/EditWorkOrderModal.tsx |
 | Close (×) / Esc | icon button | ✅ | fixed: real `isDirty` now passed | src/features/dvir/components/EditWorkOrderModal.tsx:35-42,75 |
 | Cancel button | button | ✅ | | src/features/dvir/components/EditWorkOrderModal.tsx:80 |
 | "Save changes" button | button | ✅ | guarded | src/features/dvir/components/EditWorkOrderModal.tsx:44-68,81 |
@@ -555,9 +571,9 @@ fields that are listed in `backend-gaps.md`.
 | Element | Type | Status | Note | Source |
 |---|---|---|---|---|
 | Print button | button | ✅ | `printDvir()` renders the inspection into its own hidden iframe and prints only that (WB-159) | src/features/dvir/components/DvirDrawer.tsx:86-88 |
-| Export PDF button | button | 🚫 (B-75) | disabled with "PDF export is not available yet." visible — no per-DVIR PDF endpoint (WB-159, B-75) | src/features/dvir/components/DvirDrawer.tsx:89 |
+| Export PDF button | button | ✅ | B-75 shipped 2026-09-24: `GET /dvir/:id/pdf`, fetched at click time and downloaded, never cached | src/features/dvir/components/DvirDrawer.tsx |
 | "Create work order" button | button | ✅ | maintenance FULL; opens `CreateWorkOrderModal` pre-filled with the vehicle | src/features/dvir/components/DvirDrawer.tsx:91-97 |
-| Photo thumbnail buttons | icon button (per photo) | 🚫 (B-41) | no longer buttons: static "No preview" tiles with the reason shown — no attachment presign endpoint (WB-159, B-41) | src/features/dvir/components/DvirDrawer.tsx:152-165 |
+| Photo thumbnail buttons | icon button (per photo) | ✅ | B-41 shipped 2026-09-24: `GET /attachments/:id/presign` fills a `loading="lazy"` thumbnail; click re-presigns and opens a fresh URL in a new tab — never cached in the query cache, never logged | src/features/dvir/components/DvirDrawer.tsx |
 | Mechanic name input | text input | ✅ | fixed: visible `Mechanic name` label; a typed name makes the Drawer dirty, so closing asks to discard (stage 3, DvirDrawer.tsx) | src/features/dvir/components/DvirDrawer.tsx:186-191,74-99 |
 | Repair status select | select | ✅ | fixed: visible `Repair status` label (default still derived from the defect state, WB-076) (stage 3, DvirDrawer.tsx) | src/features/dvir/components/DvirDrawer.tsx:34-39,192-202 |
 | "Sign off" button | button | ✅ | guarded; disabled until a mechanic name is typed | src/features/dvir/components/DvirDrawer.tsx:203-220 |
@@ -579,44 +595,45 @@ fields that are listed in `backend-gaps.md`.
 
 | Element | Type | Status | Note | Source |
 |---|---|---|---|---|
-| Search input | text input | ✅ | fixed: `aria-label="Search trips"`, clear (×) button and Esc (stage 3, TripsPage.tsx) | src/features/trips/TripsPage.tsx:277-285 |
+| Search input | text input | ✅ | fixed: `aria-label="Search trips"`, clear (×) button and Esc (stage 3, TripsPage.tsx) | src/features/trips/TripsPage.tsx:319-327 |
 | Period dropdown trigger | button | ✅ | | src/features/trips/components/PeriodDropdown.tsx:121-124 |
-| Filters button | button | ✅ | opens `TripFiltersDrawer` | src/features/trips/TripsPage.tsx:288-297 |
-| "Create trip" button | button | ✅ | trips FULL | src/features/trips/TripsPage.tsx:299-301 |
-| Segment tabs (Active/Scheduled/Completed/Unassigned) | segmented control | ✅ | | src/features/trips/TripsPage.tsx:328-341 |
+| Filters button | button | ✅ | opens `TripFiltersDrawer` | src/features/trips/TripsPage.tsx:330-339 |
+| "Create trip" button | button | ✅ | trips FULL | src/features/trips/TripsPage.tsx:352-354 |
+| Segment tabs (Active/Scheduled/Completed/Unassigned) | segmented control | ✅ | `Scheduled` is `DRAFT ∪ PLANNED` (B-73, shipped) — two bounded slices merged client-side, same pattern as `Active` | src/features/trips/TripsPage.tsx:380-393; src/shared/api/trips.ts (`SCHEDULED_STATUSES`, `useTripsBoard`) |
 | Filter chips remove/Clear all | button | ✅ | no `aria-label` on the `×` glyph (a11y, minor) | src/features/trips/components/TripFiltersDrawer.tsx:202-208 |
-| Active/Scheduled/Completed table row click | row click | ✅ | selects the trip for the route panel | src/features/trips/TripsPage.tsx:409 |
-| Pagination | pagination | ✅ | | src/features/trips/TripsPage.tsx:412-423 |
-| Unassigned loads "Assign driver" button | button (per row) | ✅ | trips FULL | src/features/trips/TripsPage.tsx:255-258 |
-| "Auto-assign" button | button | ✅ | trips FULL, guarded via `loading`; `handleAutoAssign` is declared `async` but never actually awaits anything (cosmetic only, request still fires) | src/features/trips/TripsPage.tsx:149-159,361-363 |
-| Empty-state "Create trip" action | button | ✅ | | src/features/trips/TripsPage.tsx:397 |
-| Empty-state "Clear search"/"Clear filters" | button | ✅ | | src/features/trips/TripsPage.tsx:387-395 |
+| Active/Scheduled/Completed table row click | row click | ✅ | selects the trip for the route panel | src/features/trips/TripsPage.tsx:463 |
+| "Publish" button (Scheduled segment, DRAFT rows only) | button (per row) | ✅ | `PATCH /trips/:id { status: 'PLANNED' }` (`usePublishTrip`, B-73 shipped) | src/features/trips/TripsPage.tsx:229-256 |
+| Pagination | pagination | ✅ | | src/features/trips/TripsPage.tsx:466-477 |
+| Unassigned loads "Assign driver" button | button (per row) | ✅ | trips FULL | src/features/trips/TripsPage.tsx:290-293 |
+| "Auto-assign" button | button | ✅ | trips FULL, guarded via `loading`; `handleAutoAssign` is declared `async` but never actually awaits anything (cosmetic only, request still fires) | src/features/trips/TripsPage.tsx:161-171,415-417 |
+| Empty-state "Create trip" action | button | ✅ | | src/features/trips/TripsPage.tsx:451 |
+| Empty-state "Clear search"/"Clear filters" | button | ✅ | | src/features/trips/TripsPage.tsx:441-449 |
+| Unassigned loads PICKUP / DELIVERY / weight columns | table cells | ✅ | `GET /trips/unassigned-loads` now includes `stops` (ordered) and a `driver`/`vehicle` name join (B-36, shipped) — read from `row.original.stops`, no longer "unavailable" | src/features/trips/TripsPage.tsx:257-292; src/shared/api/trips.ts (`useUnassignedLoads`) |
 
 ### CreateTripModal.tsx (opened from "Create trip")
 
 | Element | Type | Status | Note | Source |
 |---|---|---|---|---|
-| Trip / load ID input | text input | ✅ | required | src/features/trips/components/CreateTripModal.tsx:390 |
-| Customer input | text input | 🚫 | disabled, visible hint "Not available yet" — no customer field on `CreateTripPayload` (gap B-73) | src/features/trips/components/CreateTripModal.tsx:393-395 |
-| Reference / BOL input | text input | ✅ | | src/features/trips/components/CreateTripModal.tsx:397 |
-| Pickup location input | text input | ✅ | required | src/features/trips/components/CreateTripModal.tsx:407 |
-| Pickup window datetime input | datetime-local | ✅ | required, validated (calendar-real dates, range) | src/features/trips/components/CreateTripModal.tsx:410-417 |
-| Delivery location input | text input | ✅ | required | src/features/trips/components/CreateTripModal.tsx:419 |
-| Delivery window datetime input | datetime-local | ✅ | optional, validated | src/features/trips/components/CreateTripModal.tsx:422-429 |
-| "+ Add an intermediate stop" button | button | ✅ | adds intermediate stops (place + time, `Remove`), sent as `CHECKPOINT` stops with correct `sequence` (WB-164) | src/features/trips/components/CreateTripModal.tsx:431-436 |
-| Driver picker | combobox | ✅ | drives the HOS drive-time caption | src/features/trips/components/CreateTripModal.tsx:445-462 |
-| Unit picker | combobox | ✅ | | src/features/trips/components/CreateTripModal.tsx:464-472 |
-| Trailer input | text input | 🚫 | disabled, visible hint "Not available yet" (gap B-73 — no trailer picker endpoint) | src/features/trips/components/CreateTripModal.tsx:474-476 |
-| Distance input | number input | 🚫 | no longer required; visible hint "Not saved yet — the create-trip API has no distance field." (fixed from silently-required-then-discarded, gap B-73) | src/features/trips/components/CreateTripModal.tsx:95,481-506 |
-| Estimated drive time input | number input | 🚫 | not sent — the create-trip API has no field (B-92); still drives the HOS check, and a visible hint under the input says it is not saved (stage 3, CreateTripModal.tsx) | src/features/trips/components/CreateTripModal.tsx:174,278-284,507-518 |
-| Weight input | number input | ✅ | sent as `weightLbs` | src/features/trips/components/CreateTripModal.tsx:519-532 |
-| Rate input | number input | 🚫 | visible hint "Not saved yet — the create-trip API has no rate field." (gap B-73) | src/features/trips/components/CreateTripModal.tsx:533-557 |
-| "Pick another driver" button (HOS warning) | button | ✅ | reachable now that `GET /drivers/:id/hos` (B-2) returns real data | src/features/trips/components/CreateTripModal.tsx:560-581 |
-| Empty `<label>` in footer | leftover markup | ✅ | the empty `<label>` is gone; `DRAFT_REASON` is shown in its place (WB-164) | src/features/trips/components/CreateTripModal.tsx:355-359 |
-| "Save as draft" button | button | 🚫 | permanently disabled; reason only in a hover `title` tooltip, not on-screen text | src/features/trips/components/CreateTripModal.tsx:361-363 |
-| Close (×) / Esc | icon button | ✅ | fixed: `dirty = isDirty \|\| estimatedDriveHours !== ''`, no longer false-positives on a clean form | src/features/trips/components/CreateTripModal.tsx:188-205,242,350 |
-| Cancel button | button | ✅ | | src/features/trips/components/CreateTripModal.tsx:360 |
-| "Create trip" button | button | ✅ | guarded on `submitting`; 422s on unmapped fields (`notes`, `stops`, `commodity`, `trailerId`) now surface in the banner instead of vanishing | src/features/trips/components/CreateTripModal.tsx:286-341,364-373 |
+| Trip / load ID input | text input | ✅ | required | src/features/trips/components/CreateTripModal.tsx:434 |
+| Customer input | text input | ✅ | `CreateTripPayload.customer` (B-73, shipped) | src/features/trips/components/CreateTripModal.tsx:441-443 |
+| Reference / BOL input | text input | ✅ | | src/features/trips/components/CreateTripModal.tsx:445 |
+| Pickup location input | text input | ✅ | required | src/features/trips/components/CreateTripModal.tsx:455 |
+| Pickup window datetime input | datetime-local | ✅ | required, validated (calendar-real dates, range) | src/features/trips/components/CreateTripModal.tsx:458-465 |
+| Delivery location input | text input | ✅ | required | src/features/trips/components/CreateTripModal.tsx:467 |
+| Delivery window datetime input | datetime-local | ✅ | optional, validated | src/features/trips/components/CreateTripModal.tsx:470-477 |
+| "+ Add an intermediate stop" button | button | ✅ | adds intermediate stops (place + time, `Remove`), sent as `CHECKPOINT` stops with correct `sequence` (WB-164) | src/features/trips/components/CreateTripModal.tsx:479-484 |
+| Driver picker | combobox | ✅ | drives the HOS drive-time caption | src/features/trips/components/CreateTripModal.tsx:493-510 |
+| Unit picker | combobox | ✅ | | src/features/trips/components/CreateTripModal.tsx:512-520 |
+| Trailer picker | combobox | ✅ | `TrailerPicker` over `GET /trailers` (`useTrailersLookup`); sends `trailerId` (B-73, shipped) | src/features/trips/components/CreateTripModal.tsx:559-566; src/shared/api/trailers.ts |
+| Distance input | number input | ✅ | optional; sent as `distanceMi` (B-73, shipped) | src/features/trips/components/CreateTripModal.tsx:571-590 |
+| Estimated drive time input | number input | ✅ | sent as `estimatedDriveSec` (seconds) and still drives the on-screen HOS check (B-92, shipped) | src/features/trips/components/CreateTripModal.tsx:183,309-310,338,593-601 |
+| Weight input | number input | ✅ | sent as `weightLbs` | src/features/trips/components/CreateTripModal.tsx:603-616 |
+| Rate input | number input | ✅ | optional; sent as `rateUsd` (B-73, shipped) | src/features/trips/components/CreateTripModal.tsx:619-643 |
+| "Pick another driver" button (HOS warning) | button | ✅ | reachable now that `GET /drivers/:id/hos` (B-2) returns real data | src/features/trips/components/CreateTripModal.tsx:644-665 |
+| "Save as draft" button | button | ✅ | posts `draft: true` (B-73, shipped); shows in the `Scheduled` segment with a `Publish` action | src/features/trips/components/CreateTripModal.tsx:401-411 |
+| Close (×) / Esc | icon button | ✅ | `dirty = isDirty \|\| estimatedDriveHours !== '' \|\| intermediateStops.length > 0` | src/features/trips/components/CreateTripModal.tsx:255,398 |
+| Cancel button | button | ✅ | | src/features/trips/components/CreateTripModal.tsx:400 |
+| "Create trip" button | button | ✅ | guarded on `submitting`; 422s on unmapped fields (`notes`, `stops`, `commodity`) now surface in the banner instead of vanishing | src/features/trips/components/CreateTripModal.tsx:317-389,412-421 |
 
 ### AssignLoadModal.tsx (opened from "Assign driver" on an unassigned load)
 
@@ -626,8 +643,8 @@ fields that are listed in `backend-gaps.md`.
 | Driver list loading | — | ✅ | "Loading drivers…" row while `driversQuery.isLoading` (stage 2, AssignLoadModal.tsx:82) | src/features/trips/components/AssignLoadModal.tsx:77-107 |
 | Driver row select button | button (radio-styled) | ✅ | fixed: a native `role="radiogroup"` of labelled radios sharing a `name` — no radio inside a button, arrow keys move the pick (stage 3, AssignLoadModal.tsx) | src/features/trips/components/AssignLoadModal.tsx:82-100 |
 | HOS column | static "—" | 🚫 | hardcoded dash — no bulk per-driver HOS endpoint for a search list (comment still cites gap B-2, which has shipped only the single-driver endpoint) | src/features/trips/components/AssignLoadModal.tsx:98-99 |
-| "Notify the driver in the app" checkbox | checkbox | 🚫 (B-74) | `disabled` with `NOTIFY_REASON` visible — `POST /trips/:id/assign` has no `notify` field (WB-158, B-74) | src/features/trips/components/AssignLoadModal.tsx:16,33-36,46-58 |
-| Close (×) / Esc | icon button | ✅ | `isDirty={Boolean(selectedId) \|\| query !== '' \|\| !notify}` | src/features/trips/components/AssignLoadModal.tsx:30 |
+| "Notify the driver in the app" checkbox | checkbox | ✅ | `POST /trips/:id/assign` now takes `notify` (B-74, shipped); starts checked (server default `true`) | src/features/trips/components/AssignLoadModal.tsx:35-38,50 |
+| Close (×) / Esc | icon button | ✅ | `isDirty={Boolean(selectedId) \|\| query !== '' \|\| !notify}` | src/features/trips/components/AssignLoadModal.tsx:33 |
 | Cancel button | button | ✅ | | src/features/trips/components/AssignLoadModal.tsx:37 |
 | "Assign driver" button | button | ✅ | guarded; disabled until a driver is picked | src/features/trips/components/AssignLoadModal.tsx:38-61 |
 
@@ -675,6 +692,7 @@ fields that are listed in `backend-gaps.md`.
 | Select driver to coach | select | ✅ | value feeds "Assign coaching" button | SafetyPage.tsx:442-454 |
 | Assign coaching button | button | ✅ | disabled until a driver is picked; opens `AssignCoachingModal` | SafetyPage.tsx:455-463 |
 | Driver scorecard "Clear search" (empty state) | button | ✅ | scorecard-only search empty state | SafetyPage.tsx:473-474 |
+| Driver scorecard TREND column | static (icon + number) | ✅ | B-44 shipped 2026-09-24: server `previousScore`/`trend` (prior period of the same length); `—` only when there is no prior-period row | SafetyPage.tsx |
 | `View profile ›` cell | fake link (`<span>`) | ✅ | real button → `/drivers/:id`; absent without `drivers` READ (WB-168) | SafetyPage.tsx:262-266 |
 | Fleet safety score verdict | static text | ✅ | verdict derived on the 90/70 bands, same as the SCORE badge (WB-170) | SafetyPage.tsx:426 |
 | Threshold sentence grammar | static text | ✅ | verb agrees ("1 driver **is** below…") (WB-170) | SafetyPage.tsx:427-429 |
@@ -684,11 +702,9 @@ fields that are listed in `backend-gaps.md`.
 
 | Element | Type | Status | Note | Source |
 |---|---|---|---|---|
-| Event to coach on | select | ✅ | required; empty option blocks submit | AssignCoachingModal.tsx:78-86 |
-| Note | textarea | ✅ | optional, reaches `note` in payload | AssignCoachingModal.tsx:90-97 |
-| Cancel | button (`ModalCancelButton`) | ✅ | routes through `Modal` `requestClose`; `isDirty` now passed (fixed) | AssignCoachingModal.tsx:38,41 |
-| Assign coaching (submit) | button | ✅ | disabled while pending + local guard, blocks double-submit; success toast, closes modal | AssignCoachingModal.tsx:42-64 |
-| Event label / date in `<option>` | static text | ✅ | shared `safetyEventLabel` map, same as the table and export (WB-167) | AssignCoachingModal.tsx:80-84 |
+| Note | textarea | ✅ | optional, reaches `note` in payload | AssignCoachingModal.tsx |
+| Cancel | button (`ModalCancelButton`) | ✅ | routes through `Modal` `requestClose`; `isDirty` now passed (fixed) | AssignCoachingModal.tsx |
+| Assign coaching (submit) | button | ✅ | B-43 shipped 2026-09-24: posts `{ driverId, note }` directly — `POST /safety/coaching` closes the driver's most recent open event server-side; the open-events picker is gone | AssignCoachingModal.tsx |
 
 ### `src/features/safety/components/SafetyFiltersDrawer.tsx`
 
@@ -709,18 +725,19 @@ fields that are listed in `backend-gaps.md`.
 |---|---|---|---|---|
 | New (conversation list header) | button | ✅ | opens `NewConversationModal`, perm-gated | MessagesPage.tsx:258-260 |
 | Conversation search input | text input | ✅ | `aria-label="Search conversations"` (stage 2, MessagesPage.tsx:270) | MessagesPage.tsx:266-271 |
-| All / Unread / Groups segments | buttons (`aria-pressed`) | ✅ | filters conversation list | MessagesPage.tsx:281-295 |
-| Conversation row | button | ✅ | selects conversation, marks read locally (client-cache only, gap B-67) | MessagesPage.tsx:307-337 |
+| All / Unread / Groups segments | buttons (`aria-pressed`) | ✅ | filters conversation list; `Unread` count now reads the server's real `unreadCount` (B-67, shipped) | MessagesPage.tsx:281-295 |
+| Conversation row | button | ✅ | selects conversation and calls `POST /conversations/:id/read` (`useMarkConversationRead`, B-67, shipped) — the local cache clears the badge on `onMutate`, before the response lands | MessagesPage.tsx:188-196,340 |
+| Conversation row preview line | static text | ✅ | the newest message's body (`lastMessage.body`, `You:` prefix for the caller's own sends), B-37 shipped; falls back to the pre-B-37 placeholder when a cached row has no `lastMessage` yet | MessagesPage.tsx:56-64,347 |
 | Empty-state "New" action | button | ✅ | shown when list/search has 0 results | MessagesPage.tsx:299-302 |
 | No-match empty state copy | static text | ✅ | `searchEmptyState` + `Clear search`; distinct empty state for Unread / Groups (WB-171) | MessagesPage.tsx:298-302 |
-| View logs | button | ✅ | `navigate('/hos-logs?driverId=…')` | MessagesPage.tsx:365-367 |
-| Assign trip | button | ✅ | `navigate('/trips')`, perm-gated | MessagesPage.tsx:369-373 |
-| Retry (failed message) | button (`variant=link`) | ✅ | re-sends with the same `clientId` | MessagesPage.tsx:405-411 |
-| Quick action chips (×4) | buttons | ✅ | append canned text to draft | MessagesPage.tsx:422-432 |
-| Message draft | textarea | ✅ | Enter sends, Shift+Enter newlines, 2000-char check before send | MessagesPage.tsx:435-447 |
-| Send button | icon-only button | ✅ | 40×40 round, disabled on empty draft, optimistic send + retry-on-fail | MessagesPage.tsx:448-458 |
-| Call | button | ✅ | dials `tel:` from the driver's number; disabled with "No phone number on file for this driver" when there is none (WB-172, WD-083) | MessagesPage.tsx:474-476 |
-| Profile | button | ✅ | `navigate('/drivers/:id')` | MessagesPage.tsx:477-479 |
+| View logs | button | ✅ | `navigate('/hos-logs?driverId=…')` | MessagesPage.tsx:392-396 |
+| Assign trip | button | ✅ | `navigate('/trips')`, perm-gated | MessagesPage.tsx:398-402 |
+| Retry (failed message) | button (`variant=link`) | ✅ | re-sends with the same `clientId` | MessagesPage.tsx:436-439 |
+| Quick action chips (×4) | buttons | ✅ | append canned text to draft | MessagesPage.tsx:451-461 |
+| Message draft | textarea | ✅ | Enter sends, Shift+Enter newlines, 2000-char check before send | MessagesPage.tsx:463-476 |
+| Send button | icon-only button | ✅ | 40×40 round, disabled on empty draft, optimistic send + retry-on-fail | MessagesPage.tsx:477-487 |
+| Call | button | ✅ | dials `tel:` from the driver's number; disabled with "No phone number on file for this driver" when there is none (WB-172, WD-083) | MessagesPage.tsx:502-527 |
+| Profile | button | ✅ | `navigate('/drivers/:id')` | MessagesPage.tsx:528-530 |
 
 ### `src/features/messages/components/NewConversationModal.tsx`
 
@@ -760,12 +777,13 @@ fields that are listed in `backend-gaps.md`.
 | Vehicle group | menu (inert) | 🚫 | `disabled` — no vehicle-group model (gap B-46) | IftaReportPage.tsx:145 |
 | Export CSV | button | ✅ | `useExportWhenReady`, guarded, auto-saves | IftaReportPage.tsx:147-155 |
 | Generate report | button | ✅ | queued job followed via `useTrackedReport` and announced through `useAnnounceReport`; FAILED shows in `ActionAlert` (WB-166, WD-082) | IftaReportPage.tsx:116,157-166; useReportJobs.ts:43-61 |
-| Download IFTA PDF | button | ✅ | same `useTrackedReport` follow-up as "Generate report" (WB-166, WD-082) | IftaReportPage.tsx:215-229 |
+| Download IFTA PDF | button | ✅ | B-96 shipped (2026-09-24) — moved off `reports` FULL onto the same READ shortcut as Export CSV (`format=PDF`); visible to VIEWER now (WB-247). `useExportWhenReady({ announce: true })` follows the job and toasts `Report ready` on completion | IftaReportPage.tsx:229-238 |
 | Jurisdiction table | data table | ✅ | server data, no defects found | IftaReportPage.tsx:245-260 |
-| Report library rows (×5 navigable) | buttons | ✅ | navigate to their report route | ReportLibraryCard.tsx:50-73 |
-| Report library row — `Idle & fuel report` | button (inert) | 🚫 | `aria-disabled`, click guarded to no-op — no job type on the backend (gap B-14/WD-042) | ReportLibraryCard.tsx:31,49-57 |
+| Report library rows (×4 navigable) | buttons | ✅ | navigate to their report route | ReportLibraryCard.tsx |
+| Report library rows — `Driver logs (RODS)` / `Idle & fuel report` | button → modal | ✅ | B-14: opens `GenerateLibraryReportModal` (range, driver, unit for Idle) → `POST /reports/generate` `RODS`/`IDLE_FUEL` PDF, followed by `useTrackedReport`; `reports` FULL, absent for READ roles (WD-090) — no more Activity redirect | ReportLibraryCard.tsx; GenerateLibraryReportModal.tsx |
 | Recently generated — Schedule a report | button | ✅ | opens `ScheduleReportModal` | RecentlyGeneratedCard.tsx:141-144 |
 | Recently generated — per-row download | icon button | ✅ | only on READY rows, `saveFile` (fixed) | RecentlyGeneratedCard.tsx:110-126 |
+| Recently generated — GENERATED BY | static text | ✅ | `requestedBy.name` embedded by `GET /reports` (B-46); own name as fallback | RecentlyGeneratedCard.tsx |
 | Recently generated — pagination | pager | ✅ | only shown when `total > limit` | RecentlyGeneratedCard.tsx:171-184 |
 | Recently generated — download error dismiss | button | ✅ | ActionAlert | RecentlyGeneratedCard.tsx:148-151 |
 | Recently generated — empty-state Generate action | button | ✅ | perm-gated, calls `onGenerate` (= the CSV generate handler) | RecentlyGeneratedCard.tsx:192-201 |
@@ -780,8 +798,8 @@ fields that are listed in `backend-gaps.md`.
 | Defect type selector | menu | ✅ | client-side filter | DvirReportPage.tsx:239-247 |
 | Schedule | button | ✅ | opens `ScheduleReportModal` | DvirReportPage.tsx:250-252 |
 | Export CSV | button | ✅ | `useExportWhenReady`, guarded, auto-saves | DvirReportPage.tsx:254-263 |
-| Download PDF | button | ✅ | `useTrackedReport` follows the queued job and toasts on completion; FAILED shows in `ActionAlert` (WB-166, WD-082) | DvirReportPage.tsx:85,264-278 |
-| Inspection reports table | data table | ✅ | client-paged, capped-walk note shown when incomplete | DvirReportPage.tsx:340-347 |
+| Download PDF | button | ✅ | B-96 shipped (2026-09-24) — moved off `reports` FULL onto the same READ shortcut as Export CSV (`format=PDF`); visible to VIEWER now (WB-247). `useExportWhenReady({ announce: true })` follows the job and toasts on completion; FAILED shows in `ActionAlert` | DvirReportPage.tsx |
+| Inspection reports table | data table | ✅ | client-paged; B-47 `GET /dvir/compliance` adds `Missing` / `Not submitted` rows for each missing pre-trip, `N% compliance` chip and `Missing pre-trip` KPI (WD-091) | DvirReportPage.tsx |
 | Pagination | pager | ✅ | | DvirReportPage.tsx:348-361 |
 | ActionAlert dismiss | button | ✅ | clears pdf/export error | DvirReportPage.tsx:289-295 |
 
@@ -792,18 +810,19 @@ fields that are listed in `backend-gaps.md`.
 | Report selector | menu | ✅ | navigates | FmcsaPackPage.tsx:197 |
 | Date range picker | date-range control | ✅ | | FmcsaPackPage.tsx:198-201 |
 | Driver selector | menu | ✅ | | FmcsaPackPage.tsx:202-207 |
-| Unit selector | menu (inert) | 🚫 | `disabled` — `FmcsaPackParamsDto` has no unit filter (gap B-48) | FmcsaPackPage.tsx:209 |
+| Unit selector | menu | ✅ | B-48: `?unit=` → `vehicleId` on `GET /reports/fmcsa-pack`; DVIR KPI scoped to the unit; caption says the RODS counts are not narrowed (WD-091) | FmcsaPackPage.tsx |
 | Preview | button | ✅ | disabled until `latestPack.status === 'READY'`; `saveFile` (fixed) | FmcsaPackPage.tsx:211-224 |
 | Generate pack | button | ✅ | double-submit guarded (`useGuardedMutate`); tracks `packId` via `useReport` polling and calls `announce()` locally on status change — shows a real completion toast even though the mock never fires `report.ready` over the socket | FmcsaPackPage.tsx:100-128,225-244 |
-| Pack contents checkboxes (×6) | checkbox (display-only) | 🚫 | all `disabled readOnly`, static; "Malfunction and diagnostic events" renders unchecked although the backend always builds the pack in full and the modal's own "Includes" row lists ELD malfunctions — contradictory (gap B-48) | FmcsaPackPage.tsx:64-71,299-309 |
+| Pack contents checkboxes (×6) | checkbox | ✅ | B-48: real `include[]` (all six = full pack, no `include`); none ticked disables `Generate pack` with `Select at least one section.`; read-only without `reportsTransfer` FULL (WD-091) | FmcsaPackPage.tsx |
 | Resolve now › | button | ✅ | `navigate('/hos-logs?unassigned=1')`, shown only when segments/uncertified > 0 | FmcsaPackPage.tsx:310-319 |
 | Transfer method radios (×2) | radio | ✅ | `role=radiogroup`, sets local `method` used to prefill the modal | FmcsaPackPage.tsx:334-354 |
 | Inspector email address | text input | ✅ | inline `recipientError` + `aria-invalid`; "Send to inspector" is disabled while it is set (WB-178) | FmcsaPackPage.tsx:361-375 |
 | Output file comment | text input | ✅ | 60-char counter turns red past the limit, value carried into the modal | FmcsaPackPage.tsx:389-399 |
-| Send to inspector | button | ✅ | disabled while `recipientError` is set; an empty field still opens 11.14, which collects the address itself (WB-178) | FmcsaPackPage.tsx:401-422 |
+| Send to inspector | button | ✅ | gated `dataTransfer` FULL (B-95); disabled while `recipientError` is set; an empty field still opens 11.14 (WB-178) | FmcsaPackPage.tsx |
 | Previous transfers — View all | button | ✅ | expands to full paged list | PreviousTransfersCard.tsx:142-147 |
 | Previous transfers — comment link | button | ✅ | opens `TransferDrawer` | PreviousTransfersCard.tsx:101-105 |
-| Previous transfers — Retry (per FAILED row) | button | ✅ | opens `SendLogsModal` prefilled from the failed row, perm-gated | PreviousTransfersCard.tsx:52-57 |
+| Previous transfers — SENT BY | static text | ✅ | `requestedBy.name` (USER or DRIVER) from `GET /transfers` (B-46); also in the transfer drawer | PreviousTransfersCard.tsx |
+| Previous transfers — Retry (per FAILED row) | button | ✅ | opens `SendLogsModal` prefilled, gated `dataTransfer` FULL (B-95) | PreviousTransfersCard.tsx |
 | Previous transfers — pagination | pager | ✅ | only when expanded | PreviousTransfersCard.tsx:162-174 |
 | Transfer drawer — Download a copy | button | ✅ | `saveFile` (fixed) | PreviousTransfersCard.tsx:196-211 |
 
@@ -818,16 +837,18 @@ fields that are listed in `backend-gaps.md`.
 | Output file comment | text input | ✅ | 1–60 chars, counter turns red past limit | SendLogsModal.tsx:334-359 |
 | Cancel / Close | button (`ModalCancelButton`) | ✅ | `isDirty = formState.isDirty && !sent` — dirty-close fixed; label flips to "Close" post-send | SendLogsModal.tsx:217,221 |
 | Download a copy | button | ✅ | disabled until a transfer exists; `saveFile` (fixed) | SendLogsModal.tsx:222-235 |
-| Send transfer | button | ✅ | non-reentrant submit guard (`inFlight` ref), hidden once sent, sets field errors from server `fieldErrors` | SendLogsModal.tsx:179-186,236-248 |
+| Send transfer | button | ✅ | `dataTransfer` FULL (B-95); non-reentrant submit guard (`inFlight` ref), hidden once sent, sets field errors from server `fieldErrors`; eRODS banner from `useTransferConfig` (FM too, B-45) | SendLogsModal.tsx |
 
 ### Schedule a report modal (shared — Activity / IFTA / DVIR) — `src/features/reports/components/ScheduleReportModal.tsx`
 
 | Element | Type | Status | Note | Source |
 |---|---|---|---|---|
-| Frequency | select | ✅ | 3 fixed cron presets | ScheduleReportModal.tsx:116-126 |
+| Frequency | select | ✅ | 3 fixed cron presets | ScheduleReportModal.tsx |
 | Recipients | text input | ✅ | comma-separated emails, each validated | ScheduleReportModal.tsx:132-143 |
 | Cancel | button (`ModalCancelButton`) | ✅ | `isDirty = formState.isDirty && !create.isSuccess` — dirty-close fixed | ScheduleReportModal.tsx:99,103 |
-| Schedule (submit) | button | ✅ | non-reentrant submit guard (`inFlight` ref) | ScheduleReportModal.tsx:59,82-89,104-106 |
+| Period | select | ✅ | B-48: rolling `params.window` (IFTA: Previous quarter; others: week/month/quarter) or `This selection · <range>` (WD-091) | ScheduleReportModal.tsx |
+| Format | select | ✅ | `REPORT_TYPE_FORMATS[type]` — PDF now schedulable for IFTA / Activity / DVIR | ScheduleReportModal.tsx |
+| Schedule (submit) | button | ✅ | non-reentrant submit guard (`inFlight` ref) | ScheduleReportModal.tsx |
 
 ## Notifications
 
@@ -837,8 +858,8 @@ fields that are listed in `backend-gaps.md`.
 |---|---|---|---|---|
 | Mark all read | button | ✅ | real endpoint (`POST /notifications/read-all`), invalidates the list | NotificationsPanel.tsx:171-174; shared/api/notifications.ts:84-90 |
 | Notification preferences (gear) | icon button | ✅ | `navigate('/account#notifications')` | NotificationsPanel.tsx:176-183 |
-| All / Violations / Maintenance segments | buttons (`aria-pressed`) | ✅ | filters the list by category | NotificationsPanel.tsx:198-219 |
-| Notification row | button | ✅ | navigates + closes panel. Per-item mark-read (`POST /notifications/:id/read`) is still gap B-56; fixed (WB-244): the hook is not optimistic, so a failure leaves the row unread (nothing to roll back); any failure shows one non-blocking warning toast per session ("Marking a single notification as read isn't available yet" · "Use Mark all read instead."); a 404/405 is remembered for the session and the route is not called again (stage 4, NotificationsPanel.tsx:106-129; shared/api/notifications.ts:92-128) | NotificationsPanel.tsx:106-129; shared/api/notifications.ts:92-128; notifications/lib/copy.ts, lib/markReadNotice.ts |
+| All / Violations / Maintenance segments | buttons (`aria-pressed`) | ✅ | `?category=` filter, counts from the live `counts` (B-57); hidden when an older API omits `counts` | NotificationsPanel.tsx:198-219 |
+| Notification row | button | ✅ | navigates + closes panel. Per-item mark-read `POST /notifications/:id/read` is live (B-56 shipped); human `body` shown; click-through by `objectType`/`objectId` now also maps `EldEvent`→`/hos-logs` and `MaintenanceSchedule`→`/dvir`, and never passes a route guard; `notification.new` CRITICAL → toast (Topbar). Earlier: fixed (WB-244): the hook is not optimistic, so a failure leaves the row unread (nothing to roll back); any failure shows one non-blocking warning toast per session ("Marking a single notification as read isn't available yet" · "Use Mark all read instead."); a 404/405 is remembered for the session and the route is not called again (stage 4, NotificationsPanel.tsx:106-129; shared/api/notifications.ts:92-128) | NotificationsPanel.tsx:106-129; shared/api/notifications.ts:92-128; notifications/lib/copy.ts, lib/markReadNotice.ts |
 | View all notifications | button | ✅ | expands page size; untestable live in mock (`total` never exceeds one page in the fixture) | NotificationsPanel.tsx:225-231 |
 
 
@@ -883,7 +904,7 @@ fields that are listed in `backend-gaps.md`.
 | Search user or email | search input | ✅ | `aria-label="Search user or email"` (WB-204) | UsersPage.tsx:264 |
 | Filters | button | ✅ | opens drawer | UsersPage.tsx |
 | Filter chips (remove one / Clear all) | buttons | ✅ | | UsersPage.tsx |
-| Row menu — Edit user | menu item | ✅ | opens `EditUserModal` → `PATCH /users/:id` (name/role/status only — email, job title, phone, home terminal absent, B-84) (WB-205) | UsersPage.tsx:323 |
+| Row menu — Edit user | menu item | ✅ | opens `EditUserModal` → `PATCH /users/:id` (name/role/status/email/job title/phone/home terminal, B-84 shipped 2026-09-24) (WB-205) | UsersPage.tsx:323 |
 | Row menu — Change role | menu item | ✅ | opens `EditUserModal` in role-only mode → `PATCH /users/:id { roleId }` (WB-205) | UsersPage.tsx:329 |
 | Row menu — Resend invitation (INVITED) | menu item | ✅ | | UsersPage.tsx |
 | Row menu — Revoke invitation (INVITED) | menu item | ✅ | confirm, then `DELETE /users/:id` with a toast (WB-206) | UsersPage.tsx:341, 160 |
@@ -902,8 +923,8 @@ fields that are listed in `backend-gaps.md`.
 | Full name | text input | ✅ | splits into firstName/lastName | InviteUserModal.tsx |
 | Work email | text input | ✅ | | InviteUserModal.tsx |
 | Role (radio group) | radios (3) | ✅ | `errors.roleKey` renders (`role="alert"` span); role cards render since all 4 seeded roles carry ids | InviteUserModal.tsx |
-| Terminal access | select | 🚫 (B-85) | disabled with `SETTINGS_REASON.inviteTerminal` visible — `POST /users` has no terminal scope; used to be collected and dropped (WB-208, B-85) | InviteUserModal.tsx:197 |
-| Message (optional) | textarea | 🚫 (B-85) | disabled with `SETTINGS_REASON.inviteMessage` visible — no personal-message field (WB-208, B-85) | InviteUserModal.tsx:203 |
+| Terminal access | checkboxes | ✅ (B-85, shipped 2026-09-24) | sends `terminalIds` (home-terminal names — no Terminal table yet, D-090); stored on the user record only, not an access boundary, per the on-screen hint | InviteUserModal.tsx |
+| Message (optional) | textarea | ✅ (B-85, shipped 2026-09-24) | sends `message`, included in the invitation email | InviteUserModal.tsx |
 | Send invitation | button | ✅ | double-submit guarded (`inviteMutation.isPending`) | InviteUserModal.tsx |
 | Cancel / Close (X) | buttons | ✅ | routes through 11.30 discard-changes (shared) | Modal.tsx |
 
@@ -915,7 +936,8 @@ fields that are listed in `backend-gaps.md`.
 |---|---|---|---|---|
 | First name / Last name | text inputs | ✅ | `profile` mode (Edit user) only | EditUserModal.tsx |
 | Role | select | ✅ | both modes; `role` mode renders only this picker | EditUserModal.tsx:146 |
-| (Email / job title / phone / home terminal — omitted) | — | 🚫 (B-84) | deliberately absent, with the reason on screen: `PATCH /users/:id` accepts none of them (B-84) | EditUserModal.tsx:1-8 |
+| Work email | text input | ✅ (B-84, shipped 2026-09-24) | changing it does not switch the address immediately — sends `email`, server answers `emailVerification.pendingEmail`, shown as an on-screen re-verification notice until confirmed | EditUserModal.tsx |
+| Job title / Phone / Home terminal | text/text/select | ✅ (B-84, shipped 2026-09-24) | `jobTitle`, `phone`, `homeTerminalName` on `PATCH /users/:id` | EditUserModal.tsx |
 | Save changes / Cancel / Close (X) | buttons | ✅ | shared dirty-close, double-submit guarded | EditUserModal.tsx:118 |
 
 ### Users · Filters drawer
@@ -939,8 +961,8 @@ fields that are listed in `backend-gaps.md`.
 | Tabs (Permission matrix / Roles / Access log) | tabs (3) | ✅ | | RolesPage.tsx |
 | Search permission | search input | ✅ | `aria-label="Search permission"` (WB-204) | RolesPage.tsx:192 |
 | Reset to defaults | button | ✅ | confirm, then `PATCH /roles/:id` for the 3 editable built-in roles back to the shipped matrix (WB-209) | RolesPage.tsx:96, 207 |
-| Permission matrix cell — ADMIN column (21) | matrix cells | 🚫 | disabled with visible reason "Admin cannot be edited" (§11.19) | RolesPage.tsx |
-| Permission matrix cell — FLEET MANAGER / DISPATCHER / VIEWER columns (63) | matrix cells | ✅ | `ROLES` fixture seeds all 4 roles with real `id`s and full 22-key maps; `PATCH /roles/:id` is mocked | RolesPage.tsx, mockState.ts |
+| Permission matrix cell — ADMIN column (22, incl. `dataTransfer` row B-95) | matrix cells | 🚫 | disabled with visible reason "Admin cannot be edited" (§11.19) | RolesPage.tsx |
+| Permission matrix cell — FLEET MANAGER / DISPATCHER / VIEWER columns (66) | matrix cells | ✅ | `ROLES` fixture seeds all 4 roles with real `id`s and full 23-key maps (22 + `dataTransfer`, B-95); `PATCH /roles/:id` is mocked | RolesPage.tsx, mockState.ts |
 | Matrix footer "Last changed by … · today" | text | ✅ | fixed (WB-233, owner accepted WD-087): removed — it was built from `new Date()` and the carrier name, and the role DTO has no `updatedAt`/`updatedBy`. The legend stays; the Access log tab carries the real change history (stage 4, RolesPage.tsx:284-286) | RolesPage.tsx:284-286 |
 | Roles tab — Edit (custom role) | button | ✅ | opens `CreateRoleModal` in edit mode → `PATCH /roles/:id` (WB-210) | RolesPage.tsx:309, 361 |
 | Roles tab — Delete (custom role) | button | ✅ | opens confirm; `ROLE_IN_USE`/system-role errors handled | RolesPage.tsx |
@@ -957,7 +979,8 @@ fields that are listed in `backend-gaps.md`.
 | Copy permissions from | select | ✅ | | CreateRoleModal.tsx |
 | Description | textarea | ✅ | | CreateRoleModal.tsx |
 | Permission level toggle groups (6 rows × None/Read/Full) | buttons (18) | ✅ | | CreateRoleModal.tsx |
-| Can export FMCSA / DOT pack and send data transfers | checkbox | ✅ | fixed (WB-234, owner accepted WD-087): the two checkboxes that both wrote `reportsTransfer` are merged into one (`ROLE_COPY.transferCheckbox`); the matrix row for the key now reads "Export FMCSA / DOT pack & send data transfers". A separate transfer key is gap B-95 (stage 4, CreateRoleModal.tsx:104-106, 218-221; permissionMatrix.ts:48-49) | CreateRoleModal.tsx:104-106, 218-221 |
+| Can export FMCSA / DOT pack | checkbox | ✅ | B-95 shipped 2026-09-24 (`dataTransfer` is its own 23rd key) — split back into two independent checkboxes writing `reportsTransfer` and `dataTransfer` (`ROLE_COPY.fmcsaPackCheckbox`/`dataTransferCheckbox`) | CreateRoleModal.tsx |
+| Can send data transfers to an inspector | checkbox | ✅ | writes `dataTransfer` (B-95, shipped 2026-09-24) | CreateRoleModal.tsx |
 | Create role / Save changes | button | ✅ | double-submit guarded | CreateRoleModal.tsx |
 | Cancel / Close (X) | buttons | ✅ | shared dirty-close | Modal.tsx |
 
@@ -976,7 +999,7 @@ fields that are listed in `backend-gaps.md`.
 | Row menu — Update firmware | menu item | ✅ | opens the new `UpdateFirmwareModal` → `useUpdateFirmware` (WB-212) | DevicesPage.tsx:288 |
 | Row menu — Retire device | menu item | ✅ | opens confirm | DevicesPage.tsx |
 | Retire device? — Cancel / Retire | confirm dialog | ✅ | | DevicesPage.tsx |
-| (View diagnostics — omitted) | — | 🚫 | correctly left out of the menu rather than shown dead; gap B-8 (`GET /devices/:id/diagnostics`) | DevicesPage.tsx |
+| Row menu — View diagnostics | menu item | ✅ (B-8, shipped 2026-09-24) | opens a modal reading `GET /devices/:id/diagnostics` (derived from last recorded status, not a live round-trip) | DevicesPage.tsx |
 | (Hardcoded "L113 available" firmware chip) | chip | ✅ | removed — it was not read from any data (WB-215) | DevicesPage.tsx |
 
 ### Pair to unit modal
@@ -1008,11 +1031,11 @@ fields that are listed in `backend-gaps.md`.
 | Open scanner | button | 🚫 | disabled with its reason visible — the web panel has no QR scanner (not a backend gap); used to paint a fake success banner (WB-213) | RegisterDeviceModal.tsx:109-124 |
 | Assign to unit | select | ✅ | pairs the device on submit via `usePairDevice` | RegisterDeviceModal.tsx |
 | Firmware (display) | read-only input | 🚫 | static display value, not part of the form | RegisterDeviceModal.tsx:140 |
-| Update firmware automatically | toggle | 🚫 (B-88) | disabled with the reason visible — `POST /devices` has no firmware-policy field; used to be collected and dropped (WB-214, B-88) | RegisterDeviceModal.tsx:144-148 |
-| Send diagnostics to OneBook support | toggle | 🚫 (B-88) | same — no diagnostics opt-in on `POST /devices` (WB-214, B-88) | RegisterDeviceModal.tsx:144 |
+| Update firmware automatically | toggle | ✅ (B-88, shipped 2026-09-24) | `POST /devices` still has no policy field — applied with a follow-up `PATCH /devices/:id { autoFirmware }` right after registration | RegisterDeviceModal.tsx |
+| Send diagnostics to OneBook support | toggle | ✅ (B-88, shipped 2026-09-24) | same follow-up PATCH, `shareDiagnostics` | RegisterDeviceModal.tsx |
 | Register device | button | ✅ | double-submit guarded | RegisterDeviceModal.tsx |
 | Cancel / Close (X) | buttons | ✅ | shared dirty-close | Modal.tsx |
-| (Test connection — omitted) | — | 🚫 | correctly left out of the DOM; gap B-8 | RegisterDeviceModal.tsx |
+| Test connection | button | ✅ (B-8, shipped 2026-09-24) | shown after registration succeeds (needs a device id): `GET /devices/:id/diagnostics` | RegisterDeviceModal.tsx |
 
 ## Settings · Alert rules
 
@@ -1021,18 +1044,18 @@ fields that are listed in `backend-gaps.md`.
 | Element | Type | Status | Note | Source |
 |---|---|---|---|---|
 | New rule | button | ✅ | | AlertRulesPage.tsx |
-| Notification channel toggle — Email | switch | 🚫 (B-87) | a real, visibly disabled switch with `SETTINGS_REASON` shown — no organisation-level channel resource; used to be a dead styled `<span>` (WB-216, B-87) | AlertRulesPage.tsx:88-111 |
+| Notification channel toggle — Email | switch | ✅ (B-87, shipped 2026-09-24) | `GET/PATCH /notification-channels`, `alertRules` FULL to write | AlertRulesPage.tsx |
 | Notification channel toggle — SMS | toggle-styled span | 🚫 | intentionally disabled, "SMS is not available" (Q-2) | AlertRulesPage.tsx |
-| Notification channel toggle — Webhook | switch | 🚫 (B-87) | same as Email (WB-216, B-87) | AlertRulesPage.tsx:141 |
+| Notification channel toggle — Webhook | switch | ✅ (B-87, shipped 2026-09-24) | same resource, `webhook.enabled` | AlertRulesPage.tsx |
 | Segment tabs (All / Active / Muted) | tabs (3) | ✅ | | AlertRulesPage.tsx |
 | Search rule | search input | ✅ | `aria-label="Search rule"` (WB-204) | AlertRulesPage.tsx:177 |
 | Per-rule Active/Muted switch | toggle | ✅ | `PATCH /alert-rules/:id` mocked | AlertRulesPage.tsx:221 |
 | Row menu — Edit rule | menu item | ✅ | opens `NewAlertRuleModal` in edit mode → `PATCH /alert-rules/:id` (WB-217) | AlertRulesPage.tsx:239 |
 | Row menu — Duplicate | menu item | ✅ | opens `NewAlertRuleModal` prefilled → `POST /alert-rules` (WB-217) | AlertRulesPage.tsx:245 |
-| Row menu — Mute for 24 h | menu item | 🚫 (B-86) | disabled with `SETTINGS_REASON.timedMute` visible — no `mutedUntil` on the rule (WB-218, B-86) | AlertRulesPage.tsx:249-260 |
+| Row menu — Mute for 24 h | menu item | ✅ (B-86, shipped 2026-09-24) | `PATCH /alert-rules/:id { mutedUntil }`, ISO 24 h out; row badge reflects the effective mute | AlertRulesPage.tsx |
 | Row menu — Delete | menu item | ✅ | opens confirm; `RULE_IS_SYSTEM` 409 handled by the mock | AlertRulesPage.tsx |
 | Delete rule? — Cancel / Delete | confirm dialog | ✅ | | AlertRulesPage.tsx |
-| (Test rule — omitted) | — | 🚫 | correctly left out of the row menu; gap B-9 | AlertRulesPage.tsx |
+| Row menu — Test rule | menu item | ✅ (B-9, shipped 2026-09-24) | `POST /alert-rules/:id/test`; toasts whether it triggered (a muted rule answers `triggered: false`) | AlertRulesPage.tsx |
 
 ### New alert rule modal
 
@@ -1061,7 +1084,7 @@ fields that are listed in `backend-gaps.md`.
 
 | Element | Type | Status | Note | Source |
 |---|---|---|---|---|
-| Browse marketplace | button | 🚫 (B-89) | disabled with the reason visible — no marketplace/catalogue endpoint or URL; used to do nothing (WB-223, B-89) | IntegrationsPage.tsx:51, 148-153 |
+| Browse marketplace | button | ✅ (B-89, shipped 2026-09-24) | opens a modal listing `GET /integrations/catalog`; `available:false` entries keep `Connect` disabled | IntegrationsPage.tsx |
 | Connect (unconnected, known provider) | button | ✅ | `PUT /integrations/:provider`; toast names the product, not the raw provider id; double-click guarded (WB-226) | IntegrationsPage.tsx:76, 203 |
 | Disconnect (connected provider) | button | ✅ | renamed from "Manage" (which disconnected instantly); confirms first, then toasts (WB-224) | IntegrationsPage.tsx:87, 194, 273 |
 | Connect (catalog entries with no provider mapping — Pacific Track, DAT, Geotab, Zapier) | button | 🚫 | disabled, `title` = `SETTINGS_REASON.providerUnavailable`; the same reason is now also the card's visible status line (WB-232) (stage 4, IntegrationsPage.tsx:56, 197, 217-220) | IntegrationsPage.tsx:217-220 |
@@ -1099,6 +1122,7 @@ fields that are listed in `backend-gaps.md`.
 
 | Element | Type | Status | Note | Source |
 |---|---|---|---|---|
+| USER column | text | ✅ | B-62 shipped — `actorName` (server-joined) plus an `actorEmail` caption line; falls back to `actorType` when absent | AuditLogPage.tsx |
 | Export CSV | button | ✅ | forwards the same filters the table uses (WB-111/WB-135) | AuditLogPage.tsx:157-187 |
 | Search action, object or user | search input | ✅ | `aria-label` (WB-204). Fixed (WB-239): while a search is typed, older cursor pages are fetched automatically up to 1,000 entries (`AUTO_SEARCH_MAX_ENTRIES`), with a live "N entries searched" status and a `Stop`; it ends early once the loaded pages reach past the start of the date range. The whole log in the date range is searched within the cap; past the cap (or after Stop) the notice says older entries are not covered (server-side search is still gap B-64) (stage 4, AuditLogPage.tsx:33-42, 91-137, 290-311) | AuditLogPage.tsx:33-42, 91-137, 290-311 |
 | Filter by user | select | ✅ | real server param (`actorId`), has `aria-label` | AuditLogPage.tsx:206 |
@@ -1117,13 +1141,22 @@ fields that are listed in `backend-gaps.md`.
 | Element | Type | Status | Note | Source |
 |---|---|---|---|---|
 | New ticket | button | ✅ | opens modal | SupportPage.tsx:108 |
-| Start chat | button | 🚫 (B-90) | disabled with the reason visible — no chat service; used to do nothing (WB-228, B-90) | SupportPage.tsx:23, 123-128 |
+| Start chat | button | ✅ (B-90, shipped 2026-09-24) | opens `StartChatModal` → `POST /support/chats`; replies land under Messages | SupportPage.tsx |
 | Send email | button | ✅ | `mailto:` | SupportPage.tsx:142 |
 | Call now | button | ✅ | `tel:` | SupportPage.tsx:156 |
 | ("42 min average response" line) | text | ✅ | removed — it was hardcoded, not measured (WB-231) | SupportPage.tsx |
 | Segment tabs (All / Open / In progress / Resolved) | tabs (4) | ✅ | `All` tab added and is the default (WB-231) | SupportPage.tsx:166 |
 | Search ticket | search input | ✅ | `aria-label="Search ticket"` (WB-204) | SupportPage.tsx:187 |
 | Export (Your tickets toolbar) | button | ✅ | builds a CSV of the tickets on screen client-side — there is no export endpoint (WB-229) | SupportPage.tsx:56-60, 204 |
+
+### Start chat modal
+
+`src/features/support/components/StartChatModal.tsx` (new, B-90 shipped 2026-09-24)
+
+| Element | Type | Status | Note | Source |
+|---|---|---|---|---|
+| Message | textarea | ✅ | required | StartChatModal.tsx |
+| Start chat / Cancel / Close (X) | buttons | ✅ | double-submit guarded, shared dirty-close | StartChatModal.tsx |
 
 ### New support ticket modal
 
@@ -1135,9 +1168,10 @@ fields that are listed in `backend-gaps.md`.
 | Priority | select | ✅ | | NewTicketModal.tsx |
 | Subject | text input | ✅ | | NewTicketModal.tsx |
 | Description | textarea | ✅ | | NewTicketModal.tsx |
-| Include device diagnostics | checkbox | 🚫 (B-91) | was a fake ✅: ticked by default and attached nothing but a text marker. Now disabled with `SUPPORT_REASON.diagnostics` visible — `POST /support/tickets` takes no attachments (WB-230, B-91) | NewTicketModal.tsx:118-139 |
-| Include last 24h of ELD events | checkbox | 🚫 (B-91) | same — was a fake ✅, now disabled with the reason visible (WB-230, B-91) | NewTicketModal.tsx:137 |
-| Submit ticket | button | ✅ | permission-based (WB-245, B-12): with `support:FULL` it submits; without it (VIEWER) `Submit ticket` is disabled and the reason ("Your role can view support but not submit tickets yet…") is shown in the modal, as `title` and `aria-describedby`. `+ New ticket` stays for every role per tz.md §21.4. The inline 403 banner remains the fallback (stage 4, NewTicketModal.tsx:32-35,52,84-104) | NewTicketModal.tsx:32-35, 52, 84-104 |
+| Unit (for diagnostics) | select | ✅ (B-91, shipped 2026-09-24) | `vehicleId` — the unit the server-collected attachments are taken from | NewTicketModal.tsx |
+| Include device diagnostics | checkbox | ✅ (B-91, shipped 2026-09-24) | sends `attachments: [{ kind: 'DEVICE_DIAGNOSTICS' }]`; assembled server-side, nothing uploaded from the browser | NewTicketModal.tsx |
+| Include last 24h of ELD events | checkbox | ✅ (B-91, shipped 2026-09-24) | same, `kind: 'ELD_EVENTS_24H'` | NewTicketModal.tsx |
+| Submit ticket | button | ✅ | permission-based (WB-250, B-12 shipped): `can('support', 'READ')` submits — every role that can open this modal (route/nav gated on `support`) can submit. `+ New ticket` stays for every role per tz.md §21.4. The inline 403 banner remains the fallback for a genuine server-side refusal (NewTicketModal.tsx:31-35,57,102-105) | NewTicketModal.tsx:31-35, 57, 102-105 |
 | Cancel / Close (X) | buttons | ✅ | shared dirty-close | Modal.tsx |
 
 ## Support · Feedback
@@ -1150,7 +1184,7 @@ fields that are listed in `backend-gaps.md`.
 | Answer buttons (5 questions × 4 options) | buttons (20) | ✅ | | FeedbackPage.tsx:118-136 |
 | Comment textarea | textarea | ✅ | | FeedbackPage.tsx:140 |
 | Contact-me checkbox | checkbox | ✅ | | FeedbackPage.tsx:149 |
-| Submit feedback | button | ✅ | permission-based (WB-246, B-12): `POST /feedback` needs `support:FULL`; without it `Submit feedback` is disabled with the reason ("Your role can view support but not submit feedback yet…") on screen, as `title` and `aria-describedby`. The inline 403 remains the fallback (stage 4, FeedbackPage.tsx:49-52,61,159-176) | FeedbackPage.tsx:49-52, 61, 159-176 |
+| Submit feedback | button | ✅ | permission-based (WB-250, B-12 shipped): `POST /feedback` needs only `can('support', 'READ')` — every role that can reach this page (route/nav gated on `support`) can submit. The inline 403 remains the fallback for a genuine server-side refusal (FeedbackPage.tsx:49-52, 61, 159-176) | FeedbackPage.tsx:49-52, 61, 159-176 |
 | Send another (post-submit) | button | ✅ | | FeedbackPage.tsx:107 |
 
 ## Account
@@ -1161,15 +1195,18 @@ fields that are listed in `backend-gaps.md`.
 |---|---|---|---|---|
 | First name | text input | ✅ | | ProfileCard.tsx:133 |
 | Last name | text input | ✅ | | ProfileCard.tsx:143 |
-| Job title | read-only input | 🚫 | not part of `UpdateMyProfileDto` (firstName/lastName/phone only) | ProfileCard.tsx:153 |
+| Profile photo — Upload | button + hidden file input | ✅ | `POST /me/avatar` (B-51); PNG/JPG, ≥ 256×256, ≤ 5 MB pre-checked client-side (`avatar.ts`), server 422 shown under the photo; refreshes `/auth/me` so the topbar avatar updates | ProfileCard.tsx:90-99 |
+| Profile photo — Remove | button | ✅ | `DELETE /me/avatar`; rendered only when a photo exists | ProfileCard.tsx:101-114 |
+| Job title | text input | ✅ | editable, ≤ 120 chars, saved with `PATCH /me/profile` (B-51) | ProfileCard.tsx:245-254 |
 | Work email | disabled input | 🚫 | "Managed by your administrator" | ProfileCard.tsx:171 |
 | Mobile number | tel input | ✅ | strips non-digits as typed | ProfileCard.tsx:189 |
 | Cancel (profile, when dirty) | button | ✅ | resets to defaults | ProfileCard.tsx:212 |
-| Save changes (profile) | button | ✅ | `PATCH /me/profile`, toasts "Settings saved" | ProfileCard.tsx:215 |
-| Language & region fields (Language / Time zone / Date format / Distance unit) | read-only inputs (4) | 🚫 | no `/me/preferences` endpoint (gap B-11); deliberately shown read-only rather than a selector that would silently drop the choice | PreferenceCards.tsx:72-82 |
-| Sign out (per non-current session) | button | ✅ | `DELETE /me/sessions/:id`; only 1 seeded session (current) in the mock, so this path isn't exercised live, but the code and endpoint are correct | SessionsCard.tsx:134-143 |
+| Save changes (profile) | button | ✅ | `PATCH /me/profile` (first/last name, job title, phone), toasts "Settings saved", re-reads `/auth/me` for the topbar chip | ProfileCard.tsx |
+| Language & region selectors (Language / Time zone / Date format / Distance unit) | selects (4) | ✅ | `GET /me/preferences` (B-11); Language offers English only (v1) | PreferenceCards.tsx:107 |
+| Cancel / Save changes (Language & region, when dirty) | buttons | ✅ | `PUT /me/preferences` with the merged full row (saved views / table columns survive), toasts "Settings saved"; error → banner in the card | PreferenceCards.tsx:164-169 |
+| Sign out (per non-current session) | button | ✅ | `DELETE /me/sessions/:id`; the `current` row (B-50) shows `● Current` instead, LOCATION from the server or `—` | SessionsCard.tsx |
 | Sign out everywhere | button | ✅ | opens confirm | SessionsCard.tsx:65-71 |
-| Sign out everywhere? — Cancel / Sign out everywhere | confirm dialog | ✅ | loops `DELETE /me/sessions/:id` then signs out locally | SessionsCard.tsx:154-178 |
+| Sign out everywhere? — Cancel / Sign out everywhere | confirm dialog | ✅ | one `DELETE /me/sessions` (all other sessions, B-50) then signs out here via `/auth/logout` (WD-092) | SessionsCard.tsx:42-52 |
 
 (Security & sign-in card and Notifications card show no interactive controls — sign-in method and an `EmptyState` only.)
 
@@ -1179,7 +1216,7 @@ fields that are listed in `backend-gaps.md`.
 
 | Element | Type | Status | Note | Source |
 |---|---|---|---|---|
-| Search combobox | text input | ✅ | debounced entity search + local pages/actions filtering | CommandPalette.tsx:152 |
+| Search combobox | text input | ✅ | debounced entity search: one `GET /search?q=&limit=5` (B-10, live), no `/drivers`+`/vehicles` fan-out any more; a section the role may not read comes back empty/absent and is not rendered; driver `dutyStatus` is always `null` live → duty slot shows `—` (WD-093) + local pages/actions filtering | CommandPalette.tsx:152; shared/api/search.ts; search/paletteText.ts |
 | Result option (click) | option row | ✅ | navigates and closes | CommandPalette.tsx:221-246 |
 | Retry (search failed banner) | button | ✅ | | CommandPalette.tsx:180 |
 
@@ -1194,6 +1231,7 @@ fields that are listed in `backend-gaps.md`.
 | Sidebar collapse/expand | — | ✅ | toggle with `aria-expanded`/`aria-controls`, 64px collapsed state remembered in `localStorage` (WB-173) | Sidebar.tsx |
 | Topbar search trigger | button | ✅ | opens command palette; ⌘K/Ctrl+K do the same | Topbar.tsx:179-190 |
 | Topbar bell trigger | button | ✅ | opens `NotificationsPopover`; the panel's own contents (`features/notifications/NotificationsPanel`) are a different feature, out of this area's scope | Topbar.tsx:192-204 |
+| `Report ready` toast → Download (shell) | toast action | ✅ | `report.ready` over `user:{id}` (worker → Redis bridge, live): invalidates every report query on any screen and toasts once outside `/reports/*`; the report screens keep their own toast + 3 s poll fallback (WD-094). Download fetches a fresh presigned URL at click time | shared/realtime/reportReady.ts; Topbar.tsx |
 | Topbar refresh | button | ✅ | `queryClient.invalidateQueries()`, spinner while fetching | Topbar.tsx:207-219 |
 | Topbar account-menu trigger (avatar + chevron) | button | ✅ | | Topbar.tsx:222-234, TopbarTriggers.tsx:34 |
 | Account menu items — My profile / Account security / Notification preferences / Language / Help center / Keyboard shortcuts / Sign out | menu items (7) | ✅ | correct `/account#hash` / `/settings/support` targets; Sign out lands on `/sign-in` | AccountMenu.tsx:101-118 |
@@ -1218,26 +1256,32 @@ fields that are listed in `backend-gaps.md`.
 
 These are the API gaps behind the 🚫 rows above. Full detail in `backend-gaps.md`.
 
+All entries below are **shipped as of 2026-09-24** (backend Phase 13) unless marked "still open".
+Kept for history; none currently blocks a control still marked 🚫 in this document except where noted.
+
 | Gap | Missing API | Controls it blocks |
 |---|---|---|
-| B-69 | `options` object on `POST /drivers/import` and `POST /vehicles/import` | Import drivers / Import vehicles — `Duplicate handling`, `Default terminal`, `Send app invitations`, `Apply default HOS exemptions`, `Pair ELD devices automatically`, `Send a summary email` (8 controls, disabled with a visible reason) |
-| B-70 | `correctedBy` / `completedAt` / `laborHours` / `partsCostUsd` on `PATCH /defects/:id/resolve` | 11.17 Resolve defect — the four fields were **removed** rather than left collecting discarded input |
-| B-71 | `PATCH /api/vehicles/bulk-status` | Vehicles bulk `Set inactive` — works, but fans out one `PATCH /vehicles/:id` per unit, non-atomic |
-| B-72 | `POST /logs/:driverId/events` (propose a duty record where none exists) | HOS `Add / edit event` on a day with **no** duty record — disabled with that sentence visible; works normally on a day that has records |
-| B-73 | `distanceMi` / `rateUsd` / `customer` on `POST /trips`, plus a trailer lookup | Create trip — `Distance` (no longer required, annotated "not saved yet"), `Rate`, `Customer` and `Trailer` (disabled) |
-| B-42 | `keepOutOfService` / `notifyDriver` / `blockDispatch` on `CreateWorkOrderDto` | Create work order — the three checkboxes were **removed** rather than claim an effect they did not have |
-| B-68 | a `NOT_REQUIRED` resolution status on `POST /defects/:id/resolve` | Resolve defect — "No repair needed" is sent as `REPAIRED` with a `[No repair needed]` note prefix |
-| B-15 | `Geofence.dwellMinutes`, `Geofence.afterHoursOnly` | Create geofence — `Dwell` and `After-hours only` checkboxes |
-| B-46 / B-48 | JSON report summaries, requester names, report formats and pack options | Activity `Group by driver`; IFTA `Jurisdiction` / `Vehicle group`; FMCSA `Unit` filter and the pack-contents checkboxes (static display) |
-| B-14 | `RODS` / `IDLE_FUEL` on `ReportType` | Report library — `Idle & fuel report` row (`aria-disabled`) |
-| B-8 / B-9 | `GET /devices/:id/diagnostics`, `POST /alert-rules/:id/test` | `View diagnostics`, `Test connection`, `Test rule` — correctly **omitted from the DOM** rather than rendered dead |
-| B-2 / B-6 / B-7 | `GET /drivers/:id/hos`, `/violations`, `/co-driver-pairings` | Driver profile HOS clocks, Violations card, Co-driver row; the Create-trip HOS warning and `Pick another driver` are unreachable dead code |
-| B-4 | `GET /vehicles/:id/histories?date=` route replay | Unit histories `Play` — now disabled with its reason on screen (🚫, WB-243) |
-| B-37 / B-41 | attachment presign; `lastMessage` embed on `GET /conversations` | DVIR drawer photo thumbnails (still rendered clickable — listed ❌, not 🚫) |
-| B-56 / B-67 | `POST /notifications/:id/read`, `POST /conversations/:id/read` | Notification row mark-read and the Messages unread badge work against the mock only; the notification row now reports the failure once per session and stops calling after a 404/405 (WB-244) |
-| B-10 | `GET /search?q=` | Command palette runs against local data only |
-| B-12 | `POST /support/tickets` accepting `support:READ` | New ticket / Feedback for VIEWER — Submit disabled with the reason on screen (WB-245/WB-246); the inline 403 banner stays as fallback |
-| B-94 (tz §20 B-16) | driver documents (S3 upload + metadata) | Driver profile `Documents` tab — disabled with "Soon" and the reason visible (WB-236) |
+| ~~B-69~~ | shipped 2026-09-24 | Import drivers / Import vehicles — `Duplicate handling`, `Default terminal`, `Send app invitations`, `Apply default HOS exemptions`, `Pair ELD devices automatically`, `Send a summary email` are real controls again |
+| ~~B-70~~ | shipped 2026-09-24 | 11.17 Resolve defect — `correctedBy`/`completedAt`/`laborHours`/`partsCostUsd` are real fields again (`ResolveDefectModal.tsx`) |
+| ~~B-71~~ | shipped 2026-09-24 | `PATCH /vehicles/bulk-status` — Vehicles bulk `Set inactive` now uses the atomic endpoint (still reports partial `failed[]` honestly) |
+| ~~B-72~~ | shipped 2026-09-24 | `POST /logs/:driverId/events` — HOS `Add / edit event` on a day with no duty record now proposes a new record (`useProposeLogEvent`); no longer disabled |
+| ~~B-73~~ | shipped 2026-09-24 | Create trip — `Distance`, `Rate`, `Customer` and `Trailer` are real, sent fields again |
+| ~~B-42~~ | shipped 2026-09-24 | Create/Edit work order — `keepOutOfService`/`notifyDriver`/`blockDispatchAssignment` checkboxes and `estimatedLaborHours` are real fields again |
+| ~~B-68~~ | shipped 2026-09-24 | Resolve defect — "No repair needed" sends `resolutionType: 'NOT_REQUIRED'` (see WD-088); no note-prefix workaround |
+| ~~B-15~~ | shipped 2026-09-24 | Create geofence — `Dwell` and `After-hours only` checkboxes are real fields again |
+| ~~B-48~~ | shipped 2026-09-24 | FMCSA pack `Unit` filter and the six pack-contents checkboxes are real (`include[]`, `vehicleId`) |
+| still open (non-backend, group model) | no vehicle-group / jurisdiction model exists | Activity `Group by driver`; IFTA `Jurisdiction` / `Vehicle group` stay disabled — not a missing endpoint, there is no group entity to list |
+| ~~B-14~~ | shipped 2026-09-24 | library rows generate real PDFs (WD-090) |
+| ~~B-8~~ / ~~B-9~~ | shipped 2026-09-24 | `View diagnostics`, `Test connection`, `Test rule` are real controls again |
+| ~~B-85~~ / ~~B-86~~ / ~~B-87~~ / ~~B-88~~ / ~~B-89~~ / ~~B-90~~ / ~~B-91~~ / ~~B-95~~ | shipped 2026-09-24 | Invite terminal/message, Mute for 24 h, notification channels, device firmware/diagnostics toggles, marketplace catalog, Start chat, ticket attachments, and the separate `dataTransfer` matrix row/checkbox are all real controls again |
+| ~~B-2~~ / ~~B-6~~ / ~~B-7~~ | shipped | Driver profile HOS clocks, Violations card, Co-driver row; the Create-trip HOS warning and `Pick another driver` are real again |
+| ~~B-4~~ | shipped 2026-09-24 | Unit histories `Play` / `Pause` drives a real replay again |
+| ~~B-41~~ | shipped 2026-09-24 | DVIR drawer photo thumbnails — real presigned `loading="lazy"` tiles, click re-presigns and opens a fresh URL |
+| ~~B-37~~ / ~~B-67~~ | shipped 2026-09-24 | Messages left-panel preview line and unread dot are real (`lastMessage`, `unreadCount`, `POST /conversations/:id/read`) |
+| ~~B-56~~ | shipped 2026-09-24 | Notification row mark-read is live |
+| ~~B-10~~ | shipped 2026-09-24 | Command palette uses the single live `GET /search?q=` call (WD-093) |
+| ~~B-12~~ | shipped 2026-09-24, client updated 2026-09-24 (WB-250) | New ticket / Feedback for VIEWER — `NewTicketModal.tsx`/`FeedbackPage.tsx` now gate `Submit` on `can('support', 'READ')`; VIEWER submits real tickets/feedback |
+| ~~B-94~~ (tz §20 B-16) | shipped 2026-09-24 | Driver profile `Documents` tab is a real, enabled tab again |
 
 ## What the stage-1 pass fixed
 

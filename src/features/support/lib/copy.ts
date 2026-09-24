@@ -18,10 +18,11 @@ export const SUPPORT_REASON = {
   attachments: 'Not available yet — the ticket API cannot carry files. Describe the problem, the unit and the time instead.',
   diagnostics: 'Not available yet — the ticket API cannot attach device diagnostics or ELD events. Name the unit and the time in the description.',
   /**
-   * B-12 — `POST /support/tickets` and `POST /feedback` are `@Perm('support', 'FULL')`, while
-   * a Viewer holds `support: READ`. §21.4 keeps `+ New ticket` for every role, so the submit
-   * button is what gets disabled for a READ-only role (WB-245/WB-246), with this reason on screen.
+   * WB-250 — B-12 shipped: `POST /support/tickets` and `POST /feedback` now only need
+   * `support: READ`, which every role that can reach these screens holds. These strings are kept
+   * as the inline fallback for a genuine server-side `403` (e.g. a custom role changed
+   * mid-session), not as a client-side gate anymore.
    */
-  ticketForbidden: 'Your role can view support but not submit tickets yet — ask an administrator to open one for you (B-12).',
-  feedbackForbidden: 'Your role can view support but not submit feedback yet — ask an administrator to send it for you (B-12).',
+  ticketForbidden: 'Your role can view support but not submit tickets — check with an administrator.',
+  feedbackForbidden: 'Your role can view support but not submit feedback — check with an administrator.',
 } as const;

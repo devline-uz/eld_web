@@ -157,15 +157,33 @@ describe('ResolveDefectModal — 11.17', () => {
     expect(radios[1]).toBeChecked();
   });
 
-  it('no longer collects the four fields the DTO cannot carry', () => {
-    server.use(workOrdersListHandler());
+  it('collects the four repair-record fields and sends them (B-70, shipped 2026-09-24)', async () => {
+    const user = userEvent.setup();
+    let body: unknown;
+    server.use(
+      workOrdersListHandler(),
+      http.patch(url(endpoints.defects.resolve('def_1')), async ({ request }) => {
+        body = await request.json();
+        return ok({ id: 'def_1', status: 'REPAIRED', resolutionType: 'REPAIRED' });
+      }),
+    );
     renderModal(<ResolveDefectModal defect={DEFECT} onClose={vi.fn()} />);
 
-    expect(screen.queryByText(/Corrected by/)).not.toBeInTheDocument();
-    expect(screen.queryByText('Completed on')).not.toBeInTheDocument();
-    expect(screen.queryByText('Labour hours')).not.toBeInTheDocument();
-    expect(screen.queryByText('Parts cost')).not.toBeInTheDocument();
-    expect(screen.queryByText('Mechanic signature')).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText('Corrected by'), 'Mike Rowan');
+    await user.type(screen.getByLabelText('Completed on'), '2026-09-11');
+    await user.type(screen.getByLabelText('Labor hours'), '2.5');
+    await user.type(screen.getByLabelText(/Parts cost/), '150');
+    await user.type(screen.getByLabelText(/Repair notes/i), 'Replaced pads');
+    await user.click(screen.getByRole('button', { name: 'Mark as resolved' }));
+
+    await waitFor(() => expect(body).toBeTruthy());
+    expect(body).toMatchObject({
+      resolutionType: 'REPAIRED',
+      correctedBy: 'Mike Rowan',
+      laborHours: 2.5,
+      partsCostUsd: 150,
+    });
+    expect(typeof (body as { completedAt: string }).completedAt).toBe('string');
   });
 
   it('WB-137 · the `reported` stamp is en-US 24-hour in carrier.timezone, never the browser zone', async () => {
@@ -263,7 +281,7 @@ describe('ResolveDefectModal — 11.17', () => {
 /* -------------------------------------------------------------- 11.16 Create work order */
 
 describe('CreateWorkOrderModal — 11.16', () => {
-  it('sends exactly the fields `CreateWorkOrderDto` accepts', async () => {
+  it('sends the CreateWorkOrderDto fields, including the B-42 flags (shipped 2026-09-24)', async () => {
     const user = userEvent.setup();
     let body: unknown;
     server.use(
@@ -279,7 +297,14 @@ describe('CreateWorkOrderModal — 11.16', () => {
     await user.click(screen.getByRole('button', { name: 'Create work order' }));
 
     await waitFor(() => expect(body).toBeTruthy());
-    expect(body).toEqual({ vehicleId: 'veh_1', title: 'Brake repair', priority: 'NORMAL' });
+    expect(body).toEqual({
+      vehicleId: 'veh_1',
+      title: 'Brake repair',
+      priority: 'NORMAL',
+      keepOutOfService: true,
+      notifyDriver: true,
+      blockDispatchAssignment: true,
+    });
   });
 
   it('drops the ticked defects when the unit changes, so another unit\'s defect is never sent (stage 3)', async () => {
@@ -315,14 +340,17 @@ describe('CreateWorkOrderModal — 11.16', () => {
     expect(body).not.toHaveProperty('defectIds');
   });
 
-  it('no longer offers controls the request cannot carry', () => {
+  it('offers the estimated-labor field and the three B-42 checkboxes, checked by default', () => {
     server.use(http.get(url(endpoints.defects.list), () => ok({ items: [], page: 1, limit: 200, total: 0, totalPages: 1 })));
     renderModal(<CreateWorkOrderModal vehicleId="veh_1" onClose={vi.fn()} />);
 
-    expect(screen.queryByText('Estimated labour')).not.toBeInTheDocument();
-    expect(screen.queryByText('Notify the driver')).not.toBeInTheDocument();
-    expect(screen.queryByText('Keep the unit out of service until closed')).not.toBeInTheDocument();
-    expect(screen.queryByText('Block dispatch assignment')).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/Estimated labor/)).toBeInTheDocument();
+    const keepOos = screen.getByRole('checkbox', { name: /Keep the unit out of service/ });
+    const notify = screen.getByRole('checkbox', { name: 'Notify the driver' });
+    const block = screen.getByRole('checkbox', { name: /Block dispatch assignment/ });
+    expect(keepOos).toBeChecked();
+    expect(notify).toBeChecked();
+    expect(block).toBeChecked();
     expect(screen.queryByRole('button', { name: 'Save as draft' })).not.toBeInTheDocument();
   });
 
@@ -465,12 +493,20 @@ describe('DvirDrawer — 11.15', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it('disables Export PDF with the reason on screen (B-75)', async () => {
+  it('downloads the PDF through GET /dvir/:id/pdf (B-75, shipped 2026-09-24)', async () => {
+    Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:pdf'), revokeObjectURL: vi.fn() });
+    server.use(
+      http.get(url(endpoints.dvir.pdf('dvir_1')), () => new HttpResponse(new Blob(['%PDF-1.4']), { headers: { 'Content-Type': 'application/pdf' } })),
+    );
+    const user = userEvent.setup();
     renderDrawer();
     await screen.findByText(/Inspection/);
     const pdf = screen.getByRole('button', { name: 'Export PDF' });
-    expect(pdf).toBeDisabled();
-    expect(screen.getByText('PDF export is not available yet.')).toBeInTheDocument();
+    expect(pdf).not.toBeDisabled();
+
+    await user.click(pdf);
+
+    await waitFor(() => expect(URL.createObjectURL).toHaveBeenCalled());
   });
 
   it('Print renders the inspection into its own document instead of window.print()', async () => {
@@ -488,7 +524,10 @@ describe('DvirDrawer — 11.15', () => {
     appPrint.mockRestore();
   });
 
-  it('photo tiles are no longer clickable buttons and say why (B-41)', async () => {
+  it('photo tiles fetch a presigned thumbnail and open a fresh one on click (B-41, shipped 2026-09-24)', async () => {
+    const user = userEvent.setup();
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null);
+    let presignCalls = 0;
     server.use(
       http.get(url(endpoints.dvir.detail(':id')), () =>
         ok({
@@ -501,11 +540,23 @@ describe('DvirDrawer — 11.15', () => {
           photos: [{ id: 'att_1', key: 'x/y.jpg' }],
         }),
       ),
+      http.get(url(endpoints.attachments.presign('att_1')), () => {
+        presignCalls += 1;
+        return ok({ url: `https://cdn.example.com/att_1?n=${presignCalls}`, expiresAt: '2026-09-10T12:15:00.000Z' });
+      }),
     );
     renderDrawer();
     await screen.findByText(/Photos · /);
 
-    expect(screen.queryByRole('button', { name: 'View photo' })).not.toBeInTheDocument();
-    expect(screen.getByText('Photos were uploaded by the driver but cannot be shown here yet.')).toBeInTheDocument();
+    const openButton = await screen.findByRole('button', { name: 'Open photo' });
+    await waitFor(() => expect(openButton.querySelector('img')).toBeTruthy());
+    expect(openButton.querySelector('img')).toHaveAttribute('loading', 'lazy');
+    expect(presignCalls).toBe(1);
+
+    await user.click(openButton);
+
+    await waitFor(() => expect(presignCalls).toBe(2));
+    expect(openSpy).toHaveBeenCalledWith('https://cdn.example.com/att_1?n=2', '_blank', 'noopener,noreferrer');
+    openSpy.mockRestore();
   });
 });

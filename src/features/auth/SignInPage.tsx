@@ -62,7 +62,8 @@ function signInErrorMessage(cause: unknown): string | null {
       return 'This account has been disabled. Contact your administrator.';
     }
     if (error.status === 403 && error.code === 'PASSWORD_LOGIN_DISABLED') {
-      return 'Password sign-in is disabled. Use Continue with Google.';
+      // B-25 — a dev build pointed at an API running AUTH_MODE=production (Q-1).
+      return 'Password sign-in is turned off on this server (production mode). Sign in with Continue with Google above.';
     }
     if (error.status === 429) return 'Too many attempts. Try again in a minute.';
     if (error.status === 401 && error.code === 'INVALID_CREDENTIALS') {

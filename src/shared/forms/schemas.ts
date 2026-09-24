@@ -261,15 +261,14 @@ export const geofenceSchema = z.object({
   name: f.requiredString(),
   category: z.enum(['TERMINAL', 'SHIPPER', 'CUSTOMER', 'REST_AREA', 'OTHER']).default('TERMINAL'),
   colour: z.enum(['BLUE', 'GREEN', 'AMBER', 'RED', 'VIOLET']).default('BLUE'),
-  type: z.enum(['CIRCLE', 'POLYGON']).default('POLYGON'),
+  type: z.enum(['CIRCLE', 'POLYGON', 'ADDRESS']).default('POLYGON'),
   address: z.string().trim().optional(),
-  radiusMeters: z.number().positive().optional(),
+  /** Backend field name is `radiusMi` (miles) — B-93/D-098. */
+  radiusMi: z.number().positive().optional(),
   appliesTo: z.string().trim().default('All vehicle groups'),
   alertOnEnter: z.boolean().default(true),
   alertOnExit: z.boolean().default(true),
-  /** ⛔ B-15 — collected, not yet transmitted. */
   dwellMinutes: z.number().int().positive().optional(),
-  /** ⛔ B-15 — collected, not yet transmitted. */
   afterHoursOnly: z.boolean().default(false),
   countAsYardMove: z.boolean().default(false),
 });

@@ -3,17 +3,27 @@
 // No §11 overlay is drawn for this and §13.3 has no schedule toast, so the modal closes without one
 // rather than inventing wording (web/decisions.md WD-043). Q-2: delivery is email only; the DTO has
 // no SMS channel at all.
+//
+// B-48 (shipped): `Period` sends `params.window` — the scheduler resolves it to a concrete period on
+// every run, in the schedule's (carrier) zone — or pins the page's own range when `This selection`
+// is chosen. `Format` offers exactly `REPORT_TYPE_FORMATS[type]` (PDF for IFTA / Activity / DVIR).
 import { useRef } from 'react';
 import type { BaseSyntheticEvent } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useCreateReportSchedule, type GeneratableReportType } from '@/shared/api/reports';
+import {
+  REPORT_TYPE_FORMATS,
+  useCreateReportSchedule,
+  type GeneratableReportType,
+  type ReportFormat,
+  type ReportWindow,
+} from '@/shared/api/reports';
 import { email } from '@/shared/forms/fields';
 import { VALIDATION_MESSAGES as M } from '@/shared/forms/messages';
 import { Button } from '@/shared/ui/Button';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
-import { REPORT_LABEL, refusalText } from '../reportMeta';
+import { REPORT_LABEL, periodOf, refusalText } from '../reportMeta';
 import { ActionAlert } from './ActionAlert';
 
 const SCHEDULE_FREQUENCIES = {
@@ -22,8 +32,22 @@ const SCHEDULE_FREQUENCIES = {
   MONTHLY: { label: 'The 1st of every month at 06:00', cron: '0 6 1 * *' },
 } as const;
 
+const WINDOW_LABEL: Record<ReportWindow, string> = {
+  PREVIOUS_WEEK: 'Previous week (Mon – Sun)',
+  PREVIOUS_MONTH: 'Previous calendar month',
+  PREVIOUS_QUARTER: 'Previous quarter',
+};
+/** IFTA is filed by quarter — a week or month window would only resolve to "that quarter". */
+const windowsFor = (type: GeneratableReportType): ReportWindow[] =>
+  type === 'IFTA' ? ['PREVIOUS_QUARTER'] : ['PREVIOUS_WEEK', 'PREVIOUS_MONTH', 'PREVIOUS_QUARTER'];
+
+/** The page's fixed range keys, dropped when a rolling window replaces them. */
+const FIXED_PERIOD_KEYS = ['from', 'to', 'quarter'];
+
 const scheduleSchema = z.object({
   frequency: z.enum(['DAILY', 'WEEKLY', 'MONTHLY']),
+  period: z.enum(['FIXED', 'PREVIOUS_WEEK', 'PREVIOUS_MONTH', 'PREVIOUS_QUARTER']),
+  format: z.enum(['CSV', 'PDF', 'XLSX']),
   recipients: z
     .string()
     .trim()
@@ -50,7 +74,13 @@ export function ScheduleReportModal({ open, onClose, reportType, params, timezon
     resolver: zodResolver(scheduleSchema),
     mode: 'onBlur',
     reValidateMode: 'onChange',
-    defaultValues: { frequency: 'WEEKLY', recipients: '' },
+    defaultValues: {
+      frequency: 'WEEKLY',
+      // A repeating schedule wants a repeating period; `This selection` stays one click away.
+      period: windowsFor(reportType)[0],
+      format: REPORT_TYPE_FORMATS[reportType][0],
+      recipients: '',
+    },
   });
   const { register, handleSubmit, formState, reset } = form;
   const busy = formState.isSubmitting || create.isPending;
@@ -68,8 +98,14 @@ export function ScheduleReportModal({ open, onClose, reportType, params, timezon
     await create
       .mutateAsync({
         reportType,
-        format: reportType === 'FMCSA_PACK' ? 'PDF' : 'CSV',
-        params,
+        format: values.format as ReportFormat,
+        params:
+          values.period === 'FIXED'
+            ? params
+            : {
+                ...Object.fromEntries(Object.entries(params).filter(([key]) => !FIXED_PERIOD_KEYS.includes(key))),
+                window: values.period,
+              },
         cron: SCHEDULE_FREQUENCIES[values.frequency].cron,
         timezone,
         recipients: values.recipients.split(',').map((s) => s.trim()).filter(Boolean),
@@ -121,6 +157,43 @@ export function ScheduleReportModal({ open, onClose, reportType, params, timezon
             {Object.entries(SCHEDULE_FREQUENCIES).map(([key, value]) => (
               <option key={key} value={key}>
                 {value.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1.5 text-body-strong text-text">
+          <span>
+            Period <span className="text-danger">*</span>
+          </span>
+          <select
+            {...register('period')}
+            disabled={busy}
+            aria-describedby="schedule-period-hint"
+            className="h-btn rounded-md border border-border bg-bg-surface px-3 text-body font-normal"
+          >
+            {windowsFor(reportType).map((w) => (
+              <option key={w} value={w}>
+                {WINDOW_LABEL[w]}
+              </option>
+            ))}
+            <option value="FIXED">{`This selection · ${periodOf({ params })}`}</option>
+          </select>
+          <span id="schedule-period-hint" className="text-card-sub font-normal text-text-muted">
+            A rolling period is worked out again on every run, in the company time zone.
+          </span>
+        </label>
+        <label className="flex flex-col gap-1.5 text-body-strong text-text">
+          <span>
+            Format <span className="text-danger">*</span>
+          </span>
+          <select
+            {...register('format')}
+            disabled={busy}
+            className="h-btn rounded-md border border-border bg-bg-surface px-3 text-body font-normal"
+          >
+            {REPORT_TYPE_FORMATS[reportType].map((f) => (
+              <option key={f} value={f}>
+                {f}
               </option>
             ))}
           </select>

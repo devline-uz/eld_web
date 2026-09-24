@@ -1,5 +1,6 @@
-// web/tz.md W-24 — four states, ticket creation, and the B-12 Viewer state (button stays in the
-// DOM; a forbidden write shows inline rather than crashing the page).
+// web/tz.md W-24 — four states, ticket creation, and the B-12 (shipped) Viewer state (button
+// stays in the DOM and submits; a genuine server-side forbidden write still shows inline rather
+// than crashing the page).
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http } from 'msw';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -13,7 +14,7 @@ import { ToastProvider } from '@/shared/ui/Toast';
 import SupportPage from './SupportPage';
 import { SUPPORT_REASON } from './lib/copy';
 
-// WB-245/WB-246 — Submit follows `support:FULL`; each test picks the level (FULL by default).
+// WB-250 — B-12 shipped: Submit follows `support:READ`; each test picks the level (FULL by default).
 const perm = vi.hoisted(() => ({ support: 'FULL' as 'NONE' | 'READ' | 'FULL' }));
 vi.mock('@/shared/auth/usePermission', () => ({
   usePermission: () => ({
@@ -191,7 +192,7 @@ describe('SupportPage — W-24', () => {
     expect(await screen.findByText('Support ticket opened')).toBeInTheDocument();
   });
 
-  it('the attachment controls are disabled with a reason and the body carries no fake "attached" marker (B-91)', async () => {
+  it('the attachment checkboxes send attachments: [{ kind }] (B-91, shipped)', async () => {
     const user = userEvent.setup();
     server.use(http.get(url(endpoints.support.tickets), () => ok({ items: [], page: 1, limit: 50, total: 0, totalPages: 1 })));
     let body: unknown = null;
@@ -206,11 +207,10 @@ describe('SupportPage — W-24', () => {
     await user.click(await screen.findByRole('button', { name: /new ticket/i }));
     const diagnostics = screen.getByRole('checkbox', { name: /include device diagnostics/i });
     const events = screen.getByRole('checkbox', { name: /include the last 24 h/i });
-    expect(diagnostics).toBeDisabled();
-    expect(diagnostics).not.toBeChecked();
-    expect(events).toBeDisabled();
-    expect(events).not.toBeChecked();
-    expect(screen.getByText(/cannot attach device diagnostics or ELD events/)).toBeInTheDocument();
+    expect(diagnostics).not.toBeDisabled();
+    expect(events).not.toBeDisabled();
+    await user.click(diagnostics);
+    await user.click(events);
     expect(screen.getByText(/the ticket API cannot carry files/)).toBeInTheDocument();
     await user.selectOptions(screen.getByDisplayValue('ELD hardware'), 'Billing');
     await user.selectOptions(screen.getByDisplayValue('Normal'), 'URGENT');
@@ -219,8 +219,12 @@ describe('SupportPage — W-24', () => {
     await user.click(screen.getByRole('button', { name: 'Submit ticket' }));
 
     await waitFor(() => expect(body).not.toBeNull());
-    // Exactly the description — no "[Device diagnostics attached]" claim for a file never sent.
-    expect(body).toMatchObject({ category: 'Billing', priority: 'URGENT', body: 'Invoice looks wrong.' });
+    expect(body).toMatchObject({
+      category: 'Billing',
+      priority: 'URGENT',
+      body: 'Invoice looks wrong.',
+      attachments: [{ kind: 'DEVICE_DIAGNOSTICS' }, { kind: 'ELD_EVENTS_24H' }],
+    });
   });
 
   it('shows a generic error toast for a non-403 ticket submission failure', async () => {
@@ -274,16 +278,16 @@ describe('SupportPage — W-24', () => {
     expect(screen.getByRole('button', { name: 'Submit ticket' })).toBeInTheDocument();
   });
 
-  // WB-245 — a Viewer (`support: READ`) still sees `+ New ticket` (§21.4) but Submit is disabled
-  // with the B-12 reason on screen instead of a guaranteed 403.
-  it('support:READ (Viewer): New ticket stays, Submit ticket is disabled with the reason and sends nothing', async () => {
+  // WB-250 — a Viewer (`support: READ`) sees `+ New ticket` (§21.4) and can now submit it
+  // (B-12 shipped, needs only `support: READ`).
+  it('support:READ (Viewer, B-12 shipped): New ticket stays, Submit ticket is enabled and sends the request', async () => {
     perm.support = 'READ';
     const user = userEvent.setup();
-    let calls = 0;
+    let created: unknown = null;
     server.use(http.get(url(endpoints.support.tickets), () => ok({ items: [], page: 1, limit: 50, total: 0, totalPages: 1 })));
     server.use(
-      http.post(url(endpoints.support.createTicket), () => {
-        calls += 1;
+      http.post(url(endpoints.support.createTicket), async ({ request }) => {
+        created = await request.json();
         return ok({ id: 'tkt_1' }, 201);
       }),
     );
@@ -295,12 +299,10 @@ describe('SupportPage — W-24', () => {
     await user.type(screen.getByLabelText(/subject/i), 'Cannot see my hours');
     await user.type(screen.getByLabelText(/description/i), 'Please help.');
     const submit = screen.getByRole('button', { name: 'Submit ticket' });
-    expect(submit).toBeDisabled();
-    expect(submit).toHaveAccessibleDescription(SUPPORT_REASON.ticketForbidden);
-    expect(screen.getByText(SUPPORT_REASON.ticketForbidden)).toBeVisible();
+    expect(submit).toBeEnabled();
+    expect(screen.queryByText(SUPPORT_REASON.ticketForbidden)).not.toBeInTheDocument();
     await user.click(submit);
-    expect(calls).toBe(0);
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    await waitFor(() => expect(created).not.toBeNull());
   });
 });
 
@@ -318,11 +320,23 @@ const TICKET = {
 };
 
 describe('SupportPage — stage-2', () => {
-  it('Start chat is disabled with a visible reason (B-90)', async () => {
-    server.use(http.get(url(endpoints.support.tickets), () => ok({ items: [], page: 1, limit: 50, total: 0, totalPages: 1 })));
+  it('Start chat opens a modal and POSTs /support/chats (B-90, shipped)', async () => {
+    const user = userEvent.setup();
+    let body: unknown = null;
+    server.use(
+      http.get(url(endpoints.support.tickets), () => ok({ items: [], page: 1, limit: 50, total: 0, totalPages: 1 })),
+      http.post(url(endpoints.support.chats), async ({ request }) => {
+        body = await request.json();
+        return ok({ conversationId: 'conv_1', messageId: 'msg_1' });
+      }),
+    );
     renderPage();
-    expect(await screen.findByRole('button', { name: /start chat/i })).toBeDisabled();
-    expect(screen.getByText('Live chat is not available yet — use email or the roadside line.')).toBeInTheDocument();
+    const startChat = await screen.findByRole('button', { name: /start chat/i });
+    expect(startChat).not.toBeDisabled();
+    await user.click(startChat);
+    await user.type(screen.getByLabelText(/message/i), 'The PT30 keeps disconnecting.');
+    await user.click(screen.getByRole('button', { name: 'Start chat' }));
+    await waitFor(() => expect(body).toEqual({ message: 'The PT30 keeps disconnecting.' }));
   });
 
   it('gives the search box an accessible name', async () => {

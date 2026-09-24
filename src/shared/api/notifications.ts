@@ -160,6 +160,8 @@ export function toNotificationItem(incoming: IncomingNotification): Notification
     readAt: str(incoming.readAt),
     createdAt: incoming.createdAt ?? new Date().toISOString(),
     category: (str(incoming.category) as NotificationCategory | null) ?? null,
+    ...(str(incoming.kind) ? { kind: str(incoming.kind) as string } : {}),
+    severity: (str(incoming.severity) as NotificationItem['severity']) ?? null,
   };
 }
 
@@ -213,7 +215,8 @@ export function applyNotificationRead(queryClient: QueryClient, id: string, read
   }
 }
 
-/** Where clicking a notification goes (§11.27). `null` = no destination; the caller still has to
+/** Where clicking a notification goes (§11.27). Keys are the backend's PascalCase `objectType`
+ * (`deriveObjectRef` in notification-kind.ts + the audit-style writers), lower-cased. `null` = no destination; the caller still has to
  * check the route against the user's permissions before navigating. */
 const TARGETS: Record<string, (id: string | null) => string> = {
   vehicle: (id) => (id ? `/vehicles/${id}` : '/vehicles'),
@@ -224,6 +227,9 @@ const TARGETS: Record<string, (id: string | null) => string> = {
   dvirreport: () => '/dvir',
   defect: () => '/dvir',
   workorder: () => '/dvir',
+  maintenanceschedule: () => '/dvir',
+  // `alert.edit_request` — objectId is the ELD event id of the pending edit, not a route param.
+  eldevent: () => '/hos-logs',
   report: () => '/reports',
   datatransfer: () => '/reports/fmcsa',
   conversation: () => '/messages',

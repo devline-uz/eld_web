@@ -2,11 +2,13 @@
 // Design: web/roles and screens/admin panel/Reports — inspection and defect history.jpg
 // Route `/reports/dvir?from=&to=&unit=&defect=` · Perm `reports` READ (+ `dvir`) · not for DISPATCHER.
 //
-// Rows are the real DVIR, defect, driver and unit lists joined client-side (as W-09 does). Two
-// things the backend cannot answer yet are left out, not faked (gap B-47): the `from`/`to` filter on
-// `GET /dvir` (the list is walked back page by page past `from`, capped, and the range applied to
-// `submittedAt` in the carrier zone — a capped walk is labelled, never shown as a complete count),
-// and the expected-inspection schedule behind `Missing pre-trip`, `Not submitted` and `98% compliance`.
+// Rows are the real DVIR, defect, driver and unit lists joined client-side (as W-09 does); the list
+// is walked back page by page past `from`, capped, and the range applied to `submittedAt` in the
+// carrier zone — a capped walk is labelled, never shown as a complete count (WB-096).
+// B-47 (shipped): `GET /dvir/compliance?from&to` supplies the expected-vs-submitted pre-trip schedule
+// — its `compliancePct` is the `98% compliance` chip as is, and each `missing` entry is a
+// `Missing` row (`Not submitted`) and counts toward `Missing pre-trip`. The server names the unit
+// and day only, so a missing row's DRIVER is `—` and the KPI chip counts units, not drivers.
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { ColumnDef } from '@tanstack/react-table';
@@ -16,13 +18,12 @@ import { useAuth } from '@/shared/auth/AuthProvider';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
 import {
-  useCarrierTransferConfig,
+  useTransferConfig,
   useDvirReportRows,
-  useGenerateReport,
   useReportVehicles,
   type DvirReportRow,
 } from '@/shared/api/reports';
-import type { DefectSeverity } from '@/shared/api/dvir';
+import { useDvirCompliance, type DefectSeverity, type DvirCompliance } from '@/shared/api/dvir';
 import { formatCarrier } from '@/shared/format/datetime';
 import { EMPTY } from '@/shared/format/empty';
 import { formatNumber } from '@/shared/format/numbers';
@@ -49,7 +50,7 @@ import {
   refusalText,
   visibleReportRoutes,
 } from './reportMeta';
-import { useExportWhenReady, useGuardedMutate, useReportReadyToasts, useTrackedReport } from './useReportJobs';
+import { useExportWhenReady, useReportReadyToasts } from './useReportJobs';
 import { useReportRange } from './useReportRange';
 
 const TYPE_LABEL: Record<string, string> = { PRE_TRIP: 'Pre-trip', POST_TRIP: 'Post-trip', INTERMEDIATE: 'Intermediate' };
@@ -63,6 +64,26 @@ function worstSeverity(row: DvirReportRow): DefectSeverity | null {
   );
 }
 
+/** A pre-trip the compliance schedule expected and nobody submitted (B-47). */
+interface MissingRow {
+  kind: 'missing';
+  id: string;
+  vehicleId: string;
+  unitNumber: string;
+  /** Carrier-zone calendar day, `YYYY-MM-DD`. */
+  date: string;
+}
+type SubmittedRow = DvirReportRow & { kind: 'submitted' };
+type TableRow = SubmittedRow | MissingRow;
+
+function missingRows(compliance: DvirCompliance | undefined, unit: string | undefined): MissingRow[] {
+  return (compliance?.missing ?? [])
+    .filter((m) => !unit || m.vehicleId === unit)
+    .map((m) => ({ kind: 'missing', id: `missing:${m.vehicleId}:${m.date}`, ...m }));
+}
+
+const unitCountLabel = (n: number) => `${formatNumber(n)} ${n === 1 ? 'unit' : 'units'}`;
+
 function StatusBadge({ row }: { row: DvirReportRow }) {
   if (row.vehicleCondition === 'SATISFACTORY') return <Badge tone="success" dot>No defects</Badge>;
   if (row.repairStatus === 'REPAIRED') return <Badge tone="info" dot>Fixed</Badge>;
@@ -73,21 +94,21 @@ export default function DvirReportPage() {
   const navigate = useNavigate();
   const { can } = usePermission();
   const { user } = useAuth();
-  const carrier = useCarrierTransferConfig(can('carrierSettings'));
+  // B-45 (shipped) — `GET /carrier/transfer-config` is `reports` READ, so FLEET_MANAGER reads the
+  // real carrier zone and eRODS mode too.
+  const carrier = useTransferConfig();
   const timezone = carrier.data?.timezone ?? CARRIER_TZ_FALLBACK;
   const { from, to, params, setRange, setParam } = useReportRange(timezone);
   const unit = params.get('unit') ?? undefined;
   const defectType = params.get('defect');
 
   const data = useDvirReportRows(unit, from);
+  const compliance = useDvirCompliance({ from, to });
   const vehicles = useReportVehicles();
-  // WB-146 — single-flight: `isPending` alone still lets a real double click queue two reports.
-  const generate = useGuardedMutate(useGenerateReport());
-  // WB-166 — this screen has no `Recently generated` card, so without following the queued job
-  // `Download PDF` confirmed nothing at all unless a `report.ready` frame happened to arrive.
-  const pdfJob = useTrackedReport();
   const exportCsv = useExportWhenReady();
-  const [pdfError, setPdfError] = useState<string | null>(null);
+  // B-96 (shipped 2026-09-24) — the READ shortcut now takes `format=PDF`, so `Download PDF` no
+  // longer needs `reports` FULL (`POST /reports/generate`); VIEWER keeps the button (WB-247).
+  const exportPdf = useExportWhenReady({ announce: true });
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(10);
@@ -109,13 +130,23 @@ export default function DvirReportPage() {
     () => (defectType ? inRange.filter((r) => r.defects.some((d) => d.category === defectType)) : inRange),
     [inRange, defectType],
   );
+  const missing = useMemo(() => missingRows(compliance.data, unit), [compliance.data, unit]);
+  // Newest day first; a missing pre-trip leads its own day. A defect-type filter has nothing to
+  // match on a DVIR that was never submitted, so it hides the missing rows.
+  const tableRows = useMemo((): TableRow[] => {
+    const submitted = rows.map((r): SubmittedRow => ({ ...r, kind: 'submitted' }));
+    if (defectType) return submitted;
+    const keyOf = (r: TableRow) =>
+      r.kind === 'missing' ? `${r.date} ~` : formatCarrier(r.submittedAt, timezone, 'yyyy-MM-dd HH:mm:ss');
+    return [...submitted, ...missing].sort((a, b) => keyOf(b).localeCompare(keyOf(a)));
+  }, [rows, missing, defectType, timezone]);
   // Rows are paged client-side, so a shrinking list (a refetch, an invalidation from another
   // screen) can leave `page` past the last one and the table empty with no way back except
   // Previous. Step to the last page that still has rows, the way W-01 does.
-  const totalPages = Math.max(1, Math.ceil(rows.length / limit));
+  const totalPages = Math.max(1, Math.ceil(tableRows.length / limit));
   const currentPage = Math.min(page, totalPages);
   if (currentPage !== page) setPage(currentPage);
-  const pageRows = rows.slice((currentPage - 1) * limit, currentPage * limit);
+  const pageRows = tableRows.slice((currentPage - 1) * limit, currentPage * limit);
 
   const kpi = useMemo(() => {
     const withDefects = rows.filter((r) => r.vehicleCondition === 'DEFECTS_FOUND').length;
@@ -133,18 +164,26 @@ export default function DvirReportPage() {
 
   useDynamicSubtitle(`${rangeLabel(from, to)} · ${atLeast(rows.length)} inspections · ${atLeast(kpi.withDefects)} with defects`);
 
-  const columns = useMemo<ColumnDef<DvirReportRow, unknown>[]>(
+  const columns = useMemo<ColumnDef<TableRow, unknown>[]>(
     () => [
       {
         id: 'submittedAt',
         header: 'Date & time',
-        cell: ({ row }) => <span className="tabular-nums">{formatCarrier(row.original.submittedAt, timezone, 'MMM dd, HH:mm')}</span>,
+        cell: ({ row }) => (
+          <span className="tabular-nums">
+            {row.original.kind === 'missing'
+              ? `${formatCarrier(`${row.original.date}T12:00:00Z`, 'UTC', 'MMM dd')}, ${EMPTY.dash}`
+              : formatCarrier(row.original.submittedAt, timezone, 'MMM dd, HH:mm')}
+          </span>
+        ),
       },
       {
         id: 'unit',
         header: 'Unit',
         cell: ({ row }) =>
-          row.original.vehicle ? (
+          row.original.kind === 'missing' ? (
+            <span className="font-semibold tabular-nums text-text">{`#${row.original.unitNumber}`}</span>
+          ) : row.original.vehicle ? (
             <span className="font-semibold tabular-nums text-text">{`#${row.original.vehicle.unitNumber}`}</span>
           ) : (
             <span className="text-text-muted">{EMPTY.unassigned}</span>
@@ -154,6 +193,7 @@ export default function DvirReportPage() {
         id: 'driver',
         header: 'Driver',
         cell: ({ row }) => {
+          if (row.original.kind === 'missing') return <span className="text-text-muted">{EMPTY.dash}</span>;
           const d = row.original.driver;
           if (!d) return <span className="text-text-muted">{EMPTY.unassigned}</span>;
           const name = `${d.firstName} ${d.lastName}`;
@@ -165,12 +205,18 @@ export default function DvirReportPage() {
           );
         },
       },
-      { id: 'type', header: 'Type', cell: ({ row }) => TYPE_LABEL[row.original.type] ?? row.original.type },
+      {
+        id: 'type',
+        header: 'Type',
+        cell: ({ row }) => (row.original.kind === 'missing' ? TYPE_LABEL.PRE_TRIP : (TYPE_LABEL[row.original.type] ?? row.original.type)),
+      },
       {
         id: 'defects',
         header: 'Defects',
         cell: ({ row }) =>
-          row.original.defects.length ? (
+          row.original.kind === 'missing' ? (
+            <span className="text-warning">{EMPTY.notSubmitted}</span>
+          ) : row.original.defects.length ? (
             row.original.defects.map((d) => d.category).join(' · ')
           ) : (
             <span className="text-text-muted">{EMPTY.none}</span>
@@ -180,6 +226,7 @@ export default function DvirReportPage() {
         id: 'severity',
         header: 'Severity',
         cell: ({ row }) => {
+          if (row.original.kind === 'missing') return <span className="text-text-muted">{EMPTY.dash}</span>;
           const worst = worstSeverity(row.original);
           return worst ? <SeverityBadge severity={worst} /> : <span className="text-text-muted">{EMPTY.dash}</span>;
         },
@@ -189,6 +236,7 @@ export default function DvirReportPage() {
         header: 'Corrected by',
         cell: ({ row }) => {
           const r = row.original;
+          if (r.kind === 'missing') return <span className="text-text-muted">{EMPTY.dash}</span>;
           if (r.mechanicName) return r.mechanicName;
           if (r.vehicleCondition === 'DEFECTS_FOUND' && r.repairStatus !== 'REPAIRED') {
             return <span className="text-warning">{EMPTY.unassigned}</span>;
@@ -202,7 +250,11 @@ export default function DvirReportPage() {
         meta: { numeric: true },
         cell: ({ row }) => (
           <span className="flex justify-end">
-            <StatusBadge row={row.original} />
+            {row.original.kind === 'missing' ? (
+              <Badge tone="warning" dot>Missing</Badge>
+            ) : (
+              <StatusBadge row={row.original} />
+            )}
           </span>
         ),
       },
@@ -264,21 +316,16 @@ export default function DvirReportPage() {
           >
             Export CSV
           </Button>
+          {/* B-96 (shipped) — `GET /reports/dvir?format=PDF` is a `reports` READ shortcut, same as
+              Export CSV, so this stays for every role that can see the screen (WB-247). */}
           <Button
             variant="primary"
             iconLeft={<Download size={16} strokeWidth={1.75} />}
-            loading={generate.isPending || pdfJob.isPending}
-            disabled={generate.isPending || pdfJob.isPending}
-            onClick={() => {
-              setPdfError(null);
-              generate.mutate(
-                { type: 'DVIR', format: 'PDF', params: { from, to, ...(unit ? { vehicleId: unit } : {}) } },
-                {
-                  onSuccess: (queued) => pdfJob.track(queued.reportId),
-                  onError: (error) => setPdfError(refusalText(error)),
-                },
-              );
-            }}
+            loading={exportPdf.isPending}
+            disabled={exportPdf.isPending}
+            onClick={() =>
+              exportPdf.start({ kind: 'dvir', params: { from, to, format: 'PDF', ...(unit ? { vehicleId: unit } : {}) } })
+            }
           >
             Download PDF
           </Button>
@@ -293,19 +340,29 @@ export default function DvirReportPage() {
       )}
 
       <ActionAlert
-        message={pdfError ?? pdfJob.error ?? exportCsv.error}
+        message={exportPdf.error ?? exportCsv.error}
         onDismiss={() => {
-          setPdfError(null);
-          pdfJob.clearError();
+          exportPdf.clearError();
           exportCsv.clearError();
         }}
       />
 
-      {data.isLoading ? (
+      {data.isLoading || compliance.isLoading ? (
         <KpiRowSkeleton />
       ) : (
         <div className="grid grid-cols-4 gap-card-gap">
-          <KpiCard label="Inspections submitted" value={data.isError ? EMPTY.dash : atLeast(rows.length)} icon={ClipboardCheck} iconTone="info" />
+          <KpiCard
+            label="Inspections submitted"
+            value={data.isError ? EMPTY.dash : atLeast(rows.length)}
+            // Fleet-wide pre-trip compliance, as computed by the server (never recomputed here).
+            chip={
+              compliance.data && !unit
+                ? { text: `${formatNumber(compliance.data.compliancePct)}% compliance`, tone: compliance.data.compliancePct >= 95 ? 'success' : 'warning' }
+                : undefined
+            }
+            icon={ClipboardCheck}
+            iconTone="info"
+          />
           <KpiCard
             label="With defects"
             value={data.isError ? EMPTY.dash : atLeast(kpi.withDefects)}
@@ -319,7 +376,17 @@ export default function DvirReportPage() {
             icon={Clock}
             iconTone="success"
           />
-          <KpiCard label="Missing pre-trip" value={EMPTY.dash} icon={AlertTriangle} iconTone="danger" />
+          <KpiCard
+            label="Missing pre-trip"
+            value={compliance.isError || !compliance.data ? EMPTY.dash : formatNumber(missing.length)}
+            chip={
+              compliance.data && missing.length > 0
+                ? { text: unitCountLabel(new Set(missing.map((m) => m.vehicleId)).size), tone: 'danger' }
+                : undefined
+            }
+            icon={AlertTriangle}
+            iconTone="danger"
+          />
         </div>
       )}
 
@@ -330,7 +397,7 @@ export default function DvirReportPage() {
             subtitle="Driver and mechanic signatures are attached to every record"
             action={
               !data.isLoading && !data.isError ? (
-                <Badge tone="neutral" className="tabular-nums">{`${atLeast(rows.length)} records · showing ${pageRows.length}`}</Badge>
+                <Badge tone="neutral" className="tabular-nums">{`${atLeast(tableRows.length)} records · showing ${pageRows.length}`}</Badge>
               ) : undefined
             }
           />
@@ -352,11 +419,11 @@ export default function DvirReportPage() {
               isLoading={data.isLoading}
               emptyState={<EmptyState title={empty.title} description={empty.description} />}
             />
-            {rows.length > 0 && (
+            {tableRows.length > 0 && (
               <Pagination
                 page={currentPage}
                 limit={limit}
-                total={rows.length}
+                total={tableRows.length}
                 totalPages={totalPages}
                 itemLabel="inspections"
                 onPageChange={setPage}

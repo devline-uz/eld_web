@@ -9,7 +9,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
 import { ok, url } from '@/mocks/envelope';
 import { endpoints } from '@/shared/api/endpoints';
-import { tripsActiveSliceQuery, tripsCountQuery, tripsKpiQuery } from '@/shared/api/trips';
+import { tripsActiveSliceQuery, tripsKpiQuery } from '@/shared/api/trips';
 import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/client';
 import { ToastProvider } from '@/shared/ui/Toast';
 import * as RealtimeProviderModule from '@/shared/realtime/RealtimeProvider';
@@ -265,7 +265,8 @@ describe('W-11 Dispatch & Trips', () => {
       expect.arrayContaining([
         tripsActiveSliceQuery('ASSIGNED').queryKey,
         tripsActiveSliceQuery('IN_PROGRESS').queryKey,
-        tripsCountQuery('PLANNED').queryKey,
+        tripsActiveSliceQuery('DRAFT').queryKey,
+        tripsActiveSliceQuery('PLANNED').queryKey,
         tripsKpiQuery().queryKey,
       ]),
     );

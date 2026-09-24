@@ -200,15 +200,23 @@ describe('AlertRulesPage — W-21', () => {
 /* ------------------------------------------------------------------ stage-2 row actions */
 
 describe('AlertRulesPage — stage-2 row actions', () => {
-  it('the two organisation channel switches are disabled with a visible reason (B-87)', async () => {
-    server.use(http.get(url(endpoints.alertRules.list), () => ok([])));
+  it('the two organisation channel switches are real and PATCH /notification-channels (B-87, shipped)', async () => {
+    let patched: unknown = null;
+    server.use(
+      http.get(url(endpoints.alertRules.list), () => ok([])),
+      http.get(url(endpoints.notificationChannels.root), () => ok({ email: { enabled: true }, webhook: { enabled: false } })),
+      http.patch(url(endpoints.notificationChannels.root), async ({ request }) => {
+        patched = await request.json();
+        return ok({ email: { enabled: true }, webhook: { enabled: true } });
+      }),
+    );
+    const user = userEvent.setup();
     renderPage();
     await screen.findByText('No alert rules yet');
-    expect(screen.getByRole('switch', { name: 'Email channel' })).toBeDisabled();
-    expect(screen.getByRole('switch', { name: 'Webhook channel' })).toBeDisabled();
-    expect(
-      screen.getByText('Organisation-wide channel defaults are not available yet — choose the channels on each rule.'),
-    ).toBeInTheDocument();
+    const webhookSwitch = await screen.findByRole('switch', { name: 'Webhook channel' });
+    expect(webhookSwitch).not.toBeDisabled();
+    await user.click(webhookSwitch);
+    await waitFor(() => expect(patched).toEqual({ webhook: { enabled: true } }));
   });
 
   it('gives the search box an accessible name', async () => {
@@ -252,15 +260,39 @@ describe('AlertRulesPage — stage-2 row actions', () => {
     expect(await screen.findByDisplayValue('HOS violation (copy)')).toBeInTheDocument();
   });
 
-  it('Mute for 24 h is disabled with a visible reason (B-86)', async () => {
+  it('Mute for 24 h PATCHes a mutedUntil (B-86, shipped)', async () => {
     const user = userEvent.setup();
-    server.use(http.get(url(endpoints.alertRules.list), () => ok([RULE])));
+    let patched: { mutedUntil?: string } | null = null;
+    server.use(
+      http.get(url(endpoints.alertRules.list), () => ok([RULE])),
+      http.patch(url(endpoints.alertRules.update(RULE.id)), async ({ request }) => {
+        patched = (await request.json()) as { mutedUntil?: string };
+        return ok({ ...RULE, mutedUntil: patched.mutedUntil });
+      }),
+    );
     renderPage();
     await screen.findByText('HOS violation');
 
     await user.click(screen.getByRole('button', { name: 'Rule actions' }));
-    const item = await screen.findByText('Mute for 24 h');
-    expect(item).toHaveAttribute('aria-disabled', 'true');
-    expect(screen.getByText(/Timed mute is not available yet/)).toBeInTheDocument();
+    await user.click(await screen.findByText('Mute for 24 h'));
+    await waitFor(() => expect(patched?.mutedUntil).toBeTruthy());
+  });
+
+  it('Test rule sends POST /alert-rules/:id/test (B-9, shipped)', async () => {
+    const user = userEvent.setup();
+    let called = false;
+    server.use(
+      http.get(url(endpoints.alertRules.list), () => ok([RULE])),
+      http.post(url(endpoints.alertRules.test(RULE.id)), () => {
+        called = true;
+        return ok({ triggered: true });
+      }),
+    );
+    renderPage();
+    await screen.findByText('HOS violation');
+
+    await user.click(screen.getByRole('button', { name: 'Rule actions' }));
+    await user.click(await screen.findByText('Test rule'));
+    await waitFor(() => expect(called).toBe(true));
   });
 });

@@ -346,7 +346,7 @@ describe('11.11 · Request a log edit', () => {
     expect(within(dialog).getByRole('button', { name: 'ON duty' })).toBeDisabled();
     // …and `D` is the one status that stays selectable.
     expect(within(dialog).getByRole('button', { name: 'Driving' })).toBeEnabled();
-    // WB-021 / B-39 — YM and PC stay disabled for their own reason.
+    // YM sits on ON and PC on OFF — both would restatus driving, so both are refused too.
     expect(within(dialog).getByRole('button', { name: 'Yard move' })).toBeDisabled();
     expect(within(dialog).getByRole('button', { name: 'Personal' })).toBeDisabled();
     expect(
@@ -356,18 +356,16 @@ describe('11.11 · Request a log edit', () => {
     ).toBeGreaterThan(0);
   });
 
-  it('WB-059 · leaves OFF/SB/ON/D selectable outside automatic driving (YM/PC still disabled)', async () => {
+  it('WB-059 · leaves every chip (incl. YM/PC, B-39) selectable outside automatic driving', async () => {
     renderPage();
     await userEvent.click(await screen.findByRole('button', { name: /Add \/ edit event/ }));
     const dialog = await screen.findByRole('dialog');
     const start = within(dialog).getByPlaceholderText('14:26:58');
     await userEvent.clear(start);
     await userEvent.type(start, '20:00:00');
-    for (const name of ['OFF duty', 'Sleeper', 'Driving', 'ON duty']) {
+    for (const name of ['OFF duty', 'Sleeper', 'Driving', 'ON duty', 'Yard move', 'Personal']) {
       expect(within(dialog).getByRole('button', { name })).toBeEnabled();
     }
-    expect(within(dialog).getByRole('button', { name: 'Yard move' })).toBeDisabled();
-    expect(within(dialog).getByRole('button', { name: 'Personal' })).toBeDisabled();
     expect(
       within(dialog).queryByText('Driving time can never be shortened, deleted or restatused (49 CFR §395.30).'),
     ).not.toBeInTheDocument();
@@ -457,12 +455,15 @@ describe('11.13 · Unassigned driving', () => {
     );
     await userEvent.click(within(dialog).getByRole('button', { name: 'Assign 1 segment' }));
 
+    // B-83 — `Ask each driver to confirm` is drawn checked, so the assignment waits for the driver.
     await vi.waitFor(() =>
       expect(assigned).toEqual({
         driverId: DRIVER_ID,
         annotation: 'Yard movement at the home terminal.',
+        requireDriverConfirmation: true,
       }),
     );
+    expect(await screen.findByText('1 segment sent for confirmation')).toBeInTheDocument();
   });
 
   it('refuses an annotation under 4 characters with the FMCSA error string', async () => {
@@ -831,14 +832,13 @@ describe('overlay controls actually drive the payload', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: /OFF duty/ }));
     expect(within(dialog).getByRole('button', { name: /OFF duty/ })).toHaveAttribute('aria-pressed', 'true');
     await userEvent.type(within(dialog).getByPlaceholderText('15:30:00'), '15:30:00');
-    // WB-070 — the location is shown read-only and never sent (gap B-39).
-    expect(within(dialog).getByRole('textbox', { name: /Location/ })).toHaveAttribute('readonly');
-    const [odometer, engineHours] = within(dialog)
-      .getAllByRole('textbox')
-      .filter((input) => ['993589', ''].includes((input as HTMLInputElement).value) && input.tagName === 'INPUT' && !(input as HTMLInputElement).readOnly && !(input as HTMLInputElement).placeholder);
-    await userEvent.clear(odometer!);
-    await userEvent.type(odometer!, '993600');
-    await userEvent.type(engineHours!, '1079.4');
+    // B-39 — the location is editable now, but an untouched one is never sent.
+    expect(within(dialog).getByRole('textbox', { name: /Location/ })).not.toHaveAttribute('readonly');
+    const odometer = within(dialog).getByRole('textbox', { name: /Odometer/ });
+    const engineHours = within(dialog).getByRole('textbox', { name: /Engine hours/ });
+    await userEvent.clear(odometer);
+    await userEvent.type(odometer, '993600');
+    await userEvent.type(engineHours, '1079.4');
     await userEvent.type(within(dialog).getByRole('textbox', { name: /Reason for the edit/ }), 'Loading at shipper #4821.');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Send edit request' }));
 
@@ -851,6 +851,8 @@ describe('overlay controls actually drive the payload', () => {
       odometerMi: 993600,
       engineHours: 1079.4,
       reason: 'Loading at shipper #4821.',
+      proposedSpecial: 'NONE',
+      notifyDriver: true,
     });
     expect(body).not.toHaveProperty('location');
     expect(await screen.findByText('Edit request sent')).toBeInTheDocument();
@@ -1228,34 +1230,74 @@ describe('W-08 · stage-2 dead controls', () => {
     expect(within(dialog).getByText('Event ID')).toBeInTheDocument();
   });
 
-  it('WB-197 · 11.13 `Ask each driver to confirm` is disabled with its reason (gap B-83)', async () => {
-    server.use(http.get(url(endpoints.unidentified.list), () => ok({ items: [UNASSIGNED], total: 1, page: 1 })));
+  it('B-83 · 11.13 unchecking `Ask each driver to confirm` assigns immediately', async () => {
+    let assigned: unknown = null;
+    server.use(
+      http.get(url(endpoints.unidentified.list), () => ok({ items: [UNASSIGNED], total: 1, page: 1 })),
+      http.post(url(endpoints.unidentified.assign(UNASSIGNED.id)), async ({ request }) => {
+        assigned = await request.json();
+        return ok({ ...UNASSIGNED, status: 'ASSIGNED', assignedDriverId: DRIVER_ID });
+      }),
+    );
     renderPage();
     await userEvent.click(await screen.findByText('1 unassigned segment'));
     const dialog = await screen.findByRole('dialog');
 
     const checkbox = within(dialog).getByLabelText('Ask each driver to confirm in the app');
-    expect(checkbox).toBeDisabled();
-    expect(checkbox).not.toBeChecked();
-    expect(
-      within(dialog).getByText('Not available yet — assigning a segment does not ask the driver to confirm it.'),
-    ).toBeInTheDocument();
+    expect(checkbox).toBeEnabled();
+    expect(checkbox).toBeChecked();
+    expect(within(dialog).queryByText(/Not available yet/)).not.toBeInTheDocument();
+    await userEvent.click(checkbox);
+    await userEvent.click(within(dialog).getByLabelText('Select Unit #101 segment'));
+    await userEvent.selectOptions(within(dialog).getByLabelText('Resolution for Unit #101'), DRIVER_ID);
+    await userEvent.type(within(dialog).getByRole('textbox'), 'Driver forgot to log in.');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Assign 1 segment' }));
+
+    await vi.waitFor(() =>
+      expect(assigned).toEqual({ driverId: DRIVER_ID, annotation: 'Driver forgot to log in.' }),
+    );
+    expect(await screen.findByText('1 segment assigned')).toBeInTheDocument();
   });
 
-  it('WB-200 · 11.11 `Notify the driver immediately` states that it is always on', async () => {
-    server.use(http.get(url(endpoints.unidentified.list), () => ok({ items: [], total: 0, page: 1 })));
+  it('B-39 · 11.11 sends YM as ON + proposedSpecial, a name-only location and notifyDriver', async () => {
+    let sent: Record<string, unknown> | null = null;
+    server.use(
+      http.get(url(endpoints.unidentified.list), () => ok({ items: [], total: 0, page: 1 })),
+      http.post(url(endpoints.logs.createEditRequest(DRIVER_ID)), async ({ request }) => {
+        sent = (await request.json()) as Record<string, unknown>;
+        return ok({ id: 'req_1', status: 'PENDING', applied: false }, 201);
+      }),
+    );
     renderPage();
     await screen.findByText('No unassigned segments');
     await userEvent.click(await screen.findByRole('button', { name: 'Row actions' }));
     await userEvent.click(await screen.findByRole('button', { name: 'Request an edit' }));
 
     const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).queryByText(/cannot be proposed/)).not.toBeInTheDocument();
+    expect(within(dialog).queryByText(/Always on/)).not.toBeInTheDocument();
+    const start = within(dialog).getByPlaceholderText('14:26:58');
+    await userEvent.clear(start);
+    await userEvent.type(start, '20:00:00');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Yard move' }));
+    const location = within(dialog).getByRole('textbox', { name: /Location/ });
+    await userEvent.clear(location);
+    await userEvent.type(location, 'Florence, KY yard');
     const notify = within(dialog).getByLabelText('Notify the driver immediately');
-    expect(notify).toBeDisabled();
+    expect(notify).toBeEnabled();
     expect(notify).toBeChecked();
-    expect(within(dialog).getByText(/Always on — the driver must accept the proposal/)).toBeInTheDocument();
-    expect(
-      within(dialog).getByText(/Yard move and Personal conveyance cannot be proposed/),
-    ).toBeInTheDocument();
+    await userEvent.click(notify);
+    expect(within(dialog).getByText('The proposal still waits in the driver app until the driver accepts it.')).toBeInTheDocument();
+    await userEvent.type(within(dialog).getByRole('textbox', { name: /Reason for the edit/ }), 'Yard move at terminal.');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Send edit request' }));
+
+    await vi.waitFor(() => expect(sent).not.toBeNull());
+    expect(sent).toMatchObject({
+      proposedStatus: 'ON',
+      proposedSpecial: 'YM',
+      location: { name: 'Florence, KY yard' },
+      notifyDriver: false,
+      reason: 'Yard move at terminal.',
+    });
   });
 });

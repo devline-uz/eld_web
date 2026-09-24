@@ -183,11 +183,23 @@ export const dvirsPageQuery = (params: DvirsPageParams): PageQueryOptions<DvirRo
 });
 
 /** The newest DVIRs (`submittedAt` desc is the API default). One request serves the "Recent
- * DVIRs · Last 48 hours" list, the `DVIRs today` KPI and the 11.23 filter window (B-60). The
- * API has no date-range param, so a day with more than `RECENT_DVIR_WINDOW` submissions is
- * counted as `RECENT_DVIR_WINDOW+` (B-66). */
+ * DVIRs · Last 48 hours" list, the `DVIRs today` KPI and the 11.23 filter window (B-60). B-47
+ * shipped a server `from`/`to` on `GET /dvir` — the 48 h bound is now applied server-side
+ * (`recentDvirsFrom`) instead of only in memory, so a unit with heavy submissions past the
+ * `RECENT_DVIR_WINDOW` row cap still gets an accurate 48 h slice; a day with more than
+ * `RECENT_DVIR_WINDOW` submissions inside that slice is still counted as `RECENT_DVIR_WINDOW+`
+ * (B-66, the window cap itself is unchanged). */
 export const RECENT_DVIR_WINDOW = 200;
-export const recentDvirsQuery = () => dvirsPageQuery({ page: 1, limit: RECENT_DVIR_WINDOW });
+/** Rounded to the nearest 5 minutes so the query key — and therefore the request — stays stable
+ * between renders instead of refetching on every tick; the 48 h window still slides forward at
+ * least every 5 minutes. */
+export function recentDvirsFrom(): string {
+  const bucketMs = 5 * 60 * 1000;
+  const now = Math.floor(Date.now() / bucketMs) * bucketMs;
+  return new Date(now - 48 * 60 * 60 * 1000).toISOString();
+}
+export const recentDvirsQuery = (from: string = recentDvirsFrom()) =>
+  dvirsPageQuery({ page: 1, limit: RECENT_DVIR_WINDOW, from });
 
 /** The newest defects (`createdAt` desc) — joined onto the recent DVIRs by `dvirId`; `/dvir`
  * does not embed its defects and `/defects` has no `dvirId` param (B-66). */
@@ -218,9 +230,10 @@ export function joinDvirs(
   });
 }
 
-/** W-09 `DVIRs` tab (WD-073): the newest `RECENT_DVIR_WINDOW` DVIRs, joined with the session-wide
- * driver/vehicle lookups and the newest defects. Filtering (48 h, search, 11.23 groups) is the
- * page's — it runs on this bounded window, never on a fetch-everything set. */
+/** W-09 `DVIRs` tab (WD-073): the newest `RECENT_DVIR_WINDOW` DVIRs submitted in the last 48 h
+ * (server `from`, B-47), joined with the session-wide driver/vehicle lookups and the newest
+ * defects. Search and the 11.23 groups still run on this bounded window client-side, never on a
+ * fetch-everything set. */
 export function useRecentDvirs() {
   const dvirQuery = useQuery(recentDvirsQuery());
   const defectsQuery = useQuery(recentDefectsQuery());

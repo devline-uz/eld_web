@@ -11,13 +11,16 @@ const DUTY_LABEL: Record<NonNullable<SearchDriverHit['dutyStatus']>, string> = {
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
+/** `dutyStatus` / `openWarnings` are always `null` on the live `GET /search` (backend D-098): the
+ * duty slot renders `—` rather than a guessed status; an unknown warning count is omitted, the
+ * same as zero (web/decisions.md WD-093). */
 export function driverSubtitle(hit: SearchDriverHit): string {
   const parts: string[] = [];
   if (hit.unitNumber) parts.push(`Unit #${hit.unitNumber}`);
-  if (hit.dutyStatus) parts.push(DUTY_LABEL[hit.dutyStatus]);
+  else if (hit.homeTerminalName) parts.push(hit.homeTerminalName);
+  parts.push(hit.dutyStatus ? DUTY_LABEL[hit.dutyStatus] : '—');
   if (hit.openViolations) parts.push(plural(hit.openViolations, 'violation'));
   if (hit.openWarnings) parts.push(plural(hit.openWarnings, 'warning'));
-  if (parts.length === 0 && hit.homeTerminalName) parts.push(hit.homeTerminalName);
   return parts.join(' · ');
 }
 

@@ -29,10 +29,10 @@ import {
   useMessages,
   useSendMessage,
   useCreateConversation,
+  useMarkConversationRead,
   upsertMessage,
   bumpConversation,
   setMessageStatus,
-  markConversationRead,
   type ConversationListItem,
   type MessageRow,
 } from '@/shared/api/messaging';
@@ -50,6 +50,17 @@ function conversationName(conversation: ConversationListItem): string {
 function conversationInitials(conversation: ConversationListItem): string {
   const parts = conversationName(conversation).split(' ');
   return ((parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase();
+}
+
+/** B-37 (shipped) — the newest message's body, prefixed `You:` for the caller's own sends;
+ * falls back to the pre-B-37 placeholder text when the server has no `lastMessage` on the row
+ * (an older cache entry) but still has a `lastMessageAt`. */
+function conversationPreview(conversation: ConversationListItem): string {
+  if (conversation.lastMessage) {
+    const mine = Boolean(conversation.lastMessage.senderUserId);
+    return `${mine ? 'You: ' : ''}${conversation.lastMessage.body}`;
+  }
+  return conversation.lastMessageAt ? 'Tap to open the conversation' : 'No messages yet';
 }
 
 export default function MessagesPage() {
@@ -174,13 +185,15 @@ export default function MessagesPage() {
     },
   });
 
-  /** WB-117 — there is no server mark-read endpoint (backend-gaps.md B-67); opening a still-unread
-   * conversation clears its badge locally, the honest thing the panel can do without one. */
+  const markRead = useMarkConversationRead(user?.id);
+  const markReadMutate = markRead.mutate;
+  /** B-67 (shipped) — opening a still-unread conversation persists `lastReadAt` server-side via
+   * `POST /conversations/:id/read`; the local cache clears the badge instantly (`onMutate`). */
   useEffect(() => {
     if (selected?.unread) {
-      markConversationRead(queryClient, selected.id, user?.id);
+      markReadMutate(selected.id);
     }
-  }, [selected?.id, selected?.unread, queryClient, user?.id]);
+  }, [selected?.id, selected?.unread, markReadMutate]);
 
   const unreadCount = conversations.items.filter((c) => c.unread).length;
   const driverUnit = selected?.driver ? liveFleet.data?.items.find((u) => u.driverId === selected.driver!.id) : undefined;
@@ -342,9 +355,7 @@ export default function MessagesPage() {
                       <span className="shrink-0 text-caption text-text-muted">{formatRelativeShort(conversation.lastMessageAt)}</span>
                     </span>
                     <span className="flex items-center justify-between gap-2">
-                      <span className="truncate text-caption text-text-muted">
-                        {conversation.lastMessageAt ? 'Tap to open the conversation' : 'No messages yet'}
-                      </span>
+                      <span className="truncate text-caption text-text-muted">{conversationPreview(conversation)}</span>
                       {conversation.unread && (
                         <span aria-label="Unread" className="size-2 shrink-0 rounded-full bg-info" />
                       )}

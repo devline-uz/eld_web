@@ -123,13 +123,12 @@ export const INTEGRATION_STATUS = {
 
 /** Roles & permissions (W-21) and Create a role (11.19). */
 export const ROLE_COPY = {
-  /**
-   * WB-234 — one `reportsTransfer` key covers both the FMCSA / DOT pack export and data transfers
-   * (B-95 asks for a separate transfer key), so 11.19 shows one checkbox for both.
-   */
-  transferCheckbox: 'Can export FMCSA / DOT pack and send data transfers',
-  /** The role-matrix row for the same key. */
-  transferMatrixRow: 'Export FMCSA / DOT pack & send data transfers',
+  /** B-95 (shipped 2026-09-24) — `dataTransfer` is its own 23rd permission key; the pack export
+   * checkbox (`reportsTransfer`) and the data-transfer checkbox (`dataTransfer`) are separate. */
+  fmcsaPackCheckbox: 'Can export FMCSA / DOT pack',
+  dataTransferCheckbox: 'Can send data transfers to an inspector',
+  transferMatrixRow: 'Export FMCSA / DOT pack',
+  dataTransferMatrixRow: 'Send data transfers to an inspector',
 } as const;
 
 /**

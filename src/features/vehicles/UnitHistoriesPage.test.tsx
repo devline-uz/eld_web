@@ -172,15 +172,56 @@ describe('W-05 Unit histories — states', () => {
     }
   });
 
-  // WB-243 / B-4 — Play only flipped its own label; there is no track to replay.
-  it('Route replay Play is disabled and states the B-4 reason on screen', async () => {
+  // B-4 shipped — a day with zero segments has no track to replay: Play stays disabled and says why.
+  it('Route replay Play is disabled on a day with no segments', async () => {
     server.use(http.get(url(endpoints.vehicles.histories('veh_1')), () => ok(emptyHistories())));
     renderPage();
     const play = await screen.findByRole('button', { name: 'Play' });
     expect(play).toBeDisabled();
-    expect(play).toHaveAccessibleDescription(/Route replay is not available yet.*B-4/);
-    expect(play).toHaveAttribute('title', expect.stringMatching(/B-4/));
-    expect(screen.getByText(/Route replay is not available yet/)).toBeVisible();
+    expect(screen.getByText(/No track to replay/)).toBeVisible();
     expect(screen.queryByRole('button', { name: 'Pause' })).not.toBeInTheDocument();
+  });
+
+  // B-4 shipped — a day with a real track lets Play flip to Pause and animate along the segments.
+  it('Route replay Play works when the day has a track', async () => {
+    const segA = {
+      marker: 'A',
+      type: 'DRIVE' as const,
+      startAt: '2026-09-01T08:00:00.000Z',
+      endAt: '2026-09-01T09:00:00.000Z',
+      durationSec: 3600,
+      location: 'Columbus, OH',
+      distanceMi: 42,
+      odometerMi: 993589,
+      driverName: 'John Smith',
+      lat: 39.96,
+      lon: -83.0,
+    };
+    const segB = {
+      ...segA,
+      marker: 'B',
+      type: 'STOP' as const,
+      startAt: '2026-09-01T09:00:00.000Z',
+      endAt: '2026-09-01T09:30:00.000Z',
+      lat: 40.1,
+      lon: -83.5,
+    };
+    server.use(
+      http.get(url(endpoints.vehicles.histories('veh_1')), () =>
+        ok({
+          ...emptyHistories(),
+          firstMovementAt: segA.startAt,
+          lastMovementAt: segB.endAt,
+          segments: [segA, segB],
+          driveSegments: 1,
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    const play = await screen.findByRole('button', { name: 'Play' });
+    expect(play).toBeEnabled();
+    await user.click(play);
+    expect(await screen.findByRole('button', { name: 'Pause' })).toBeInTheDocument();
   });
 });

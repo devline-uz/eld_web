@@ -88,6 +88,9 @@ describe('notification cache patches', () => {
     const normalised = toNotificationItem({ id: 'n', type: 't', title: 'T', objectType: 'Vehicle', objectId: 'v1', readAt: 5 });
     expect(normalised).toMatchObject({ body: '', objectType: 'Vehicle', objectId: 'v1', readAt: null, category: null });
     expect(normalised.createdAt).toEqual(expect.any(String));
+    const critical = toNotificationItem({ id: 'c', type: 't', title: 'T', kind: 'VIOLATION', severity: 'CRITICAL', category: 'VIOLATIONS' });
+    expect(critical).toMatchObject({ kind: 'VIOLATION', severity: 'CRITICAL', category: 'VIOLATIONS' });
+    expect(normalised.severity).toBeNull();
   });
 
   it('resolves deep links by object type', () => {
@@ -108,6 +111,8 @@ describe('notification cache patches', () => {
       ['HosViolation', '/hos-logs'],
       ['UnidentifiedSegment', '/hos-logs'],
       ['Device', '/settings/devices'],
+      ['MaintenanceSchedule', '/dvir'],
+      ['EldEvent', '/hos-logs'],
     ];
     for (const [objectType, to] of cases) {
       expect(notificationTarget({ objectType, objectId: null })).toBe(to);

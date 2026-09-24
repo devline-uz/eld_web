@@ -68,37 +68,6 @@ function assertBodyMatches(method: string, path: string, body: unknown): void {
 
 /* ------------------------------------------------------------------ response contract */
 
-/**
- * Documented drift, recorded in web/backend-gaps.md ("Contract deviations", 2026-09-24): the
- * telemetry route returns the raw Prisma `TelemetryPoint`, whose `Decimal(9,6)` lat/lon serialise
- * as STRINGS (verified live on :3002), while the openapi example shows numbers. The mock follows
- * the live API; this is the only place the difference is tolerated, and only for a string that
- * parses as a finite number — anything else still fails.
- */
-const DECIMAL_STRING_FIELDS: Record<string, string[]> = {
-  '/api/vehicles/{id}/telemetry': ['latitude', 'longitude'],
-};
-
-function normaliseDecimals(documented: string, data: unknown): unknown {
-  const fields = DECIMAL_STRING_FIELDS[documented];
-  if (!fields) return data;
-  const page = data as { items: Array<Record<string, unknown>> };
-  return {
-    ...page,
-    items: page.items.map((row) => {
-      const out = { ...row };
-      for (const f of fields) {
-        if (typeof out[f] === 'string') {
-          const n = Number(out[f]);
-          expect(Number.isFinite(n), `${documented} ${f}=${String(out[f])} is not a decimal string`).toBe(true);
-          out[f] = n;
-        }
-      }
-      return out;
-    }),
-  };
-}
-
 describe('Phase 13 responses match openapi.json (default MSW handlers)', () => {
   const GETS: Array<[string, string, Record<string, string | number> | undefined]> = [
     ['/api/vehicles/{id}/histories', endpoints.vehicles.histories('veh_1'), { date: '2026-09-24' }],
@@ -118,7 +87,7 @@ describe('Phase 13 responses match openapi.json (default MSW handlers)', () => {
 
   it.each(GETS)('GET %s', async (documented, path, params) => {
     const data = await client.get(path, { params });
-    assertMatchesOpenApi('GET', documented, normaliseDecimals(documented, data));
+    assertMatchesOpenApi('GET', documented, data);
   });
 
   const WRITES: Array<[string, string, string, unknown]> = [

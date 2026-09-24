@@ -2,8 +2,8 @@
 //
 // Real endpoints (backend/src/modules/users/me.controller.ts):
 //   GET/PATCH /me/profile · GET /me/sessions · DELETE /me/sessions/:id
-// Gaps (web/backend-gaps.md): B-50 sessions have no `current`/location and leak `refreshHash`;
-// B-51 profile has no avatar upload, no `jobTitle` on PATCH.
+// Phase 13 (B-11/B-50/B-51, shipped) — avatar, preferences and `DELETE /me/sessions` live in
+// `shared/api/me.ts` (WD-088) and are used from the cards directly.
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { client } from '@/shared/api/client';
 import { endpoints } from '@/shared/api/endpoints';
@@ -21,11 +21,11 @@ export interface MyProfile {
   authProvider: 'PASSWORD' | 'GOOGLE';
   googleUid: string | null;
   role: { key: string; name: string };
-  /** ⛔ GAP B-51 — not returned today; rendered only when present. */
+  /** B-51 — presigned URL of the uploaded photo, `null` when there is none. */
   avatarUrl?: string | null;
 }
 
-/** The live `GET /me/sessions` row. `current` and `location` are GAP B-50 (optional). */
+/** The live `GET /me/sessions` row (B-50: `current` marks this browser's session). */
 export interface MySession {
   id: string;
   userAgent: string | null;
@@ -40,6 +40,7 @@ export interface MySession {
 export interface UpdateProfileInput {
   firstName: string;
   lastName: string;
+  jobTitle?: string;
   phone?: string;
 }
 
@@ -63,7 +64,7 @@ export function useUpdateProfile() {
   });
 }
 
-/** Only the fields the UI reads — the raw row also carries `refreshHash` (B-50), dropped here. */
+/** Only the fields the UI reads — anything else the row ever carries is dropped here. */
 function toSession(row: MySession): MySession {
   return {
     id: row.id,
@@ -94,20 +95,5 @@ export function useRevokeSession() {
         rows?.filter((row) => row.id !== id),
       );
     },
-  });
-}
-
-/**
- * `Sign out everywhere` — there is no revoke-all endpoint (B-50), so every listed session is
- * revoked one by one with the real `DELETE /me/sessions/:id`. Sequential on purpose: a partial
- * failure stops at the first error and the list is refetched so it shows the truth.
- */
-export function useRevokeAllSessions() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (ids: string[]) => {
-      for (const id of ids) await client.delete(endpoints.me.session(id));
-    },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: qk.sessions }),
   });
 }

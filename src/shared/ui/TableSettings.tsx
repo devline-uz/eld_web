@@ -5,8 +5,8 @@ import { Button } from './Button';
 import { cn } from './cn';
 
 // owner: web-design-system — §5.5 / 11.24. Column visibility + order, persisted by the
-// caller to `localStorage['obk.table.<screen>']` (saved views are out of scope here — v1
-// backend has no `/me/preferences` endpoint, see web/backend-gaps.md).
+// caller with `useUiPreference('tableColumns', '<screen>', defaults)` from
+// `shared/auth/uiPreferences.ts` — `PUT /me/preferences` (B-11) with a localStorage fallback.
 
 export interface TableColumnSetting {
   id: string;

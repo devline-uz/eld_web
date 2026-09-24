@@ -4,7 +4,7 @@
 // Route `/account`, every role, no permission key. One long page: the `MY ACCOUNT` sub-nav, the
 // topbar Account menu (11.26) and the Notifications panel link to the section anchors
 // `#profile`, `#security`, `#notifications`, `#language`, `#sessions` — the section is scrolled
-// into view and focused on load. `Notifications` / `Language & region` are read-only until B-11.
+// into view and focused on load. `Language & region` saves via `/me/preferences` (B-11).
 import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useDynamicSubtitle } from '@/app/layouts/Topbar';

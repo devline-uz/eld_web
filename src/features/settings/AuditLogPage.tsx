@@ -346,7 +346,10 @@ export default function AuditLogPage() {
                     <td className="px-3">
                       <span className="flex items-center gap-2">
                         <Avatar name={entry.actorName ?? entry.actorType} size="sm" />
-                        <span className="text-text">{entry.actorName ?? entry.actorType}</span>
+                        <span className="flex flex-col">
+                          <span className="text-text">{entry.actorName ?? entry.actorType}</span>
+                          {entry.actorEmail && <span className="text-caption text-text-muted">{entry.actorEmail}</span>}
+                        </span>
                       </span>
                     </td>
                     <td className="px-3">

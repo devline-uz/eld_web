@@ -15,7 +15,6 @@ import { endpoints } from '@/shared/api/endpoints';
 import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/client';
 import { ToastProvider } from '@/shared/ui/Toast';
 import DriverProfilePage from './DriverProfilePage';
-import { DRIVER_DOCUMENTS_REASON } from './lib/copy';
 
 let permission = true;
 vi.mock('@/shared/auth/usePermission', () => ({
@@ -46,6 +45,7 @@ const DRIVER = {
   appVersion: null,
   appPlatform: null,
   registeredAt: '2025-04-18T00:00:00.000Z',
+  emailVerifiedAt: '2025-04-19T00:00:00.000Z',
 };
 
 /** Renders the current router location so navigation can be asserted without a route tree. */
@@ -75,6 +75,7 @@ afterEach(() => {
   server.resetHandlers();
   resetAuthBridge();
   permission = true;
+  vi.unstubAllGlobals();
 });
 afterAll(() => server.close());
 
@@ -145,20 +146,57 @@ describe('W-07 Driver profile — four states', () => {
   });
 });
 
-// WB-236 / B-94 — the Documents tab stays disabled (no driver-document API) but now says why on
-// screen: a tooltip, a "Soon" badge and a visible caption wired as its accessible description.
-describe('W-07 Driver profile — Documents tab shows its disabled reason', () => {
-  it('is disabled with the reason as title, visible caption and accessible description', async () => {
-    server.use(http.get(url(endpoints.drivers.detail('drv_1')), () => ok(DRIVER)));
+// B-94 shipped — the Documents tab reads/writes the real `/drivers/:id/documents` API.
+describe('W-07 Driver profile — Documents tab', () => {
+  it('lists documents and uploads a new one', async () => {
+    let uploaded = false;
+    server.use(
+      http.get(url(endpoints.drivers.detail('drv_1')), () => ok(DRIVER)),
+      http.get(url(endpoints.drivers.documents('drv_1')), () =>
+        ok(
+          uploaded
+            ? [{ id: 'doc_1', type: 'CDL', fileName: 'cdl.pdf', expiresAt: null, uploadedAt: '2026-01-01T00:00:00.000Z', url: 'https://mock/doc_1' }]
+            : [],
+        ),
+      ),
+      http.post(url(endpoints.drivers.documents('drv_1')), () =>
+        ok({ id: 'doc_1', type: 'CDL', fileName: 'cdl.pdf', expiresAt: null, uploadedAt: '2026-01-01T00:00:00.000Z', url: 'https://mock/doc_1', uploadUrl: 'https://mock-storage/put' }),
+      ),
+    );
+    // `putToPresignedUrl` calls the raw `fetch` against a foreign (non-MSW) origin on purpose
+    // (it must carry no bearer token). Only that one URL is intercepted here; everything else
+    // (the real API calls `client.ts` also makes with `fetch`) falls through to MSW's own patched
+    // fetch, captured before the stub and restored by the shared `afterEach` (`vi.unstubAllGlobals`).
+    const realFetch = global.fetch;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+        if (typeof input === 'string' && input.includes('mock-storage')) {
+          uploaded = true;
+          return Promise.resolve({ ok: true } as Response);
+        }
+        return realFetch(input, init);
+      }),
+    );
+
+    const user = userEvent.setup();
     renderPage();
     await screen.findByRole('heading', { name: 'John Smith' });
-    const tab = screen.getByRole('button', { name: /^Documents/ });
-    expect(tab).toBeDisabled();
-    expect(tab).toHaveTextContent('Soon');
-    expect(tab).toHaveAttribute('title', DRIVER_DOCUMENTS_REASON);
-    expect(tab).toHaveAccessibleDescription(DRIVER_DOCUMENTS_REASON);
-    expect(screen.getByText(DRIVER_DOCUMENTS_REASON)).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Documents' }));
+    expect(await screen.findByText('No documents uploaded.')).toBeInTheDocument();
+
+    const file = new File(['%PDF-1.4'], 'cdl.pdf', { type: 'application/pdf' });
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(input, file);
+
+    expect(await screen.findByText('cdl.pdf')).toBeInTheDocument();
+    expect(await screen.findByText('cdl.pdf uploaded')).toBeInTheDocument();
   });
+
+  // The `usePermission` mock in this file only distinguishes "has `drivers`" (page guard) from
+  // "does not" — it does not model READ vs FULL, so the upload-card / delete-button gating on
+  // `<Can perm="drivers" level="FULL">` is covered by `shared/auth/Can` and the RBAC fixture
+  // (100% of the 22 keys × 4 roles × 3 levels, per `web-rbac-matrix`), not re-tested here.
 });
 
 // Regression: a long email used to run into its label and spill past the card edge — the
@@ -267,15 +305,20 @@ describe('W-07 Driver profile — long values stay inside the profile card', () 
     expect(patched).toEqual([{ status: 'INACTIVE' }]);
   });
 
-  it('B-81 · `Reset app password` is disabled with its reason on screen', async () => {
-    server.use(http.get(url(endpoints.drivers.detail('drv_1')), () => ok(DRIVER)));
+  it('B-81 shipped · `Reset app password` calls POST /drivers/:id/reset-password', async () => {
+    server.use(
+      http.get(url(endpoints.drivers.detail('drv_1')), () => ok(DRIVER)),
+      http.post(url(endpoints.drivers.resetPassword('drv_1')), () => ok({ emailedTo: 'john.smith@example.com' })),
+    );
     const user = userEvent.setup();
     renderPage();
     await screen.findByRole('heading', { name: 'John Smith' });
 
     await user.click(screen.getByRole('button', { name: 'More' }));
-    expect(await screen.findByText('Reset app password')).toHaveAttribute('data-disabled');
-    expect(screen.getByText(/the driver resets the app password from the sign-in screen/)).toBeInTheDocument();
+    const item = await screen.findByText('Reset app password');
+    expect(item).not.toHaveAttribute('data-disabled');
+    await user.click(item);
+    expect(await screen.findByText('Password reset emailed')).toBeInTheDocument();
   });
 
   it('WB-188 · `Edit` opens the profile form and PATCHes the changed fields', async () => {

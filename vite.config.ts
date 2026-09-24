@@ -55,6 +55,16 @@ export default defineConfig({
           if (/^(zod|react-hook-form|@hookform)/.test(pkg)) return 'vendor-forms';
           if (/^@tanstack\/(table-core|react-table|react-virtual|virtual-core)/.test(pkg))
             return 'vendor-table';
+          // Lazy — anchored popups (popover, dropdown/menu, tabs, checkbox, switch) and the
+          // floating-ui positioning engine are used only by feature screens and the lazy topbar
+          // overlays. In the catch-all `vendor` bucket they rode along eagerly (WB-249).
+          if (
+            /^@radix-ui\/react-(popover|dropdown-menu|menu|popper|roving-focus|arrow|use-size|tabs|checkbox|switch|use-previous)[/@]/.test(
+              pkg,
+            ) ||
+            pkg.startsWith('@floating-ui/')
+          )
+            return 'vendor-popover';
           // Eager: React itself and the router the shell mounts.
           if (/^(react|react-dom|react-router|scheduler)[/@]/.test(pkg) || /^(react|react-dom|react-router|scheduler)$/.test(pkg))
             return 'vendor-react';

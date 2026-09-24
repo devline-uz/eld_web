@@ -46,10 +46,11 @@ function satisfactionTone(value: number): 'success' | 'warning' {
 export default function FeedbackPage() {
   const { toast } = useToast();
   const submitFeedback = useSubmitFeedback();
-  // WB-246 / B-12 — `POST /feedback` needs `support:FULL`; a READ role sees the reason
-  // instead of a guaranteed 403. The inline 403 below stays as the fallback.
+  // WB-250 — B-12 shipped: `POST /feedback` now only needs `support:READ`. A `support:NONE`
+  // role never reaches this page (route + nav gated on `support`), so any role that can see
+  // this screen can submit. The inline 403 below stays as a fallback for a server-side refusal.
   const { can } = usePermission();
-  const canSubmit = can('support', 'FULL');
+  const canSubmit = can('support', 'READ');
   const [tab, setTab] = useState<Tab>('send');
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [comment, setComment] = useState('');

@@ -1,13 +1,21 @@
 // owner: web-settings-admin — 11.20 Register an ELD device (web/tz.md §11.20). `devices` FULL.
 // Validation comes from the shared `deviceSchema`, which matches `CreateDeviceDto` (WB-024).
-import { QrCode } from 'lucide-react';
+import { useState } from 'react';
+import { QrCode, Wifi, Loader2 } from 'lucide-react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
 import { ApiError } from '@/shared/api/errors';
-import { useCreateDevice, usePairDevice, type DeviceModel } from '@/shared/api/settingsAdmin';
+import {
+  useCreateDevice,
+  usePairDevice,
+  useUpdateDevice,
+  useDeviceDiagnostics,
+  type DeviceModel,
+  type DeviceRow,
+} from '@/shared/api/settingsAdmin';
 import { useVehiclesPicker } from '@/shared/api/vehicles';
 import { Field, inputClass, ToggleRow } from './formKit';
 import { SETTINGS_REASON } from '../lib/copy';
@@ -22,7 +30,15 @@ export function RegisterDeviceModal({ onClose }: { onClose: () => void }) {
 
   const createDevice = useCreateDevice();
   const pairDevice = usePairDevice();
+  const updateDevice = useUpdateDevice();
+  const diagnostics = useDeviceDiagnostics();
   const vehiclesQuery = useVehiclesPicker();
+
+  const [autoFirmware, setAutoFirmware] = useState(false);
+  const [shareDiagnostics, setShareDiagnostics] = useState(false);
+  // Present once `POST /devices` (and the optional pair/policy follow-up) succeeds — the modal
+  // switches to a "test the connection" step instead of closing immediately (B-8).
+  const [registered, setRegistered] = useState<DeviceRow | null>(null);
 
   const {
     register,
@@ -36,9 +52,35 @@ export function RegisterDeviceModal({ onClose }: { onClose: () => void }) {
   });
 
   // Both requests count: the pair call runs inside `onSuccess`, so the modal is still busy.
-  const submitting = createDevice.isPending || pairDevice.isPending;
-  // Every editable control is inside react-hook-form now (the B-88 toggles are read-only).
-  const dirty = isDirty;
+  const submitting = createDevice.isPending || pairDevice.isPending || updateDevice.isPending;
+  const dirty = isDirty || autoFirmware || shareDiagnostics;
+
+  function finishPolicy(device: DeviceRow, paired: boolean) {
+    // `POST /devices` still has no firmware-policy fields (B-88 "still open") — set them with the
+    // documented follow-up `PATCH /devices/:id` instead of dropping the toggle state.
+    if (autoFirmware || shareDiagnostics) {
+      updateDevice.mutate(
+        { id: device.id, dto: { autoFirmware, shareDiagnostics } },
+        {
+          onSettled: () => {
+            toast({
+              kind: 'success',
+              title: `Device ${device.serial} registered`,
+              description: paired ? 'ELD paired and the driver was notified.' : undefined,
+            });
+            setRegistered({ ...device, autoFirmware, shareDiagnostics });
+          },
+        },
+      );
+      return;
+    }
+    toast({
+      kind: 'success',
+      title: `Device ${device.serial} registered`,
+      description: paired ? 'ELD paired and the driver was notified.' : undefined,
+    });
+    setRegistered(device);
+  }
 
   function onSubmit(values: RegisterDeviceValues) {
     // `mutate()` resolves RHF's `submitting` before the request lands — guard on the mutation
@@ -51,17 +93,11 @@ export function RegisterDeviceModal({ onClose }: { onClose: () => void }) {
           if (values.vehicleId) {
             pairDevice.mutate(
               { id: device.id, vehicleId: values.vehicleId },
-              {
-                onSettled: () => {
-                  toast({ kind: 'success', title: `Device ${device.serial} registered`, description: 'ELD paired and the driver was notified.' });
-                  onClose();
-                },
-              },
+              { onSettled: () => finishPolicy(device, true) },
             );
             return;
           }
-          toast({ kind: 'success', title: `Device ${device.serial} registered` });
-          onClose();
+          finishPolicy(device, false);
         },
         onError: (error) => {
           if (error instanceof ApiError && error.status === 409) {
@@ -71,6 +107,59 @@ export function RegisterDeviceModal({ onClose }: { onClose: () => void }) {
           toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
         },
       },
+    );
+  }
+
+  if (registered) {
+    const result = diagnostics.data;
+    return (
+      <Modal
+        open
+        onClose={onClose}
+        title="Register an ELD device"
+        subtitle={`${registered.serial} registered`}
+        size="md"
+        footer={
+          <Button variant="primary" size="lg" onClick={onClose}>
+            Done
+          </Button>
+        }
+      >
+        <div className="flex flex-col gap-4">
+          <div className="flex items-center justify-between gap-4 rounded-md bg-bg-subtle p-4">
+            <div className="flex items-center gap-3">
+              <Wifi size={32} strokeWidth={1.5} className="text-text-muted" />
+              <div>
+                <p className="text-body-strong text-text">Test connection</p>
+                <p className="text-caption text-text-muted">
+                  Reads the device&apos;s last recorded status — not a live round-trip.
+                </p>
+              </div>
+            </div>
+            <Button
+              variant="secondary"
+              type="button"
+              disabled={diagnostics.isPending}
+              iconLeft={diagnostics.isPending ? <Loader2 size={16} className="animate-spin" /> : undefined}
+              onClick={() =>
+                diagnostics.mutate(registered.id, {
+                  onError: (error) =>
+                    toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }),
+                })
+              }
+            >
+              Test connection
+            </Button>
+          </div>
+          {result && (
+            <div className="flex flex-col gap-1 rounded-md border border-border p-3 text-body text-text">
+              <p>Signal strength: <span className="text-body-strong capitalize">{result.signalStrength}</span></p>
+              <p>GPS lock: <span className="text-body-strong">{result.gpsLock ? 'Acquired' : 'Not acquired'}</span></p>
+              <p>Device responded: <span className="text-body-strong">{result.responded ? 'Yes' : 'No'}</span></p>
+            </div>
+          )}
+        </div>
+      </Modal>
     );
   }
 
@@ -85,8 +174,6 @@ export function RegisterDeviceModal({ onClose }: { onClose: () => void }) {
       footer={
         <>
           <ModalCancelButton disabled={submitting} />
-          {/* ⛔ GAP B-8 — `GET /devices/:id/diagnostics` does not exist on the live API; the
-              `Test connection` button stays out of the DOM until it ships (§20). */}
           <Button variant="primary" size="lg" loading={submitting} disabled={submitting} onClick={handleSubmit(onSubmit)}>
             Register device
           </Button>
@@ -141,22 +228,21 @@ export function RegisterDeviceModal({ onClose }: { onClose: () => void }) {
           </Field>
         </div>
 
-        {/* ⛔ GAP B-88 — `POST /devices` takes `serial`, `model` and `firmware` only. Both toggles
-            were collected and dropped (WB-214); they are disabled with the reason on screen
-            rather than claiming a setting that never left the browser. */}
+        {/* B-88 (shipped) — `POST /devices` still has no firmware-policy fields; the toggle state
+            is applied with a follow-up `PATCH /devices/:id` right after registration. */}
         <ToggleRow
           title="Update firmware automatically"
-          description={SETTINGS_REASON.autoFirmware}
-          checked={false}
-          disabled
-          tooltip={SETTINGS_REASON.autoFirmwareTooltip}
+          description="Installs new firmware over Bluetooth automatically."
+          checked={autoFirmware}
+          disabled={submitting}
+          onChange={setAutoFirmware}
         />
         <ToggleRow
           title="Send diagnostics to OneBook support"
-          description={SETTINGS_REASON.diagnosticsOptIn}
-          checked={false}
-          disabled
-          tooltip={SETTINGS_REASON.diagnosticsOptInTooltip}
+          description="Lets OneBook support read this device's connection diagnostics."
+          checked={shareDiagnostics}
+          disabled={submitting}
+          onChange={setShareDiagnostics}
         />
       </form>
     </Modal>

@@ -9,8 +9,8 @@ import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
 import { useDynamicSubtitle } from '@/app/layouts/Topbar';
 import { useRoom } from '@/shared/realtime/useRoom';
-import { useDeactivateDriver, useDriver, useDriverHos } from '@/shared/api/drivers';
-import { useVehicle } from '@/shared/api/vehicles';
+import { useDeactivateDriver, useDriver, useDriverHos, useResetDriverPassword, useSendDriverVerification } from '@/shared/api/drivers';
+import { useCoDriverPairings, useVehicle } from '@/shared/api/vehicles';
 import { client } from '@/shared/api/client';
 import { endpoints } from '@/shared/api/endpoints';
 import { ApiError } from '@/shared/api/errors';
@@ -27,7 +27,8 @@ import { orNone } from '@/shared/format/empty';
 import { qk, qkRoot } from '@/shared/api/queryKeys';
 import { messagesHref } from '@/shared/lib/messagesHref';
 import { EditDriverModal } from './components/EditDriverModal';
-import { DRIVER_DOCUMENTS_REASON, DRIVER_TOAST, NO_PASSWORD_RESET } from './lib/copy';
+import { DriverDocumentsTab } from './components/DriverDocumentsTab';
+import { DRIVER_TOAST } from './lib/copy';
 import { DVIR_HREF, tripsHrefForDriver } from './lib/links';
 
 const TABS = ['overview', 'hos', 'dvirs', 'trips', 'documents', 'activity'] as const;
@@ -80,6 +81,14 @@ export default function DriverProfilePage() {
   const hosQuery = useDriverHos(id);
   const vehicleQuery = useVehicle(driverQuery.data?.assignedVehicleId ?? undefined);
   const fleetManagerQuery = useDriverFleetManager(driverQuery.data?.fleetManagerId ?? null);
+  const coDriverPairingQuery = useCoDriverPairings({ driverId: id, active: true, limit: 1 }, Boolean(id));
+  const coDriverPairing = coDriverPairingQuery.data?.items[0] ?? null;
+  const coDriverPartnerId = coDriverPairing
+    ? coDriverPairing.primaryDriverId === id
+      ? coDriverPairing.coDriverId
+      : coDriverPairing.primaryDriverId
+    : undefined;
+  const coDriverQuery = useDriver(coDriverPartnerId);
 
   useDynamicSubtitle(driverQuery.data ? `Drivers › ${driverQuery.data.firstName} ${driverQuery.data.lastName}` : null);
   useRoom(id ? `driver:${id}` : null, {});
@@ -91,6 +100,24 @@ export default function DriverProfilePage() {
   // WB-183 — the row menu's `Deactivate driver` had no handler at all; it now confirms first
   // (§5.9 destructive confirm) and then really writes `PATCH /drivers/:id { status: 'INACTIVE' }`.
   const deactivate = useDeactivateDriver();
+  const resetPassword = useResetDriverPassword();
+  const sendVerification = useSendDriverVerification();
+
+  function runResetPassword() {
+    if (!id || resetPassword.isPending) return;
+    resetPassword.mutate(id, {
+      onSuccess: (result) => toast({ kind: 'success', ...DRIVER_TOAST.passwordReset(result) }),
+      onError: (error) => toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }),
+    });
+  }
+
+  function runSendVerification(email: string) {
+    if (!id || sendVerification.isPending) return;
+    sendVerification.mutate(id, {
+      onSuccess: () => toast({ kind: 'success', ...DRIVER_TOAST.verificationSent(email) }),
+      onError: (error) => toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }),
+    });
+  }
 
   function runDeactivate() {
     if (!id || deactivate.isPending) return;
@@ -148,6 +175,9 @@ export default function DriverProfilePage() {
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-page-title text-text">{name}</h1>
                 {driver.status === 'ACTIVE' && <Badge tone="success" dot>Active</Badge>}
+                {driver.email && !driver.emailVerifiedAt && (
+                  <Badge tone="warning" dot>Email not verified</Badge>
+                )}
               </div>
               <p className="mt-1 text-body text-text-muted">
                 {vehicleQuery.data ? `Unit ${vehicleQuery.data.unitNumber} · ` : ''}
@@ -179,12 +209,22 @@ export default function DriverProfilePage() {
                   </Button>
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Portal>
-                  <DropdownMenu.Content align="end" className="z-50 min-w-40 rounded-md border border-border bg-bg-surface p-1 shadow-pop">
-                    {/* ⛔ GAP B-81 — no carrier-side password reset for a driver account. */}
-                    <DropdownMenu.Item disabled className="rounded-md px-2 py-1.5 text-body text-text-muted outline-none data-[disabled]:cursor-not-allowed">
+                  <DropdownMenu.Content align="end" className="z-50 min-w-48 rounded-md border border-border bg-bg-surface p-1 shadow-pop">
+                    {/* B-81 shipped — `POST /drivers/:id/reset-password`. */}
+                    <DropdownMenu.Item
+                      onSelect={runResetPassword}
+                      className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle"
+                    >
                       Reset app password
                     </DropdownMenu.Item>
-                    <p className="max-w-56 px-2 pb-1 text-caption text-text-muted">{NO_PASSWORD_RESET}</p>
+                    {driver.email && !driver.emailVerifiedAt && (
+                      <DropdownMenu.Item
+                        onSelect={() => runSendVerification(driver.email as string)}
+                        className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle"
+                      >
+                        Resend verification email
+                      </DropdownMenu.Item>
+                    )}
                     <DropdownMenu.Item
                       onSelect={() => setConfirmDeactivate(true)}
                       className="cursor-pointer rounded-md px-2 py-1.5 text-body text-danger outline-none hover:bg-danger-soft"
@@ -199,34 +239,22 @@ export default function DriverProfilePage() {
         </div>
       </Card>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex h-9 w-fit overflow-hidden rounded-md border border-border">
-          {TABS.map((t) => (
-            <button
-              key={t}
-              type="button"
-              aria-pressed={tab === t}
-              disabled={t === 'documents'}
-              // B-94 — disabled with its reason on screen (tooltip, "Soon" badge, caption), WB-236.
-              title={t === 'documents' ? DRIVER_DOCUMENTS_REASON : undefined}
-              aria-describedby={t === 'documents' ? 'driver-documents-reason' : undefined}
-              onClick={() => setTab(t)}
-              className={
-                tab === t
-                  ? 'bg-bg-inverse px-3 text-body-strong text-text-inverse'
-                  : t === 'documents'
-                    ? 'cursor-not-allowed bg-bg-surface px-3 text-body text-text-muted'
-                    : 'bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'
-              }
-            >
-              {TAB_LABEL[t]}
-              {t === 'documents' && <Badge tone="neutral" className="ml-1.5">Soon</Badge>}
-            </button>
-          ))}
-        </div>
-        <p id="driver-documents-reason" className="text-caption text-text-muted">
-          {DRIVER_DOCUMENTS_REASON}
-        </p>
+      <div className="flex h-9 w-fit overflow-hidden rounded-md border border-border">
+        {TABS.map((t) => (
+          <button
+            key={t}
+            type="button"
+            aria-pressed={tab === t}
+            onClick={() => setTab(t)}
+            className={
+              tab === t
+                ? 'bg-bg-inverse px-3 text-body-strong text-text-inverse'
+                : 'bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'
+            }
+          >
+            {TAB_LABEL[t]}
+          </button>
+        ))}
       </div>
 
       {tab === 'overview' && (
@@ -306,15 +334,19 @@ export default function DriverProfilePage() {
             />
             <div className="mt-2">
               <DetailRow label="Username" value={driver.username} />
-              {/* ⛔ GAP B-29/B-31 — no verification state on Driver.email yet. */}
-              <DetailRow label="Email" value={driver.email ?? '—'} />
+              <DetailRow
+                label={driver.email && !driver.emailVerifiedAt ? 'Email · not verified' : 'Email'}
+                value={driver.email ?? '—'}
+              />
               <DetailRow label="Phone" value={driver.phone ?? '—'} />
               <DetailRow label="CDL number" value={driver.cdlNumber} />
               <DetailRow label="CDL state" value={driver.cdlState} />
               <DetailRow label="Home terminal" value={driver.homeTerminalName} />
               <DetailRow label="Fleet manager" value={fleetManagerQuery.data?.name ?? '—'} />
-              {/* ⛔ GAP B-7 — no /co-driver-pairings endpoint. */}
-              <DetailRow label="Co-driver" value="—" />
+              <DetailRow
+                label="Co-driver"
+                value={coDriverQuery.data ? `${coDriverQuery.data.firstName} ${coDriverQuery.data.lastName}` : '—'}
+              />
               <DetailRow label="Assigned unit" value={vehicleQuery.data?.unitNumber ?? 'Unassigned'} />
               <DetailRow label="App version" value={driver.appVersion ? `${driver.appVersion} · ${driver.appPlatform ?? ''}` : '—'} />
               <DetailRow label="Registered on" value={formatLocal(driver.registeredAt, 'shortDate')} />
@@ -361,6 +393,7 @@ export default function DriverProfilePage() {
           </p>
         </Card>
       )}
+      {tab === 'documents' && <DriverDocumentsTab driverId={driver.id} />}
       {tab === 'activity' && (
         <Card>
           <p className="text-body text-text-muted">No activity recorded.</p>

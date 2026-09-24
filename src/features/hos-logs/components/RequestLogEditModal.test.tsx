@@ -9,7 +9,11 @@ import type { LogEventView } from '@/shared/api/hosLogs';
 import { RequestLogEditModal } from './RequestLogEditModal';
 
 const mutate = vi.fn();
-vi.mock('@/shared/api/hosLogs', () => ({ useCreateEditRequest: () => ({ mutate, isPending: false }) }));
+const propose = vi.fn();
+vi.mock('@/shared/api/hosLogs', () => ({
+  useCreateEditRequest: () => ({ mutate, isPending: false }),
+  useProposeLogEvent: () => ({ mutate: propose, isPending: false }),
+}));
 vi.mock('@/shared/map/geocode', () => ({
   geocodingEnabled: true,
   PLACE_QUERY_MIN: 3,
@@ -77,7 +81,7 @@ describe('11.11 Location (geocoded)', () => {
     });
   });
 
-  it('refuses a typed name that was never picked, and sends nothing', async () => {
+  it('sends a typed name that was never picked as a name-only location (B-39)', async () => {
     mutate.mockClear();
     const user = userEvent.setup();
     const dialog = renderModal();
@@ -86,8 +90,10 @@ describe('11.11 Location (geocoded)', () => {
     await user.type(location, 'Nowhere');
     await user.type(within(dialog).getByRole('textbox', { name: /Reason for the edit/ }), 'Wrong city.');
     await user.click(within(dialog).getByRole('button', { name: 'Send edit request' }));
-    expect(await within(dialog).findByText('Pick a place from the suggestions so it can be located.')).toBeInTheDocument();
-    expect(mutate).not.toHaveBeenCalled();
+    expect(mutate).toHaveBeenCalledTimes(1);
+    expect(mutate.mock.calls[0]![0]).toMatchObject({ location: { name: 'Nowhere' } });
+    expect(mutate.mock.calls[0]![0].location).not.toHaveProperty('lat');
+    expect(propose).not.toHaveBeenCalled();
   });
 
   it('an untouched location is not sent', async () => {

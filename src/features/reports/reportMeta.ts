@@ -7,33 +7,26 @@
 import { format } from 'date-fns';
 import { ApiError, ERROR_MESSAGES } from '@/shared/api/errors';
 import { DVIR_REPORT_MAX_PAGES, type ReportRow, type ReportType, type TransferStatus } from '@/shared/api/reports';
+import { REPORT_TYPE_LABEL, fileSizeLabel, saveFile } from '@/shared/api/reportFiles';
 import { formatNumber } from '@/shared/format/numbers';
 import type { PermissionKey, Role } from '@/shared/auth/permissions';
 import type { BadgeTone } from '@/shared/ui/Badge';
 import { formatDateRange, formatInTz } from '@/shared/format/datetime';
 import { daySpan } from '@/shared/forms/fields';
 
+export { fileSizeLabel, saveFile };
+
 /**
- * ⛔ Gap B-45 — `GET /carrier` is `carrierSettings` READ, which FLEET_MANAGER lacks. Until the
- * carrier zone is readable with `reports`, the seeded carrier's zone is the fallback — the same
- * one W-01 uses (DashboardPage `carrierTz`).
+ * The zone used only until `GET /carrier/transfer-config` (B-45, shipped — `reports` READ, so every
+ * report role reads it) has answered: the seeded carrier's zone, as W-01 uses.
  */
 export const CARRIER_TZ_FALLBACK = 'America/New_York';
 
-export const REPORT_LABEL: Record<ReportType, string> = {
-  IFTA: 'IFTA mileage report',
-  ACTIVITY: 'Activity report',
-  DVIR: 'DVIR report',
-  FMCSA_PACK: 'FMCSA audit pack',
-  UNIDENTIFIED: 'Unidentified driving report',
-  SAFETY: 'Safety report',
-  // B-14 shipped 2026-09-24 — the W-12 library names these rows already used.
-  RODS: 'Driver logs (RODS)',
-  IDLE_FUEL: 'Idle & fuel report',
-};
+/** @deprecated use `REPORT_TYPE_LABEL` from `@/shared/api/reportFiles` — kept for call sites in this file. */
+export const REPORT_LABEL: Record<ReportType, string> = REPORT_TYPE_LABEL;
 
 export function reportLabel(type: string): string {
-  return (REPORT_LABEL as Record<string, string | undefined>)[type] ?? type;
+  return (REPORT_TYPE_LABEL as Record<string, string | undefined>)[type] ?? type;
 }
 
 /* ------------------------------------------------------------------ selector */
@@ -179,14 +172,6 @@ export const DVIR_WINDOW_NOTE = `Only the newest ${formatNumber(DVIR_REPORT_MAX_
 
 /* ------------------------------------------------------------------ misc */
 
-/** `2.4 MB` — the size in the `Report ready` toast. */
-export function fileSizeLabel(bytes: number | null | undefined): string {
-  if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes < 0) return '—';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
 /**
  * A server refusal, shown verbatim (§14.3). Known codes carry their exact §14.3 sentence; a code
  * with only a generic mapping (e.g. VALIDATION_FAILED on an unsupported format) shows the server's
@@ -203,38 +188,3 @@ export function refusalText(error: unknown): string {
   return error instanceof Error && error.message ? error.message : 'Something went wrong.';
 }
 
-/** True when the href would be served by this origin — `download` is only honoured there. */
-function isSameOrigin(href: string): boolean {
-  try {
-    return new URL(href, window.location.href).origin === window.location.origin;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Saves a Blob or opens a presigned URL without ever putting the URL in the DOM or a log.
- *
- * WB-140 — `download` is ignored on a cross-origin href (the presigned MinIO URL lives on
- * :19000), so the anchor navigated the SPA away and the whole session was lost. A cross-origin
- * href is therefore opened in a new context (`target="_blank"`, `rel="noopener noreferrer"`):
- * the browser downloads it from `Content-Disposition` and this document is never unloaded.
- */
-export function saveFile(source: Blob | string, fileName: string): void {
-  const href = typeof source === 'string' ? source : URL.createObjectURL(source);
-  const crossOrigin = typeof source === 'string' && !isSameOrigin(href);
-  const link = document.createElement('a');
-  link.href = href;
-  if (crossOrigin) {
-    link.target = '_blank';
-    link.rel = 'noopener noreferrer';
-  } else {
-    link.download = fileName;
-    link.rel = 'noopener';
-  }
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  // Revoking on the click's own tick can abort the download in Firefox/Safari (WB-100).
-  if (typeof source !== 'string') setTimeout(() => URL.revokeObjectURL(href), 0);
-}

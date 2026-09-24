@@ -203,14 +203,17 @@ describe('11.8 Add driver (Q-3)', () => {
     expect(screen.getByLabelText(/Exemption reason/)).toHaveAttribute('aria-invalid', 'true');
   });
 
-  it('B-82 — `Send invitation now` is disabled with its reason: the API always sends it', async () => {
+  it('B-82 shipped — `Send invitation now` is a real toggle, checked by default', async () => {
     server.use(http.get(url(endpoints.vehicles.list), () => ok({ items: [], page: 1, limit: 500, total: 0, totalPages: 1 })));
+    const user = userEvent.setup();
     renderWithProviders(<AddDriverModal onClose={() => {}} />);
 
     const checkbox = screen.getByLabelText('Send invitation now');
-    expect(checkbox).toBeDisabled();
+    expect(checkbox).toBeEnabled();
     expect(checkbox).toBeChecked();
-    expect(screen.getByText(/The invitation is always sent/)).toBeInTheDocument();
+    await user.click(checkbox);
+    expect(checkbox).not.toBeChecked();
+    expect(screen.getByText(/No invitation email is sent/)).toBeInTheDocument();
   });
 
   it('WB-187 — every US state can be chosen as the issuing state', () => {
@@ -282,11 +285,11 @@ describe('11.7 Import drivers', () => {
     expect(await screen.findByText(/2 rows detected · 1 valid, 1 need attention/)).toBeInTheDocument();
   });
 
-  it('WB — the import options are disabled with the reason on screen (no endpoint support)', async () => {
+  it('B-69 shipped — the import options are real controls', async () => {
     renderWithProviders(<ImportDriversModal onClose={() => {}} />);
 
-    expect(screen.getByText(/Import options are not available yet/)).toBeInTheDocument();
-    expect(screen.getByRole('combobox', { name: 'Duplicate handling' })).toBeDisabled();
+    expect(screen.getByRole('combobox', { name: 'Duplicate handling' })).toBeEnabled();
+    expect(screen.getByLabelText(/Send app invitations after import/)).toBeChecked();
   });
 
   it('WB-108 — rejects a file over the advertised 500-row maximum', async () => {

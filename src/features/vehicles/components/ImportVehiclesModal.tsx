@@ -7,22 +7,18 @@ import { Button } from '@/shared/ui/Button';
 import { Badge } from '@/shared/ui/Badge';
 import { useToast } from '@/shared/ui/Toast';
 import { TOAST_COPY } from '@/shared/ui/copy';
-import { useImportVehicles } from '@/shared/api/vehicles';
+import { useImportVehicles, type ImportVehiclesOptions } from '@/shared/api/vehicles';
 import { ApiError } from '@/shared/api/errors';
 import { parseCsv, toCsv } from '@/shared/lib/csv';
 
 const MAX_BYTES = 5 * 1024 * 1024;
 const MAX_ROWS = 2000;
-const optionClass = 'h-input rounded-md border border-border bg-bg-subtle px-3 text-body text-text-muted disabled:cursor-not-allowed disabled:opacity-50';
+const optionClass = 'h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text';
 
 /** The columns `POST /vehicles/import` reads — also the template's header row. */
 const TEMPLATE_COLUMNS = ['unitNumber', 'vin', 'make', 'model', 'year', 'licensePlate', 'plateState', 'fuelType', 'odometerMi', 'notes'];
 
-// ⛔ `POST /vehicles/import` accepts one field, `{ vehicles: [...] }`. Duplicate handling, a
-// default terminal, ELD auto-pairing and the summary email have no counterpart in the request or
-// in any other endpoint, so the controls stay visible (they are in the design) but disabled with
-// the reason spelled out, rather than pretending to change an import they cannot reach.
-const UNSUPPORTED_OPTION_REASON = 'Not available yet — the import endpoint does not accept this option.';
+const IMPORT_TERMINALS = ['Columbus, OH', 'Raleigh, NC'];
 
 export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
   const { toast } = useToast();
@@ -31,6 +27,10 @@ export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
   const [rows, setRows] = useState<Array<Record<string, unknown>>>([]);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [duplicateStrategy, setDuplicateStrategy] = useState<NonNullable<ImportVehiclesOptions['duplicateStrategy']>>('UPDATE_BY_VIN');
+  const [defaultTerminal, setDefaultTerminal] = useState(IMPORT_TERMINALS[0]);
+  const [pairDevices, setPairDevices] = useState(true);
+  const [emailSummary, setEmailSummary] = useState(true);
   const mutation = useImportVehicles();
 
   function downloadTemplate() {
@@ -84,7 +84,7 @@ export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
             loading={mutation.isPending}
             onClick={() =>
               mutation.mutate(
-                { vehicles: rows },
+                { vehicles: rows, options: { duplicateStrategy, defaultTerminal, pairDevices, emailSummary } },
                 {
                   onSuccess: (summary) => {
                     const total = summary.imported + summary.updated;
@@ -162,29 +162,39 @@ export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
           }}
         />
         {error && <p className="text-body text-danger">{error}</p>}
+        {/* B-69 shipped — `ImportVehiclesOptionsDto` rides alongside the parsed rows. */}
         <div className="grid grid-cols-2 gap-4">
           <label className="flex flex-col gap-1">
-            <span className="text-label text-text-muted">Duplicate handling</span>
-            <select disabled title={UNSUPPORTED_OPTION_REASON} className={optionClass}>
-              <option>Update existing units by VIN</option>
+            <span className="text-label text-text">Duplicate handling</span>
+            <select
+              value={duplicateStrategy}
+              onChange={(e) => setDuplicateStrategy(e.target.value as typeof duplicateStrategy)}
+              className={optionClass}
+            >
+              <option value="UPDATE_BY_VIN">Update existing units by VIN</option>
+              <option value="SKIP">Skip existing units</option>
+              <option value="CREATE">Always create new</option>
             </select>
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-label text-text-muted">Default terminal</span>
-            <select disabled title={UNSUPPORTED_OPTION_REASON} className={optionClass}>
-              <option>Columbus, OH</option>
+            <span className="text-label text-text">Default terminal</span>
+            <select value={defaultTerminal} onChange={(e) => setDefaultTerminal(e.target.value)} className={optionClass}>
+              {IMPORT_TERMINALS.map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
             </select>
           </label>
         </div>
-        <label className="flex items-center gap-2 text-body text-text-muted">
-          <input type="checkbox" disabled title={UNSUPPORTED_OPTION_REASON} />
+        <label className="flex items-center gap-2 text-body text-text">
+          <input type="checkbox" checked={pairDevices} onChange={(e) => setPairDevices(e.target.checked)} />
           Pair ELD devices automatically — match the ELD serial column to unpaired devices
         </label>
-        <label className="flex items-center gap-2 text-body text-text-muted">
-          <input type="checkbox" disabled title={UNSUPPORTED_OPTION_REASON} />
+        <label className="flex items-center gap-2 text-body text-text">
+          <input type="checkbox" checked={emailSummary} onChange={(e) => setEmailSummary(e.target.checked)} />
           Send a summary email when the import finishes
         </label>
-        <p className="text-caption text-text-muted">{UNSUPPORTED_OPTION_REASON}</p>
         <p className="text-caption text-text-muted">
           Not sure about the format?{' '}
           <button type="button" onClick={downloadTemplate} className="text-primary hover:underline">

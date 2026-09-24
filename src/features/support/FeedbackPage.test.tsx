@@ -1,4 +1,4 @@
-// web/tz.md W-25 — feedback submission, its success state, and the inline 403 (support:FULL gap).
+// web/tz.md W-25 — feedback submission, its success state, and the inline 403 fallback.
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http } from 'msw';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -12,7 +12,7 @@ import { ToastProvider } from '@/shared/ui/Toast';
 import FeedbackPage from './FeedbackPage';
 import { SUPPORT_REASON } from './lib/copy';
 
-// WB-245/WB-246 — Submit follows `support:FULL`; each test picks the level (FULL by default).
+// WB-250 — B-12 shipped: Submit follows `support:READ`; each test picks the level (FULL by default).
 const perm = vi.hoisted(() => ({ support: 'FULL' as 'NONE' | 'READ' | 'FULL' }));
 vi.mock('@/shared/auth/usePermission', () => ({
   usePermission: () => ({
@@ -78,23 +78,22 @@ describe('FeedbackPage — W-25', () => {
     expect(screen.getByRole('button', { name: 'Submit feedback' })).toBeInTheDocument();
   });
 
-  it('support:READ (Viewer, B-12): Submit feedback is disabled with the reason on screen and nothing is sent', async () => {
+  it('support:READ (Viewer, B-12 shipped): Submit feedback is enabled and sends the request', async () => {
     perm.support = 'READ';
     const user = userEvent.setup();
-    let calls = 0;
+    let submitted: unknown = null;
     server.use(
-      http.post(url(endpoints.support.feedback), () => {
-        calls += 1;
+      http.post(url(endpoints.support.feedback), async ({ request }) => {
+        submitted = await request.json();
         return ok({ id: 'fbk_1' }, 201);
       }),
     );
     renderPage();
     const submit = screen.getByRole('button', { name: 'Submit feedback' });
-    expect(submit).toBeDisabled();
-    expect(submit).toHaveAccessibleDescription(SUPPORT_REASON.feedbackForbidden);
-    expect(screen.getByText(SUPPORT_REASON.feedbackForbidden)).toBeVisible();
+    expect(submit).toBeEnabled();
+    expect(screen.queryByText(SUPPORT_REASON.feedbackForbidden)).not.toBeInTheDocument();
     await user.click(submit);
-    expect(calls).toBe(0);
+    await waitFor(() => expect(submitted).not.toBeNull());
   });
 
   it('support:FULL shows no forbidden reason', () => {

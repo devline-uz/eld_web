@@ -12,7 +12,7 @@ import { KpiCard } from '@/shared/ui/KpiCard';
 import { DataTable } from '@/shared/ui/DataTable';
 import { Pagination } from '@/shared/ui/Pagination';
 import { Card } from '@/shared/ui/Card';
-import { ConfirmDelete } from '@/shared/ui/Modal';
+import { ConfirmDelete, Modal } from '@/shared/ui/Modal';
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
 import { searchEmptyState } from '@/shared/ui/copy';
 import { useToast } from '@/shared/ui/Toast';
@@ -26,6 +26,7 @@ import {
   useDevicesList,
   useUnpairDevice,
   useRemoveDevice,
+  useDeviceDiagnostics,
   type DeviceRow,
   type DeviceStatus,
   type BleState,
@@ -60,6 +61,8 @@ export default function DevicesPage() {
   const [retireTarget, setRetireTarget] = useState<DeviceRow | null>(null);
   const [pairTarget, setPairTarget] = useState<DeviceRow | null>(null);
   const [firmwareTarget, setFirmwareTarget] = useState<DeviceRow | null>(null);
+  const [diagnosticsTarget, setDiagnosticsTarget] = useState<DeviceRow | null>(null);
+  const diagnostics = useDeviceDiagnostics();
 
   const statusFilter: DeviceStatus | undefined = segment === 'UNASSIGNED' ? 'UNASSIGNED' : undefined;
   // A new search term or segment re-pages the list from the start, and the page is clamped to the
@@ -287,9 +290,19 @@ export default function DevicesPage() {
                         >
                           Update firmware
                         </DropdownMenu.Item>
-                        {/* ⛔ GAP B-8 — `View diagnostics` needs `GET /devices/:id/diagnostics`,
-                            which does not exist on the live API; omitted here rather than shown
-                            disabled. */}
+                        {/* B-8 (shipped 2026-09-24) — `GET /devices/:id/diagnostics`. */}
+                        <DropdownMenu.Item
+                          onSelect={() => {
+                            setDiagnosticsTarget(row);
+                            diagnostics.mutate(row.id, {
+                              onError: (error) =>
+                                toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }),
+                            });
+                          }}
+                          className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle"
+                        >
+                          View diagnostics
+                        </DropdownMenu.Item>
                         <DropdownMenu.Separator className="my-1 h-px bg-border" />
                         <DropdownMenu.Item
                           onSelect={() => setRetireTarget(row)}
@@ -321,6 +334,43 @@ export default function DevicesPage() {
       {registerOpen && <RegisterDeviceModal onClose={() => setRegisterOpen(false)} />}
       {pairTarget && <PairDeviceModal device={pairTarget} onClose={() => setPairTarget(null)} />}
       {firmwareTarget && <UpdateFirmwareModal device={firmwareTarget} onClose={() => setFirmwareTarget(null)} />}
+      {diagnosticsTarget && (
+        <Modal
+          open
+          onClose={() => {
+            setDiagnosticsTarget(null);
+            diagnostics.reset();
+          }}
+          title="Device diagnostics"
+          subtitle={diagnosticsTarget.serial}
+          size="sm"
+          footer={
+            <Button
+              variant="primary"
+              size="lg"
+              onClick={() => {
+                setDiagnosticsTarget(null);
+                diagnostics.reset();
+              }}
+            >
+              Close
+            </Button>
+          }
+        >
+          {diagnostics.isPending ? (
+            <LoadingState className="p-4" />
+          ) : diagnostics.isError ? (
+            <ErrorState onRetry={() => diagnostics.mutate(diagnosticsTarget.id)} />
+          ) : diagnostics.data ? (
+            <div className="flex flex-col gap-1 text-body text-text">
+              <p>Signal strength: <span className="text-body-strong capitalize">{diagnostics.data.signalStrength}</span></p>
+              <p>GPS lock: <span className="text-body-strong">{diagnostics.data.gpsLock ? 'Acquired' : 'Not acquired'}</span></p>
+              <p>Device responded: <span className="text-body-strong">{diagnostics.data.responded ? 'Yes' : 'No'}</span></p>
+              <p className="mt-2 text-caption text-text-muted">Derived from the device&apos;s last recorded status — not a live round-trip.</p>
+            </div>
+          ) : null}
+        </Modal>
+      )}
       <ConfirmDelete
         open={Boolean(retireTarget)}
         onClose={() => setRetireTarget(null)}

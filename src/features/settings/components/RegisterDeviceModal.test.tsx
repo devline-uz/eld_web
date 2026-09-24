@@ -50,14 +50,29 @@ describe('RegisterDeviceModal — 11.20', () => {
   });
 
   // ⛔ GAP B-88 — `POST /devices` has no firmware-policy or diagnostics field.
-  it('the two device-preference switches are disabled rather than collected and dropped', async () => {
+  it('the two device-preference toggles PATCH /devices/:id after registration (B-88, shipped)', async () => {
+    const user = userEvent.setup();
+    let patched: unknown = null;
+    server.use(
+      http.post(url(endpoints.devices.create), () =>
+        ok({ id: 'dev_9', serial: 'PT30_1C4F', model: 'PT30', status: 'UNASSIGNED', bleState: 'DISCONNECTED' }, 201),
+      ),
+      http.patch(url(endpoints.devices.update('dev_9')), async ({ request }) => {
+        patched = await request.json();
+        return ok({ id: 'dev_9', autoFirmware: true, shareDiagnostics: true });
+      }),
+    );
     renderModal();
-    const switches = screen.getAllByRole('switch');
-    expect(switches).toHaveLength(2);
-    for (const s of switches) {
-      expect(s).toBeDisabled();
-      expect(s).toHaveAttribute('aria-checked', 'false');
+    const toggles = screen.getAllByRole('switch');
+    expect(toggles).toHaveLength(2);
+    for (const t of toggles) {
+      expect(t).not.toBeDisabled();
+      await user.click(t);
     }
+    await user.type(screen.getByPlaceholderText('PT30_1C4F'), 'PT30_2B7F');
+    await user.click(screen.getByRole('button', { name: 'Register device' }));
+
+    await waitFor(() => expect(patched).toEqual({ autoFirmware: true, shareDiagnostics: true }));
   });
 
   it('registers and pairs to a unit in one submit, sending the picker-selected vehicle id', async () => {

@@ -1,5 +1,5 @@
-// web/tz.md §11.1 — renders `dwellMinutes` / `afterHoursOnly` even though they are gap B-15
-// (disabled, never dropped silently), and posts to `POST /geofences` on save.
+// web/tz.md §11.1 — the Address shape, `dwellMinutes` and `afterHoursOnly` are live (B-93/B-15
+// shipped, web/backend-gaps.md 2026-09-24 handoff); posts to `POST /geofences` on save.
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { render, screen } from '@testing-library/react';
@@ -28,17 +28,25 @@ function renderModal(onClose = vi.fn()) {
 }
 
 describe('11.1 Create a geofence', () => {
-  it('renders the dwell and after-hours checkboxes disabled (gap B-15), not dropped', () => {
+  it('renders the dwell and after-hours checkboxes enabled and toggleable (B-15 shipped)', async () => {
+    const user = userEvent.setup();
     renderModal();
-    expect(screen.getByLabelText(/Dwell longer than — not yet supported/)).toBeDisabled();
-    expect(screen.getByLabelText(/After-hours entry — not yet supported/)).toBeDisabled();
+    const dwellCheckbox = screen.getByLabelText('Dwell longer than');
+    const dwellMinutes = screen.getByLabelText('Dwell minutes');
+    const afterHours = screen.getByLabelText('After-hours entry');
+    expect(dwellCheckbox).not.toBeDisabled();
+    expect(afterHours).not.toBeDisabled();
+    expect(dwellMinutes).toBeDisabled();
+
+    await user.click(dwellCheckbox);
+    expect(dwellMinutes).not.toBeDisabled();
   });
 
-  it('posts to POST /geofences and fires the geofenceCreated toast on save', async () => {
-    let posted: unknown = null;
+  it('posts dwellMinutes/afterHoursOnly/radiusMi and fires the geofenceCreated toast on save', async () => {
+    let posted: Record<string, unknown> | null = null;
     server.use(
       http.post(url(endpoints.geofences.create), async ({ request }) => {
-        posted = await request.json();
+        posted = (await request.json()) as Record<string, unknown>;
         return ok({ id: 'geo_1' });
       }),
     );
@@ -46,14 +54,54 @@ describe('11.1 Create a geofence', () => {
     const { onClose } = renderModal();
 
     await user.type(screen.getByPlaceholderText('Columbus terminal'), 'Columbus terminal');
+    await user.type(screen.getByPlaceholderText('0.8'), '0.5');
+    await user.click(screen.getByLabelText('Dwell longer than'));
+    await user.click(screen.getByLabelText('After-hours entry'));
     await user.click(screen.getByRole('button', { name: 'Save geofence' }));
 
     expect(await screen.findByText('Geofence created', {}, { timeout: 8000 })).toBeInTheDocument();
     expect(onClose).toHaveBeenCalled();
-    expect(posted).toMatchObject({ name: 'Columbus terminal' });
-    // ⛔ B-15 — dropped from the payload, not sent as an unknown field.
-    expect(posted).not.toHaveProperty('dwellMinutes');
-    expect(posted).not.toHaveProperty('afterHoursOnly');
+    expect(posted).toMatchObject({ name: 'Columbus terminal', radiusMi: 0.5, dwellMinutes: 45, afterHoursOnly: true });
+  });
+
+  it('unlocks the Address shape, requires an address, and sends type: ADDRESS', async () => {
+    let posted: Record<string, unknown> | null = null;
+    server.use(
+      http.post(url(endpoints.geofences.create), async ({ request }) => {
+        posted = (await request.json()) as Record<string, unknown>;
+        return ok({ id: 'geo_1' });
+      }),
+    );
+    const user = userEvent.setup();
+    renderModal();
+
+    await user.click(screen.getByRole('button', { name: 'Address' }));
+    expect(screen.getByRole('button', { name: 'Address' })).not.toBeDisabled();
+    await user.type(screen.getByPlaceholderText('Columbus terminal'), 'Yard A');
+    await user.type(screen.getByPlaceholderText('4517 Washington Ave., Columbus, OH 43004'), '123 Main St, Columbus, OH');
+    await user.click(screen.getByRole('button', { name: 'Save geofence' }));
+
+    await vi.waitFor(() => expect(posted).toMatchObject({ type: 'ADDRESS', address: '123 Main St, Columbus, OH' }));
+  });
+
+  it('surfaces GEOCODER_NOT_CONFIGURED in the in-modal banner', async () => {
+    server.use(
+      http.post(url(endpoints.geofences.create), () =>
+        HttpResponse.json(
+          { statusCode: 422, code: 'GEOCODER_NOT_CONFIGURED', message: 'No geocoding service is configured.', details: {}, traceId: 't1' },
+          { status: 422 },
+        ),
+      ),
+    );
+    const user = userEvent.setup();
+    renderModal();
+
+    await user.click(screen.getByRole('button', { name: 'Address' }));
+    await user.type(screen.getByPlaceholderText('Columbus terminal'), 'Yard A');
+    await user.type(screen.getByPlaceholderText('4517 Washington Ave., Columbus, OH 43004'), '123 Main St');
+    await user.click(screen.getByRole('button', { name: 'Save geofence' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Address lookup is not configured/);
   });
 });
 
@@ -126,14 +174,6 @@ describe('11.1 Create a geofence — shape segments and double-submit', () => {
     await user.type(screen.getByPlaceholderText('Columbus terminal'), 'Yard A');
     await user.click(screen.getByRole('button', { name: 'Save geofence' }));
     await vi.waitFor(() => expect(posted).toMatchObject({ type: 'CIRCLE' }));
-  });
-
-  it('disables Address with its reason on screen (B-93) instead of sending POLYGON', () => {
-    renderModal();
-    const address = screen.getByRole('button', { name: 'Address' });
-    expect(address).toBeDisabled();
-    expect(address).toHaveAccessibleDescription(/Address shape is not available yet/);
-    expect(screen.getByText(/Address shape is not available yet/)).toBeVisible();
   });
 
   it('sends one POST while the request is in flight, however many times Save is clicked', async () => {

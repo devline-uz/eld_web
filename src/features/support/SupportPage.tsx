@@ -16,12 +16,9 @@ import { toCsv } from '@/shared/lib/csv';
 import { formatRelative } from '@/shared/format/relative';
 import { useTicketsList, type TicketRow, type TicketStatus, type TicketPriority } from '@/shared/api/settingsAdmin';
 import { NewTicketModal } from './components/NewTicketModal';
-import { SUPPORT_REASON } from './lib/copy';
+import { StartChatModal } from './components/StartChatModal';
 
 type Segment = 'ALL' | 'OPEN' | 'IN_PROGRESS' | 'RESOLVED';
-
-/** ⛔ GAP B-90 — shown under the disabled `Start chat` button. */
-const CHAT_REASON = SUPPORT_REASON.chat;
 
 const PRIORITY_TONE: Record<TicketPriority, BadgeTone> = { URGENT: 'danger', HIGH: 'warning', NORMAL: 'neutral', LOW: 'neutral' };
 const STATUS_TONE: Record<TicketStatus, BadgeTone> = { OPEN: 'info', IN_PROGRESS: 'warning', RESOLVED: 'success', CLOSED: 'neutral' };
@@ -32,6 +29,7 @@ export default function SupportPage() {
   const [segment, setSegment] = useState<Segment>('ALL');
   const [search, setSearch] = useState('');
   const [ticketOpen, setTicketOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
 
   const ticketsQuery = useTicketsList({ page: 1, limit: 50, q: search || undefined });
   const rows = useMemo(() => ticketsQuery.data?.items ?? [], [ticketsQuery.data]);
@@ -120,14 +118,10 @@ export default function SupportPage() {
               <p className="text-caption text-text-muted">Mon–Fri, 07:00–21:00 ET</p>
             </div>
           </div>
-          {/* ⛔ GAP B-90 — there is no chat service or chat widget behind this card, and no
-              endpoint to open a conversation with support. The button used to do nothing at all
-              (WB-228); it is disabled with the reason visible and the two channels that do work
-              sit next to it. */}
-          <Button variant="primary" className="mt-3 w-full" disabled title={CHAT_REASON}>
+          {/* B-90 (shipped 2026-09-24) — `POST /support/chats`. */}
+          <Button variant="primary" className="mt-3 w-full" onClick={() => setChatOpen(true)}>
             › Start chat
           </Button>
-          <p className="mt-1 text-caption text-text-muted">{CHAT_REASON}</p>
         </Card>
         <Card>
           <div className="flex items-center gap-3">
@@ -222,6 +216,7 @@ export default function SupportPage() {
       </Card>
 
       {ticketOpen && <NewTicketModal contactEmail={user?.email ?? 'support@onebookeld.com'} onClose={() => setTicketOpen(false)} />}
+      {chatOpen && <StartChatModal onClose={() => setChatOpen(false)} />}
     </div>
   );
 }

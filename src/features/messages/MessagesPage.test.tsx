@@ -339,6 +339,36 @@ describe('W-16 Messages', () => {
     expect(screen.getByRole('button', { name: 'Unread 0' })).toBeInTheDocument();
   });
 
+  it('persists the read state via POST /conversations/:id/read (B-67)', async () => {
+    usePopulatedConversations();
+    let posted: string | undefined;
+    server.use(
+      http.post(url(endpoints.conversations.read(':id')), ({ params }) => {
+        posted = params.id as string;
+        return ok({ conversationId: params.id as string, lastReadAt: new Date().toISOString() });
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByText('John Smith'));
+
+    await waitFor(() => expect(posted).toBe('cnv_1'));
+  });
+
+  it('renders the real unread count and the newest message as the preview line (B-37)', async () => {
+    server.use(
+      http.get(url(endpoints.conversations.list), () =>
+        ok({ items: [{ ...CONVERSATION, unreadCount: 2, lastMessage: { id: 'msg_5', conversationId: 'cnv_1', senderUserId: null, senderDriverId: 'drv_1', body: 'Running 20 late.', attachmentId: null, clientId: null, sentAt: '2026-09-12T15:39:00.000Z', deliveredAt: null, readAt: null } }] }),
+      ),
+      http.get(url(endpoints.drivers.list), () => ok({ items: [DRIVER], page: 1, limit: 500, total: 1, totalPages: 1 })),
+    );
+    renderPage();
+
+    expect(await screen.findByText('Running 20 late.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Unread 1' })).toBeInTheDocument();
+  });
+
   describe('deep link ?driverId= (WB-139, every "Send message" entry point)', () => {
     const DRIVER_2 = { ...DRIVER, id: 'drv_2', username: 'mariagarcia', firstName: 'Maria', lastName: 'Garcia' };
     const CREATED = {

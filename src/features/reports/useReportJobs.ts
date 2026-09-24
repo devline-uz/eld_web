@@ -10,7 +10,6 @@
 // the READY row in `Recently generated` carries the download.
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient, type UseMutationResult } from '@tanstack/react-query';
-import { useAuth } from '@/shared/auth/AuthProvider';
 import { qk, qkRoot } from '@/shared/api/queryKeys';
 import {
   fetchReport,
@@ -21,7 +20,7 @@ import {
   type QueueShortcutInput,
   type ReportRow,
 } from '@/shared/api/reports';
-import { useRoom } from '@/shared/realtime/useRoom';
+import { useRealtimeEvent } from '@/shared/realtime/useRealtimeEvent';
 import { TOAST_COPY } from '@/shared/ui/copy';
 import { useToast, type ToastInput } from '@/shared/ui/Toast';
 import { reportLabel, fileSizeLabel, refusalText, saveFile } from './reportMeta';
@@ -99,20 +98,17 @@ export function useAnnounceReport() {
 }
 
 export function useReportReadyToasts(): void {
-  const { user } = useAuth();
   const queryClient = useQueryClient();
   const announce = useAnnounceReport();
 
-  useRoom(user ? `user:${user.id}` : null, {
-    'report.ready': (payload) => {
-      void queryClient.invalidateQueries({ queryKey: qkRoot.reports });
-      fetchReport(payload.reportId)
-        .then((report) => {
-          queryClient.setQueryData(qk.report(report.id), report);
-          announce(report);
-        })
-        .catch(() => undefined);
-    },
+  useRealtimeEvent('report.ready', (payload) => {
+    void queryClient.invalidateQueries({ queryKey: qkRoot.reports });
+    fetchReport(payload.reportId)
+      .then((report) => {
+        queryClient.setQueryData(qk.report(report.id), report);
+        announce(report);
+      })
+      .catch(() => undefined);
   });
 }
 
@@ -172,13 +168,24 @@ export interface ExportJob {
   clearError: () => void;
 }
 
-export function useExportWhenReady(): ExportJob {
+export interface ExportJobOptions {
+  /**
+   * B-96 — `Download PDF` / `Download IFTA PDF` moved from `POST /reports/generate` (FULL) to this
+   * same READ shortcut with `format=PDF`, but WB-166 still wants the on-screen `Report ready`
+   * confirmation those buttons had. `Export CSV` stays silent (its own original behaviour) unless
+   * this is set.
+   */
+  announce?: boolean;
+}
+
+export function useExportWhenReady(options: ExportJobOptions = {}): ExportJob {
   const queue = useQueueReport();
   const [reportId, setReportId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dismissedFailure, setDismissedFailure] = useState<string | null>(null);
   const job = useReport(reportId);
   const downloaded = useRef<string | null>(null);
+  const announce = useAnnounceReport();
   // WB-146 — same-tick guard: `queue.isPending` only flips on the next render.
   const inFlight = useRef(false);
 
@@ -194,9 +201,11 @@ export function useExportWhenReady(): ExportJob {
   useEffect(() => {
     if (!report || report.status !== 'READY' || downloaded.current === report.id) return;
     downloaded.current = report.id;
+    if (options.announce) announce(report);
     fetchReportDownload(report.id)
       .then((file) => saveFile(file.downloadUrl, file.fileName))
       .catch((cause: unknown) => setError(refusalText(cause)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `announce` is idempotent per report id, `options.announce` is a caller-fixed flag
   }, [report]);
 
   return {

@@ -14,7 +14,7 @@ import { useAuth } from '@/shared/auth/AuthProvider';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
 import {
-  useCarrierTransferConfig,
+  useTransferConfig,
   useGenerateReport,
   useIftaSummary,
   useReportVehicles,
@@ -94,7 +94,9 @@ export default function IftaReportPage() {
   const { can } = usePermission();
   const { user } = useAuth();
   const [params, setParams] = useSearchParams();
-  const carrier = useCarrierTransferConfig(can('carrierSettings'));
+  // B-45 (shipped) — `GET /carrier/transfer-config` is `reports` READ, so FLEET_MANAGER reads the
+  // real carrier zone and eRODS mode too.
+  const carrier = useTransferConfig();
   const timezone = carrier.data?.timezone ?? CARRIER_TZ_FALLBACK;
   const current = quarterOf(todayKey(timezone));
   const requested = params.get('quarter') ?? '';
@@ -114,13 +116,14 @@ export default function IftaReportPage() {
 
   // WB-146 — every queueing click goes through the single-flight guard, not just the disabled attribute.
   const generate = useGuardedMutate(useGenerateReport());
-  // WB-166 — the queued job is followed to READY/FAILED so `Generate report` and `Download IFTA
-  // PDF` confirm on screen without depending on a `report.ready` socket frame.
+  // WB-166 — the queued job is followed to READY/FAILED so `Generate report` confirms on screen
+  // without depending on a `report.ready` socket frame.
   const csvJob = useTrackedReport();
-  const pdfJob = useTrackedReport();
   const exportCsv = useExportWhenReady();
+  // B-96 (shipped 2026-09-24) — `Download IFTA PDF` uses the READ shortcut (`format=PDF`), same as
+  // Export CSV, no longer `POST /reports/generate` (`reports` FULL).
+  const exportPdf = useExportWhenReady({ announce: true });
   const [scheduleOpen, setScheduleOpen] = useState(false);
-  const [pdfError, setPdfError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const reportOptions = visibleReportRoutes((key) => can(key), user?.role).map((r) => ({ value: r.to, label: r.label }));
@@ -225,38 +228,21 @@ export default function IftaReportPage() {
               title="Miles by jurisdiction"
               subtitle={`${quarterLabel(quarter)} · IFTA-ready`}
               action={
-                <Can perm="reports" level="FULL">
-                  <Button
-                    variant="secondary"
-                    iconLeft={<Download size={16} strokeWidth={1.75} />}
-                    loading={generate.isPending || pdfJob.isPending}
-                    disabled={generate.isPending || pdfJob.isPending}
-                    onClick={() => {
-                      setPdfError(null);
-                      generate.mutate(
-                        { type: 'IFTA', format: 'PDF', params: { quarter } },
-                        {
-                          onSuccess: (queued) => pdfJob.track(queued.reportId),
-                          onError: (error) => setPdfError(refusalText(error)),
-                        },
-                      );
-                    }}
-                  >
-                    Download IFTA PDF
-                  </Button>
-                </Can>
+                <Button
+                  variant="secondary"
+                  iconLeft={<Download size={16} strokeWidth={1.75} />}
+                  loading={exportPdf.isPending}
+                  disabled={exportPdf.isPending}
+                  onClick={() => exportPdf.start({ kind: 'ifta', params: { quarter, format: 'PDF' } })}
+                >
+                  Download IFTA PDF
+                </Button>
               }
             />
           </div>
-          {(pdfError ?? pdfJob.error) && (
+          {exportPdf.error && (
             <div className="px-card pb-3">
-              <ActionAlert
-                message={pdfError ?? pdfJob.error}
-                onDismiss={() => {
-                  setPdfError(null);
-                  pdfJob.clearError();
-                }}
-              />
+              <ActionAlert message={exportPdf.error} onDismiss={() => exportPdf.clearError()} />
             </div>
           )}
           {summary.isError ? (
@@ -283,7 +269,7 @@ export default function IftaReportPage() {
             />
           )}
         </Card>
-        <ReportLibraryCard />
+        <ReportLibraryCard timezone={timezone} />
       </div>
 
       <RecentlyGeneratedCard timezone={timezone} onSchedule={() => setScheduleOpen(true)} onGenerate={generateCsv} />

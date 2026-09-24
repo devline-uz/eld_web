@@ -85,7 +85,11 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'bypass' }));
 beforeEach(() => {
   setAuthBridge({ getAccessToken: () => 'test-token' });
   setAccessToken('test-token');
-  server.use(...reportScreenHandlers);
+  server.use(
+    ...reportScreenHandlers,
+    // B-47 — no missing pre-trips unless a test says so (the fixture's `#110` row would duplicate the unit).
+    http.get(url(endpoints.dvir.compliance), () => ok({ expected: 0, submitted: 0, compliancePct: 100, missing: [] })),
+  );
   mocks.role = 'FLEET_MANAGER';
   vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
   Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:csv'), revokeObjectURL: vi.fn() });
@@ -126,7 +130,13 @@ describe('W-12 interactions', () => {
   it('shows and dismisses Generate report, Download IFTA PDF and Export CSV refusals', async () => {
     server.use(
       http.post(url(endpoints.reports.generate), () => fail(403, 'FORBIDDEN', 'Insufficient permission.')),
-      http.get(url(endpoints.reports.ifta), () => fail(422, 'VALIDATION_FAILED', 'quarter must look like 2026-Q3.')),
+      // B-96 — Download IFTA PDF and Export CSV are the same READ shortcut, split only by `format`.
+      http.get(url(endpoints.reports.ifta), ({ request }) => {
+        const format = new URL(request.url).searchParams.get('format');
+        return format === 'PDF'
+          ? fail(422, 'VALIDATION_FAILED', 'PDF is not available for this quarter.')
+          : fail(422, 'VALIDATION_FAILED', 'quarter must look like 2026-Q3.');
+      }),
     );
     renderPage(<IftaReportPage />, '/reports/ifta?quarter=2026-Q3');
 
@@ -136,9 +146,9 @@ describe('W-12 interactions', () => {
     expect(screen.queryByText('You do not have access to this.')).toBeNull();
 
     await user.click(screen.getByRole('button', { name: 'Download IFTA PDF' }));
-    const pdfAlert = await alertWith('You do not have access to this.');
+    const pdfAlert = await alertWith('PDF is not available for this quarter.');
     await user.click(within(pdfAlert).getByRole('button', { name: 'Dismiss' }));
-    await waitFor(() => expect(screen.queryByText('You do not have access to this.')).toBeNull());
+    await waitFor(() => expect(screen.queryByText('PDF is not available for this quarter.')).toBeNull());
 
     await user.click(screen.getByRole('button', { name: 'Export CSV' }));
     expect(await screen.findByText('quarter must look like 2026-Q3.')).toBeInTheDocument();
@@ -428,7 +438,7 @@ describe('queued report jobs confirm without a `report.ready` frame (WB-166)', (
 
   it('surfaces a FAILED job in place instead of leaving the button silent', async () => {
     server.use(
-      http.post(url(endpoints.reports.generate), () => ok({ reportId: 'rpt_failed', status: 'QUEUED' }, 202)),
+      http.get(url(endpoints.reports.dvir), () => ok({ reportId: 'rpt_failed', status: 'QUEUED' }, 202)),
       http.get(url(endpoints.reports.detail('rpt_failed')), () =>
         ok({ ...reportRows[0], id: 'rpt_failed', status: 'FAILED', error: 'The worker ran out of memory.' }),
       ),

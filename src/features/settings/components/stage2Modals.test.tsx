@@ -66,18 +66,36 @@ const USER: UserRow = {
 };
 
 describe('EditUserModal', () => {
-  it('shows the fixed-field reason, and says why a PATCH failed instead of closing', async () => {
+  it('says why a PATCH failed instead of closing', async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
     server.use(http.patch(url(endpoints.users.update('usr_5')), () => fail(500, 'INTERNAL_ERROR', 'Boom')));
     renderModal(<EditUserModal user={USER} roles={ROLES} mode="profile" activeAdminCount={2} onClose={onClose} />);
 
-    expect(screen.getByText(/the user-update API does not accept them/)).toBeInTheDocument();
     await user.clear(screen.getByDisplayValue('Jo'));
     await user.type(screen.getByRole('textbox', { name: /first name/i }), 'Joanna');
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
     expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('B-84 (shipped): changing the email shows the re-verification notice instead of closing', async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    server.use(
+      http.patch(url(endpoints.users.update('usr_5')), () =>
+        ok({ ...USER, emailVerification: { pendingEmail: 'jo.park@example.com' } }),
+      ),
+    );
+    renderModal(<EditUserModal user={USER} roles={ROLES} mode="profile" activeAdminCount={2} onClose={onClose} />);
+
+    const email = screen.getByDisplayValue('jo@example.com');
+    await user.clear(email);
+    await user.type(email, 'jo.park@example.com');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(await screen.findByText(/A verification link was sent to jo\.park@example\.com/)).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
   });
 

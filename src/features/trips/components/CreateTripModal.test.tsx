@@ -12,7 +12,6 @@ import { endpoints } from '@/shared/api/endpoints';
 import { ToastProvider } from '@/shared/ui/Toast';
 import { VALIDATION_MESSAGES } from '@/shared/forms/messages';
 import { CreateTripModal } from './CreateTripModal';
-import { EST_DRIVE_TIME_HINT } from '../lib/copy';
 
 const VALIDATION_REQUIRED = VALIDATION_MESSAGES.required;
 
@@ -346,7 +345,7 @@ describe('CreateTripModal — dirty close, payload and 422 mapping', () => {
     expect(await screen.findByText('Discard changes?')).toBeInTheDocument();
   });
 
-  it('submits without a distance and never sends one (WB-134 — no API field)', async () => {
+  it('submits without a distance and never sends the field when it is blank (B-73)', async () => {
     const posts: Record<string, unknown>[] = [];
     renderModal();
     server.use(
@@ -361,11 +360,9 @@ describe('CreateTripModal — dirty close, payload and 422 mapping', () => {
 
     await vi.waitFor(() => expect(posts).toHaveLength(1));
     expect(Object.keys(posts[0]!)).not.toContain('distanceMi');
-    // The gap is visible in the UI rather than silently swallowed.
-    expect(screen.getAllByText(/Not saved yet — the create-trip API has no distance field\./)).not.toHaveLength(0);
   });
 
-  it('never sends `Estimated drive time` and says so on screen (B-92)', async () => {
+  it('sends `Estimated drive time` as seconds (B-92, shipped)', async () => {
     const posts: Record<string, unknown>[] = [];
     renderModal();
     server.use(
@@ -374,14 +371,31 @@ describe('CreateTripModal — dirty close, payload and 422 mapping', () => {
         return ok({ id: 'trp_1', number: 'TR-1' });
       }),
     );
-    expect(screen.getByText(EST_DRIVE_TIME_HINT)).toBeInTheDocument();
     const user = await fillValidForm();
     await user.type(screen.getByPlaceholderText('h'), '6');
 
     await user.click(screen.getByRole('button', { name: 'Create trip' }));
 
     await vi.waitFor(() => expect(posts).toHaveLength(1));
-    expect(JSON.stringify(posts[0])).not.toMatch(/estimat|drive(Sec|Time|Hours|Duration)/i);
+    expect(posts[0]!.estimatedDriveSec).toBe(6 * 3600);
+  });
+
+  it('saves as a draft via `draft: true` and shows the draft toast', async () => {
+    const posts: Record<string, unknown>[] = [];
+    renderModal();
+    server.use(
+      http.post(url(endpoints.trips.create), async ({ request }) => {
+        posts.push((await request.json()) as Record<string, unknown>);
+        return ok({ id: 'trp_1', number: 'TR-1' });
+      }),
+    );
+    const user = await fillValidForm();
+
+    await user.click(screen.getByRole('button', { name: 'Save as draft' }));
+
+    await vi.waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]!.draft).toBe(true);
+    expect(await screen.findByText('Trip TR-1 saved as draft')).toBeInTheDocument();
   });
 
   it('shows a 422 on `notes` in the modal banner instead of swallowing it', async () => {

@@ -2,14 +2,12 @@
 //
 // B-10 `GET /search?q=&limit=` shipped 2026-09-24 (backend `search.service.ts`, no permission key):
 // shapes below match it field for field; `dutyStatus`/`openWarnings` are always `null` there (never
-// fabricated, backend D-098) and `scope` is not sent. The `GET /drivers?q=` + `GET /vehicles?q=`
-// fallback stays only for a 404 from an older API (web/decisions.md WD-054).
+// fabricated, backend D-098) and `scope` is not sent. The old `GET /drivers?q=` + `GET /vehicles?q=`
+// 404 fallback (WD-054) is retired — one call only (WD-093).
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { client } from './client';
 import { endpoints } from './endpoints';
-import { ApiError } from './errors';
 import { qk } from './queryKeys';
-import type { DriverRow, VehicleRow } from './vehicles';
 
 export type SearchDutyStatus = 'DRIVING' | 'ON_DUTY' | 'SLEEPER' | 'OFF_DUTY';
 
@@ -41,10 +39,6 @@ export interface GlobalSearchResponse {
   scope?: { units: number; drivers: number; logs: number };
 }
 
-export interface GlobalSearchResult extends GlobalSearchResponse {
-  source: 'search' | 'fallback';
-}
-
 export interface SearchScope {
   drivers: boolean;
   vehicles: boolean;
@@ -54,59 +48,27 @@ export const SEARCH_DEBOUNCE_MS = 250;
 export const SEARCH_MIN_CHARS = 2;
 export const SEARCH_RESULT_LIMIT = 5;
 
-function driverHit(row: DriverRow): SearchDriverHit {
-  return {
-    id: row.id,
-    name: `${row.firstName} ${row.lastName}`.trim() || row.username,
-    unitNumber: null,
-    dutyStatus: null,
-    openViolations: null,
-    openWarnings: null,
-    homeTerminalName: row.homeTerminalName ?? null,
-  };
-}
-
-function vehicleHit(row: VehicleRow): SearchVehicleHit {
-  return {
-    id: row.id,
-    unitNumber: row.unitNumber,
-    make: row.make,
-    model: row.model,
-    vin: row.vin,
-    driverName: null,
-  };
-}
-
+/**
+ * One `GET /search` call (WD-093). The backend already searches only the sections the caller may
+ * read (B-090) and answers `[]` for the rest; a section missing from the body is treated the same
+ * way. The client scope is applied on top so a stale permission set can never widen the palette.
+ * There is no `/drivers?q=` + `/vehicles?q=` fan-out any more — a failure surfaces as the
+ * palette's error line.
+ */
 export async function fetchGlobalSearch(
   q: string,
   scope: SearchScope,
   signal?: AbortSignal,
-): Promise<GlobalSearchResult> {
-  try {
-    const res = await client.get<GlobalSearchResponse>(endpoints.search.root, {
-      params: { q, limit: SEARCH_RESULT_LIMIT },
-      signal,
-    });
-    return {
-      ...res,
-      drivers: scope.drivers ? (res.drivers ?? []) : [],
-      vehicles: scope.vehicles ? (res.vehicles ?? []) : [],
-      source: 'search',
-    };
-  } catch (error) {
-    if (!(error instanceof ApiError) || error.status !== 404) throw error;
-  }
-
-  const listParams = { q, limit: SEARCH_RESULT_LIMIT };
-  const [drivers, vehicles] = await Promise.all([
-    scope.drivers ? client.list<DriverRow>(endpoints.drivers.list, listParams, { signal }) : null,
-    scope.vehicles ? client.list<VehicleRow>(endpoints.vehicles.list, listParams, { signal }) : null,
-  ]);
+): Promise<GlobalSearchResponse> {
+  const res = await client.get<Partial<GlobalSearchResponse>>(endpoints.search.root, {
+    params: { q, limit: SEARCH_RESULT_LIMIT },
+    signal,
+  });
   return {
-    q,
-    drivers: (drivers?.items ?? []).map(driverHit),
-    vehicles: (vehicles?.items ?? []).map(vehicleHit),
-    source: 'fallback',
+    q: res.q ?? q,
+    drivers: scope.drivers ? (res.drivers ?? []) : [],
+    vehicles: scope.vehicles ? (res.vehicles ?? []) : [],
+    ...(res.scope ? { scope: res.scope } : {}),
   };
 }
 

@@ -1,5 +1,5 @@
-// W-26 My profile — four states, profile save, sessions.
-// MSW against the real response shapes observed on the dev API (2026-09-13).
+// W-26 My profile — four states, profile save, avatar, Language & region, sessions.
+// MSW against the real response shapes of the dev API (Phase 13: B-11/B-50/B-51, 2026-09-24).
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -49,36 +49,53 @@ const PROFILE = {
 };
 
 const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
+// B-50 live shape: no `refreshHash`/`userId` ever; `current` + `location` on every row.
 const SESSIONS = [
   {
     id: 'ses_mac',
-    userId: 'usr_fleet_manager',
-    refreshHash: 'never-render-this-hash',
     userAgent: MAC_CHROME,
     ip: '10.14.2.88',
     deviceLabel: null,
+    location: null,
     lastSeenAt: hoursAgo(2),
     expiresAt: '2026-10-13T09:01:52.710Z',
-    revokedAt: null,
+    current: false,
   },
   {
     id: 'ses_iphone',
-    userId: 'usr_fleet_manager',
-    refreshHash: 'another-hash',
     userAgent: IPHONE,
     ip: '98.44.21.7',
     deviceLabel: null,
+    location: null,
     lastSeenAt: hoursAgo(5),
     expiresAt: '2026-10-13T09:01:52.710Z',
-    revokedAt: null,
+    current: false,
   },
 ];
+
+const PREFS = {
+  language: 'en',
+  timezone: 'America/Chicago',
+  dateFormat: 'MMM D, YYYY',
+  distanceUnit: 'MILES',
+  savedViews: { drivers: [{ name: 'On duty' }] },
+  tableColumns: {},
+};
 
 function api({
   profile = PROFILE as Record<string, unknown>,
   sessions = SESSIONS as unknown[],
-}: { profile?: Record<string, unknown>; sessions?: unknown[] } = {}) {
-  const calls = { profileGets: 0, patches: [] as unknown[], deletes: [] as string[] };
+  prefs = PREFS as Record<string, unknown>,
+}: { profile?: Record<string, unknown>; sessions?: unknown[]; prefs?: Record<string, unknown> } = {}) {
+  const calls = {
+    profileGets: 0,
+    patches: [] as unknown[],
+    deletes: [] as string[],
+    deleteAll: 0,
+    prefPuts: [] as unknown[],
+    avatarPosts: 0,
+    avatarDeletes: 0,
+  };
   server.use(
     http.get(url(endpoints.me.profile), () => {
       calls.profileGets += 1;
@@ -93,6 +110,24 @@ function api({
     http.delete(url(endpoints.me.session(':id')), ({ params }) => {
       calls.deletes.push(String(params.id));
       return ok({ success: true });
+    }),
+    http.delete(url(endpoints.me.sessions), () => {
+      calls.deleteAll += 1;
+      return ok({ revoked: 1 });
+    }),
+    http.get(url(endpoints.me.preferences), () => ok(prefs)),
+    http.put(url(endpoints.me.preferences), async ({ request }) => {
+      const body = (await request.json()) as Record<string, unknown>;
+      calls.prefPuts.push(body);
+      return ok(body);
+    }),
+    http.post(url(endpoints.me.avatar), () => {
+      calls.avatarPosts += 1;
+      return ok({ id: PROFILE.id, avatarUrl: 'https://minio.test/avatars/usr_fleet_manager/a.png' });
+    }),
+    http.delete(url(endpoints.me.avatar), () => {
+      calls.avatarDeletes += 1;
+      return ok({ id: PROFILE.id, avatarUrl: null });
     }),
   );
   return calls;
@@ -138,15 +173,15 @@ describe('W-26 — states', () => {
 
     expect(await screen.findByLabelText(/First name/)).toHaveValue('Mike');
     expect(screen.getByLabelText(/Last name/)).toHaveValue('Torres');
-    expect(screen.getByLabelText('Job title')).toHaveAttribute('readonly');
+    expect(screen.getByLabelText('Job title')).toHaveValue('Fleet Manager'); // editable (B-51)
     expect(screen.getByLabelText('Work email')).toBeDisabled();
     expect(screen.getByText('Managed by your administrator')).toBeInTheDocument();
     expect(screen.getByText('Shown to your team and on records you sign')).toBeInTheDocument();
     expect(screen.getByText('PNG or JPG, at least 256 × 256 px. Appears on your signature block.')).toBeInTheDocument();
 
-    // Q-1: no password fields; B-51: no Upload/Remove; no Save until something changes.
+    // Q-1: no password fields; B-51: `Upload` always, `Remove` only with a photo; no Save until dirty.
     expect(screen.queryByLabelText(/password/i)).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Upload' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Upload' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument();
 
@@ -254,7 +289,7 @@ describe('W-26 — section anchors (11.26 Account menu, Notifications panel)', (
     expect(scroll).not.toHaveBeenCalled();
   });
 
-  it('states what Notifications and Language & region really do, with nothing to save (B-11)', async () => {
+  it('keeps Notifications an honest empty state (no per-event channel matrix in B-11)', async () => {
     api();
     renderPage();
     const notifications = card('Notifications');
@@ -262,30 +297,94 @@ describe('W-26 — section anchors (11.26 Account menu, Notifications panel)', (
       within(notifications).getByText('Personal notification settings are not available yet'),
     ).toBeInTheDocument();
     expect(within(notifications).queryByRole('checkbox')).not.toBeInTheDocument();
+  });
+});
 
+describe('W-26 — Language & region (GET/PUT /me/preferences, B-11)', () => {
+  it('shows the saved preferences as real selectors', async () => {
+    api();
+    renderPage();
     const language = card('Language & region');
-    expect(within(language).getByLabelText('Language')).toHaveValue('English');
-    expect(within(language).getByLabelText('Distance unit')).toHaveValue('Miles');
+    expect(await within(language).findByLabelText('Time zone')).toHaveValue('America/Chicago');
+    expect(within(language).getByLabelText('Language')).toHaveValue('en');
     expect(within(language).getByLabelText('Date format')).toHaveValue('MMM D, YYYY');
-    expect(within(language).getByLabelText('Time zone')).toHaveAttribute('readonly');
-    expect(within(language).queryByRole('button')).not.toBeInTheDocument();
-    expect(within(language).queryByRole('combobox')).not.toBeInTheDocument();
+    expect(within(language).getByLabelText('Distance unit')).toHaveValue('MILES');
+    expect(within(language).getAllByRole('combobox')).toHaveLength(4);
+    expect(within(language).queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument();
+  });
+
+  it('saves the merged row with PUT (saved views survive) and toasts `Settings saved`', async () => {
+    const user = userEvent.setup();
+    const calls = api();
+    renderPage();
+    const language = card('Language & region');
+    await user.selectOptions(await within(language).findByLabelText('Time zone'), 'America/Denver');
+    await user.selectOptions(within(language).getByLabelText('Distance unit'), 'KM');
+    await user.click(within(language).getByRole('button', { name: 'Save changes' }));
+
+    expect(await screen.findByText('Settings saved')).toBeInTheDocument();
+    expect(calls.prefPuts).toEqual([
+      { ...PREFS, timezone: 'America/Denver', distanceUnit: 'KM' },
+    ]);
+    await waitFor(() =>
+      expect(within(language).queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument(),
+    );
+  });
+
+  it('`Cancel` restores the saved values; a failed save shows a banner in the card', async () => {
+    const user = userEvent.setup();
+    api();
+    server.use(http.put(url(endpoints.me.preferences), () => fail(404, 'NOT_FOUND', 'Nope.')));
+    renderPage();
+    const language = card('Language & region');
+    const tz = await within(language).findByLabelText('Date format');
+    await user.selectOptions(tz, 'YYYY-MM-DD');
+    await user.click(within(language).getByRole('button', { name: 'Save changes' }));
+    expect(await within(language).findByRole('alert')).toHaveTextContent(errorMessage('NOT_FOUND'));
+    await user.click(within(language).getByRole('button', { name: 'Cancel' }));
+    expect(within(language).getByLabelText('Date format')).toHaveValue('MMM D, YYYY');
+  });
+
+  it('falls back to English, the browser zone and miles for an empty row', async () => {
+    api({ prefs: {} });
+    renderPage();
+    const language = card('Language & region');
+    expect(await within(language).findByLabelText('Language')).toHaveValue('en');
+    expect(within(language).getByLabelText('Distance unit')).toHaveValue('MILES');
+    expect(within(language).getByLabelText('Time zone')).not.toHaveValue('');
+  });
+
+  it('keeps a preferences error inside its card', async () => {
+    api();
+    server.use(http.get(url(endpoints.me.preferences), () => fail(404, 'NOT_FOUND', 'Nope.')));
+    renderPage();
+    expect(await screen.findByText('Could not load your preferences')).toBeInTheDocument();
+    expect(await screen.findByLabelText(/First name/)).toHaveValue('Mike');
   });
 });
 
 describe('W-26 — Profile card', () => {
-  it('saves first name, last name and phone, then toasts `Settings saved`', async () => {
+  it('saves name, job title and phone, toasts `Settings saved` and refreshes the topbar user', async () => {
     const user = userEvent.setup();
+    const refreshUser = vi.fn(async () => undefined);
+    auth = buildMockAuthContext('FLEET_MANAGER', { refreshUser });
     const calls = api();
     renderPage();
     const first = await screen.findByLabelText(/First name/);
     await user.clear(first);
     await user.type(first, 'Michael');
+    const job = screen.getByLabelText('Job title');
+    expect(job).not.toHaveAttribute('readonly');
+    await user.clear(job);
+    await user.type(job, 'Head of Fleet');
     await user.type(screen.getByLabelText('Mobile number'), '+16145550104');
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
     expect(await screen.findByText('Settings saved')).toBeInTheDocument();
-    expect(calls.patches).toEqual([{ firstName: 'Michael', lastName: 'Torres', phone: '+16145550104' }]);
+    expect(calls.patches).toEqual([
+      { firstName: 'Michael', lastName: 'Torres', jobTitle: 'Head of Fleet', phone: '+16145550104' },
+    ]);
+    expect(refreshUser).toHaveBeenCalled();
     await waitFor(() =>
       expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument(),
     );
@@ -333,9 +432,9 @@ describe('W-26 — Profile card', () => {
 });
 
 describe('W-26 — Active sessions', () => {
-  it('lists devices with the drawn columns, never rendering the refresh hash', async () => {
+  it('lists devices with the drawn columns', async () => {
     api();
-    const { container } = renderPage();
+    renderPage();
     const sessions = card('Active sessions');
     expect(await within(sessions).findByText('Mac · Chrome 129')).toBeInTheDocument();
     expect(
@@ -345,13 +444,11 @@ describe('W-26 — Active sessions', () => {
     ).toEqual(['DEVICE', 'LOCATION', 'IP ADDRESS', 'LAST ACTIVE', 'Actions']);
     expect(within(sessions).getByText('10.14.2.88')).toHaveClass('tabular');
     expect(within(sessions).getByText('2 h')).toBeInTheDocument();
-    expect(within(sessions).getAllByText('—')).toHaveLength(2); // LOCATION — B-50
-    // B-50: without a `current` flag every row can be signed out.
+    expect(within(sessions).getAllByText('—')).toHaveLength(2); // LOCATION null → `—`
     expect(within(sessions).getAllByRole('button', { name: /^Sign out (Mac|iPhone)/ })).toHaveLength(2);
-    expect(container.innerHTML).not.toContain('never-render-this-hash');
   });
 
-  it('marks the current session once the backend sends `current`', async () => {
+  it('marks the current session `● Current` with its location and no `Sign out`', async () => {
     api({ sessions: [{ ...SESSIONS[0], current: true, location: 'Columbus, OH, US' }, SESSIONS[1]] });
     renderPage();
     const sessions = card('Active sessions');
@@ -382,7 +479,7 @@ describe('W-26 — Active sessions', () => {
     expect(screen.getByText('iPhone · Safari 17')).toBeInTheDocument();
   });
 
-  it('`Sign out everywhere` confirms, revokes every session, then signs out here', async () => {
+  it('`Sign out everywhere` confirms, calls DELETE /me/sessions once, then signs out here', async () => {
     const user = userEvent.setup();
     const signOut = vi.fn();
     auth = buildMockAuthContext('FLEET_MANAGER', { signOut });
@@ -392,7 +489,8 @@ describe('W-26 — Active sessions', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Sign out everywhere?' });
     await user.click(within(dialog).getByRole('button', { name: 'Sign out everywhere' }));
     await waitFor(() => expect(signOut).toHaveBeenCalledTimes(1));
-    expect(calls.deletes).toEqual(['ses_mac', 'ses_iphone']);
+    expect(calls.deleteAll).toBe(1);
+    expect(calls.deletes).toEqual([]);
   });
 
   it('a failed `Sign out everywhere` keeps the session and reports it', async () => {
@@ -400,7 +498,7 @@ describe('W-26 — Active sessions', () => {
     const signOut = vi.fn();
     auth = buildMockAuthContext('FLEET_MANAGER', { signOut });
     api();
-    server.use(http.delete(url(endpoints.me.session(':id')), () => fail(404, 'NOT_FOUND', 'Gone.')));
+    server.use(http.delete(url(endpoints.me.sessions), () => fail(404, 'NOT_FOUND', 'Gone.')));
     renderPage();
     await user.click(await screen.findByRole('button', { name: 'Sign out everywhere' }));
     const dialog = await screen.findByRole('dialog', { name: 'Sign out everywhere?' });
@@ -448,6 +546,73 @@ describe('W-26 — Active sessions', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
 
     expect(calls.deletes).toEqual([]);
+    expect(calls.deleteAll).toBe(0);
     expect(signOut).not.toHaveBeenCalled();
+  });
+});
+
+describe('W-26 — Profile photo (POST/DELETE /me/avatar, B-51)', () => {
+  const png = (bytes = 10) => new File([new Uint8Array(bytes)], 'me.png', { type: 'image/png' });
+  const stubBitmap = (width: number, height: number) =>
+    vi.stubGlobal(
+      'createImageBitmap',
+      vi.fn(async () => ({ width, height, close: () => undefined })),
+    );
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('uploads a valid PNG, toasts and refreshes the topbar avatar', async () => {
+    stubBitmap(512, 512);
+    const refreshUser = vi.fn(async () => undefined);
+    auth = buildMockAuthContext('FLEET_MANAGER', { refreshUser });
+    const calls = api();
+    renderPage();
+    const profile = card('Profile');
+    expect(await within(profile).findByRole('button', { name: 'Upload' })).toBeInTheDocument();
+    // No photo yet → nothing to remove.
+    expect(within(profile).queryByRole('button', { name: 'Remove' })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByTestId('avatar-file-input'), { target: { files: [png()] } });
+
+    expect(await screen.findByText('Settings saved')).toBeInTheDocument();
+    expect(calls.avatarPosts).toBe(1);
+    await waitFor(() => expect(refreshUser).toHaveBeenCalled());
+  });
+
+  it('refuses a small, a large or a non-image file before uploading', async () => {
+    const calls = api();
+    renderPage();
+    const input = await screen.findByTestId('avatar-file-input');
+
+    stubBitmap(128, 400);
+    fireEvent.change(input, { target: { files: [png()] } });
+    expect(await screen.findByText('The image must be a PNG or JPG of at least 256 × 256 pixels.')).toBeInTheDocument();
+
+    fireEvent.change(input, { target: { files: [png(5 * 1024 * 1024 + 1)] } });
+    expect(await screen.findByText('The photo must be 5 MB or smaller.')).toBeInTheDocument();
+
+    fireEvent.change(input, {
+      target: { files: [new File(['x'], 'me.gif', { type: 'image/gif' })] },
+    });
+    expect(await screen.findByText('Choose a PNG or JPG image.')).toBeInTheDocument();
+    expect(calls.avatarPosts).toBe(0);
+  });
+
+  it('shows the server refusal (422 IMAGE_TOO_SMALL) under the photo', async () => {
+    stubBitmap(512, 512);
+    api();
+    server.use(http.post(url(endpoints.me.avatar), () => fail(422, 'IMAGE_TOO_SMALL', 'Too small.')));
+    renderPage();
+    fireEvent.change(await screen.findByTestId('avatar-file-input'), { target: { files: [png()] } });
+    expect(await within(card('Profile')).findByRole('alert')).toHaveTextContent(
+      errorMessage('IMAGE_TOO_SMALL'),
+    );
+  });
+
+  it('`Remove` deletes the current photo', async () => {
+    const user = userEvent.setup();
+    const calls = api({ profile: { ...PROFILE, avatarUrl: 'https://minio.test/a.png' } });
+    renderPage();
+    await user.click(await within(card('Profile')).findByRole('button', { name: 'Remove' }));
+    expect(await screen.findByText('Settings saved')).toBeInTheDocument();
+    expect(calls.avatarDeletes).toBe(1);
   });
 });

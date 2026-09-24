@@ -1,6 +1,6 @@
 // owner: web-reports-transfer — ⭐ 11.14 Send logs to a safety official (FMCSA §395.34 data transfer).
 // Design: web/roles and screens/sheets, modals, drawers, menus/Settings — permission matrix across roles.jpg
-// Perm `reportsTransfer` FULL · POST /transfers { driverId, method, rangeStart, rangeEnd, outputFileComment, recipient? }
+// Perm `dataTransfer` FULL (B-95, split from `reportsTransfer`) · POST /transfers { driverId, method, rangeStart, rangeEnd, outputFileComment, recipient? }
 //
 // FMCSA constraints are enforced here exactly, never widened: an inspector address must end in
 // `fmcsa.dot.gov`, `outputFileComment` is 1–60 characters, the range is at most 8 RODS days.
@@ -68,7 +68,7 @@ export interface SendLogsModalProps {
   open: boolean;
   onClose: () => void;
   initial?: SendLogsInitial;
-  /** `undefined` = not readable for this role (B-45) → treated as TEST, never hidden. */
+  /** `undefined` = not loaded yet or the read failed → treated as TEST, never hidden (WD-038). */
   erodsMode: ErodsMode | undefined;
   eldIdentifier?: string;
   /** Carrier zone, only to resolve "today" for the default range end. */
@@ -234,7 +234,7 @@ export function SendLogsModal({ open, onClose, initial, erodsMode, eldIdentifier
             Download a copy
           </Button>
           {!sent && (
-            <Can perm="reportsTransfer" level="FULL">
+            <Can perm="dataTransfer" level="FULL">
               <Button
                 variant="primary"
                 size="lg"
