@@ -53,6 +53,10 @@ export interface DriverScoreRow {
   milesDriven: number;
   violationCount: number;
   rank: number | null;
+  /** B-44 (shipped 2026-09-24) — score for the prior period of the same length, and
+   * `score - previousScore` computed server-side. Null when there is no prior-period row. */
+  previousScore?: number | null;
+  trend?: number | null;
 }
 
 export interface SafetyEventTableRow extends SafetyEventRow {
@@ -163,7 +167,9 @@ export function useUpdateSafetyEvent(id: string) {
 export function useAssignCoaching() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (payload: { eventId: string; note?: string }) =>
+    /** B-43 (shipped) — pass `driverId` instead of `eventId` to coach at driver level (closes that
+     * driver's most recent open event). Exactly one of the two. */
+    mutationFn: (payload: ({ eventId: string; driverId?: never } | { driverId: string; eventId?: never }) & { note?: string }) =>
       client.post<SafetyEventRow>(endpoints.safety.coaching, payload),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qkRoot.safety });

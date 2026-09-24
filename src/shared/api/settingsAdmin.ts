@@ -103,7 +103,27 @@ export interface InviteUserPayload {
   roleId: string;
   jobTitle?: string;
   phone?: string;
+  /** B-85 (shipped) — personal note in the invitation email. */
+  message?: string;
+  /** B-85 — terminal scope (home terminal names; no Terminal table, backend D-090). */
+  terminalIds?: string[];
 }
+
+/** `UpdateUserDto` (B-84, shipped). Changing `email` does NOT write it: the response carries
+ * `emailVerification.pendingEmail` and the address switches only once the link is confirmed via
+ * `POST /auth/email/verify` (backend D-101). */
+export interface UpdateUserPayload {
+  firstName?: string;
+  lastName?: string;
+  jobTitle?: string;
+  phone?: string;
+  roleId?: string;
+  status?: UserStatus;
+  email?: string;
+  homeTerminalName?: string;
+}
+
+export type UpdateUserResult = UserRow & { emailVerification?: { pendingEmail: string; verifyToken?: string } };
 
 export function useInviteUser() {
   const qc = useQueryClient();
@@ -117,8 +137,8 @@ export function useInviteUser() {
 export function useUpdateUser() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, dto }: { id: string; dto: Partial<{ roleId: string; status: UserStatus; firstName: string; lastName: string }> }) =>
-      client.patch<UserRow>(endpoints.users.update(id), dto),
+    mutationFn: ({ id, dto }: { id: string; dto: UpdateUserPayload }) =>
+      client.patch<UpdateUserResult>(endpoints.users.update(id), dto),
     onSuccess: () => qc.invalidateQueries({ queryKey: qkRoot.users }),
   });
 }
@@ -202,6 +222,9 @@ export interface DeviceRow {
   firmwareOutdated: boolean;
   lastHeartbeatAt: string | null;
   storedEventsCount?: number;
+  /** B-88 (shipped 2026-09-24). */
+  autoFirmware?: boolean;
+  shareDiagnostics?: boolean;
 }
 
 export interface DeviceListParams {
@@ -211,6 +234,8 @@ export interface DeviceListParams {
   q?: string;
   status?: DeviceStatus;
   bleState?: BleState;
+  /** B-35 (shipped) — devices paired to one unit. */
+  vehicleId?: string;
 }
 
 export function useDevicesList(params: DeviceListParams = {}) {
@@ -269,9 +294,8 @@ export function useRemoveDevice() {
   });
 }
 
-/** ⛔ GAP B-8 — `GET /devices/:id/diagnostics` does not exist; served by MSW only
- * (`src/mocks/handlers/settingsGaps.ts`). Against the live API this 404s and the caller must
- * hide `Test connection` rather than pretend the call succeeded. */
+/** B-8 (shipped 2026-09-24) — `GET /devices/:id/diagnostics`: derived from the device's latest
+ * recorded status, not a live round-trip (label the result accordingly). */
 export interface DeviceDiagnostics {
   signalStrength: 'good' | 'fair' | 'poor';
   gpsLock: boolean;
@@ -312,6 +336,8 @@ export interface AlertRuleRow {
   quietHours?: { from: string; to: string; timezone: string };
   enabled: boolean;
   isSystem?: boolean;
+  /** B-86 (shipped) — ISO until which delivery is muted; null = not muted. */
+  mutedUntil?: string | null;
 }
 
 export function useAlertRulesList() {
@@ -349,7 +375,8 @@ export function useCreateAlertRule() {
 export function useUpdateAlertRule() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, dto }: { id: string; dto: Partial<CreateAlertRulePayload> }) =>
+    /** `mutedUntil` (B-86): ISO to mute, `null` to unmute. */
+    mutationFn: ({ id, dto }: { id: string; dto: Partial<CreateAlertRulePayload> & { mutedUntil?: string | null } }) =>
       client.patch<AlertRuleRow>(endpoints.alertRules.update(id), dto),
     onSuccess: () => qc.invalidateQueries({ queryKey: qkRoot.alertRules }),
   });
@@ -363,7 +390,8 @@ export function useDeleteAlertRule() {
   });
 }
 
-/** ⛔ GAP B-9 — `POST /alert-rules/:id/test` does not exist; served by MSW only. */
+/** B-9 (shipped 2026-09-24) — sends a test through the rule's own channels to the caller; a
+ * disabled rule answers `{ triggered: false }`. */
 export function useTestAlertRule() {
   return useMutation({
     mutationFn: (id: string) => client.post<{ triggered: boolean }>(endpoints.alertRules.test(id)),
@@ -463,7 +491,9 @@ export interface AuditEntry {
   createdAt: string;
   actorType: 'USER' | 'SYSTEM' | 'DRIVER';
   actorId?: string | null;
+  /** B-62 (shipped) — joined server-side; no client-side user lookup needed. */
   actorName?: string | null;
+  actorEmail?: string | null;
   action: 'CREATE' | 'UPDATE' | 'DELETE' | 'VIEW' | string;
   objectType: string;
   objectId?: string | null;
@@ -530,11 +560,17 @@ export function useTicketsList(params: TicketListParams = {}) {
   });
 }
 
+/** B-91 — the server collects these itself (the client never uploads a diagnostics file). */
+export type TicketAttachmentKind = 'DEVICE_DIAGNOSTICS' | 'ELD_EVENTS_24H';
+
 export interface CreateTicketPayload {
   subject: string;
   body: string;
   category?: string;
   priority: TicketPriority;
+  /** B-91 — the unit the server-collected attachments are taken from. */
+  vehicleId?: string;
+  attachments?: Array<{ kind: TicketAttachmentKind }>;
 }
 
 export function useCreateTicket() {
@@ -551,5 +587,79 @@ export function useSubmitFeedback() {
   return useMutation({
     mutationFn: (dto: { answers: Record<string, unknown>; comment?: string }) =>
       client.post<{ id: string }>(endpoints.support.feedback, dto),
+  });
+}
+
+/* ------------------------------------------------------------------ Phase 13 (2026-09-24) */
+
+/** B-88 — `UpdateDeviceDto`. `PATCH /devices/:id`, `devices` FULL. */
+export interface UpdateDevicePayload {
+  serial?: string;
+  bleMacAddress?: string;
+  model?: DeviceModel;
+  firmware?: string;
+  periodicConnectedSec?: number;
+  periodicDisconnectedMin?: number;
+  autoFirmware?: boolean;
+  shareDiagnostics?: boolean;
+  status?: DeviceStatus;
+}
+
+export function useUpdateDevice() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, dto }: { id: string; dto: UpdateDevicePayload }) => client.patch<DeviceRow>(endpoints.devices.update(id), dto),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qkRoot.devices }),
+  });
+}
+
+/** B-89 — marketplace catalog; `available: false` rows are listed but cannot be connected. */
+export interface IntegrationCatalogEntry {
+  provider: string;
+  name: string;
+  description: string;
+  category: string;
+  available: boolean;
+}
+
+export function useIntegrationsCatalog(enabled = true) {
+  return useQuery({
+    queryKey: qk.integrationsCatalog,
+    queryFn: ({ signal }) => client.get<IntegrationCatalogEntry[]>(endpoints.integrations.catalog, { signal }),
+    enabled,
+    ...typedCachePolicy<IntegrationCatalogEntry[]>('reference'),
+  });
+}
+
+/** B-90 — `POST /support/chats`: opens a SUPPORT conversation with the first message. Join the
+ * `conversation:{conversationId}` room for replies and read it through `useMessages`. */
+export function useStartSupportChat() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (dto: { subject?: string; message: string }) =>
+      client.post<{ conversationId: string; messageId: string }>(endpoints.support.chats, dto),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qkRoot.conversations }),
+  });
+}
+
+/** `PATCH /support/tickets/:id` — `support` FULL. */
+export function useUpdateTicket() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, dto }: { id: string; dto: { status?: TicketStatus; priority?: TicketPriority; assignedToId?: string } }) =>
+      client.patch<TicketRow>(endpoints.support.updateTicket(id), dto),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qkRoot.support }),
+  });
+}
+
+/** B-84 — the landing page of the email-change link: `POST /auth/email/verify { token }`. */
+export function useConfirmEmailChange() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (token: string) => client.post<{ success: boolean }>(endpoints.auth.emailVerify, { token }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qkRoot.me });
+      void qc.invalidateQueries({ queryKey: qkRoot.users });
+    },
   });
 }

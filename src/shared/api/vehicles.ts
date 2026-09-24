@@ -14,6 +14,7 @@ import { qk, qkRoot } from './queryKeys';
 import { typedCachePolicy } from './queryPolicy';
 import { useDevicesLookup, useDriversLookup, useVehiclesLookup, vehiclesLookupQuery } from './lookups';
 import { compactParams, pagePolicy, usePagedQuery, type PageQueryOptions } from './paging';
+import type { OffsetPage } from './types';
 
 /** The real, raw `Vehicle` row (backend/prisma/schema.prisma `model Vehicle`). */
 export interface VehicleRow {
@@ -243,7 +244,8 @@ export function useVehicleAssignedDriver(vehicleId: string | undefined) {
   return { ...query, data };
 }
 
-/** ⛔ GAP B-35 — no `GET /devices?vehicleId=` filter; read from the session-wide `/devices` lookup. */
+/** Session-wide `/devices` lookup join. B-35 shipped `GET /devices?vehicleId=` — a screen that only
+ * needs one unit's device should prefer `useDevicesForVehicle` (below), which asks the server. */
 export function useVehicleDevice(vehicleId: string | undefined) {
   const query = useDevicesLookup(Boolean(vehicleId));
   const data = useMemo(
@@ -275,7 +277,8 @@ export function useVehicleDtc(vehicleId: string | undefined) {
   });
 }
 
-/** ⛔ GAP B-5 — `GET /vehicles/:id/activities` does not exist; MSW answers the §20 shape. */
+/** B-5 (shipped 2026-09-24) — `VehicleActivityItem` in backend `vehicles.service.ts`: audit trail +
+ * DVIR submissions for the unit. */
 export interface VehicleActivityItem {
   id: string;
   occurredAt: string;
@@ -294,10 +297,8 @@ export function useVehicleActivities(vehicleId: string | undefined) {
   });
 }
 
-/** ⛔ GAP B-4 — `GET /vehicles/:id/histories?date=` does not exist; W-05 does not ship for real
- * without it (web/tz.md §10 W-05). MSW answers the documented segment shape so the screen can be
- * built and reviewed; it is not wired to a client-side telemetry fan-out (60k points, rejected
- * by tz.md itself). */
+/** B-4 (shipped 2026-09-24) — server-side DRIVE/STOP/IDLE segmentation of one day
+ * (`backend/src/modules/vehicles/lib/vehicle-histories.ts`). Never a client-side telemetry fan-out. */
 export interface RouteSegment {
   marker: string;
   type: 'DRIVE' | 'STOP' | 'IDLE';
@@ -322,14 +323,15 @@ export interface VehicleHistoriesResponse {
   stopTimeSec: number;
   idleTimeSec: number;
   idleFuelWastedGal: number;
-  firstMovementAt: string;
-  lastMovementAt: string;
+  /** Null on a day with no movement. */
+  firstMovementAt: string | null;
+  lastMovementAt: string | null;
   engineOnSec: number;
   engineOffSec: number;
   longestDrive: { label: string; durationSec: number };
   longestStop: { label: string; durationSec: number };
   maxSpeedMph: number;
-  maxSpeedAt: string;
+  maxSpeedAt: string | null;
   segments: RouteSegment[];
 }
 
@@ -394,7 +396,8 @@ export function useDeleteVehicle() {
 export function useAssignDriver(vehicleId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (payload: { driverId: string; effectiveAt?: string }) =>
+    /** B-74 `notify` — push the driver about the assignment. B-13: allowed at `vehicles` FULL OR `trips` FULL. */
+    mutationFn: (payload: { driverId: string; effectiveAt?: string; notify?: boolean }) =>
       client.post<VehicleRow>(endpoints.vehicles.assignDriver(vehicleId), payload),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qkRoot.vehicles });
@@ -419,16 +422,169 @@ export function useCalibrateOdometer(vehicleId: string) {
 export interface ImportSummary {
   imported: number;
   updated: number;
+  /** B-69 — present when `options.duplicateStrategy` is `SKIP`. */
+  skipped?: number;
   failed: Array<{ index: number; error: string }>;
+}
+
+/** B-69 (shipped) — `ImportVehiclesOptionsDto`. */
+export interface ImportVehiclesOptions {
+  duplicateStrategy?: 'UPDATE_BY_VIN' | 'SKIP' | 'CREATE';
+  /** Backfills `notes` on rows that omit it (Vehicle has no terminal column, backend D-099). */
+  defaultTerminal?: string;
+  /** Pairs each row's `deviceSerial` to the created/updated unit. */
+  pairDevices?: boolean;
+  /** Emails the import result to the calling user (Q-2: email only). */
+  emailSummary?: boolean;
 }
 
 export function useImportVehicles() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (payload: { vehicles: Array<Record<string, unknown>> }) =>
+    mutationFn: (payload: { vehicles: Array<Record<string, unknown>>; options?: ImportVehiclesOptions }) =>
       client.post<ImportSummary>(endpoints.vehicles.import, payload),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qkRoot.vehicles });
+    },
+  });
+}
+
+/* ---------------------------------------------------------------------- Phase 13 (2026-09-24) */
+
+/** One `TelemetryPoint` row (Prisma). Decimal columns serialise as strings. */
+export interface TelemetryPointRow {
+  time: string;
+  vehicleId: string;
+  driverId: string | null;
+  latitude: number | string;
+  longitude: number | string;
+  speedMph: number | null;
+  headingDeg: number | null;
+  odometerMi: number | null;
+  engineHours: number | string | null;
+  idleHours: number | string | null;
+  engineOn: boolean | null;
+  rpm: number | null;
+  fuelPct: number | null;
+  defPct: number | null;
+  fuelEconomyMpg: number | string | null;
+  coolantTempC: number | null;
+  oilTempC: number | null;
+  voltage: number | string | null;
+  dtcCount: number | null;
+  [key: string]: unknown;
+}
+
+export interface VehicleTelemetryParams {
+  [key: string]: string | number | undefined;
+  from?: string;
+  to?: string;
+  /** 1…2000, backend default 500. The W-04 status card needs `limit: 1`. */
+  limit?: number;
+}
+
+/** `GET /vehicles/:id/telemetry` — newest first. `vehicles` READ. */
+export function useVehicleTelemetry(vehicleId: string | undefined, params: VehicleTelemetryParams = { limit: 1 }) {
+  return useQuery({
+    queryKey: qk.vehicleTelemetry(vehicleId ?? '', params),
+    queryFn: ({ signal }) =>
+      client.get<{ items: TelemetryPointRow[] }>(endpoints.vehicles.telemetry(vehicleId as string), { params, signal }),
+    enabled: Boolean(vehicleId),
+    ...typedCachePolicy<{ items: TelemetryPointRow[] }>('live'),
+  });
+}
+
+export type VehicleStatus = 'ACTIVE' | 'INACTIVE' | 'OUT_OF_SERVICE';
+
+export interface BulkStatusResult {
+  updated: string[];
+  /** Each id is checked against the OOS hard rule on its own; a refused one lands here. */
+  failed: Array<{ id: string; error: string }>;
+}
+
+/** B-71 — `PATCH /vehicles/bulk-status`, `vehicles` FULL. Partial success is a 200: read `failed`. */
+export function useBulkVehicleStatus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: { ids: string[]; status: VehicleStatus }) =>
+      client.patch<BulkStatusResult>(endpoints.vehicles.bulkStatus, payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: qkRoot.vehicles });
+    },
+  });
+}
+
+/** B-35 — `GET /devices?vehicleId=`: the device(s) paired to one unit, asked of the server. */
+export interface VehicleDeviceRow {
+  id: string;
+  serial: string;
+  model: 'PT30' | 'PT40';
+  status: string;
+  vehicleId: string | null;
+  bleState: string;
+  firmwareVersion: string | null;
+  firmwareOutdated: boolean;
+  lastHeartbeatAt: string | null;
+}
+
+export function useDevicesForVehicle(vehicleId: string | undefined, enabled = true) {
+  const params = compactParams({ vehicleId, limit: 5 });
+  return useQuery({
+    queryKey: qk.devices(params),
+    queryFn: ({ signal }) => client.list<VehicleDeviceRow>(endpoints.devices.list, params, { signal }),
+    enabled: enabled && Boolean(vehicleId),
+    ...typedCachePolicy<OffsetPage<VehicleDeviceRow>>('list'),
+  });
+}
+
+/* ---- B-7 co-driver pairings (team driving) */
+
+export interface CoDriverPairingRow {
+  id: string;
+  primaryDriverId: string;
+  coDriverId: string;
+  vehicleId: string;
+  startedAt: string;
+  endedAt: string | null;
+}
+
+export interface CoDriverPairingParams {
+  [key: string]: string | number | boolean | undefined;
+  vehicleId?: string;
+  driverId?: string;
+  active?: boolean;
+  page?: number;
+  limit?: number;
+}
+
+/** `GET /co-driver-pairings` — offset page. W-04 co-driver row: `{ vehicleId, active: true, limit: 1 }`. */
+export function useCoDriverPairings(params: CoDriverPairingParams, enabled = true) {
+  const clean = compactParams(params);
+  return useQuery({
+    queryKey: qk.coDriverPairings(clean),
+    queryFn: ({ signal }) => client.list<CoDriverPairingRow>(endpoints.coDriverPairings.list, clean, { signal }),
+    enabled,
+    ...typedCachePolicy<OffsetPage<CoDriverPairingRow>>('list'),
+  });
+}
+
+export function useCreateCoDriverPairing() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: { primaryDriverId: string; coDriverId: string; vehicleId: string; startedAt?: string }) =>
+      client.post<CoDriverPairingRow>(endpoints.coDriverPairings.create, payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: qkRoot.coDriverPairings });
+    },
+  });
+}
+
+export function useEndCoDriverPairing() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => client.post<{ id: string; endedAt: string }>(endpoints.coDriverPairings.end(id)),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: qkRoot.coDriverPairings });
     },
   });
 }

@@ -154,6 +154,18 @@ export const ERROR_MESSAGES: Record<string, string> = {
   STORAGE_UNAVAILABLE: 'File storage is temporarily unavailable.',
   WEBHOOK_DELIVERY_FAILED: 'The webhook could not be delivered.',
   INTEGRATION_NOT_CONFIGURED: 'This integration is not configured yet.',
+  // --- backend Phase 13 (2026-09-24) ------------------------------------------------------------
+  PASSWORD_LOGIN_DISABLED: 'Password sign-in is disabled. Continue with Google.',
+  VEHICLE_HAS_OPEN_CRITICAL_DEFECTS: 'This unit has an open critical defect and must stay out of service.',
+  DRIVER_DOCUMENT_NOT_FOUND: 'Document not found.',
+  CO_DRIVER_PAIRING_NOT_FOUND: 'Co-driver pairing not found or already ended.',
+  IMAGE_TOO_SMALL: 'The image must be a PNG or JPG of at least 256 × 256 pixels.',
+  ATTACHMENT_NOT_FOUND: 'Attachment not found.',
+  TRIP_NOT_FOUND: 'Trip not found.',
+  TRAILER_NOT_FOUND: 'Trailer not found.',
+  TRIP_NOT_DRAFT: 'Only a draft trip can be published.',
+  GEOCODER_NOT_CONFIGURED: 'Address lookup is not configured. Draw the geofence on the map instead.',
+  GEOCODE_FAILED: 'That address could not be found. Check it or draw the geofence on the map.',
 };
 
 /** §14.3 — unknown code → `Something went wrong. Reference: <traceId>`. */

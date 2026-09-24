@@ -5,19 +5,10 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath, URL } from 'node:url';
 import { openapi } from './openapi';
 
-/** Recorded in web/backend-gaps.md — still-missing B-NN ids plus the vehicle telemetry read path.
- * B-1, B-2, B-3, B-6 and B-46 (IFTA summary) shipped 2026-09-14 and are no longer listed. */
-const KNOWN_GAPS = new Set([
-  '/api/vehicles/{}/histories',
-  '/api/vehicles/{}/activities',
-  '/api/vehicles/{}/telemetry',
-  '/api/co-driver-pairings',
-  '/api/devices/{}/diagnostics',
-  '/api/alert-rules/{}/test',
-  '/api/search',
-  '/api/notifications/{}/read',
-  '/api/me/preferences',
-]);
+/** Recorded in web/backend-gaps.md. Every former gap (B-4, B-5, B-7, B-8, B-9, B-10, B-11, B-56 and
+ * the telemetry read path) shipped in backend Phase 13 (2026-09-24) and was removed; a new entry
+ * needs a B-NN id in backend-gaps.md. */
+const KNOWN_GAPS = new Set<string>([]);
 
 const SOURCE = readFileSync(
   fileURLToPath(new URL('../../src/shared/api/endpoints.ts', import.meta.url)),

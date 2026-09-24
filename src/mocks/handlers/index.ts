@@ -14,6 +14,7 @@ import { fleetWriteHandlers, tripDetailHandlers } from './fleetWrites';
 import { settingsAdminHandlers } from './settingsAdminGaps';
 import { hosWriteHandlers } from './hosWrites';
 import { safetyDataHandlers } from './safetyData';
+import { phase13Handlers } from './phase13';
 
 // `vehiclesDriversGapHandlers` registers static paths (`/drivers/roster`) that must be matched
 // BEFORE `fleetHandlers`' `/drivers/:id` — MSW is first-match-wins and `:id` happily captures the
@@ -30,6 +31,9 @@ import { safetyDataHandlers } from './safetyData';
 // HOS certify / log edit requests). Without them those requests fell through to the real API and
 // failed with `net::ERR_FAILED` in `dev:mock` (mock-layer audit, 2026-09-23).
 export const handlers = [
+  // Backend Phase 13 (2026-09-24) — static `/vehicles/bulk-status`, `/dvir/compliance`,
+  // `/integrations/catalog` must beat the `:id` / `:provider` handlers below (WB-016).
+  ...phase13Handlers,
   // `/drivers/roster` is a STATIC path and must beat `fleetWriteHandlers`' `/drivers/:id`, which
   // otherwise captures the literal segment "roster" (WB-016).
   ...vehiclesDriversGapHandlers,
@@ -65,4 +69,5 @@ export {
   settingsAdminHandlers,
   hosWriteHandlers,
   safetyDataHandlers,
+  phase13Handlers,
 };

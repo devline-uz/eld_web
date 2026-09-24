@@ -1,9 +1,9 @@
 // owner: web-architect — 11.28 Command palette entity search (web/tz.md §11.28, §20 B-10).
 //
-// ⛔ GAP B-10 `GET /search?q=` does not exist on the backend (live `404 NOT_FOUND`). The palette
-// asks it first — MSW serves the shape below — and only on a 404 falls back to what §11.28
-// documents for v1: `GET /drivers?q=` + `GET /vehicles?q=` in parallel. Any other failure is
-// thrown and rendered as an in-panel error (web/decisions.md WD-054).
+// B-10 `GET /search?q=&limit=` shipped 2026-09-24 (backend `search.service.ts`, no permission key):
+// shapes below match it field for field; `dutyStatus`/`openWarnings` are always `null` there (never
+// fabricated, backend D-098) and `scope` is not sent. The `GET /drivers?q=` + `GET /vehicles?q=`
+// fallback stays only for a 404 from an older API (web/decisions.md WD-054).
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { client } from './client';
 import { endpoints } from './endpoints';
@@ -32,12 +32,12 @@ export interface SearchVehicleHit {
   driverName: string | null;
 }
 
-/** B-10 proposed response (recorded in web/backend-gaps.md). */
+/** B-10 response (`GlobalSearchResult` in backend `search.service.ts`). */
 export interface GlobalSearchResponse {
   q: string;
   drivers: SearchDriverHit[];
   vehicles: SearchVehicleHit[];
-  /** Footer `Searching 69 units · 58 drivers · 1,284 logs`. */
+  /** Footer `Searching 69 units · 58 drivers · 1,284 logs` — NOT returned by the shipped API. */
   scope?: { units: number; drivers: number; logs: number };
 }
 

@@ -1,7 +1,6 @@
-// owner: web-settings-admin — ⛔ GAP B-8 (`GET /devices/:id/diagnostics`, 11.20 `Test connection`)
-// and ⛔ GAP B-9 (`POST /alert-rules/:id/test`, 11.21 `Test rule`). Neither endpoint exists on the
-// backend (web/backend-gaps.md). Served here with the §11.20/§11.21 documented response shapes so
-// deleting this file is the whole migration the day either one ships.
+// owner: web-settings-admin — B-8 (`GET /devices/:id/diagnostics`, 11.20 `Test connection`) and B-9
+// (`POST /alert-rules/:id/test`, 11.21 `Test rule`), both shipped 2026-09-24. Answers the documented
+// openapi.json examples (asserted by tests/contract/phase13.contract.test.ts).
 import { http } from 'msw';
 import { endpoints } from '@/shared/api/endpoints';
 import { ok } from '../envelope';

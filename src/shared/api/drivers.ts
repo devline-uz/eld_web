@@ -197,7 +197,8 @@ export interface CreateDriverPayload {
   firstName: string;
   lastName: string;
   username: string;
-  password: string;
+  /** Optional since B-82: with `sendInvitation: true` the driver sets it from the emailed code. */
+  password?: string;
   email: string;
   phone?: string;
   cdlNumber: string;
@@ -213,6 +214,8 @@ export interface CreateDriverPayload {
   splitSleeperEnabled?: boolean;
   eldExempt?: boolean;
   eldExemptReason?: string;
+  /** B-82 (shipped) — emails the driver an app invitation (one-time code). Q-2: email only. */
+  sendInvitation?: boolean;
 }
 
 export function useCreateDriver() {
@@ -250,16 +253,143 @@ export function useDeactivateDriver() {
 export interface DriverImportSummary {
   imported: number;
   updated: number;
+  skipped?: number;
   failed: Array<{ index: number; error: string }>;
+}
+
+/** B-69 (shipped) — `ImportDriversOptionsDto`. */
+export interface ImportDriversOptions {
+  duplicateStrategy?: 'SKIP' | 'UPDATE' | 'CREATE';
+  defaultHomeTerminalName?: string;
+  sendInvitations?: boolean;
+  applyDefaultExemptions?: boolean;
 }
 
 export function useImportDrivers() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (payload: { drivers: Array<Record<string, unknown>> }) =>
+    mutationFn: (payload: { drivers: Array<Record<string, unknown>>; options?: ImportDriversOptions }) =>
       client.post<DriverImportSummary>(endpoints.drivers.import, payload),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qkRoot.drivers });
+    },
+  });
+}
+
+/* ---------------------------------------------------------------------- Phase 13 (2026-09-24) */
+
+/** B-81 / B-29 — `emailedTo` is null when the driver has no email: then (and only when the backend
+ * runs with `DEV_ECHO_SECRETS`, D-103) `code` is the one-time code the dispatcher reads out. Never
+ * log, persist or put `code` in a URL; render it once, in the modal that asked for it. */
+export interface DriverOneTimeCodeResult {
+  emailedTo: string | null;
+  code?: string;
+}
+
+/** `POST /drivers/:id/reset-password` — `drivers` FULL, audited. */
+export function useResetDriverPassword() {
+  return useMutation({
+    mutationFn: (driverId: string) => client.post<DriverOneTimeCodeResult>(endpoints.drivers.resetPassword(driverId)),
+  });
+}
+
+/** `POST /drivers/:id/send-verification` — emails a verification token to `Driver.email`. */
+export function useSendDriverVerification() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (driverId: string) => client.post<DriverOneTimeCodeResult>(endpoints.drivers.sendVerification(driverId)),
+    onSuccess: (_result, driverId) => {
+      void queryClient.invalidateQueries({ queryKey: qk.driver(driverId) });
+    },
+  });
+}
+
+/** `POST /drivers/:id/verify-email` `{ token }` — sets `emailVerifiedAt` (the `Verified` badge). */
+export function useVerifyDriverEmail(driverId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (token: string) =>
+      client.post<{ id: string; email: string; emailVerifiedAt: string }>(endpoints.drivers.verifyEmail(driverId), { token }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: qkRoot.drivers });
+    },
+  });
+}
+
+/* ---- B-94 driver documents: metadata POST → presigned PUT of the bytes → list refetch */
+
+export type DriverDocumentType = 'CDL' | 'MEDICAL_CARD' | 'MVR' | 'OTHER';
+export const DRIVER_DOCUMENT_CONTENT_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/heic', 'image/webp'] as const;
+export type DriverDocumentContentType = (typeof DRIVER_DOCUMENT_CONTENT_TYPES)[number];
+
+export interface DriverDocumentRow {
+  id: string;
+  type: DriverDocumentType;
+  fileName: string;
+  expiresAt: string | null;
+  uploadedAt: string;
+  /** Short-lived presigned GET — open it, never store or log it (§17). */
+  url: string;
+}
+
+export function useDriverDocuments(driverId: string | undefined) {
+  return useQuery({
+    queryKey: qk.driverDocuments(driverId ?? ''),
+    queryFn: ({ signal }) => client.get<DriverDocumentRow[]>(endpoints.drivers.documents(driverId as string), { signal }),
+    enabled: Boolean(driverId),
+    // The rows carry presigned URLs: always refetch on mount rather than serve a stale link.
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+  });
+}
+
+export interface UploadDriverDocumentInput {
+  type: DriverDocumentType;
+  file: File;
+  expiresAt?: string;
+}
+
+/** PUTs the bytes straight to object storage. Not `client.ts`: the URL is foreign (MinIO/S3), it
+ * must carry NO bearer token, and its signature binds `Content-Type` + exact length (backend B-091). */
+export async function putToPresignedUrl(uploadUrl: string, file: Blob, contentType: string, signal?: AbortSignal): Promise<void> {
+  const res = await fetch(uploadUrl, { method: 'PUT', body: file, headers: { 'Content-Type': contentType }, credentials: 'omit', signal });
+  if (!res.ok) throw new Error(`Upload failed (${res.status})`);
+}
+
+/** The whole B-94 upload flow in one mutation: metadata → presigned PUT → invalidate. A failed PUT
+ * leaves an empty row behind, so it is deleted before the error is rethrown. */
+export function useUploadDriverDocument(driverId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ type, file, expiresAt }: UploadDriverDocumentInput) => {
+      const created = await client.post<DriverDocumentRow & { uploadUrl: string }>(endpoints.drivers.documents(driverId), {
+        type,
+        fileName: file.name,
+        contentType: file.type,
+        sizeBytes: file.size,
+        ...(expiresAt ? { expiresAt } : {}),
+      });
+      try {
+        await putToPresignedUrl(created.uploadUrl, file, file.type);
+      } catch (error) {
+        await client.delete(endpoints.drivers.document(driverId, created.id)).catch(() => undefined);
+        throw error;
+      }
+      const { uploadUrl: _uploadUrl, ...row } = created;
+      return row as DriverDocumentRow;
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: qk.driverDocuments(driverId) });
+    },
+  });
+}
+
+export function useDeleteDriverDocument(driverId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (docId: string) => client.delete<{ deleted: boolean }>(endpoints.drivers.document(driverId, docId)),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: qk.driverDocuments(driverId) });
     },
   });
 }

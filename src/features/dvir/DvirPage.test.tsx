@@ -464,15 +464,14 @@ describe('DvirPage', () => {
 
       await waitFor(() => expect(body).toBeTruthy());
       expect(body).not.toHaveProperty('returnToService');
-      expect((body as { status: string }).status).toBe('REPAIRED');
+      expect((body as { resolutionType: string }).resolutionType).toBe('REPAIRED');
     });
   });
 
-  // WB-077 — the third "No repair needed" resolution used to be submitted identically to a
-  // completed repair; the API has no NOT_REQUIRED value on this endpoint (backend-gaps.md B-67),
-  // so the distinction is tagged in the only free-text field the DTO offers.
-  describe('WB-077 "No repair needed" is tagged, not silently REPAIRED', () => {
-    it('sends status REPAIRED with a distinguishing note prefix', async () => {
+  // WB-077 → B-68 (shipped 2026-09-24): "No repair needed" is its own `resolutionType`, so the
+  // note-prefix workaround is gone and the choice is never recorded as a repair.
+  describe('WB-077 / B-68 "No repair needed" is NOT_REQUIRED, not silently REPAIRED', () => {
+    it('sends resolutionType NOT_REQUIRED with the note as typed', async () => {
       const user = userEvent.setup();
       let body: unknown;
       server.use(
@@ -509,8 +508,7 @@ describe('DvirPage', () => {
       await user.click(await screen.findByRole('button', { name: 'Mark as resolved' }));
 
       await waitFor(() => expect(body).toBeTruthy());
-      expect((body as { status: string }).status).toBe('REPAIRED');
-      expect((body as { resolutionNote: string }).resolutionNote).toBe('[No repair needed] Inspected, within spec');
+      expect(body).toEqual({ resolutionType: 'NOT_REQUIRED', resolutionNote: 'Inspected, within spec' });
     });
   });
 

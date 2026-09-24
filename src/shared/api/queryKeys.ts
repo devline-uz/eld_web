@@ -13,6 +13,8 @@ export const qk = {
   /** W-26 — `GET /me/profile` (display fields only; permissions stay on `/auth/me`). */
   profile: ['me', 'profile'] as const,
   carrier: ['carrier'] as const,
+  /** B-45 — `GET /carrier/transfer-config` (`reports` READ). Separate from `carrier`: different shape. */
+  carrierTransferConfig: ['carrier', 'transfer-config'] as const,
   /** Third-party geocoder results (`shared/map/geocode.ts`). */
   places: (query: string) => ['places', query] as const,
   /** W-01 Fleet Dashboard aggregate (`GET /dashboard/summary`, WD-074) — no params, one caller. */
@@ -21,7 +23,7 @@ export const qk = {
   // fleet
   vehicles: (params?: QueryParams) => ['vehicles', p(params)] as const,
   vehicle: (id: string) => ['vehicles', id] as const,
-  vehicleTelemetry: (id: string) => ['vehicles', id, 'telemetry'] as const,
+  vehicleTelemetry: (id: string, params?: QueryParams) => ['vehicles', id, 'telemetry', p(params)] as const,
   vehicleDtc: (id: string) => ['vehicles', id, 'dtc'] as const,
   vehicleHistories: (id: string, date: string) => ['vehicles', id, 'histories', date] as const,
   vehicleActivities: (id: string, params?: QueryParams) =>
@@ -38,6 +40,8 @@ export const qk = {
   driver: (id: string) => ['drivers', id] as const,
   driverRoster: (params?: QueryParams) => ['drivers', 'roster', p(params)] as const,
   driverHos: (id: string) => ['drivers', id, 'hos'] as const,
+  /** B-94 — qualification documents (the list carries short-lived `url`s: staleTime stays short). */
+  driverDocuments: (id: string) => ['drivers', id, 'documents'] as const,
 
   // ⭐ HOS — a log key always carries the RODS date in the driver's home terminal zone (§8.3)
   logDay: (driverId: string, date: string) => ['logs', driverId, 'day', date] as const,
@@ -52,6 +56,8 @@ export const qk = {
   // compliance
   dvirs: (params?: QueryParams) => ['dvir', p(params)] as const,
   dvir: (id: string) => ['dvir', id] as const,
+  /** B-47 — `GET /dvir/compliance?from&to`. */
+  dvirCompliance: (params?: QueryParams) => ['dvir', 'compliance', p(params)] as const,
   defects: (params?: QueryParams) => ['defects', p(params)] as const,
   defect: (id: string) => ['defects', id] as const,
   workOrders: (params?: QueryParams) => ['work-orders', p(params)] as const,
@@ -91,6 +97,10 @@ export const qk = {
   alertRule: (id: string) => ['alert-rules', id] as const,
   integrations: ['integrations'] as const,
   integration: (provider: string) => ['integrations', provider] as const,
+  /** B-89 — marketplace catalog. */
+  integrationsCatalog: ['integrations', 'catalog'] as const,
+  /** B-87 — org-level email / webhook toggles. */
+  notificationChannels: ['notification-channels'] as const,
   apiKeys: ['api-keys'] as const,
   audit: (params?: QueryParams) => ['audit-log', p(params)] as const,
 
@@ -124,4 +134,8 @@ export const qkRoot = {
   safety: ['safety'] as const,
   unidentified: ['unidentified'] as const,
   alertRules: ['alert-rules'] as const,
+  coDriverPairings: ['co-driver-pairings'] as const,
+  me: ['me'] as const,
+  support: ['support'] as const,
+  integrations: ['integrations'] as const,
 } as const;

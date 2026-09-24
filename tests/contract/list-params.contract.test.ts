@@ -19,12 +19,10 @@ import {
 import { devicesLookupQuery, driversLookupQuery, vehiclesLookupQuery } from '../../src/shared/api/lookups';
 import { assertMatchesOpenApi, operation } from './openapi';
 
-/** Params the running API accepts (zod DTO) that its `@ApiQuery` list omits — web/backend-gaps.md
- * B-59: `TripListQueryDto` extends `ListQueryDto` (`q`) and adds `driverId`, verified live. Remove
- * an entry here the moment openapi.json documents it. */
-const ACCEPTED_BUT_UNDOCUMENTED: Record<string, string[]> = {
-  '/api/trips': ['q', 'driverId'],
-};
+/** Params the running API accepts (zod DTO) that its `@ApiQuery` list omits. Empty since backend
+ * Phase 13B (2026-09-24) documents every `@Query(zodBody)` param — B-59 `GET /trips` `q`/`driverId`
+ * included. Add an entry only with a web/backend-gaps.md id; remove it the moment openapi.json has it. */
+const ACCEPTED_BUT_UNDOCUMENTED: Record<string, string[]> = {};
 
 function documentedQueryParams(path: string): Set<string> {
   const op = operation('GET', path) as { parameters?: Array<{ name: string; in: string }> } | null;

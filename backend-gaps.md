@@ -268,3 +268,86 @@ Ids start at B-84, the next number after the Drivers/HOS block. The ids B-74…B
 |---|---|---|---|---|
 | B-95 *(new)* | the 22-key permission set has one `reportsTransfer` key for both the FMCSA / DOT pack export and data transfers (send to inspector) | 11.19 Create a role — the design's two rights "Can export FMCSA / DOT pack" and "Can send data transfers"; W-19 matrix row `reportsTransfer` | a separate key, e.g. `dataTransfer: NONE\|READ\|FULL`, on `GET /auth/me` `permissions`, on the role DTO and enforced on the transfer endpoints (the web then adds it to `PERMISSION_KEYS` and splits the checkbox) | **confirmed missing** — WB-234. Until then the modal shows one checkbox, "Can export FMCSA / DOT pack and send data transfers", and the matrix row is labelled for both (WD-087). |
 
+
+## 2026-09-24 (`web-api-client`) — backend Phase 13 shipped every open gap: API layer ready, screen handoff
+
+Backend Phase 13 (`../backend_tasks.md`, backend `tasks.md` Phase 13, D-090…D-103) closed every gap
+listed above. `KNOWN_GAPS` (tests/contract/endpoints.contract.test.ts) and `ACCEPTED_BUT_UNDOCUMENTED`
+(tests/contract/list-params.contract.test.ts) are now **empty**; `tests/contract/phase13.contract.test.ts`
+holds every new endpoint's MSW response AND the request payload types to `openapi.json` (WD-088).
+Every B-NN above is **shipped** unless listed under "Still open" below.
+
+**Breaking change done here:** `PATCH /defects/:id/resolve` takes `resolutionType`
+(`REPAIRED | NOT_REQUIRED | DEFERRED`) — `useResolveDefect` / `ResolveDefectPayload` / `ResolveDefectModal`
+migrated; "No repair needed" → `NOT_REQUIRED`, the WB-077 `[No repair needed]` note tag is gone.
+
+**Contract deviation (backend doc, not a web gap):** `GET /vehicles/:id/telemetry` returns raw Prisma rows —
+`latitude`/`longitude` (and every `Decimal` column) arrive as **strings** (verified live on :3002); the
+openapi example shows numbers. Tolerated only in `DECIMAL_STRING_FIELDS` of the Phase 13 contract test.
+
+### Handoff — hook → the 🚫 rows in `buttonsAndInputs.md` it unlocks
+
+| Hook / type (all in `src/shared/api/`) | Endpoint | Unlocks (buttonsAndInputs.md line) |
+|---|---|---|
+| `useCreateGeofence` / `useUpdateGeofence` + `GeofencePayload` (`geofences.ts`) | `POST/PATCH /geofences` `dwellMinutes`, `afterHoursOnly`, `type: 'ADDRESS'` + `address` | L134 Address shape (422 `GEOCODER_NOT_CONFIGURED` when unset), L140 Dwell, L141 After-hours. Send `radiusMi`, not `radiusMeters` (D-098 alias) |
+| `useAssignDriver` `notify` (`vehicles.ts`) | `POST /vehicles/:id/assign-driver` | L217 Notify the driver |
+| `useImportVehicles` `options: ImportVehiclesOptions` | `POST /vehicles/import` | L246–249 import options |
+| `useVehicleHistories` (types now nullable) | `GET /vehicles/:id/histories?date=` | L283 Play/Pause replay; B-4 row L1235 |
+| `useVehicleTelemetry(id, { limit: 1 })` | `GET /vehicles/:id/telemetry` | W-04 live status card (was MSW-only) |
+| `useVehicleActivities` | `GET /vehicles/:id/activities` | W-04 activity tab (real now) |
+| `useBulkVehicleStatus` | `PATCH /vehicles/bulk-status` | Vehicles bulk Deactivate (replaces the per-id PATCH loop in `VehiclesPage.tsx:245`; read `failed`) |
+| `useDevicesForVehicle` | `GET /devices?vehicleId=` | W-04 device card without the session-wide lookup (B-35) |
+| `useCoDriverPairings` / `useCreateCoDriverPairing` / `useEndCoDriverPairing` | `/co-driver-pairings`, `/:id/end` | W-04 co-driver row (B-7) |
+| `useResetDriverPassword` → `{ emailedTo, code? }` | `POST /drivers/:id/reset-password` | L313, L386 Reset app password (show `code` once when `emailedTo` is null; never log it) |
+| `useCreateDriver` `sendInvitation` | `POST /drivers` | L344 Send invitation now |
+| `useImportDrivers` `options: ImportDriversOptions` | `POST /drivers/import` | L357–360 import options |
+| `useSendDriverVerification` / `useVerifyDriverEmail` | `POST /drivers/:id/send-verification`, `/verify-email` | B-29/30/31 Verified badge / resend |
+| `useDriverDocuments` / `useUploadDriverDocument` (metadata → presigned PUT → refetch) / `useDeleteDriverDocument` | `/drivers/:id/documents[/:docId]` | L389 Documents tab |
+| `useProposeLogEvent` + `ProposeEventPayload` (`hosLogs.ts`) | `POST /logs/:driverId/events` | L407 Add / edit event on an empty day |
+| `CreateEditRequestPayload.proposedSpecial` / `notifyDriver` / name-only `location` | `POST /logs/:driverId/edit-requests` | L430 YM/PC chips, L432 Location (name only), L437 Notify the driver |
+| `UnidentifiedAction.assign.requireDriverConfirmation` (status `PENDING_CONFIRMATION`) | `POST /unidentified/:id/assign` | L458 Ask each driver to confirm |
+| `fetchDvirPdf` (`dvir.ts`) | `GET /dvir/:id/pdf` | L558 Export PDF |
+| `fetchAttachmentUrl` (never cache the URL) | `GET /attachments/:id/presign` | L560 photo thumbnails; B-41 row L1236 |
+| `useDvirCompliance`, `DvirsPageParams.from/to` | `GET /dvir/compliance`, `GET /dvir?from&to` | W-14 compliance chip / missing rows (B-47); drops the 200-row window (B-66) |
+| `useAssignDefect`, `DefectListParams.assigneeId`, `DefectRow.assigneeId` | `PATCH /defects/:id/assign` | W-09 ASSIGNED TO column (B-40) |
+| `ResolveDefectPayload.correctedBy/completedAt/laborHours/partsCostUsd` | `PATCH /defects/:id/resolve` | re-add the four 11.17 inputs WB-151 removed |
+| `CreateWorkOrderPayload` / `UpdateWorkOrderPayload` `estimatedLaborHours`, `keepOutOfService`, `notifyDriver`, `blockDispatchAssignment` | `/work-orders` | 11.16 work-order fields (B-42) |
+| `CreateTripPayload` `customer`, `trailerId`, `distanceMi`, `rateUsd`, `estimatedDriveSec`, `draft` | `POST /trips` | L600 Customer, L609 Trailer, L610 Distance, L611 Est. drive time, L613 Rate, L616 Save as draft |
+| `usePublishTrip` / `useUpdateTrip` (`TripStatus` gains `DRAFT`) | `PATCH /trips/:id` | publishing a draft (422 `TRIP_NOT_DRAFT`) |
+| `AssignTripPayload.notify` | `POST /trips/:id/assign` | L629 Notify the driver |
+| `GenerateReportInput` `RODS` / `IDLE_FUEL` (PDF only), `REPORT_TYPE_FORMATS` | `POST /reports/generate` | L766 Idle & fuel report row |
+| `QueueShortcutInput.fmcsaPack` `vehicleId` + `include: FmcsaPackSection[]` | `GET /reports/fmcsa-pack` | L795 Unit selector, L798 Pack contents checkboxes |
+| `CreateScheduleInput.params.window: ReportWindow` | `POST /reports/schedules` | rolling schedule periods (B-48) |
+| `useTransferConfig` (`reports.ts`, `reports` READ) | `GET /carrier/transfer-config` | FLEET_MANAGER eRODS banner (B-45) — replace `useCarrierTransferConfig(can('carrierSettings'))` |
+| `InviteUserPayload.message` / `terminalIds` (`settingsAdmin.ts`) | `POST /users` | L905 Terminal access, L906 Message |
+| `useUpdateUser` + `UpdateUserPayload` (email → `emailVerification.pendingEmail`), `useConfirmEmailChange` | `PATCH /users/:id`, `POST /auth/email/verify` | L918 Email / job title / phone / home terminal |
+| `dataTransfer` permission key (23rd, `shared/auth/permissions.ts`) | `POST /transfers` now needs `dataTransfer:FULL` | 11.19 role matrix needs a row for it (`permissionMatrix.ts`; ADMIN/FM FULL, DISPATCHER/VIEWER NONE); `Send to inspector` should gate on `dataTransfer`, list/download stay on `reportsTransfer` |
+| `useDeviceDiagnostics` (real) | `GET /devices/:id/diagnostics` | L979 View diagnostics, L1015 Test connection |
+| `useUpdateDevice` + `UpdateDevicePayload` `autoFirmware` / `shareDiagnostics` | `PATCH /devices/:id` | L1011, L1012 (register then PATCH — `POST /devices` still has no policy fields) |
+| `useNotificationChannels` / `useUpdateNotificationChannels` (`notifications.ts`, `alertRules` READ/FULL) | `GET/PATCH /notification-channels` | L1024 Email, L1026 Webhook (SMS L1025 stays Q-2) |
+| `useUpdateAlertRule` `mutedUntil` | `PATCH /alert-rules/:id` | L1032 Mute for 24 h |
+| `useTestAlertRule` (real) | `POST /alert-rules/:id/test` | L1035 Test rule |
+| `useIntegrationsCatalog` | `GET /integrations/catalog` | L1064 Browse marketplace, L1067 catalog Connect (`available: false` stays disabled) |
+| `useStartSupportChat` → `{ conversationId }` + `useMessages` | `POST /support/chats` | L1120 Start chat |
+| `CreateTicketPayload.vehicleId` + `attachments: [{ kind }]` | `POST /support/tickets` | L1138, L1139 include diagnostics / 24h ELD events |
+| `useUpdateMyProfile` `jobTitle` (`me.ts`) | `PATCH /me/profile` | L1164 Job title |
+| `useUploadAvatar` / `useDeleteAvatar` (422 `IMAGE_TOO_SMALL`) | `POST/DELETE /me/avatar` | W-26 avatar (B-51) |
+| `useMyPreferences` / `useUpdateMyPreferences` (PUT = full replace) | `GET/PUT /me/preferences` | L1169 Language & region; saved views / table columns (B-11) |
+| `useSignOutOtherSessions` → `{ revoked }` | `DELETE /me/sessions` | replaces the per-id loop in `features/account/api.ts#useRevokeAllSessions` |
+| `useMarkConversationRead`, `ConversationRow.lastMessage` / `unreadCount` (`messaging.ts`) | `POST /conversations/:id/read`, `GET /conversations` | W-16 persisted unread dot + preview line (B-37/B-67) |
+| `useMarkNotificationRead` (real), `NotificationItem.kind/severity/category`, `counts` | `/notifications` | 11.27 segments + single read (B-56/57/58) |
+| `useAssignCoaching({ driverId })`, `DriverScoreRow.previousScore` / `trend` (`safety.ts`) | `POST /safety/coaching`, `GET /safety/scorecard` | W-10 driver-level coaching + trend arrows (B-43/B-44) |
+| `AuditEntry.actorEmail` / `actorName` | `GET /audit-log` | W-23 actor column without a client join (B-62) |
+| `GlobalSearchResponse` (real) | `GET /search` | 11.28 palette — no fallback fan-out needed on this API |
+
+New query keys: `qk.carrierTransferConfig`, `qk.driverDocuments(id)`, `qk.dvirCompliance(p)`,
+`qk.integrationsCatalog`, `qk.notificationChannels`, `qk.vehicleTelemetry(id, p)` (now takes params);
+roots `qkRoot.coDriverPairings`, `qkRoot.me`, `qkRoot.support`, `qkRoot.integrations`.
+New error copy: `PASSWORD_LOGIN_DISABLED`, `VEHICLE_HAS_OPEN_CRITICAL_DEFECTS`, `DRIVER_DOCUMENT_NOT_FOUND`,
+`CO_DRIVER_PAIRING_NOT_FOUND`, `IMAGE_TOO_SMALL`, `ATTACHMENT_NOT_FOUND`, `TRIP_NOT_FOUND`,
+`TRAILER_NOT_FOUND`, `TRIP_NOT_DRAFT`, `GEOCODER_NOT_CONFIGURED`, `GEOCODE_FAILED`.
+
+### Still open (not closed by Phase 13)
+- No vehicle-group / jurisdiction list (L745, L759, L760) — no B-NN shipped for them.
+- `SearchDriverHit.dutyStatus` / `openWarnings` are always `null` on the real API (D-098); the palette must render `—`.
+- `POST /devices` still takes no `autoFirmware`/`shareDiagnostics`: set them with a follow-up `PATCH /devices/:id`.

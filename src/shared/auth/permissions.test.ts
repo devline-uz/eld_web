@@ -1,5 +1,5 @@
 // owner: web-auth-rbac — web/tz.md §6.9 / §18: `shared/auth/permissions.ts` is a 100% coverage
-// gate. 22 keys × 4 roles × 3 levels, plus every helper branch.
+// gate. 23 keys × 4 roles × 3 levels, plus every helper branch.
 import { describe, expect, it } from 'vitest';
 import {
   NO_PERMISSIONS,
@@ -19,8 +19,8 @@ import {
 const ROLES: Role[] = ['ADMIN', 'FLEET_MANAGER', 'DISPATCHER', 'VIEWER'];
 const LEVELS: PermissionLevel[] = ['NONE', 'READ', 'FULL'];
 
-describe('the 22 permission keys', () => {
-  it('is exactly the §6.9 key list, in order, with no duplicates', () => {
+describe('the 23 permission keys', () => {
+  it('is exactly the §6.9 key list + B-95 `dataTransfer`, in order, with no duplicates', () => {
     expect(PERMISSION_KEYS).toEqual([
       'dashboard',
       'liveFleet',
@@ -44,11 +44,12 @@ describe('the 22 permission keys', () => {
       'auditLog',
       'support',
       'carrierSettings',
+      'dataTransfer',
     ]);
-    expect(new Set(PERMISSION_KEYS).size).toBe(22);
+    expect(new Set(PERMISSION_KEYS).size).toBe(23);
   });
 
-  it('NO_PERMISSIONS denies all 22 keys', () => {
+  it('NO_PERMISSIONS denies all 23 keys', () => {
     for (const key of PERMISSION_KEYS) {
       expect(NO_PERMISSIONS[key]).toBe('NONE');
       expect(hasPermission(NO_PERMISSIONS, key)).toBe(false);
@@ -57,7 +58,7 @@ describe('the 22 permission keys', () => {
   });
 });
 
-describe('hasPermission — 22 keys × 3 levels', () => {
+describe('hasPermission — 23 keys × 3 levels', () => {
   for (const key of PERMISSION_KEYS) {
     for (const level of LEVELS) {
       it(`${key} @ ${level}`, () => {
@@ -71,16 +72,16 @@ describe('hasPermission — 22 keys × 3 levels', () => {
   }
 });
 
-describe('the role matrix — 4 roles × 22 keys', () => {
+describe('the role matrix — 4 roles × 23 keys', () => {
   for (const role of ROLES) {
-    it(`${role} declares all 22 keys with a valid level`, () => {
+    it(`${role} declares all 23 keys with a valid level`, () => {
       const map = ROLE_PERMISSIONS[role];
       expect(Object.keys(map).sort()).toEqual([...PERMISSION_KEYS].sort());
       for (const key of PERMISSION_KEYS) expect(LEVELS).toContain(map[key]);
     });
   }
 
-  it('ADMIN is FULL on all 22 keys', () => {
+  it('ADMIN is FULL on all 23 keys', () => {
     for (const key of PERMISSION_KEYS) expect(ROLE_PERMISSIONS.ADMIN[key]).toBe('FULL');
   });
 
@@ -124,7 +125,7 @@ describe('guards', () => {
     expect(isRole(7)).toBe(false);
   });
 
-  it('isPermissionKey accepts the 22 keys and rejects anything else', () => {
+  it('isPermissionKey accepts the 23 keys and rejects anything else', () => {
     for (const key of PERMISSION_KEYS) expect(isPermissionKey(key)).toBe(true);
     expect(isPermissionKey('billing')).toBe(false);
     expect(isPermissionKey(null)).toBe(false);
@@ -133,7 +134,7 @@ describe('guards', () => {
 });
 
 describe('toPermissionMap — whatever GET /auth/me sent', () => {
-  it('keeps the 22 known keys with their level', () => {
+  it('keeps the 23 known keys with their level', () => {
     expect(toPermissionMap(ROLE_PERMISSIONS.DISPATCHER)).toEqual(ROLE_PERMISSIONS.DISPATCHER);
   });
 
@@ -141,7 +142,7 @@ describe('toPermissionMap — whatever GET /auth/me sent', () => {
     const map = toPermissionMap({ dashboard: 'FULL' });
     expect(map.dashboard).toBe('FULL');
     expect(map.users).toBe('NONE');
-    expect(Object.keys(map)).toHaveLength(22);
+    expect(Object.keys(map)).toHaveLength(23);
   });
 
   it('drops unknown keys and unknown levels', () => {
@@ -159,5 +160,14 @@ describe('toPermissionMap — whatever GET /auth/me sent', () => {
   it('never mutates NO_PERMISSIONS', () => {
     toPermissionMap({ users: 'FULL' } satisfies Partial<Record<PermissionKey, PermissionLevel>>);
     expect(NO_PERMISSIONS.users).toBe('NONE');
+  });
+});
+
+describe('B-95 dataTransfer — the 23rd key, split from reportsTransfer', () => {
+  it('matches backend permission-matrix.ts: ADMIN/FM FULL, DISPATCHER/VIEWER NONE', () => {
+    expect(ROLE_PERMISSIONS.ADMIN.dataTransfer).toBe('FULL');
+    expect(ROLE_PERMISSIONS.FLEET_MANAGER.dataTransfer).toBe('FULL');
+    expect(ROLE_PERMISSIONS.DISPATCHER.dataTransfer).toBe('NONE');
+    expect(ROLE_PERMISSIONS.VIEWER.dataTransfer).toBe('NONE');
   });
 });

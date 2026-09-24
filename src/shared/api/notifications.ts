@@ -1,11 +1,10 @@
 // owner: web-architect — 11.27 Notifications panel (bell) data layer (web/tz.md §11.27, §7.3).
 //
-// Real today: `GET /notifications` (`?page&limit&unreadOnly`) and `POST /notifications/read-all`
-// — both personal, not gated by a permission key (backend NotificationsController).
-// Missing (web/backend-gaps.md):
-//   ⛔ B-56 `POST /notifications/:id/read` — clicking one item cannot set its `readAt`.
-//   ⛔ B-57 `category` + `counts` — the `Violations` / `Maintenance` segments. When the response
-//          carries no `counts` the panel renders only `All` (web/decisions.md WD-055).
+// `GET /notifications` (`?page&limit&unreadOnly&category`), `POST /notifications/read-all` and
+// `POST /notifications/:id/read` — all personal, not gated by a permission key.
+// B-56 (per-item read), B-57 (`category` + `counts`) and B-58 (human `body`, `objectType`/`objectId`,
+// `severity`) shipped 2026-09-24. `counts` is still typed optional so an older API degrades to the
+// `All`-only panel (WD-055) instead of crashing.
 import { useMutation, useQuery, useQueryClient, type QueryClient, type QueryKey } from '@tanstack/react-query';
 import { client } from './client';
 import { ApiError } from './errors';
@@ -24,11 +23,15 @@ export interface NotificationItem {
   objectId?: string | null;
   readAt: string | null;
   createdAt?: string;
-  /** ⛔ GAP B-57 — absent on the live API. */
+  /** B-57 — null for kinds that belong to neither segment (backend D-096 mapping). */
   category?: NotificationCategory | null;
+  /** Backend `NotificationKind` (e.g. `VIOLATION`). */
+  kind?: string;
+  /** B-58 — alert notifications only. */
+  severity?: 'CRITICAL' | 'WARNING' | 'INFO' | null;
 }
 
-/** ⛔ GAP B-57 — absent on the live API. */
+/** B-57 — segment counts for the panel tabs. */
 export interface NotificationCounts {
   all: number;
   violations: number;
@@ -90,7 +93,7 @@ export function useMarkAllNotificationsRead() {
   });
 }
 
-/** ⛔ GAP B-56 — `POST /notifications/:id/read` is served by MSW only. The hook is deliberately
+/** B-56 (shipped 2026-09-24) — `POST /notifications/:id/read`. The hook is deliberately
  * not optimistic: the item keeps `readAt: null` until the server stores one, so a failure leaves
  * nothing to roll back and the row never pretends to be read. A 404/405 means the route does not
  * exist on this backend — that is remembered for the session (WB-244) and the panel stops calling
@@ -233,4 +236,31 @@ export function notificationTarget(item: Pick<NotificationItem, 'objectType' | '
   if (!item.objectType) return null;
   const build = TARGETS[item.objectType.replace(/[^a-z]/gi, '').toLowerCase()];
   return build ? build(item.objectId ?? null) : null;
+}
+
+/* ------------------------------------------------------------------ B-87 notification channels */
+
+/** `alertRules` READ (GET) / FULL (PATCH). Org-level channel toggles. A disabled channel suppresses delivery for every alert rule. Q-2: there
+ * is no SMS channel here, ever. */
+export interface NotificationChannels {
+  email: { enabled: boolean };
+  webhook: { enabled: boolean; url?: string | null };
+}
+
+export function useNotificationChannels(enabled = true) {
+  return useQuery({
+    queryKey: qk.notificationChannels,
+    queryFn: ({ signal }) => client.get<NotificationChannels>(endpoints.notificationChannels.root, { signal }),
+    enabled,
+    ...typedCachePolicy<NotificationChannels>('reference'),
+  });
+}
+
+export function useUpdateNotificationChannels() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (dto: { email?: { enabled: boolean }; webhook?: { enabled: boolean; url?: string } }) =>
+      client.patch<NotificationChannels>(endpoints.notificationChannels.root, dto),
+    onSuccess: (data) => queryClient.setQueryData(qk.notificationChannels, data),
+  });
 }

@@ -193,16 +193,30 @@ export function useLogEvents(driverId: string | undefined, date: string) {
 
 /* ------------------------------------------------------------------ 11.11 · edit requests */
 
+/** B-39 (shipped 2026-09-24) — PC/YM are proposed as a special category ON TOP of the duty status
+ * (PC ⇒ OFF, YM ⇒ ON); `NONE` or omitted means a plain status. */
+export type ProposedSpecial = 'NONE' | 'PC' | 'YM';
+
+/** B-39 — a location may be coordinates, a free-text name only, or both. */
+export interface ProposalLocation {
+  lat?: number;
+  lon?: number;
+  name?: string;
+}
+
 export interface CreateEditRequestPayload {
   originalEventId: string;
   proposedStatus: RodsDutyStatus;
+  proposedSpecial?: ProposedSpecial;
   proposedStart: string;
   proposedEnd?: string;
-  location?: { lat: number; lon: number; name?: string };
+  location?: ProposalLocation;
   odometerMi?: number;
   engineHours?: number;
   /** 4–60 characters, §395 Appendix A. */
   reason: string;
+  /** B-39 — push/email the driver about the pending proposal. */
+  notifyDriver?: boolean;
 }
 
 export interface EditRequestResult {
@@ -214,6 +228,9 @@ export interface EditRequestResult {
   proposedStart: string;
   proposedEnd: string | null;
   reason: string;
+  proposedSpecial?: ProposedSpecial;
+  notifyDriver?: boolean;
+  recordStatus?: 3;
   /** §395.30 — spelled out by the server: the log has NOT changed. */
   applied: false;
 }
@@ -225,6 +242,50 @@ export function useCreateEditRequest(driverId: string) {
       client.post<EditRequestResult>(endpoints.logs.createEditRequest(driverId), payload),
     onSuccess: () => {
       // A proposal is inert, but it becomes visible as recordStatus = 3 in the audit trail.
+      void queryClient.invalidateQueries({ queryKey: qkRoot.logs });
+    },
+  });
+}
+
+/* ------------------------------------------------------------------ B-72 · propose a new record */
+
+/** `ProposeEventDto` — a NEW record on a RODS day, typically one with no duty record yet. Stored
+ * inert (recordStatus 3, `applied: false`) and applied only if the driver accepts (§395.30). */
+export interface ProposeEventPayload {
+  status: RodsDutyStatus;
+  proposedSpecial?: ProposedSpecial;
+  eventDateTime: string;
+  endDateTime?: string;
+  location?: ProposalLocation;
+  odometerMi?: number;
+  engineHours?: number;
+  /** Required — the edit reason the driver and the inspector see. */
+  annotation: string;
+  notifyDriver?: boolean;
+}
+
+export interface ProposeEventResult {
+  id: string;
+  driverId: string;
+  status: 'PENDING';
+  kind: 'INSERT';
+  proposedStatus: RodsDutyStatus;
+  proposedSpecial: ProposedSpecial;
+  eventDateTime: string;
+  endDateTime: string | null;
+  annotation: string;
+  notifyDriver: boolean;
+  recordStatus: 3;
+  applied: false;
+}
+
+/** `POST /logs/:driverId/events` — `hosEdit` FULL. */
+export function useProposeLogEvent(driverId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: ProposeEventPayload) =>
+      client.post<ProposeEventResult>(endpoints.logs.proposeEvent(driverId), payload),
+    onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qkRoot.logs });
     },
   });
@@ -269,7 +330,9 @@ export interface UnidentifiedSegment {
   distanceMi: number;
   startLocation: string | null;
   endLocation: string | null;
-  status: 'PENDING' | 'ASSIGNED' | 'REJECTED' | 'ANNOTATED';
+  /** `PENDING_CONFIRMATION` (B-83) — assigned with `requireDriverConfirmation`; nothing is attributed
+   * to the driver's log until they confirm in the app. */
+  status: 'PENDING' | 'ASSIGNED' | 'REJECTED' | 'ANNOTATED' | 'PENDING_CONFIRMATION';
   assignedDriverId: string | null;
   assignedById: string | null;
   assignedAt: string | null;
@@ -305,7 +368,8 @@ export function useUnidentifiedSegments(params: UnidentifiedListParams, enabled 
 }
 
 export type UnidentifiedAction =
-  | { kind: 'assign'; id: string; driverId: string; annotation: string }
+  /** `requireDriverConfirmation` (B-83) → the segment goes PENDING_CONFIRMATION instead of ASSIGNED. */
+  | { kind: 'assign'; id: string; driverId: string; annotation: string; requireDriverConfirmation?: boolean }
   | { kind: 'annotate'; id: string; annotation: string }
   | { kind: 'reject'; id: string; reason: string };
 
@@ -330,6 +394,7 @@ function postUnidentifiedAction(action: UnidentifiedAction): Promise<Unidentifie
     return client.post<UnidentifiedSegment>(endpoints.unidentified.assign(action.id), {
       driverId: action.driverId,
       annotation: action.annotation,
+      ...(action.requireDriverConfirmation ? { requireDriverConfirmation: true } : {}),
     });
   }
   if (action.kind === 'annotate') {

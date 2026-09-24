@@ -385,17 +385,34 @@ export const fleetWriteHandlers = [
   ),
   http.delete(url(endpoints.geofences.remove(':id')), () => ok(fixture('DELETE /api/geofences/{id}'))),
 
-  /** Silences the unhandled-request warning for the co-driver gap card (B-7). */
-  http.get(url(endpoints.coDriverPairings.list), () => ok({ items: [] })),
+  /** B-7 (shipped 2026-09-24) — the documented offset page; no seeded pairings (team driving is rare). */
+  http.get(url(endpoints.coDriverPairings.list), ({ request }) => ok(serverPage([], request))),
+  /** Telemetry read path (shipped 2026-09-24) — `{ items }` newest first, the documented row shape. */
   http.get(url(endpoints.vehicles.telemetry(':id')), ({ params }) =>
     ok({
-      vehicleId: String(params.id),
-      recordedAt: daysAgo(0),
-      speedMph: 0,
-      odometerMi: findVehicle(String(params.id))?.odometerMi ?? 0,
-      engineHours: 12_400,
-      latitude: 39.9612,
-      longitude: -82.9988,
+      items: [
+        {
+          time: daysAgo(0),
+          vehicleId: String(params.id),
+          driverId: null,
+          latitude: '39.961200',
+          longitude: '-82.998800',
+          speedMph: 0,
+          headingDeg: 90,
+          odometerMi: findVehicle(String(params.id))?.odometerMi ?? 0,
+          engineHours: '12400.00',
+          idleHours: '310.50',
+          engineOn: false,
+          rpm: 0,
+          fuelPct: 62,
+          defPct: 80,
+          fuelEconomyMpg: '6.40',
+          coolantTempC: 79,
+          oilTempC: 88,
+          voltage: '13.9',
+          dtcCount: 0,
+        },
+      ],
     }),
   ),
 ];

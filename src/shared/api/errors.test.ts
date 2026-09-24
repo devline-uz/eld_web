@@ -81,3 +81,14 @@ describe('ApiError', () => {
     expect(toUserMessage('oops')).toBe('Something went wrong. Reference: ');
   });
 });
+
+describe('backend Phase 13 codes (2026-09-24)', () => {
+  it.each([
+    'PASSWORD_LOGIN_DISABLED', 'VEHICLE_HAS_OPEN_CRITICAL_DEFECTS', 'DRIVER_DOCUMENT_NOT_FOUND',
+    'CO_DRIVER_PAIRING_NOT_FOUND', 'IMAGE_TOO_SMALL', 'ATTACHMENT_NOT_FOUND', 'TRIP_NOT_FOUND',
+    'TRAILER_NOT_FOUND', 'TRIP_NOT_DRAFT', 'GEOCODER_NOT_CONFIGURED', 'GEOCODE_FAILED',
+  ])('%s has English copy, never the trace-id fallback', (code) => {
+    expect(ERROR_MESSAGES[code]).toBeTruthy();
+    expect(errorMessage(code, 'T1')).not.toContain('Reference');
+  });
+});

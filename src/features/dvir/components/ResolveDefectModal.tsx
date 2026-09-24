@@ -4,7 +4,13 @@ import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { SeverityBadge } from '@/shared/ui/Badge';
 import { useToast } from '@/shared/ui/Toast';
-import { useResolveDefect, useLinkDefectWorkOrder, useWorkOrdersList, type DefectTableRow } from '@/shared/api/dvir';
+import {
+  useResolveDefect,
+  useLinkDefectWorkOrder,
+  useWorkOrdersList,
+  type DefectResolutionType,
+  type DefectTableRow,
+} from '@/shared/api/dvir';
 import { ApiError } from '@/shared/api/errors';
 import { useCarrierTransferConfig } from '@/shared/api/reports';
 import { usePermission } from '@/shared/auth/usePermission';
@@ -18,7 +24,7 @@ import { formatCarrier, timezoneAbbreviation } from '@/shared/format/datetime';
  */
 const CARRIER_TZ_FALLBACK = 'America/New_York';
 
-type Resolution = 'REPAIRED' | 'NO_REPAIR' | 'DEFERRED';
+type Resolution = DefectResolutionType;
 
 const inputClass = 'h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text';
 
@@ -45,21 +51,13 @@ export function ResolveDefectModal({ defect, onClose }: { defect: DefectTableRow
   const isPending = mutation.isPending || linkWorkOrder.isPending;
 
   function submit() {
-    // WB-077 — `PATCH /defects/:id/resolve` (`DefectResolveDto`) only accepts
-    // `status: 'REPAIRED' | 'DEFERRED'` and `resolutionNote`; there is no `NOT_REQUIRED` value and
-    // no separate `resolutionType` field to carry "inspected, no repair needed"
-    // (web/backend-gaps.md B-68). The only place the distinction survives is the free-text note,
-    // so it is tagged there rather than written to the audit trail as an indistinguishable
-    // completed repair.
-    //
-    // WB-151 — the modal used to also collect `Corrected by *`, `Completed on`, `Labour hours` and
-    // `Parts cost` and then send none of them: the DTO has no field for any of the four
-    // (`resolvedById` is taken from the caller's token server-side, `resolvedAt` from the clock).
-    // Collecting a *required* mechanic name and dropping it is worse than not asking, so the four
-    // inputs — and the "Mechanic signature" card that only mirrored `Corrected by` — are gone
-    // until the DTO can carry them (web/backend-gaps.md, shape in the report).
-    const status = resolution === 'DEFERRED' ? 'DEFERRED' : 'REPAIRED';
-    const resolutionNote = resolution === 'NO_REPAIR' ? `[No repair needed] ${notes.trim()}` : notes.trim();
+    // B-68 (shipped 2026-09-24, WD-121) — `resolutionType` carries the choice itself, so "No repair
+    // needed" is `NOT_REQUIRED` and is never recorded as a repair; the WB-077 `[No repair needed]`
+    // note tag is gone. B-70 (`correctedBy`, `completedAt`, `laborHours`, `partsCostUsd`) is now
+    // accepted by `ResolveDefectPayload` — re-adding those inputs is a screen task (WB-151 removed
+    // them while the DTO could not carry them).
+    const resolutionType = resolution;
+    const resolutionNote = notes.trim();
     setServerError(null);
 
     const link =
@@ -71,7 +69,7 @@ export function ResolveDefectModal({ defect, onClose }: { defect: DefectTableRow
         : Promise.resolve(null);
 
     void link
-      .then(() => mutation.mutateAsync({ status, resolutionNote }))
+      .then(() => mutation.mutateAsync({ resolutionType, resolutionNote }))
       .then(() => {
         toast({
           kind: 'success',
@@ -144,7 +142,7 @@ export function ResolveDefectModal({ defect, onClose }: { defect: DefectTableRow
             {(
               [
                 ['REPAIRED', 'Repaired', 'The defect was corrected and the unit is safe to operate'],
-                ['NO_REPAIR', 'No repair needed', 'Inspected and found to be within specification'],
+                ['NOT_REQUIRED', 'No repair needed', 'Inspected and found to be within specification'],
                 ['DEFERRED', 'Deferred', 'Non-safety defect scheduled for a later service'],
               ] as [Resolution, string, string][]
             ).map(([value, label, desc]) => (

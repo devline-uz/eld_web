@@ -4,7 +4,7 @@
  *
  *   entry + vendor + shell (everything index.html loads eagerly)  <= 220 KB gzip
  *   any other route chunk                                         <=  90 KB gzip
- *   maplibre + its css (lazy, map screens only)                   <= 290 KB gzip (WD-023)
+ *   maplibre + worker + css (lazy, map screens only)              <= 425 KB gzip (WD-023, WD-077)
  *   recharts (lazy)                                               <= 120 KB gzip
  *   total of every emitted chunk                                  <= 1.2 MB gzip
  */
@@ -19,9 +19,12 @@ const BUDGET = {
   route: 90 * KB,
   // §16.1 says 250 KB. `maplibre-gl@5.24.0`'s own shipped bundle gzips to 268.6 KB before a
   // single line of app code, so that number is unreachable at this major — raised to 290 KB
-  // against the measured 286.2 KB in web/decisions.md WD-023. Still lazy, still map-screens-only,
-  // and the ~4 KB of headroom means any further growth of the map chunk fails the build.
-  maplibre: 290 * KB,
+  // against the measured 286.2 KB in web/decisions.md WD-023. Raised again to 425 KB in WD-077:
+  // `FleetMap.tsx` now points MapLibre at the Vite-bundled tile worker (`maplibre-gl-worker-*.js`,
+  // 141.6 KB gzip) instead of a URL that 404'd, and the `/^maplibre-/` match correctly folds it
+  // in — measured 421.0 KB. Still lazy, still map-screens-only, and the ~4 KB of headroom means
+  // any further growth of the map chunk fails the build.
+  maplibre: 425 * KB,
   recharts: 120 * KB,
   total: 1.2 * 1024 * KB,
 };

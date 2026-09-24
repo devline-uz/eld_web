@@ -2,9 +2,9 @@
 // Paths are written WITHOUT the `/api` prefix; the prefix is part of VITE_API_BASE_URL.
 // The backend is unversioned (`/api/vehicles`, never `/api/v1/vehicles`) — web/tz.md §6.1.
 //
-// Every path below was checked against backend/docs/openapi.json (131 paths, 174 operations).
-// Paths marked `⛔ GAP B-NN` do not exist on the backend yet (web/backend-gaps.md); they are
-// served by MSW only and a screen calling one must show the documented fallback.
+// Every path below was checked against backend/docs/openapi.json (183 paths, 233 operations,
+// regenerated 2026-09-24 after backend Phase 13). Every former `⛔ GAP` path shipped; the contract
+// suite (tests/contract/endpoints.contract.test.ts) fails on any path the backend does not document.
 
 export const API_BASE_URL: string =
   import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3002/api';
@@ -20,18 +20,29 @@ export const endpoints = {
     signOut: '/auth/logout',
     passwordForgot: '/auth/password/forgot',
     passwordReset: '/auth/password/reset',
+    /** B-84 (shipped) — completes a `PATCH /users/:id { email }` re-verification link. */
+    emailVerify: '/auth/email/verify',
   },
 
   // --- carrier and account (W-17, W-26) ------------------------------------------------------
-  carrier: { root: '/carrier' },
+  carrier: {
+    root: '/carrier',
+    /** B-45 (shipped) — timezone + Appendix A ids + erodsMode, gated `reports` READ (not carrierSettings). */
+    transferConfig: '/carrier/transfer-config',
+  },
+  /** B-41 (shipped) — 15-minute presigned GET for one DVIR/defect/ticket attachment. Never cached. */
+  attachments: { presign: (id: string) => `/attachments/${id}/presign` },
   /** Perf plan item 3 — W-01 Fleet Dashboard's single aggregate call (WD-074). */
   dashboard: { summary: '/dashboard/summary' },
   me: {
     profile: '/me/profile',
+    /** GET lists; DELETE (B-50) signs out every OTHER session → `{ revoked }`. */
     sessions: '/me/sessions',
     session: (id: string) => `/me/sessions/${id}`,
-    /** ⛔ GAP B-11 — saved views / column choice; localStorage fallback until it lands. */
+    /** B-11 (shipped) — GET / PUT (full replace). */
     preferences: '/me/preferences',
+    /** B-51 (shipped) — POST multipart `file` (PNG/JPG ≥ 256×256) / DELETE. */
+    avatar: '/me/avatar',
   },
 
   // --- fleet (W-03…W-05) ---------------------------------------------------------------------
@@ -47,12 +58,14 @@ export const endpoints = {
     unassignDriver: (id: string) => `/vehicles/${id}/unassign-driver`,
     calibrateOdometer: (id: string) => `/vehicles/${id}/calibrate-odometer`,
     dtc: (id: string) => `/vehicles/${id}/dtc`,
-    /** ⛔ GAP — live status card on W-04; only the write path /ingest/telemetry exists. */
+    /** Shipped 2026-09-24 — newest-first points, `?from&to&limit≤2000`. */
     telemetry: (id: string) => `/vehicles/${id}/telemetry`,
-    /** ⛔ GAP B-4 — W-05 route replay. */
+    /** B-4 (shipped) — W-05 day segmentation, `?date=`. */
     histories: (id: string) => `/vehicles/${id}/histories`,
-    /** ⛔ GAP B-5 — W-04 activity tab. */
+    /** B-5 (shipped) — W-04 activity tab. */
     activities: (id: string) => `/vehicles/${id}/activities`,
+    /** B-71 (shipped) — PATCH `{ ids, status }` → `{ updated, failed }`. Static path: its MSW handler must precede the vehicle-by-id one. */
+    bulkStatus: '/vehicles/bulk-status',
   },
   trailers: {
     list: '/trailers',
@@ -77,15 +90,29 @@ export const endpoints = {
     roster: '/drivers/roster',
     /** B-2 (shipped 2026-09-14) — W-07 / W-16 / W-08 HOS clocks right now. */
     hos: (id: string) => `/drivers/${id}/hos`,
+    /** B-81 (shipped) — `drivers` FULL, audited. */
+    resetPassword: (id: string) => `/drivers/${id}/reset-password`,
+    /** B-29/B-30 (shipped) — emails a verification token to `Driver.email`. */
+    sendVerification: (id: string) => `/drivers/${id}/send-verification`,
+    verifyEmail: (id: string) => `/drivers/${id}/verify-email`,
+    /** B-94 (shipped) — GET list / POST metadata → presigned PUT `uploadUrl`. */
+    documents: (id: string) => `/drivers/${id}/documents`,
+    document: (id: string, docId: string) => `/drivers/${id}/documents/${docId}`,
   },
-  /** ⛔ GAP B-7 — W-04 co-driver row. */
-  coDriverPairings: { list: '/co-driver-pairings', create: '/co-driver-pairings' },
+  /** B-7 (shipped) — W-04 co-driver row. */
+  coDriverPairings: {
+    list: '/co-driver-pairings',
+    create: '/co-driver-pairings',
+    end: (id: string) => `/co-driver-pairings/${id}/end`,
+  },
 
   // --- ⭐ HOS (W-08) -------------------------------------------------------------------------
   logs: {
     day: (driverId: string) => `/logs/${driverId}`,
     range: (driverId: string) => `/logs/${driverId}/range`,
     events: (driverId: string) => `/logs/${driverId}/events`,
+    /** B-72 (shipped) — POST a proposed record on a day with no duty record (recordStatus 3, inert). */
+    proposeEvent: (driverId: string) => `/logs/${driverId}/events`,
     certify: (driverId: string) => `/logs/${driverId}/certify`,
     editRequests: (driverId: string) => `/logs/${driverId}/edit-requests`,
     createEditRequest: (driverId: string) => `/logs/${driverId}/edit-requests`,
@@ -107,13 +134,20 @@ export const endpoints = {
   dvir: {
     list: '/dvir',
     detail: (id: string) => `/dvir/${id}`,
+    /** B-75 (shipped) — §396.11 PDF (binary; `client.blob`). */
+    pdf: (id: string) => `/dvir/${id}/pdf`,
+    /** B-47 (shipped) — expected vs submitted PRE_TRIP DVIRs, `?from&to`. Static path: its MSW handler must precede the DVIR-by-id one. */
+    compliance: '/dvir/compliance',
     mechanicSignoff: (id: string) => `/dvir/${id}/mechanic-signoff`,
     nextDriverReview: (id: string) => `/dvir/${id}/next-driver-review`,
   },
   defects: {
     list: '/defects',
     detail: (id: string) => `/defects/${id}`,
+    /** B-68/B-70 — `resolutionType` REPAIRED | NOT_REQUIRED | DEFERRED (+ repair record fields). */
     resolve: (id: string) => `/defects/${id}/resolve`,
+    /** B-40 (shipped) — `{ assigneeId: string | null }`. */
+    assign: (id: string) => `/defects/${id}/assign`,
     workOrder: (id: string) => `/defects/${id}/work-order`,
   },
   workOrders: {
@@ -166,9 +200,13 @@ export const endpoints = {
     create: '/conversations',
     messages: (id: string) => `/conversations/${id}/messages`,
     sendMessage: (id: string) => `/conversations/${id}/messages`,
+    /** B-67 (shipped) — marks the caller's copy read up to now. */
+    read: (id: string) => `/conversations/${id}/read`,
     broadcast: '/messages/broadcast',
   },
   notifications: { list: '/notifications', readAll: '/notifications/read-all' },
+  /** B-87 (shipped) — org-level email / webhook toggles, GET / PATCH. */
+  notificationChannels: { root: '/notification-channels' },
 
   // --- reports and transfers (W-12…W-15) -----------------------------------------------------
   reports: {
@@ -222,7 +260,7 @@ export const endpoints = {
     unpair: (id: string) => `/devices/${id}/unpair`,
     firmware: (id: string) => `/devices/${id}/firmware`,
     bleStatus: (id: string) => `/devices/${id}/ble-status`,
-    /** ⛔ GAP B-8 — 11.20 `Test connection`. */
+    /** B-8 (shipped) — 11.20 `Test connection`. */
     diagnostics: (id: string) => `/devices/${id}/diagnostics`,
   },
   alertRules: {
@@ -231,11 +269,13 @@ export const endpoints = {
     detail: (id: string) => `/alert-rules/${id}`,
     update: (id: string) => `/alert-rules/${id}`,
     remove: (id: string) => `/alert-rules/${id}`,
-    /** ⛔ GAP B-9 — 11.21 `Test rule`. */
+    /** B-9 (shipped) — 11.21 `Test rule`. */
     test: (id: string) => `/alert-rules/${id}/test`,
   },
   integrations: {
     list: '/integrations',
+    /** B-89 (shipped) — marketplace catalog. Static path: its MSW handler must precede the by-provider one. */
+    catalog: '/integrations/catalog',
     detail: (provider: string) => `/integrations/${provider}`,
     update: (provider: string) => `/integrations/${provider}`,
     remove: (provider: string) => `/integrations/${provider}`,
@@ -255,15 +295,17 @@ export const endpoints = {
     createTicket: '/support/tickets',
     ticket: (id: string) => `/support/tickets/${id}`,
     updateTicket: (id: string) => `/support/tickets/${id}`,
+    /** B-90 (shipped) — opens a SUPPORT conversation; replies arrive on `conversation:{id}`. */
+    chats: '/support/chats',
     feedback: '/feedback',
   },
 
   // --- command palette (11.28) ---------------------------------------------------------------
-  /** ⛔ GAP B-10 — until it lands the palette fans out to /vehicles + /drivers. */
+  /** B-10 (shipped) — `?q&limit`. */
   search: { root: '/search' },
 
   // --- notifications panel (11.27) — appended by web-architect, Phase 9 ----------------------
-  /** ⛔ GAP B-56 — per-item `readAt`; only `POST /notifications/read-all` exists today. */
+  /** B-56 (shipped) — per-item `readAt`. */
   notificationItem: { markRead: (id: string) => `/notifications/${id}/read` },
 } as const;
 

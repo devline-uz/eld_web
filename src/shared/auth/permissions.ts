@@ -1,4 +1,4 @@
-// owner: web-auth-rbac — the 22 permission keys and the role matrix (web/tz.md §6.9, §12).
+// owner: web-auth-rbac — the 23 permission keys (22 from §6.9 + `dataTransfer`, B-95) and the role matrix (web/tz.md §6.9, §12).
 // GET /auth/me is the only source of truth at runtime; the matrix copy here exists for tests
 // and the Roles & permissions screen. The JWT is never decoded.
 // 100% unit coverage (22 keys × 4 roles × 3 levels) is a CI gate.
@@ -26,6 +26,10 @@ export const PERMISSION_KEYS = [
   'auditLog',
   'support',
   'carrierSettings',
+  // B-95 (shipped 2026-09-24, backend D-101) — additive 23rd key split from `reportsTransfer`:
+  // `POST /transfers` (send to FMCSA/inspector) needs `dataTransfer:FULL`; viewing/downloading
+  // transfers stays on `reportsTransfer`. WD-121.
+  'dataTransfer',
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
@@ -81,6 +85,7 @@ export const ROLE_PERMISSIONS: Record<Role, PermissionMap> = {
     auditLog: 'NONE',
     support: 'FULL',
     carrierSettings: 'NONE',
+    dataTransfer: 'FULL',
   },
   DISPATCHER: {
     dashboard: 'FULL',
@@ -105,6 +110,7 @@ export const ROLE_PERMISSIONS: Record<Role, PermissionMap> = {
     auditLog: 'NONE',
     support: 'FULL',
     carrierSettings: 'NONE',
+    dataTransfer: 'NONE',
   },
   VIEWER: {
     dashboard: 'READ',
@@ -129,6 +135,7 @@ export const ROLE_PERMISSIONS: Record<Role, PermissionMap> = {
     auditLog: 'NONE',
     support: 'READ',
     carrierSettings: 'NONE',
+    dataTransfer: 'NONE',
   },
 };
 

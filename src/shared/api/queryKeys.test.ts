@@ -11,7 +11,8 @@ describe('qk factory', () => {
     expect(qk.vehicles()).toEqual(['vehicles', {}]);
     expect(qk.vehicles({ page: 2 })).toEqual(['vehicles', { page: 2 }]);
     expect(qk.vehicle('veh_1')).toEqual(['vehicles', 'veh_1']);
-    expect(qk.vehicleTelemetry('veh_1')).toEqual(['vehicles', 'veh_1', 'telemetry']);
+    expect(qk.vehicleTelemetry('veh_1')).toEqual(['vehicles', 'veh_1', 'telemetry', {}]);
+    expect(qk.vehicleTelemetry('veh_1', { limit: 50 })).toEqual(['vehicles', 'veh_1', 'telemetry', { limit: 50 }]);
     expect(qk.vehicleDtc('veh_1')).toEqual(['vehicles', 'veh_1', 'dtc']);
     expect(qk.logDay('drv_1', '2026-09-10')).toEqual(['logs', 'drv_1', 'day', '2026-09-10']);
     expect(qk.logRange('drv_1', '2026-09-01', '2026-09-08')).toEqual([

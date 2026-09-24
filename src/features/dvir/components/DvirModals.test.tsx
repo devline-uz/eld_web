@@ -102,7 +102,7 @@ function workOrdersListHandler() {
 /* ------------------------------------------------------------------ 11.17 Resolve defect */
 
 describe('ResolveDefectModal — 11.17', () => {
-  it('sends exactly what `DefectResolveDto` accepts and nothing else', async () => {
+  it('sends exactly what `ResolveDefectDto` accepts and nothing else (B-68 resolutionType)', async () => {
     const user = userEvent.setup();
     let body: unknown;
     server.use(
@@ -118,7 +118,27 @@ describe('ResolveDefectModal — 11.17', () => {
     await user.click(screen.getByRole('button', { name: 'Mark as resolved' }));
 
     await waitFor(() => expect(body).toBeTruthy());
-    expect(body).toEqual({ status: 'REPAIRED', resolutionNote: 'Replaced pads' });
+    expect(body).toEqual({ resolutionType: 'REPAIRED', resolutionNote: 'Replaced pads' });
+  });
+
+  it('B-68 · "No repair needed" is sent as resolutionType NOT_REQUIRED with the note untouched', async () => {
+    const user = userEvent.setup();
+    let body: unknown;
+    server.use(
+      workOrdersListHandler(),
+      http.patch(url(endpoints.defects.resolve('def_1')), async ({ request }) => {
+        body = await request.json();
+        return ok({ id: 'def_1', status: 'REPAIRED', resolutionType: 'NOT_REQUIRED' });
+      }),
+    );
+    renderModal(<ResolveDefectModal defect={DEFECT} onClose={vi.fn()} />);
+
+    await user.click(screen.getByRole('radio', { name: /No repair needed/ }));
+    await user.type(screen.getByLabelText(/Repair notes/i), 'Within spec');
+    await user.click(screen.getByRole('button', { name: 'Mark as resolved' }));
+
+    await waitFor(() => expect(body).toBeTruthy());
+    expect(body).toEqual({ resolutionType: 'NOT_REQUIRED', resolutionNote: 'Within spec' });
   });
 
   it('groups the three resolutions under one name so arrow keys move between them (stage 3)', async () => {

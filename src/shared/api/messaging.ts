@@ -20,7 +20,8 @@ import { useDriversLookup } from './lookups';
 import type { OffsetPage } from './types';
 import type { DriverRow } from './vehicles';
 
-export type ConversationType = 'DIRECT' | 'GROUP' | 'BROADCAST';
+/** `SUPPORT` (B-90) — a support chat opened with `POST /support/chats`. */
+export type ConversationType = 'DIRECT' | 'GROUP' | 'BROADCAST' | 'SUPPORT';
 
 export interface ConversationParticipantRow {
   id: string;
@@ -39,6 +40,9 @@ export interface ConversationRow {
   createdById: string;
   createdAt: string;
   participants: ConversationParticipantRow[];
+  /** B-37 (shipped 2026-09-24) — the newest message (preview line) and the caller's real unread count. */
+  lastMessage?: MessageRow | null;
+  unreadCount?: number;
 }
 
 export interface MessageRow {
@@ -242,6 +246,24 @@ export function useBroadcastMessage() {
     mutationFn: (payload: BroadcastPayload) => client.post<BroadcastResult>(endpoints.conversations.broadcast, payload),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qkRoot.conversations });
+    },
+  });
+}
+
+/* ------------------------------------------------------------------ B-67 persisted read */
+
+/** `POST /conversations/:id/read` — persists the caller's `lastReadAt` (B-67, shipped 2026-09-24).
+ * Applies the local `markConversationRead` patch first so the dot clears instantly, then writes it. */
+export function useMarkConversationRead(currentUserId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (conversationId: string) =>
+      client.post<{ conversationId: string; lastReadAt: string }>(endpoints.conversations.read(conversationId)),
+    onMutate: (conversationId) => markConversationRead(queryClient, conversationId, currentUserId),
+    onSuccess: (_result, conversationId) => {
+      queryClient.setQueryData<{ items: ConversationRow[] } | undefined>(qk.conversations(), (prev) =>
+        prev ? { items: prev.items.map((c) => (c.id === conversationId ? { ...c, unreadCount: 0 } : c)) } : prev,
+      );
     },
   });
 }

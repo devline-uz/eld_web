@@ -28,10 +28,26 @@ import { useLogRange, type UnidentifiedListResponse } from './hosLogs';
 
 /* ------------------------------------------------------------------ reports */
 
-/** `ReportType` as the backend enum spells it. `RODS` / `IDLE_FUEL` are gap B-14. */
-export type ReportType = 'IFTA' | 'ACTIVITY' | 'DVIR' | 'FMCSA_PACK' | 'UNIDENTIFIED' | 'SAFETY';
-/** Only these four are accepted by `POST /reports/generate` (`GENERATABLE_REPORT_TYPES`). */
-export type GeneratableReportType = 'IFTA' | 'ACTIVITY' | 'DVIR' | 'FMCSA_PACK';
+/** `ReportType` as the backend enum spells it. `RODS` / `IDLE_FUEL` are B-14 (shipped 2026-09-24). */
+export type ReportType = 'IFTA' | 'ACTIVITY' | 'DVIR' | 'FMCSA_PACK' | 'UNIDENTIFIED' | 'SAFETY' | 'RODS' | 'IDLE_FUEL';
+/** Accepted by `POST /reports/generate` / schedules (`GENERATABLE_REPORT_TYPES`, backend reports.dto.ts). */
+export type GeneratableReportType = 'IFTA' | 'ACTIVITY' | 'DVIR' | 'FMCSA_PACK' | 'RODS' | 'IDLE_FUEL';
+
+/** B-48 — formats the server accepts per type (`REPORT_TYPE_FORMATS`); anything else is a 422. */
+export const REPORT_TYPE_FORMATS: Record<GeneratableReportType, readonly ReportFormat[]> = {
+  IFTA: ['CSV', 'PDF'],
+  ACTIVITY: ['CSV', 'PDF'],
+  DVIR: ['CSV', 'PDF'],
+  FMCSA_PACK: ['PDF'],
+  RODS: ['PDF'],
+  IDLE_FUEL: ['PDF'],
+};
+
+/** B-48 — FMCSA pack sections (`FMCSA_PACK_SECTIONS`). Omit `include` for the full pack. */
+export type FmcsaPackSection = 'RODS' | 'UNIDENTIFIED' | 'EDITS' | 'ELD_ID' | 'DVIR' | 'MALFUNCTIONS';
+
+/** B-48 — a schedule's `params.window`: resolved to a concrete from/to on every run. */
+export type ReportWindow = 'PREVIOUS_WEEK' | 'PREVIOUS_MONTH' | 'PREVIOUS_QUARTER';
 export type ReportStatus = 'QUEUED' | 'RUNNING' | 'READY' | 'FAILED';
 export type ReportFormat = 'CSV' | 'PDF' | 'XLSX';
 
@@ -96,7 +112,15 @@ export type GenerateReportInput =
   | { type: 'IFTA'; format: ReportFormat; params: { quarter: string; vehicleId?: string } }
   | { type: 'ACTIVITY'; format: ReportFormat; params: { from: string; to: string; driverId?: string } }
   | { type: 'DVIR'; format: ReportFormat; params: { from: string; to: string; vehicleId?: string } }
-  | { type: 'FMCSA_PACK'; format: ReportFormat; params: { from: string; to: string; driverId?: string } };
+  | {
+      type: 'FMCSA_PACK';
+      format: ReportFormat;
+      params: { from: string; to: string; driverId?: string; vehicleId?: string; include?: FmcsaPackSection[] };
+    }
+  /** B-14 — printable log sheets; PDF only, range ≤ 62 days. */
+  | { type: 'RODS'; format: 'PDF'; params: { from: string; to: string; driverId?: string } }
+  /** B-14 — idle time / fuel waste from telemetry; PDF only. */
+  | { type: 'IDLE_FUEL'; format: 'PDF'; params: { from: string; to: string; driverId?: string; vehicleId?: string } };
 
 /** `POST /reports/generate` — `reports` FULL. The server decides which formats exist (422 otherwise). */
 export function useGenerateReport() {
@@ -116,7 +140,12 @@ export type QueueShortcutInput =
   | { kind: 'ifta'; params: { quarter: string } }
   | { kind: 'activity'; params: { from: string; to: string; driverId?: string } }
   | { kind: 'dvir'; params: { from: string; to: string; vehicleId?: string } }
-  | { kind: 'fmcsaPack'; params: { from: string; to: string; driverId?: string } };
+  | {
+      kind: 'fmcsaPack';
+      /** B-48 — `vehicleId` narrows WHICH drivers are in the pack; `include` limits the sections
+       * (sent as repeated `include=` params). */
+      params: { from: string; to: string; driverId?: string; vehicleId?: string; include?: FmcsaPackSection[] };
+    };
 
 export function useQueueReport() {
   const queryClient = useQueryClient();
@@ -152,7 +181,8 @@ export interface ReportScheduleRow {
 export interface CreateScheduleInput {
   reportType: GeneratableReportType;
   format: ReportFormat;
-  params: Record<string, unknown>;
+  /** `{ window: ReportWindow }` (B-48) for a rolling period, or fixed `from`/`to`. */
+  params: Record<string, unknown> & { window?: ReportWindow };
   cron: string;
   timezone: string;
   /** Q-2 — schedules deliver by email only; there is no SMS field on the DTO. */
@@ -317,6 +347,17 @@ export function downloadTransferFile(id: string): Promise<Blob> {
 }
 
 /* ------------------------------------------------------------------ carrier transfer config */
+
+/** B-45 (shipped) — `GET /carrier/transfer-config`: gated `reports` READ, so FLEET_MANAGER (no
+ * `carrierSettings`) reads it too. Prefer this over `useCarrierTransferConfig` for erodsMode/timezone. */
+export function useTransferConfig(enabled = true) {
+  return useQuery({
+    queryKey: qk.carrierTransferConfig,
+    queryFn: ({ signal }) => client.get<Required<Omit<CarrierTransferConfig, 'name'>>>(endpoints.carrier.transferConfig, { signal }),
+    enabled,
+    ...typedCachePolicy<Required<Omit<CarrierTransferConfig, 'name'>>>('reference'),
+  });
+}
 
 export interface CarrierTransferConfig {
   name?: string;

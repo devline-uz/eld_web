@@ -23,6 +23,9 @@ export type DvirCondition = 'SATISFACTORY' | 'DEFECTS_FOUND';
 export type RepairStatus = 'NOT_REQUIRED' | 'PENDING' | 'REPAIRED' | 'DEFERRED';
 export type DefectSeverity = 'MINOR' | 'MAJOR' | 'CRITICAL';
 export type DefectStatus = 'OPEN' | 'IN_PROGRESS' | 'REPAIRED' | 'DEFERRED';
+/** B-68 — what `PATCH /defects/:id/resolve` records. `NOT_REQUIRED` still stores `status: 'REPAIRED'`
+ * (OPEN-ness only); render the resolution from `resolutionType`, never from `status`. */
+export type DefectResolutionType = 'REPAIRED' | 'NOT_REQUIRED' | 'DEFERRED';
 export type WorkOrderStatus = 'OPEN' | 'IN_PROGRESS' | 'DONE' | 'CANCELLED';
 export type WorkOrderPriority = 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
 export type MaintenanceDueState = 'OK' | 'DUE_SOON' | 'OVERDUE';
@@ -78,6 +81,13 @@ export interface DefectRow {
   resolvedAt: string | null;
   resolvedById: string | null;
   resolutionNote: string | null;
+  /** B-68/B-70/B-40 (shipped 2026-09-24) — null on rows resolved before the migration. */
+  resolutionType?: DefectResolutionType | null;
+  correctedBy?: string | null;
+  completedAt?: string | null;
+  laborHours?: number | string | null;
+  partsCostUsd?: number | string | null;
+  assigneeId?: string | null;
   createdAt: string;
   photos?: AttachmentRow[];
 }
@@ -97,6 +107,11 @@ export interface WorkOrderRow {
   openedAt: string;
   dueAt: string | null;
   closedAt: string | null;
+  /** B-42 (shipped 2026-09-24). Decimal → string on the wire. */
+  estimatedLaborHours?: number | string | null;
+  keepOutOfService?: boolean;
+  notifyDriver?: boolean;
+  blockDispatchAssignment?: boolean;
 }
 
 export interface MaintenanceDue {
@@ -147,7 +162,7 @@ export interface ScheduleTableRow extends MaintenanceScheduleRow {
 
 /* --------------------------------------------------------------------- DVIRs */
 
-/** Exactly `DvirListQueryDto` (page/limit/sort/vehicleId/driverId/repairStatus). */
+/** Exactly `DvirListQueryDto` (page/limit/sort/vehicleId/driverId/repairStatus + B-47 `from`/`to`). */
 export interface DvirsPageParams {
   [key: string]: string | number | boolean | undefined;
   page: number;
@@ -156,6 +171,9 @@ export interface DvirsPageParams {
   vehicleId?: string;
   driverId?: string;
   repairStatus?: RepairStatus;
+  /** B-47 — ISO date/time bounds on `submittedAt`. */
+  from?: string;
+  to?: string;
 }
 
 export const dvirsPageQuery = (params: DvirsPageParams): PageQueryOptions<DvirRow> => ({
@@ -265,6 +283,8 @@ export interface DefectListParams {
   status?: DefectStatus;
   severity?: DefectSeverity;
   outOfService?: boolean;
+  /** B-40 — defects assigned to one user/shop. */
+  assigneeId?: string;
 }
 
 export const defectsPageQuery = (params: DefectListParams): PageQueryOptions<DefectRow> => ({
@@ -342,10 +362,22 @@ export function useDefect(id: string | undefined) {
   });
 }
 
+/** `ResolveDefectDto` (backend `service.dto.ts`) — B-68 replaced `status` with `resolutionType`;
+ * B-70 added the repair-record fields. `completedAt` is an ISO datetime with offset (server defaults
+ * it to now); `laborHours` 0…999, `partsCostUsd` 0…1,000,000 — sent as entered, never rounded. */
+export interface ResolveDefectPayload {
+  resolutionType: DefectResolutionType;
+  resolutionNote?: string;
+  correctedBy?: string;
+  completedAt?: string;
+  laborHours?: number;
+  partsCostUsd?: number;
+}
+
 export function useResolveDefect(id: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (payload: { status: 'REPAIRED' | 'DEFERRED'; resolutionNote?: string }) =>
+    mutationFn: (payload: ResolveDefectPayload) =>
       client.patch<DefectRow>(endpoints.defects.resolve(id), payload),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qkRoot.defects });
@@ -419,6 +451,12 @@ export interface CreateWorkOrderPayload {
   odometerMi?: number;
   dueAt?: string;
   defectIds?: string[];
+  /** B-42 (shipped 2026-09-24). */
+  estimatedLaborHours?: number;
+  keepOutOfService?: boolean;
+  /** Server default true. Q-2: email/in-app only. */
+  notifyDriver?: boolean;
+  blockDispatchAssignment?: boolean;
 }
 
 export function useCreateWorkOrder() {
@@ -468,6 +506,11 @@ export type UpdateWorkOrderPayload = {
   costUsd?: number | null;
   odometerMi?: number | null;
   dueAt?: string | null;
+  status?: 'OPEN' | 'IN_PROGRESS';
+  estimatedLaborHours?: number;
+  keepOutOfService?: boolean;
+  notifyDriver?: boolean;
+  blockDispatchAssignment?: boolean;
 };
 
 export function useUpdateWorkOrder(id: string) {
@@ -606,4 +649,48 @@ export function useUpdateSchedule(id: string) {
       void queryClient.invalidateQueries({ queryKey: qk.schedules() });
     },
   });
+}
+
+/* --------------------------------------------------------------------- Phase 13 (2026-09-24) */
+
+/** B-40 — `PATCH /defects/:id/assign { assigneeId }`; `null` clears. `dvir` FULL. */
+export function useAssignDefect(id: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (assigneeId: string | null) =>
+      client.patch<{ id: string; assigneeId: string | null }>(endpoints.defects.assign(id), { assigneeId }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: qkRoot.defects });
+      void queryClient.invalidateQueries({ queryKey: qk.defect(id) });
+    },
+  });
+}
+
+/** B-47 — `GET /dvir/compliance?from&to`: expected vs submitted PRE_TRIP DVIRs (W-14 chip / missing rows). */
+export interface DvirCompliance {
+  expected: number;
+  submitted: number;
+  /** Already computed server-side — render as is, never recompute. */
+  compliancePct: number;
+  missing: Array<{ vehicleId: string; unitNumber: string; date: string }>;
+}
+
+export function useDvirCompliance(params: { from: string; to: string }, enabled = true) {
+  return useQuery({
+    queryKey: qk.dvirCompliance(params),
+    queryFn: ({ signal }) => client.get<DvirCompliance>(endpoints.dvir.compliance, { params, signal }),
+    enabled: enabled && Boolean(params.from && params.to),
+    ...typedCachePolicy<DvirCompliance>('list'),
+  });
+}
+
+/** B-75 — `GET /dvir/:id/pdf`, the §396.11 record. Fetched at click time, never cached. */
+export function fetchDvirPdf(id: string): Promise<Blob> {
+  return client.blob(endpoints.dvir.pdf(id), { headers: { Accept: 'application/pdf' } });
+}
+
+/** B-41 — a 15-minute presigned GET for one DVIR/defect/ticket attachment. Fetch at click/render
+ * time only: presigned URLs are never cached in the query cache nor logged (§17). */
+export function fetchAttachmentUrl(id: string, signal?: AbortSignal): Promise<{ url: string; expiresAt: string }> {
+  return client.get<{ url: string; expiresAt: string }>(endpoints.attachments.presign(id), { signal });
 }

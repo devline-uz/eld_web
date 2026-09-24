@@ -27,20 +27,13 @@ export const REPORT_LABEL: Record<ReportType, string> = {
   FMCSA_PACK: 'FMCSA audit pack',
   UNIDENTIFIED: 'Unidentified driving report',
   SAFETY: 'Safety report',
-};
-
-/**
- * ⛔ Gap B-14 — the backend can still store `RODS` / `IDLE_FUEL` rows although `ReportType` omits
- * them; they carry their W-12 library names. Any other unknown type shows its raw value, never
- * `undefined` (web/bugs.md WB-099).
- */
-const STORED_ONLY_LABEL: Record<string, string> = {
+  // B-14 shipped 2026-09-24 — the W-12 library names these rows already used.
   RODS: 'Driver logs (RODS)',
   IDLE_FUEL: 'Idle & fuel report',
 };
 
 export function reportLabel(type: string): string {
-  return (REPORT_LABEL as Record<string, string | undefined>)[type] ?? STORED_ONLY_LABEL[type] ?? type;
+  return (REPORT_LABEL as Record<string, string | undefined>)[type] ?? type;
 }
 
 /* ------------------------------------------------------------------ selector */

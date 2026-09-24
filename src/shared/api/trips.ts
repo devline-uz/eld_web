@@ -19,7 +19,8 @@ import { FILTER_WINDOW, useDriverMap, useVehicleMap } from './lookups';
 import { compactParams, pagePolicy, usePagedQuery, type PageQueryOptions } from './paging';
 import type { DriverRow, VehicleRow } from './vehicles';
 
-export type TripStatus = 'PLANNED' | 'ASSIGNED' | 'IN_PROGRESS' | 'DELIVERED' | 'CANCELLED';
+/** `DRAFT` (B-73, shipped 2026-09-24) — saved, not dispatched; publish = PATCH `{ status: 'PLANNED' }`. */
+export type TripStatus = 'DRAFT' | 'PLANNED' | 'ASSIGNED' | 'IN_PROGRESS' | 'DELIVERED' | 'CANCELLED';
 export type StopType = 'PICKUP' | 'DELIVERY' | 'FUEL' | 'REST' | 'CHECKPOINT';
 export type StopStatus = 'PENDING' | 'ARRIVED' | 'COMPLETED' | 'SKIPPED';
 
@@ -61,6 +62,14 @@ export interface TripRow {
   createdById: string;
   createdAt: string;
   stops: TripStopRow[];
+  /** B-73 / B-92 (shipped 2026-09-24). Decimals serialise as strings; render as is, never round. */
+  distanceMi?: number | string | null;
+  rateUsd?: number | string | null;
+  customer?: string | null;
+  estimatedDriveSec?: number | null;
+  /** B-36 (shipped) — minimal name joins on list / unassigned-loads / detail. */
+  driver?: { id: string; firstName: string; lastName: string } | null;
+  vehicle?: { id: string; unitNumber: string } | null;
 }
 
 /** The design's STATUS column — computed, not a `Trip.status` value (web/tz.md §10 W-11).
@@ -324,6 +333,8 @@ export interface CreateTripStopInput {
   type: StopType;
   name: string;
   address?: string;
+  latitude?: number;
+  longitude?: number;
   scheduledAt?: string;
   note?: string;
 }
@@ -340,6 +351,14 @@ export interface CreateTripPayload {
   plannedEndAt?: string;
   notes?: string;
   stops?: CreateTripStopInput[];
+  pieces?: number;
+  /** B-73 / B-92 (shipped 2026-09-24). */
+  distanceMi?: number;
+  rateUsd?: number;
+  customer?: string;
+  estimatedDriveSec?: number;
+  /** B-73 — saves as `DRAFT` even when `driverId` is set (never silently ASSIGNED, backend D-098). */
+  draft?: boolean;
 }
 
 export function useCreateTrip() {
@@ -356,6 +375,8 @@ export interface AssignTripPayload {
   driverId: string;
   vehicleId?: string;
   trailerId?: string;
+  /** B-74 — server default `true`: push the driver about the assignment. */
+  notify?: boolean;
 }
 
 export function useAssignTrip(tripId: string) {
@@ -377,6 +398,47 @@ export function useAutoAssignTrips() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => client.post<AutoAssignResult>(endpoints.trips.autoAssign, {}),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: qkRoot.trips });
+    },
+  });
+}
+
+/* --------------------------------------------------------------------- Phase 13 (2026-09-24) */
+
+/** `TripPatchDto` — every field `PATCH /trips/:id` accepts. `status` follows backend
+ * `ALLOWED_TRANSITIONS` (DRAFT → PLANNED | CANCELLED; 422 otherwise). */
+export interface UpdateTripPayload {
+  status?: TripStatus;
+  shippingDocument?: string;
+  commodity?: string;
+  weightLbs?: number;
+  pieces?: number;
+  plannedStartAt?: string;
+  plannedEndAt?: string;
+  etaAt?: string;
+  notes?: string;
+  distanceMi?: number;
+  rateUsd?: number;
+  customer?: string;
+  estimatedDriveSec?: number;
+}
+
+export function useUpdateTrip(tripId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: UpdateTripPayload) => client.patch<TripRow>(endpoints.trips.update(tripId), payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: qkRoot.trips });
+    },
+  });
+}
+
+/** B-73 — publishing a draft is `PATCH /trips/:id { status: 'PLANNED' }` (no dedicated route, D-098). */
+export function usePublishTrip() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (tripId: string) => client.patch<TripRow>(endpoints.trips.update(tripId), { status: 'PLANNED' }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qkRoot.trips });
     },
