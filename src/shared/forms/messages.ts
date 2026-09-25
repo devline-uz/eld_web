@@ -38,6 +38,8 @@ export const VALIDATION_MESSAGES = {
   timeOrder: 'End time must be after the start time.',
   engineHours: 'Enter engine hours, e.g. 1079.4.',
   placePick: 'Pick a place from the suggestions so it can be located.',
+  webhookUrl: 'Enter a full URL starting with https:// (or http://).',
+  webhookSecret: 'Enter a signing secret, or generate one.',
 } as const;
 
 export const LIMITS = {

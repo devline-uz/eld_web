@@ -2,7 +2,7 @@
 // Design: web/roles and screens/admin panel/Settings — integrations and API keys.jpg
 import { useMemo, useState } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
-import { ExternalLink, Plus, Copy } from 'lucide-react';
+import { ExternalLink, Plus, Copy, Send, Settings2 } from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
@@ -23,12 +23,15 @@ import {
   useApiKeysList,
   useRevokeApiKey,
   useIntegrationsCatalog,
+  useSendWebhookTest,
+  webhookUrlOf,
   type IntegrationProvider,
   type ApiKeyRow,
   type IntegrationRow,
 } from '@/shared/api/settingsAdmin';
 import { CreateApiKeyModal } from './components/CreateApiKeyModal';
 import { EditApiKeyScopesModal } from './components/EditApiKeyScopesModal';
+import { WebhookConfigModal } from './components/WebhookConfigModal';
 import { INTEGRATION_STATUS, SETTINGS_REASON, SETTINGS_TOAST } from './lib/copy';
 
 interface CatalogEntry {
@@ -56,6 +59,8 @@ const CATALOG: CatalogEntry[] = [
 function integrationStatusLine(entry: CatalogEntry, record: IntegrationRow | undefined): string {
   if (!entry.provider) return INTEGRATION_STATUS.noConnector;
   if (record?.status !== 'CONNECTED') return INTEGRATION_STATUS.notConnected;
+  // WB-251 — a webhook connected before the fix has no `config.url`; the backend skips it.
+  if (entry.provider === 'webhook' && !webhookUrlOf(record)) return INTEGRATION_STATUS.webhookNoEndpoint;
   return record.lastSyncAt ? INTEGRATION_STATUS.lastSync(formatRelative(record.lastSyncAt)) : INTEGRATION_STATUS.connectedNoSync;
 }
 
@@ -68,6 +73,9 @@ export default function IntegrationsPage() {
   const upsert = useUpsertIntegration();
   const disconnect = useDisconnectIntegration();
   const revokeKey = useRevokeApiKey();
+  const sendWebhookTest = useSendWebhookTest();
+  // WB-251 — the Custom webhook needs a URL and a signing secret, so it connects through a modal.
+  const [webhookModal, setWebhookModal] = useState<{ mode: 'connect' | 'configure'; name: string } | null>(null);
   const [createKeyOpen, setCreateKeyOpen] = useState(false);
   const [scopesTarget, setScopesTarget] = useState<ApiKeyRow | null>(null);
   const [disconnectTarget, setDisconnectTarget] = useState<CatalogEntry | null>(null);
@@ -87,6 +95,12 @@ export default function IntegrationsPage() {
 
   function handleConnect(entry: { provider: IntegrationProvider | string; name: string }) {
     if (upsert.isPending) return;
+    // WB-251 — `config: {}` left the webhook with no endpoint, so nothing was ever delivered.
+    if (entry.provider === 'webhook') {
+      setMarketplaceOpen(false);
+      setWebhookModal({ mode: 'connect', name: entry.name });
+      return;
+    }
     upsert.mutate(
       { provider: entry.provider, dto: { enabled: true, config: {} } },
       {
@@ -94,6 +108,14 @@ export default function IntegrationsPage() {
         onError: (error) => toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }),
       },
     );
+  }
+
+  function handleSendWebhookTest() {
+    if (sendWebhookTest.isPending) return;
+    sendWebhookTest.mutate(undefined, {
+      onSuccess: () => toast({ kind: 'success', ...SETTINGS_TOAST.webhookTestQueued }),
+      onError: (error) => toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }),
+    });
   }
 
   function handleDisconnect(entry: CatalogEntry) {
@@ -194,17 +216,42 @@ export default function IntegrationsPage() {
                 </div>
                 <p className="mt-3 text-card-title font-semibold text-text">{entry.name}</p>
                 <p className="text-card-sub text-text-muted">{entry.description}</p>
-                <div className="mt-4 flex items-center justify-between">
+                <div className="mt-4 flex items-center justify-between gap-2">
                   <span className="text-caption tabular-nums text-text-muted">{integrationStatusLine(entry, record)}</span>
                   {canFull && entry.provider ? (
                     connected ? (
-                      // WB-224 — the button was labelled `Manage` and disconnected the
-                      // integration on the first click with no confirm. There is no
-                      // configuration endpoint to manage anything with, so it says what it does
-                      // and asks first.
-                      <Button variant="danger-outline" size="sm" onClick={() => setDisconnectTarget(entry)}>
-                        Disconnect
-                      </Button>
+                      <div className="flex flex-wrap items-center justify-end gap-2">
+                        {entry.provider === 'webhook' && (
+                          <>
+                            {/* WB-251 — re-open the modal with the stored URL; the secret is never readable. */}
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              iconLeft={<Settings2 size={14} strokeWidth={1.75} />}
+                              onClick={() => setWebhookModal({ mode: 'configure', name: entry.name })}
+                            >
+                              Configure
+                            </Button>
+                            {/* `POST /integrations/webhook/test` — queues a signed `test.ping`. */}
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              iconLeft={<Send size={14} strokeWidth={1.75} />}
+                              loading={sendWebhookTest.isPending}
+                              disabled={sendWebhookTest.isPending}
+                              onClick={handleSendWebhookTest}
+                            >
+                              Send test
+                            </Button>
+                          </>
+                        )}
+                        {/* WB-224 — the button was labelled `Manage` and disconnected the
+                            integration on the first click with no confirm; it now says what it
+                            does and asks first. */}
+                        <Button variant="danger-outline" size="sm" onClick={() => setDisconnectTarget(entry)}>
+                          Disconnect
+                        </Button>
+                      </div>
                     ) : (
                       <Button
                         variant="primary"
@@ -325,6 +372,14 @@ export default function IntegrationsPage() {
             </div>
           )}
         </Modal>
+      )}
+      {webhookModal && (
+        <WebhookConfigModal
+          mode={webhookModal.mode}
+          name={webhookModal.name}
+          initialUrl={webhookModal.mode === 'configure' ? webhookUrlOf(byProvider.webhook) : ''}
+          onClose={() => setWebhookModal(null)}
+        />
       )}
       {createKeyOpen && <CreateApiKeyModal onClose={() => setCreateKeyOpen(false)} />}
       {scopesTarget && <EditApiKeyScopesModal apiKey={scopesTarget} onClose={() => setScopesTarget(null)} />}

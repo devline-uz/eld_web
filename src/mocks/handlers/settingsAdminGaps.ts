@@ -28,6 +28,17 @@ async function body(request: Request): Promise<Record<string, unknown>> {
 
 const NOT_FOUND = (what: string) => fail(404, 'NOT_FOUND', `${what} was not found.`);
 
+/** Mirrors the backend's `redactConfigSecrets` (integrations/lib/config-secrets.ts). */
+const SECRET_KEY_PATTERN = /secret|token|password|api[_-]?key|signing|private[_-]?key|access[_-]?key/i;
+function redactSecrets(config: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(config).map(([key, value]) => [
+      key,
+      SECRET_KEY_PATTERN.test(key) && typeof value === 'string' && value.length > 0 ? '[REDACTED]' : value,
+    ]),
+  );
+}
+
 function roleById(id: string): RoleRow | undefined {
   return ROLES.find((r) => r.id === id || r.key === id);
 }
@@ -230,7 +241,9 @@ export const settingsAdminHandlers = [
     }
     row.enabled = dto.enabled !== false;
     row.status = row.enabled ? 'CONNECTED' : 'DISCONNECTED';
-    if (dto.config) row.config = dto.config as Record<string, unknown>;
+    // Like `IntegrationsService.upsert`: the whole config is replaced (default `{}`), and secret
+    // fields are only ever returned redacted.
+    row.config = redactSecrets((dto.config ?? {}) as Record<string, unknown>);
     if (row.enabled) row.lastSyncAt = new Date().toISOString();
     return ok(row);
   }),
@@ -240,9 +253,18 @@ export const settingsAdminHandlers = [
     row.enabled = false;
     row.status = 'DISCONNECTED';
     row.lastSyncAt = null;
+    row.config = {};
     return ok(row);
   }),
-  http.post(url(endpoints.integrations.testWebhook), () => ok({ id: mockId('whd'), status: 'QUEUED', attempts: 0 }, 201)),
+  // Like `WebhooksService.sendTest`: 409 unless an enabled `webhook` row has a `config.url`.
+  http.post(url(endpoints.integrations.testWebhook), () => {
+    const row = INTEGRATIONS.find((i) => i.provider === 'webhook');
+    const target = row?.config?.url;
+    if (!row?.enabled || typeof target !== 'string' || target.length === 0) {
+      return fail(409, 'INTEGRATION_NOT_CONFIGURED', "No enabled 'webhook' integration configured.");
+    }
+    return ok({ id: mockId('whd'), status: 'QUEUED', attempts: 0 }, 201);
+  }),
 
   http.get(url(endpoints.apiKeys.list), () => ok(API_KEYS)),
   http.post(url(endpoints.apiKeys.create), async ({ request }) => {

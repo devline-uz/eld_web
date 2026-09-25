@@ -1,7 +1,7 @@
 // WB-158 — 11.4 (load variant): the `Notify the driver` tick was never part of the request, and
 // the driver list gave no feedback while it loaded.
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { http } from 'msw';
+import { http, HttpResponse } from 'msw';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -115,6 +115,104 @@ describe('AssignLoadModal — 11.4 load variant', () => {
     renderModal();
     expect(await screen.findByText('Loading drivers…')).toBeInTheDocument();
   });
+  // Was "GAP B-2" (a static `—`): the right column now shows remaining drive / cycle time.
+  describe('HOS column', () => {
+    const TWO = [
+      { id: 'drv_1', username: 'jsmith', firstName: 'John', lastName: 'Smith', status: 'ACTIVE', homeTerminalName: 'Columbus, OH' },
+      { id: 'drv_2', username: 'adoe', firstName: 'Ann', lastName: 'Doe', status: 'ACTIVE', homeTerminalName: 'Dayton, OH' },
+    ];
+    const rosterRow = (id: string, driveRemainingSec: number, cycleRemainingSec: number) => ({
+      driver: { id, username: id, firstName: 'X', lastName: 'Y', homeTerminalName: 'Z', appVersion: null, email: null },
+      dutyStatus: 'OFF_DUTY',
+      unit: null,
+      hos: { driveRemainingSec, shiftRemainingSec: 50_400, cycleRemainingSec },
+      openViolations: 0,
+      emailVerified: null,
+    });
+    const page = (items: unknown[]) => ok({ items, page: 1, limit: 25, total: items.length, totalPages: 1 });
+    const rowOf = (name: string) => screen.getByRole('radio', { name }).closest('label') as HTMLElement;
+    // 404, not 5xx: `client.ts` retries a failed GET on 5xx (1 s, 3 s), which only slows the test.
+    const fail = () =>
+      HttpResponse.json({ statusCode: 404, code: 'DRIVER_NOT_FOUND', message: 'Driver not found.', details: null, traceId: 't' }, { status: 404 });
+    let hosCalls: string[];
+
+    beforeEach(() => {
+      hosCalls = [];
+      server.use(http.get(url(endpoints.drivers.list), () => page(TWO)));
+    });
+
+    it('renders each row\'s drive and cycle time from one roster request', async () => {
+      const rosterQueries: string[] = [];
+      server.use(
+        http.get(url(endpoints.drivers.roster), ({ request }) => {
+          rosterQueries.push(new URL(request.url).search);
+          return page([rosterRow('drv_1', 39_600, 252_000), rosterRow('drv_2', 1_140, 36_000)]);
+        }),
+        http.get(url(endpoints.drivers.hos(':id')), ({ params }) => {
+          hosCalls.push(String(params.id));
+          return fail();
+        }),
+      );
+      renderModal();
+      await screen.findByRole('radio', { name: 'John Smith' });
+      await waitFor(() => expect(rowOf('John Smith')).toHaveTextContent('11:00 drive70:00 cycle'));
+      expect(rowOf('Ann Doe')).toHaveTextContent('00:19 drive10:00 cycle');
+      expect(rosterQueries).toHaveLength(1);
+      expect(rosterQueries[0]).toContain('limit=25');
+      expect(hosCalls).toEqual([]);
+    });
+
+    it('falls back to the per-driver clock only for a row the roster page misses', async () => {
+      server.use(
+        http.get(url(endpoints.drivers.roster), () => page([rosterRow('drv_1', 39_600, 252_000)])),
+        http.get(url(endpoints.drivers.hos(':id')), ({ params }) => {
+          hosCalls.push(String(params.id));
+          return ok({ driveRemainingSec: 23_400, shiftRemainingSec: 36_000, cycleRemainingSec: 200_000 });
+        }),
+      );
+      renderModal();
+      await screen.findByRole('radio', { name: 'Ann Doe' });
+      await waitFor(() => expect(rowOf('Ann Doe')).toHaveTextContent('06:30 drive55:33 cycle'));
+      expect(rowOf('John Smith')).toHaveTextContent('11:00 drive');
+      expect(hosCalls).toEqual(['drv_2']);
+    });
+
+    it('shows a loading placeholder per cell while the clocks are in flight', async () => {
+      server.use(
+        http.get(url(endpoints.drivers.roster), async () => {
+          await new Promise((r) => setTimeout(r, 50));
+          return page([rosterRow('drv_1', 39_600, 252_000), rosterRow('drv_2', 1_140, 36_000)]);
+        }),
+      );
+      renderModal();
+      await screen.findByRole('radio', { name: 'John Smith' });
+      expect(screen.getAllByRole('status', { name: 'Loading hours' })).toHaveLength(2);
+      await waitFor(() => expect(rowOf('John Smith')).toHaveTextContent('11:00 drive'));
+      expect(screen.queryByRole('status', { name: 'Loading hours' })).not.toBeInTheDocument();
+    });
+
+    it('shows — when the clocks cannot be read', async () => {
+      server.use(
+        http.get(url(endpoints.drivers.roster), () => page([rosterRow('drv_1', 39_600, 252_000)])),
+        http.get(url(endpoints.drivers.hos(':id')), () => fail()),
+      );
+      renderModal();
+      await screen.findByRole('radio', { name: 'Ann Doe' });
+      await waitFor(() => expect(rowOf('John Smith')).toHaveTextContent('11:00 drive'));
+      await waitFor(() => expect(rowOf('Ann Doe')).toHaveTextContent('—'));
+      expect(rowOf('Ann Doe')).not.toHaveTextContent('drive');
+    });
+
+    it('shows — in every row when the roster request fails', async () => {
+      server.use(http.get(url(endpoints.drivers.roster), () => fail()));
+      renderModal();
+      await screen.findByRole('radio', { name: 'John Smith' });
+      await waitFor(() => expect(rowOf('John Smith')).toHaveTextContent('—'));
+      expect(rowOf('Ann Doe')).toHaveTextContent('—');
+      expect(screen.queryByRole('status', { name: 'Loading hours' })).not.toBeInTheDocument();
+    });
+  });
+
   // WB-237 — Enter in the driver search used to do nothing.
   describe('driver search Enter', () => {
     const DRIVERS = [

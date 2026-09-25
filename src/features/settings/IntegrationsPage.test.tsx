@@ -280,3 +280,233 @@ describe('IntegrationsPage — stage-2', () => {
     await waitFor(() => expect(body).toEqual({ scopes: ['drivers:read'] }));
   });
 });
+
+/* ------------------------------------------------------------------ WB-251 Custom webhook */
+
+describe('IntegrationsPage — Custom webhook (WB-251)', () => {
+  const WEBHOOK_URL = 'https://hooks.example.com/onebook';
+
+  function webhookCard() {
+    return screen.getByText('Custom webhook').closest('div.rounded-lg')!;
+  }
+
+  it('Connect opens the webhook modal instead of connecting blind', async () => {
+    const user = userEvent.setup();
+    let putCalled = false;
+    server.use(
+      http.get(url(endpoints.apiKeys.list), () => ok([])),
+      http.put(url(endpoints.integrations.update('webhook')), () => {
+        putCalled = true;
+        return ok({ id: 'int_6', provider: 'webhook', enabled: true, status: 'CONNECTED' });
+      }),
+    );
+    renderPage();
+    await screen.findByText('Custom webhook');
+    await userEventClickWithin(webhookCard(), /connect/i, user);
+
+    const dialog = await screen.findByRole('dialog', { name: 'Connect Custom webhook' });
+    expect(within(dialog).getByLabelText(/Endpoint URL/)).toHaveValue('');
+    expect(within(dialog).getByLabelText(/Signing secret/)).toHaveAttribute('type', 'password');
+    expect(putCalled).toBe(false);
+  });
+
+  it('shows validation errors and sends nothing for an empty or non-http URL and an empty secret', async () => {
+    const user = userEvent.setup();
+    let putCalled = false;
+    server.use(
+      http.get(url(endpoints.apiKeys.list), () => ok([])),
+      http.put(url(endpoints.integrations.update('webhook')), () => {
+        putCalled = true;
+        return ok({});
+      }),
+    );
+    renderPage();
+    await screen.findByText('Custom webhook');
+    await userEventClickWithin(webhookCard(), /connect/i, user);
+    const dialog = await screen.findByRole('dialog', { name: 'Connect Custom webhook' });
+
+    await user.click(within(dialog).getByRole('button', { name: 'Connect' }));
+    expect(await within(dialog).findByText('Enter a full URL starting with https:// (or http://).')).toBeInTheDocument();
+    expect(within(dialog).getByText('Enter a signing secret, or generate one.')).toBeInTheDocument();
+    expect(within(dialog).getByLabelText(/Signing secret/)).toHaveAttribute('aria-invalid', 'true');
+
+    await user.type(within(dialog).getByLabelText(/Endpoint URL/), 'ftp://files.example.com/hook');
+    await user.type(within(dialog).getByLabelText(/Signing secret/), '   ');
+    await user.click(within(dialog).getByRole('button', { name: 'Connect' }));
+    expect(await within(dialog).findByText('Enter a full URL starting with https:// (or http://).')).toBeInTheDocument();
+    expect(within(dialog).getByText('Enter a signing secret, or generate one.')).toBeInTheDocument();
+    expect(putCalled).toBe(false);
+  });
+
+  it('submits { enabled: true, config: { url, secret } } and toasts', async () => {
+    const user = userEvent.setup();
+    let body: unknown = null;
+    server.use(
+      http.get(url(endpoints.apiKeys.list), () => ok([])),
+      http.put(url(endpoints.integrations.update('webhook')), async ({ request }) => {
+        body = await request.json();
+        return ok({ id: 'int_6', provider: 'webhook', enabled: true, status: 'CONNECTED' });
+      }),
+    );
+    renderPage();
+    await screen.findByText('Custom webhook');
+    await userEventClickWithin(webhookCard(), /connect/i, user);
+    const dialog = await screen.findByRole('dialog', { name: 'Connect Custom webhook' });
+
+    await user.type(within(dialog).getByLabelText(/Endpoint URL/), WEBHOOK_URL);
+    await user.type(within(dialog).getByLabelText(/Signing secret/), 'whsec_test_value');
+    await user.click(within(dialog).getByRole('button', { name: 'Show secret' }));
+    expect(within(dialog).getByLabelText(/Signing secret/)).toHaveAttribute('type', 'text');
+    await user.click(within(dialog).getByRole('button', { name: 'Connect' }));
+
+    await waitFor(() =>
+      expect(body).toEqual({ enabled: true, config: { url: WEBHOOK_URL, secret: 'whsec_test_value' } }),
+    );
+    expect(await screen.findByText('Custom webhook connected')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Connect Custom webhook' })).not.toBeInTheDocument());
+  });
+
+  it('Generate fills a 64-character hex secret and reveals it', async () => {
+    const user = userEvent.setup();
+    let body: { config?: { secret?: string } } | null = null;
+    server.use(
+      http.get(url(endpoints.apiKeys.list), () => ok([])),
+      http.put(url(endpoints.integrations.update('webhook')), async ({ request }) => {
+        body = (await request.json()) as typeof body;
+        return ok({ id: 'int_6', provider: 'webhook', enabled: true, status: 'CONNECTED' });
+      }),
+    );
+    renderPage();
+    await screen.findByText('Custom webhook');
+    await userEventClickWithin(webhookCard(), /connect/i, user);
+    const dialog = await screen.findByRole('dialog', { name: 'Connect Custom webhook' });
+
+    await user.type(within(dialog).getByLabelText(/Endpoint URL/), WEBHOOK_URL);
+    await user.click(within(dialog).getByRole('button', { name: 'Generate' }));
+    const secretInput = within(dialog).getByLabelText(/Signing secret/);
+    expect(secretInput).toHaveAttribute('type', 'text');
+    expect((secretInput as HTMLInputElement).value).toMatch(/^[0-9a-f]{64}$/);
+    await user.click(within(dialog).getByRole('button', { name: 'Connect' }));
+    await waitFor(() => expect(body?.config?.secret).toBe((secretInput as HTMLInputElement).value));
+  });
+
+  it('Configure re-opens the modal with the stored URL, a blank secret, and requires the secret again', async () => {
+    const user = userEvent.setup();
+    let body: unknown = null;
+    server.use(
+      http.get(url(endpoints.apiKeys.list), () => ok([])),
+      http.get(url(endpoints.integrations.list), () =>
+        ok([
+          {
+            id: 'int_6',
+            provider: 'webhook',
+            enabled: true,
+            status: 'CONNECTED',
+            lastSyncAt: null,
+            config: { url: WEBHOOK_URL, secret: '[REDACTED]' },
+          },
+        ]),
+      ),
+      http.put(url(endpoints.integrations.update('webhook')), async ({ request }) => {
+        body = await request.json();
+        return ok({ id: 'int_6', provider: 'webhook', enabled: true, status: 'CONNECTED' });
+      }),
+    );
+    renderPage();
+    await screen.findByText('Custom webhook');
+    await userEventClickWithin(webhookCard(), /configure/i, user);
+
+    const dialog = await screen.findByRole('dialog', { name: 'Configure Custom webhook' });
+    expect(within(dialog).getByLabelText(/Endpoint URL/)).toHaveValue(WEBHOOK_URL);
+    const secretInput = within(dialog).getByLabelText(/Signing secret/);
+    expect(secretInput).toHaveValue('');
+    expect(within(dialog).queryByDisplayValue('[REDACTED]')).not.toBeInTheDocument();
+    expect(within(dialog).getByText(/Saving replaces the whole webhook configuration/)).toBeInTheDocument();
+
+    // The backend replaces the whole config, so an edit without the secret is refused client-side.
+    await user.click(within(dialog).getByRole('button', { name: 'Save changes' }));
+    expect(await within(dialog).findByText('Enter a signing secret, or generate one.')).toBeInTheDocument();
+    expect(body).toBeNull();
+
+    const urlInput = within(dialog).getByLabelText(/Endpoint URL/);
+    await user.clear(urlInput);
+    await user.type(urlInput, 'https://hooks.example.com/v2');
+    await user.type(secretInput, 'rotated-secret');
+    await user.click(within(dialog).getByRole('button', { name: 'Save changes' }));
+    await waitFor(() =>
+      expect(body).toEqual({ enabled: true, config: { url: 'https://hooks.example.com/v2', secret: 'rotated-secret' } }),
+    );
+    expect(await screen.findByText('Custom webhook updated')).toBeInTheDocument();
+  });
+
+  it('Send test posts to /integrations/webhook/test and toasts; a 409 shows the mapped message', async () => {
+    const user = userEvent.setup();
+    let calls = 0;
+    let body: unknown = null;
+    server.use(
+      http.get(url(endpoints.apiKeys.list), () => ok([])),
+      http.get(url(endpoints.integrations.list), () =>
+        ok([{ id: 'int_6', provider: 'webhook', enabled: true, status: 'CONNECTED', lastSyncAt: null, config: { url: WEBHOOK_URL, secret: '[REDACTED]' } }]),
+      ),
+      http.post(url(endpoints.integrations.testWebhook), async ({ request }) => {
+        calls += 1;
+        body = await request.json();
+        return calls === 1
+          ? ok({ id: 'whd_1', status: 'QUEUED', attempts: 0 }, 201)
+          : fail(409, 'INTEGRATION_NOT_CONFIGURED', "No enabled 'webhook' integration configured.");
+      }),
+    );
+    renderPage();
+    await screen.findByText('Custom webhook');
+    await userEventClickWithin(webhookCard(), /send test/i, user);
+    await waitFor(() => expect(calls).toBe(1));
+    expect(body).toEqual({ eventType: 'test.ping' });
+    expect(await screen.findByText('Test event queued')).toBeInTheDocument();
+
+    await userEventClickWithin(webhookCard(), /send test/i, user);
+    expect(await screen.findByText('This integration is not configured yet.')).toBeInTheDocument();
+  });
+
+  it('flags a connected webhook with no endpoint URL', async () => {
+    server.use(
+      http.get(url(endpoints.apiKeys.list), () => ok([])),
+      http.get(url(endpoints.integrations.list), () =>
+        ok([{ id: 'int_6', provider: 'webhook', enabled: true, status: 'CONNECTED', lastSyncAt: null, config: {} }]),
+      ),
+    );
+    renderPage();
+    expect(await screen.findByText('Connected · no endpoint set')).toBeInTheDocument();
+  });
+
+  it('hides Configure and Send test for a READ-only caller', async () => {
+    canFull = false;
+    server.use(
+      http.get(url(endpoints.apiKeys.list), () => ok([])),
+      http.get(url(endpoints.integrations.list), () =>
+        ok([{ id: 'int_6', provider: 'webhook', enabled: true, status: 'CONNECTED', lastSyncAt: null, config: { url: WEBHOOK_URL, secret: '[REDACTED]' } }]),
+      ),
+    );
+    renderPage();
+    await screen.findByText('Custom webhook');
+    expect(screen.queryByRole('button', { name: /configure/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /send test/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /disconnect/i })).not.toBeInTheDocument();
+  });
+
+  it('other providers still connect in one click with an empty config (Slack)', async () => {
+    const user = userEvent.setup();
+    let body: unknown = null;
+    server.use(
+      http.get(url(endpoints.apiKeys.list), () => ok([])),
+      http.put(url(endpoints.integrations.update('slack')), async ({ request }) => {
+        body = await request.json();
+        return ok({ id: 'int_2', provider: 'slack', enabled: true, status: 'CONNECTED' });
+      }),
+    );
+    renderPage();
+    await screen.findByText('McLeod PowerBroker');
+    await userEventClickWithin(screen.getByText('Slack').closest('div.rounded-lg')!, /connect/i, user);
+    await waitFor(() => expect(body).toEqual({ enabled: true, config: {} }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+});

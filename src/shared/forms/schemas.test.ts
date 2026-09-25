@@ -304,3 +304,21 @@ describe('form schemas', () => {
     expect(ticketSchema.safeParse({ ...ticket, category: 'x'.repeat(101) }).success).toBe(false);
   });
 });
+
+describe('W-22 Custom webhook fields (WB-251)', () => {
+  it('webhookUrl accepts http(s) URLs only', () => {
+    expect(f.webhookUrl().safeParse('https://hooks.example.com/onebook').success).toBe(true);
+    expect(f.webhookUrl().safeParse('http://localhost:8080/hook').success).toBe(true);
+    for (const bad of ['', 'hooks.example.com', 'ftp://example.com/x', 'javascript:alert(1)']) {
+      const result = f.webhookUrl().safeParse(bad);
+      expect(result.success).toBe(false);
+      if (!result.success) expect(result.error.issues[0]?.message).toBe(M.webhookUrl);
+    }
+  });
+
+  it('webhookSecret requires a non-blank value and keeps it untrimmed', () => {
+    expect(f.webhookSecret().parse(' s3cret ')).toBe(' s3cret ');
+    expect(f.webhookSecret().safeParse('   ').success).toBe(false);
+    expect(f.webhookSecret().safeParse('').success).toBe(false);
+  });
+});

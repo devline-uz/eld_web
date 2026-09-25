@@ -161,6 +161,8 @@ export const TRANSFER_METHOD_LABEL = {
  */
 export const ACTIVITY_EXPORT_SCOPE =
   'Export CSV covers every home terminal and driver status — the terminal filter applies to this screen only.';
+export const IFTA_EXPORT_SCOPE =
+  'Export CSV and Download IFTA PDF cover every jurisdiction — the jurisdiction filter applies to this screen only.';
 export const DVIR_EXPORT_SCOPE =
   'Export CSV and Download PDF include every defect type — the defect filter applies to this screen only.';
 

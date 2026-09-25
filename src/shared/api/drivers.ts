@@ -7,7 +7,7 @@
 // `Driver` — `GET /drivers/roster` (B-1, shipped 2026-09-14) is the only sane source (58 drivers,
 // not 58 requests). Types below were checked against backend `driver-roster.service.ts`.
 import { useMemo } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { client } from './client';
 import { endpoints } from './endpoints';
 import { FILTER_WINDOW } from './lookups';
@@ -183,13 +183,60 @@ export interface DriverHosResponse {
   computedAt: string;
 }
 
+/** One B-2 query — shared by `useDriverHos` and `useDriversHosClocks` so both read and write the
+ * same `qk.driverHos(id)` entry under the same `hosDay` policy. */
+const driverHosQuery = (driverId: string) => ({
+  queryKey: qk.driverHos(driverId),
+  queryFn: ({ signal }: { signal: AbortSignal }) => client.get<DriverHosResponse>(endpoints.drivers.hos(driverId), { signal }),
+  ...typedCachePolicy<DriverHosResponse>('hosDay'),
+});
+
 export function useDriverHos(driverId: string | undefined) {
-  return useQuery({
-    queryKey: qk.driverHos(driverId ?? ''),
-    queryFn: ({ signal }) => client.get<DriverHosResponse>(endpoints.drivers.hos(driverId as string), { signal }),
-    enabled: Boolean(driverId),
-    ...typedCachePolicy<DriverHosResponse>('hosDay'),
-  });
+  return useQuery({ ...driverHosQuery(driverId ?? ''), enabled: Boolean(driverId) });
+}
+
+/** One picker row's HOS cell: still loading, unavailable (error / no data → `—`), or the clocks. */
+export type DriverHosCell =
+  | { state: 'loading' }
+  | { state: 'missing' }
+  | { state: 'ready'; driveRemainingSec: number; cycleRemainingSec: number };
+
+/**
+ * HOS clocks for the driver rows a picker renders (`ids`, already bounded by the list `limit`).
+ *
+ * Bulk source first: `GET /drivers/roster` (B-1) returns the engine clocks for a whole page of
+ * drivers in one request. `window` must describe the same page the rows came from (same `q`,
+ * `limit`, and the `GET /drivers` default order `registeredAt:desc`) so the two windows line up;
+ * rows are joined by driver id. A rendered id the roster page does not contain (a sort tie at the
+ * page edge, or a data change between the two reads) falls back to `GET /drivers/:id/hos` (B-2)
+ * for that id only. A roster failure leaves every cell `missing` — no 25-request fan-out.
+ */
+export function useDriversHosClocks(
+  ids: readonly string[],
+  window: Pick<DriverRosterParams, 'q' | 'limit'>,
+): Map<string, DriverHosCell> {
+  const roster = useDriverRoster({ ...window, sort: 'registeredAt:desc' }, { enabled: ids.length > 0 });
+  const rosterById = useMemo(() => new Map((roster.data?.items ?? []).map((row) => [row.driver.id, row.hos])), [roster.data]);
+  const uncovered = roster.isSuccess ? ids.filter((id) => !rosterById.has(id)) : [];
+  const fallback = useQueries({ queries: uncovered.map((id) => driverHosQuery(id)) });
+
+  const cells = new Map<string, DriverHosCell>();
+  for (const id of ids) {
+    if (roster.isPending) {
+      cells.set(id, { state: 'loading' });
+      continue;
+    }
+    if (roster.isError) {
+      cells.set(id, { state: 'missing' });
+      continue;
+    }
+    const hos = rosterById.get(id) ?? fallback[uncovered.indexOf(id)]?.data;
+    const pending = !rosterById.has(id) && fallback[uncovered.indexOf(id)]?.isPending;
+    if (pending) cells.set(id, { state: 'loading' });
+    else if (hos) cells.set(id, { state: 'ready', driveRemainingSec: hos.driveRemainingSec, cycleRemainingSec: hos.cycleRemainingSec });
+    else cells.set(id, { state: 'missing' });
+  }
+  return cells;
 }
 
 /* ---------------------------------------------------------------------- mutations */
