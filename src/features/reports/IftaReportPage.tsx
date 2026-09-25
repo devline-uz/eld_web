@@ -5,7 +5,9 @@
 // Gap B-46 — KPI row and `Miles by jurisdiction` read `GET /reports/ifta/summary?quarter=`.
 // Fuel / MPG / tax fields may be `null` (no receipts or rates on the server): they render `—`,
 // never `0`. The error state appears only when that request actually fails.
-import { useState } from 'react';
+// `All jurisdictions ▾` (`?jurisdiction=`) filters the loaded rows client-side (iftaJurisdictions.ts);
+// `All vehicle groups ▾` stays inert — the backend has no vehicle-group model (B-46).
+import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { ColumnDef } from '@tanstack/react-table';
 import { Download, FileText, Fuel, Route, TrendingUp, Upload } from 'lucide-react';
@@ -36,7 +38,15 @@ import { ReportLibraryCard } from './components/ReportLibraryCard';
 import { ScheduleReportModal } from './components/ScheduleReportModal';
 import { SelectMenu } from './components/SelectMenu';
 import {
+  ALL_JURISDICTIONS,
+  jurisdictionOptions,
+  kpisForJurisdiction,
+  parseJurisdiction,
+  rowsForJurisdiction,
+} from './iftaJurisdictions';
+import {
   CARRIER_TZ_FALLBACK,
+  IFTA_EXPORT_SCOPE,
   previousQuarters,
   quarterLabel,
   quarterOf,
@@ -101,14 +111,32 @@ export default function IftaReportPage() {
   const current = quarterOf(todayKey(timezone));
   const requested = params.get('quarter') ?? '';
   const quarter = QUARTER_RE.test(requested) ? requested : current;
+  const jurisdiction = parseJurisdiction(params.get('jurisdiction'));
+  const setParam = (key: string, value: string | null) => {
+    const next = new URLSearchParams(params);
+    if (value) next.set(key, value);
+    else next.delete(key);
+    setParams(next, { replace: true });
+  };
 
   const summary = useIftaSummary(quarter);
   const vehicles = useReportVehicles();
   const units = summary.data?.unitCount ?? vehicles.data?.total;
-  const kpis = summary.data?.kpis;
-  const tableRows: IftaTableRow[] = summary.data?.rows.length
-    ? [...summary.data.rows, { ...summary.data.totals, jurisdiction: 'Total', isTotal: true }]
-    : [];
+  const allRows = summary.data?.rows;
+  const jurisdictionRows = useMemo(
+    () => (allRows && jurisdiction ? rowsForJurisdiction(allRows, jurisdiction) : null),
+    [allRows, jurisdiction],
+  );
+  const jurisdictionRow = jurisdictionRows?.[0];
+  const kpis = jurisdiction ? (jurisdictionRow ? kpisForJurisdiction(jurisdictionRow) : undefined) : summary.data?.kpis;
+  // One jurisdiction selected: its own row, no totals row (it would repeat the row).
+  const tableRows: IftaTableRow[] = jurisdictionRows
+    ? jurisdictionRows
+    : summary.data?.rows.length
+      ? [...summary.data.rows, { ...summary.data.totals, jurisdiction: 'Total', isTotal: true }]
+      : [];
+  const jurisdictionMenu = useMemo(() => jurisdictionOptions(allRows ?? [], jurisdiction), [allRows, jurisdiction]);
+  const exportScopeId = jurisdiction ? 'ifta-export-scope' : undefined;
   useDynamicSubtitle(
     `${quarterLabel(quarter)} · ${quarterSpanLabel(quarter)}${typeof units === 'number' ? ` · ${units} units` : ''}`,
   );
@@ -148,10 +176,15 @@ export default function IftaReportPage() {
           name="Quarter"
           value={quarter}
           options={quarterOptions}
-          onSelect={(q) => setParams({ quarter: q }, { replace: true })}
+          onSelect={(q) => setParam('quarter', q)}
         />
-        {/* No jurisdiction list and no vehicle-group model on the backend (B-46, web/tz.md §20.4 Q4). */}
-        <SelectMenu name="Jurisdiction" value="all" options={[{ value: 'all', label: 'All jurisdictions' }]} disabled />
+        <SelectMenu
+          name="Jurisdiction"
+          value={jurisdiction ?? ALL_JURISDICTIONS}
+          options={jurisdictionMenu}
+          onSelect={(value) => setParam('jurisdiction', value === ALL_JURISDICTIONS ? null : value)}
+        />
+        {/* No vehicle-group model on the backend (B-46, web/tz.md §20.4 Q4) — the one control left inert. */}
         <SelectMenu name="Vehicle group" value="all" options={[{ value: 'all', label: 'All vehicle groups' }]} disabled />
         <div className="ml-auto flex items-center gap-2">
           <Button
@@ -159,6 +192,7 @@ export default function IftaReportPage() {
             iconLeft={<Upload size={16} strokeWidth={1.75} />}
             loading={exportCsv.isPending}
             disabled={exportCsv.isPending}
+            aria-describedby={exportScopeId}
             onClick={() => exportCsv.start({ kind: 'ifta', params: { quarter } })}
           >
             Export CSV
@@ -176,6 +210,14 @@ export default function IftaReportPage() {
           </Can>
         </div>
       </div>
+
+      {jurisdiction && (
+        // The IFTA shortcuts take only `quarter` (+ `vehicleId`): the files cannot be narrowed to a
+        // jurisdiction, so say so instead of exporting something else (as W-13's terminal note).
+        <p id="ifta-export-scope" className="text-caption text-text-muted">
+          {IFTA_EXPORT_SCOPE}
+        </p>
+      )}
 
       <ActionAlert
         message={actionError ?? csvJob.error ?? exportCsv.error}
@@ -233,6 +275,7 @@ export default function IftaReportPage() {
                   iconLeft={<Download size={16} strokeWidth={1.75} />}
                   loading={exportPdf.isPending}
                   disabled={exportPdf.isPending}
+                  aria-describedby={exportScopeId}
                   onClick={() => exportPdf.start({ kind: 'ifta', params: { quarter, format: 'PDF' } })}
                 >
                   Download IFTA PDF
@@ -260,11 +303,19 @@ export default function IftaReportPage() {
               rowClassName={(r) => (r.isTotal ? 'bg-bg-subtle font-semibold' : undefined)}
               isLoading={summary.isLoading}
               emptyState={
-                <EmptyState
-                  icon={<Route size={24} strokeWidth={1.75} />}
-                  title="No jurisdiction miles for this quarter"
-                  description="Miles appear here once units drive in the selected quarter."
-                />
+                jurisdiction ? (
+                  <EmptyState
+                    icon={<Route size={24} strokeWidth={1.75} />}
+                    title={`No miles in ${formatJurisdiction(jurisdiction)} for this quarter`}
+                    description="Pick All jurisdictions or another quarter to see recorded miles."
+                  />
+                ) : (
+                  <EmptyState
+                    icon={<Route size={24} strokeWidth={1.75} />}
+                    title="No jurisdiction miles for this quarter"
+                    description="Miles appear here once units drive in the selected quarter."
+                  />
+                )
               }
             />
           )}

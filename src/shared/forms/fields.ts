@@ -124,6 +124,28 @@ export const city = () =>
 /** Company name / street address — free text, capped at `LIMITS.companyTextMax`. */
 export const companyText = () => requiredString().max(LIMITS.companyTextMax, M.companyTextMax);
 
+/**
+ * W-22 Custom webhook — `config.url`. The backend (`WebhooksService.readUrl`) only needs a
+ * non-empty string and does not restrict the scheme, so http is accepted; https is the default
+ * the placeholder and hint steer to (WB-251).
+ */
+export const webhookUrl = () =>
+  requiredString(M.webhookUrl).refine((value) => {
+    try {
+      const parsed = new URL(value);
+      return (parsed.protocol === 'https:' || parsed.protocol === 'http:') && parsed.hostname.length > 0;
+    } catch {
+      return false;
+    }
+  }, M.webhookUrl);
+
+/**
+ * W-22 Custom webhook — `config.secret`, the HMAC key the worker signs every delivery with
+ * (`X-OneBook-Signature`). The backend requires it to be non-empty and sets no other rule. It
+ * is not trimmed: the receiver must verify with exactly the characters entered.
+ */
+export const webhookSecret = () =>
+  z.string({ required_error: M.webhookSecret }).refine((value) => value.trim().length > 0, M.webhookSecret);
 
 export const isoDay = () => requiredString(M.required).regex(ISO_DAY_RE, M.required);
 

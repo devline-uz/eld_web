@@ -5,7 +5,8 @@ import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { Avatar } from '@/shared/ui/Avatar';
 import { useToast } from '@/shared/ui/Toast';
-import { useDriversList } from '@/shared/api/drivers';
+import { useDriversHosClocks, useDriversList, type DriverHosCell } from '@/shared/api/drivers';
+import { formatHosHours } from '@/shared/format/hos';
 import { useAssignTrip, blocksAssignment, type TripRow } from '@/shared/api/trips';
 import { ApiError } from '@/shared/api/errors';
 
@@ -18,7 +19,11 @@ export function AssignLoadModal({ load, onClose }: { load: TripRow; onClose: () 
   const [notify, setNotify] = useState(true);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const driversQuery = useDriversList({ q: query || undefined, limit: 25 });
+  const listWindow = { q: query || undefined, limit: 25 };
+  const driversQuery = useDriversList(listWindow);
+  // B-1 roster (bulk) for the rendered rows' HOS clocks — same `q`/`limit` page, joined by id.
+  const rowIds = useMemo(() => (driversQuery.data?.items ?? []).map((d) => d.id), [driversQuery.data]);
+  const hosById = useDriversHosClocks(rowIds, listWindow);
   const mutation = useAssignTrip(load.id);
 
   const selectedDriver = useMemo(() => driversQuery.data?.items.find((d) => d.id === selectedId) ?? null, [driversQuery.data, selectedId]);
@@ -117,8 +122,9 @@ export function AssignLoadModal({ load, onClose }: { load: TripRow; onClose: () 
                     {driver.status === 'ACTIVE' ? 'Active' : driver.status} · {driver.homeTerminalName}
                   </span>
                 </span>
-                {/* ⛔ GAP B-2 — no per-driver HOS read endpoint; hours cannot be shown here. */}
-                <span className="text-right text-caption text-text-muted">—</span>
+                {/* B-1/B-2 (shipped) — was "GAP B-2", a static `—`. Remaining drive / cycle time from the
+                    roster page, per-driver `GET /drivers/:id/hos` only for rows the page misses. */}
+                <HosCell cell={hosById.get(driver.id)} />
               </label>
             );
           })}
@@ -128,5 +134,19 @@ export function AssignLoadModal({ load, onClose }: { load: TripRow; onClose: () 
         )}
       </div>
     </Modal>
+  );
+}
+
+/** 11.4 row, right side: `11:00 drive` over `70:00 cycle` (web/tz.md §11.4); `—` when unavailable. */
+function HosCell({ cell }: { cell: DriverHosCell | undefined }) {
+  if (!cell || cell.state === 'loading') {
+    return <span role="status" aria-label="Loading hours" className="h-8 w-16 animate-pulse rounded bg-bg-subtle" />;
+  }
+  if (cell.state === 'missing') return <span className="text-right text-caption text-text-muted">—</span>;
+  return (
+    <span className="text-right text-caption tabular-nums">
+      <span className="block text-body-strong text-text">{formatHosHours(cell.driveRemainingSec)} drive</span>
+      <span className="block text-text-muted">{formatHosHours(cell.cycleRemainingSec)} cycle</span>
+    </span>
   );
 }

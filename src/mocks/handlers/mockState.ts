@@ -301,6 +301,8 @@ export let ALERT_RULES: AlertRuleRow[] = [];
 
 /* ------------------------------------------------------------------ integrations & api keys */
 
+// WB-251 — the `webhook` row mirrors the backend contract: `config.url` + `config.secret`, the
+// secret redacted exactly as `redactConfigSecrets` returns it.
 function seedIntegrations(): IntegrationRow[] {
   return [
     { id: 'int_1', provider: 'mcleod', enabled: true, status: 'CONNECTED', lastSyncAt: ago(2 * HOUR), config: { baseUrl: 'https://tms.example.com', apiToken: '***' } },
@@ -308,7 +310,7 @@ function seedIntegrations(): IntegrationRow[] {
     { id: 'int_3', provider: 'comdata', enabled: false, status: 'DISCONNECTED', lastSyncAt: null, config: {} },
     { id: 'int_4', provider: 'quickbooks', enabled: false, status: 'DISCONNECTED', lastSyncAt: null, config: {} },
     { id: 'int_5', provider: 'slack', enabled: true, status: 'CONNECTED', lastSyncAt: ago(30 * 60_000), config: { channel: '#dispatch' } },
-    { id: 'int_6', provider: 'webhook', enabled: true, status: 'CONNECTED', lastSyncAt: ago(5 * 60_000), config: { url: 'https://hooks.example.com/onebook', secret: '***' } },
+    { id: 'int_6', provider: 'webhook', enabled: true, status: 'CONNECTED', lastSyncAt: ago(5 * 60_000), config: { url: 'https://hooks.example.com/onebook', secret: '[REDACTED]' } },
   ];
 }
 

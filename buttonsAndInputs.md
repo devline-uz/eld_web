@@ -36,12 +36,17 @@ were still marked 🚫 for endpoints that have since shipped, and the HOS `Locat
 such as the driver Documents tab, Start chat and device diagnostics, alongside the 15 flips), ✅
 656 → 729, ⚠️ 0 → 0, ❌ 0 → 0, 🚫 68 → 17, ❓ 1 → 0.
 
+2026-09-25 (uncommitted web changes): three 🚫 rows now work and are ✅ — Trips `Assign driver to
+load` → `HOS column` (bulk clocks from `GET /drivers/roster`, per-driver `GET /drivers/:id/hos`
+fallback), Activity `Group by` (driver / terminal, client-side) and IFTA `Jurisdiction` (client-side
+from the loaded quarter). **Total 746 → 746**, ✅ 729 → 732, 🚫 17 → 14 (Trips 1 → 0, Reports 3 → 1).
+
 | Status | Count |
 |---|---|
-| ✅ works | 729 |
+| ✅ works | 732 |
 | ⚠️ works with a problem | 0 |
 | ❌ does not work | 0 |
-| 🚫 disabled with a reason | 17 |
+| 🚫 disabled with a reason | 14 |
 | ❓ needs a live check | 0 |
 | **Total** | **746** |
 
@@ -56,10 +61,10 @@ such as the driver Documents tab, Start chat and device diagnostics, alongside t
 | Drivers | 84 | 84 | 0 | 0 | 0 | 0 |
 | HOS logs | 43 | 43 | 0 | 0 | 0 | 0 |
 | DVIR | 82 | 82 | 0 | 0 | 0 | 0 |
-| Trips | 59 | 58 | 0 | 0 | 1 | 0 |
+| Trips | 59 | 59 | 0 | 0 | 0 | 0 |
 | Safety | 24 | 24 | 0 | 0 | 0 | 0 |
 | Messages | 21 | 21 | 0 | 0 | 0 | 0 |
-| Reports | 68 | 65 | 0 | 0 | 3 | 0 |
+| Reports | 68 | 67 | 0 | 0 | 1 | 0 |
 | Notifications | 5 | 5 | 0 | 0 | 0 | 0 |
 | Settings · Company profile | 23 | 23 | 0 | 0 | 0 | 0 |
 | Settings · Users | 28 | 28 | 0 | 0 | 0 | 0 |
@@ -74,15 +79,15 @@ such as the driver Documents tab, Start chat and device diagnostics, alongside t
 | Search / command palette | 3 | 3 | 0 | 0 | 0 | 0 |
 | Global chrome & shared UI | 22 | 20 | 0 | 0 | 2 | 0 |
 
-No dead controls (❌), no ⚠️ rows and no ❓ rows remain. The 17 🚫 rows are all controls disabled
-for a reason that is **not** a missing backend endpoint: the 404 page stub, the Traffic map layer
-(`VITE_TRAFFIC_TILES_URL` unset), driverless "View logs", the Unit `Documents` tab (v2
-placeholder), `Group by driver` / `Vehicle group` / `Jurisdiction` (no group model on the
-backend), the bulk-search `HOS column` (no bulk per-driver HOS endpoint), the ADMIN row of the
-permission matrix ("Admin cannot be edited"), the QR scanner and the read-only Firmware display,
-SMS delivery (Q-2, never used), `Connect` for catalog providers with no connector, `Work email`
-("Managed by your administrator"), and the v2 `Switch organisation` controls — every one of them
-a deliberate, visible-reason 🚫 that does not depend on a `backend-gaps.md` B-NN row shipping.
+No dead controls (❌), no ⚠️ rows and no ❓ rows remain. The 14 🚫 rows are controls disabled
+with a visible reason: the 404 page stub, the Traffic map layer (`VITE_TRAFFIC_TILES_URL` unset),
+driverless "View logs", the Unit `Documents` tab (v2 placeholder), IFTA `Vehicle group` (no
+vehicle-group model on the backend — B-46, still open), the ADMIN row of the permission matrix
+("Admin cannot be edited"), the QR scanner and the read-only Firmware display, SMS delivery (Q-2,
+never used), `Connect` for catalog providers with no connector (Pacific Track / DAT / Geotab /
+Zapier — B-98, still open), `Work email` ("Managed by your administrator"), and the v2 `Switch
+organisation` controls. Only `Vehicle group` (B-46) and `Connect` (B-98) wait on the backend; the
+rest are deliberate and do not depend on a `backend-gaps.md` B-NN row shipping.
 
 ---
 ## Auth
@@ -642,7 +647,7 @@ a deliberate, visible-reason 🚫 that does not depend on a `backend-gaps.md` B-
 | Driver search input | text input | ✅ works | `aria-label` added (stage 2); Enter selects the first driver the live-filtered list shows and focuses its radio, never submits, no-op with no match (WB-237) (stage 3, AssignLoadModal.tsx) | src/features/trips/components/AssignLoadModal.tsx:70-87 |
 | Driver list loading | — | ✅ | "Loading drivers…" row while `driversQuery.isLoading` (stage 2, AssignLoadModal.tsx:82) | src/features/trips/components/AssignLoadModal.tsx:77-107 |
 | Driver row select button | button (radio-styled) | ✅ | fixed: a native `role="radiogroup"` of labelled radios sharing a `name` — no radio inside a button, arrow keys move the pick (stage 3, AssignLoadModal.tsx) | src/features/trips/components/AssignLoadModal.tsx:82-100 |
-| HOS column | static "—" | 🚫 | hardcoded dash — no bulk per-driver HOS endpoint for a search list (comment still cites gap B-2, which has shipped only the single-driver endpoint) | src/features/trips/components/AssignLoadModal.tsx:98-99 |
+| HOS column | static text | ✅ | wired 2026-09-25: `useDriversHosClocks` reads bulk `hos.driveRemainingSec`/`cycleRemainingSec` from `GET /drivers/roster` (same `q`/`limit` page, joined by id) and falls back to `GET /drivers/:id/hos` only for rows the roster page misses; shows `HH:MM drive` / `HH:MM cycle`, a loading placeholder, `—` on error. Caveat B-99: the roster returns full limits (e.g. 11:00/70:00) when the backend cannot compute a driver's HOS state, indistinguishable from a fresh driver | src/features/trips/components/AssignLoadModal.tsx:24-26, 127, 141-152; src/shared/api/drivers.ts |
 | "Notify the driver in the app" checkbox | checkbox | ✅ | `POST /trips/:id/assign` now takes `notify` (B-74, shipped); starts checked (server default `true`) | src/features/trips/components/AssignLoadModal.tsx:35-38,50 |
 | Close (×) / Esc | icon button | ✅ | `isDirty={Boolean(selectedId) \|\| query !== '' \|\| !notify}` | src/features/trips/components/AssignLoadModal.tsx:33 |
 | Cancel button | button | ✅ | | src/features/trips/components/AssignLoadModal.tsx:37 |
@@ -759,7 +764,7 @@ a deliberate, visible-reason 🚫 that does not depend on a `backend-gaps.md` B-
 | Report selector | menu (`SelectMenu`) | ✅ | navigates to the chosen report route | ActivityReportPage.tsx:198 |
 | Date range picker | date-range control | ✅ | updates `from`/`to` in the URL, resets page | ActivityReportPage.tsx:199-205 |
 | Terminal selector | menu | ✅ | server-side `terminal` filter (B-46) | ActivityReportPage.tsx:206-214 |
-| Group by driver | menu (inert) | 🚫 | `disabled`, single option — no vehicle-group model on backend | ActivityReportPage.tsx:215 |
+| Group by | menu | ✅ | wired 2026-09-25: `Group by driver` (default) / `Group by terminal`, rolled up client-side over the whole range (`activityGroups.ts`), persisted as `?group=terminal`; no unit/day/vehicle-group option — the summary rows carry neither (vehicle groups: B-46, still open) | ActivityReportPage.tsx:279-287; activityGroups.ts |
 | Schedule | button | ✅ | opens shared `ScheduleReportModal`, perm-gated | ActivityReportPage.tsx:218-220 |
 | Export CSV | button | ✅ | `useExportWhenReady` — guarded against double-click, auto-saves via `saveFile` once READY (cross-origin nav bug fixed) | ActivityReportPage.tsx:222-231; reportMeta.ts:230-247; useReportJobs.ts:127-174 |
 | Print | button | ✅ | `window.print()` | ActivityReportPage.tsx:232-234 |
@@ -773,8 +778,8 @@ a deliberate, visible-reason 🚫 that does not depend on a `backend-gaps.md` B-
 |---|---|---|---|---|
 | Report selector | menu | ✅ | navigates | IftaReportPage.tsx:136 |
 | Quarter selector | menu | ✅ | writes `?quarter=` | IftaReportPage.tsx:137-142 |
-| Jurisdiction | menu (inert) | 🚫 | `disabled` — no jurisdiction list on backend (gap B-46) | IftaReportPage.tsx:144 |
-| Vehicle group | menu (inert) | 🚫 | `disabled` — no vehicle-group model (gap B-46) | IftaReportPage.tsx:145 |
+| Jurisdiction | menu | ✅ | wired 2026-09-25: options derived client-side from the loaded quarter's rows (`iftaJurisdictions.ts`), persisted as `?jurisdiction=XX`; KPIs and table switch to that jurisdiction. Export CSV / PDF still cover every jurisdiction — a note on the page says so | IftaReportPage.tsx:181-186, 214-220; iftaJurisdictions.ts |
+| Vehicle group | menu (inert) | 🚫 | `disabled` — no vehicle-group model in the backend prisma schema and no endpoint (gap B-46, still open). W-12 has no `Unit` menu either | IftaReportPage.tsx:187-188 |
 | Export CSV | button | ✅ | `useExportWhenReady`, guarded, auto-saves | IftaReportPage.tsx:147-155 |
 | Generate report | button | ✅ | queued job followed via `useTrackedReport` and announced through `useAnnounceReport`; FAILED shows in `ActionAlert` (WB-166, WD-082) | IftaReportPage.tsx:116,157-166; useReportJobs.ts:43-61 |
 | Download IFTA PDF | button | ✅ | B-96 shipped (2026-09-24) — moved off `reports` FULL onto the same READ shortcut as Export CSV (`format=PDF`); visible to VIEWER now (WB-247). `useExportWhenReady({ announce: true })` follows the job and toasts `Report ready` on completion | IftaReportPage.tsx:229-238 |
@@ -1085,9 +1090,9 @@ a deliberate, visible-reason 🚫 that does not depend on a `backend-gaps.md` B-
 | Element | Type | Status | Note | Source |
 |---|---|---|---|---|
 | Browse marketplace | button | ✅ (B-89, shipped 2026-09-24) | opens a modal listing `GET /integrations/catalog`; `available:false` entries keep `Connect` disabled | IntegrationsPage.tsx |
-| Connect (unconnected, known provider) | button | ✅ | `PUT /integrations/:provider`; toast names the product, not the raw provider id; double-click guarded (WB-226) | IntegrationsPage.tsx:76, 203 |
+| Connect (unconnected, known provider) | button | ✅ | `PUT /integrations/:provider`; toast names the product, not the raw provider id; double-click guarded (WB-226). WB-251 fixed 2026-09-25: `Custom webhook` opens `WebhookConfigModal` (endpoint URL http/https + signing secret with show/hide and `Generate`) and sends `config: { url, secret }`; once connected its card also has `Configure` (URL prefilled, secret re-entered because the backend replaces the whole config) and `Send test` (`POST /integrations/webhook/test`), FULL only | IntegrationsPage.tsx, components/WebhookConfigModal.tsx |
 | Disconnect (connected provider) | button | ✅ | renamed from "Manage" (which disconnected instantly); confirms first, then toasts (WB-224) | IntegrationsPage.tsx:87, 194, 273 |
-| Connect (catalog entries with no provider mapping — Pacific Track, DAT, Geotab, Zapier) | button | 🚫 | disabled, `title` = `SETTINGS_REASON.providerUnavailable`; the same reason is now also the card's visible status line (WB-232) (stage 4, IntegrationsPage.tsx:56, 197, 217-220) | IntegrationsPage.tsx:217-220 |
+| Connect (catalog entries with no provider mapping — Pacific Track, DAT, Geotab, Zapier) | button | 🚫 | disabled, `title` = `SETTINGS_REASON.providerUnavailable`; the same reason is now also the card's visible status line (WB-232) (stage 4, IntegrationsPage.tsx:56, 197, 217-220). Backend gap B-98 (still open): `INTEGRATION_PROVIDERS` = mcleod, wex, comdata, quickbooks, slack, webhook — these four get a 422, no OAuth, no connectors | IntegrationsPage.tsx:217-220 |
 | Integration card status lines ("69 devices syncing", "1,842 receipts this quarter") | text | ✅ | fixed (WB-232, owner accepted WD-087): the hardcoded `meta` figures are gone. The line is built from `GET /integrations` only — `Last sync · <relative>` from `lastSyncAt`, `Connected · no sync yet`, `Not connected`, or, for catalogue entries with no connector, the reason the `Connect` button is disabled (`INTEGRATION_STATUS`, settings/lib/copy.ts) (stage 4, IntegrationsPage.tsx:39-59, 197) | IntegrationsPage.tsx:39-59, 197 |
 | Create key | button | ✅ | opens modal | IntegrationsPage.tsx:225 |
 | Copy key prefix | icon button | ✅ | clipboard write | IntegrationsPage.tsx:126 |
@@ -1270,11 +1275,12 @@ Kept for history; none currently blocks a control still marked 🚫 in this docu
 | ~~B-68~~ | shipped 2026-09-24 | Resolve defect — "No repair needed" sends `resolutionType: 'NOT_REQUIRED'` (see WD-088); no note-prefix workaround |
 | ~~B-15~~ | shipped 2026-09-24 | Create geofence — `Dwell` and `After-hours only` checkboxes are real fields again |
 | ~~B-48~~ | shipped 2026-09-24 | FMCSA pack `Unit` filter and the six pack-contents checkboxes are real (`include[]`, `vehicleId`) |
-| still open (non-backend, group model) | no vehicle-group / jurisdiction model exists | Activity `Group by driver`; IFTA `Jurisdiction` / `Vehicle group` stay disabled — not a missing endpoint, there is no group entity to list |
+| still open (B-46, group model) | no vehicle-group model exists | IFTA `Vehicle group` stays disabled — there is no group entity to list. Activity `Group by` and IFTA `Jurisdiction` were wired client-side on 2026-09-25 |
+| still open (B-98) | no connector / OAuth for Pacific Track, DAT, Geotab, Zapier (`INTEGRATION_PROVIDERS` rejects them with 422) | W-22 `Connect` for those four catalog entries |
 | ~~B-14~~ | shipped 2026-09-24 | library rows generate real PDFs (WD-090) |
 | ~~B-8~~ / ~~B-9~~ | shipped 2026-09-24 | `View diagnostics`, `Test connection`, `Test rule` are real controls again |
 | ~~B-85~~ / ~~B-86~~ / ~~B-87~~ / ~~B-88~~ / ~~B-89~~ / ~~B-90~~ / ~~B-91~~ / ~~B-95~~ | shipped 2026-09-24 | Invite terminal/message, Mute for 24 h, notification channels, device firmware/diagnostics toggles, marketplace catalog, Start chat, ticket attachments, and the separate `dataTransfer` matrix row/checkbox are all real controls again |
-| ~~B-2~~ / ~~B-6~~ / ~~B-7~~ | shipped | Driver profile HOS clocks, Violations card, Co-driver row; the Create-trip HOS warning and `Pick another driver` are real again |
+| ~~B-2~~ / ~~B-6~~ / ~~B-7~~ | shipped | Driver profile HOS clocks, Violations card, Co-driver row; the Create-trip HOS warning and `Pick another driver` are real again; the Assign-load `HOS column` reads the bulk clocks from `GET /drivers/roster` (2026-09-25, caveat B-99) |
 | ~~B-4~~ | shipped 2026-09-24 | Unit histories `Play` / `Pause` drives a real replay again |
 | ~~B-41~~ | shipped 2026-09-24 | DVIR drawer photo thumbnails — real presigned `loading="lazy"` tiles, click re-presigns and opens a fresh URL |
 | ~~B-37~~ / ~~B-67~~ | shipped 2026-09-24 | Messages left-panel preview line and unread dot are real (`lastMessage`, `unreadCount`, `POST /conversations/:id/read`) |

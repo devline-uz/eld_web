@@ -6,6 +6,8 @@
 // the RODS engine's totals aggregated server-side, paged and sorted by the server — never one
 // `GET /logs/:driverId/range` per driver (web/bugs.md WB-048, web/decisions.md WD-070). A `null`
 // `vs prev.` delta renders `—`; `mi/day` is not drawn because the summary carries no driver-day count.
+// `Group by ▾` (`?group=`, default driver): `terminal` rolls the whole range's rows (not one page) up
+// per home terminal client-side — see `activityGroups.ts` for why unit/day/vehicle-group are absent.
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { ColumnDef } from '@tanstack/react-table';
@@ -17,6 +19,7 @@ import { usePermission } from '@/shared/auth/usePermission';
 import type { ApiError } from '@/shared/api/errors';
 import {
   useActivitySummary,
+  useActivitySummaryRows,
   useTransferConfig,
   useReportDrivers,
   type ActivitySummaryItem,
@@ -34,6 +37,7 @@ import { DateRangePicker } from '@/shared/ui/DateRangePicker';
 import { KpiCard, KpiRowSkeleton, type KpiCardProps } from '@/shared/ui/KpiCard';
 import { Pagination } from '@/shared/ui/Pagination';
 import { EmptyState, ErrorState, ForbiddenState } from '@/shared/ui/states';
+import { ACTIVITY_GROUP_OPTIONS, NO_TERMINAL_LABEL, groupByTerminal, parseGroupBy, type TerminalGroup } from './activityGroups';
 import { ActionAlert } from './components/ActionAlert';
 import { ScheduleReportModal } from './components/ScheduleReportModal';
 import { SelectMenu } from './components/SelectMenu';
@@ -70,6 +74,43 @@ function deltaChip(value: number | null | undefined, unit: '%' | '', upIsGood: b
   return { text: `${arrow}${formatNumber(Math.abs(value))}${unit} vs prev.`, tone: good ? 'success' : upIsGood ? 'neutral' : 'danger' };
 }
 
+/** DAYS … CERTIFIED — shared by the per-driver rows and the per-terminal roll-up (same fields). */
+type DutyTotals = Pick<ActivitySummaryItem, 'days' | 'offSec' | 'sbSec' | 'drivingSec' | 'onSec' | 'distanceMi' | 'violations' | 'certifiedDays'>;
+
+function metricColumns<T extends DutyTotals>(): ColumnDef<T, unknown>[] {
+  return [
+    { id: 'days', header: 'Days', meta: { numeric: true }, cell: ({ row }) => <Num>{row.original.days}</Num> },
+    { id: 'off', header: 'Off', meta: { numeric: true }, cell: ({ row }) => <Num className="text-text-muted">{formatHosHours(row.original.offSec)}</Num> },
+    { id: 'sb', header: 'SB', meta: { numeric: true }, cell: ({ row }) => <Num className="text-violet">{formatHosHours(row.original.sbSec)}</Num> },
+    { id: 'driving', header: 'Driving', meta: { numeric: true }, cell: ({ row }) => <Num className="font-semibold text-success">{formatHosHours(row.original.drivingSec)}</Num> },
+    { id: 'on', header: 'On', meta: { numeric: true }, cell: ({ row }) => <Num className="text-danger">{formatHosHours(row.original.onSec)}</Num> },
+    { id: 'distance', header: 'Distance', meta: { numeric: true }, cell: ({ row }) => <Num className="font-semibold text-text">{formatDistance(row.original.distanceMi)}</Num> },
+    {
+      id: 'violations',
+      header: 'Violations',
+      meta: { numeric: true },
+      cell: ({ row }) => (
+        <span className="flex justify-end">
+          {row.original.violations > 0 ? (
+            <Badge tone="danger" className="tabular-nums">{row.original.violations}</Badge>
+          ) : (
+            <Badge tone="success">None</Badge>
+          )}
+        </span>
+      ),
+    },
+    {
+      id: 'certified',
+      header: 'Certified',
+      meta: { numeric: true },
+      cell: ({ row }) => {
+        const { certifiedDays: c, days: d } = row.original;
+        return <Num className={c < d ? 'text-warning' : 'text-success'}>{`${c} / ${d}`}</Num>;
+      },
+    },
+  ];
+}
+
 export default function ActivityReportPage() {
   const navigate = useNavigate();
   const { can } = usePermission();
@@ -78,8 +119,9 @@ export default function ActivityReportPage() {
   // real carrier zone and eRODS mode too.
   const carrier = useTransferConfig();
   const timezone = carrier.data?.timezone ?? CARRIER_TZ_FALLBACK;
-  const { from, to, params, setRange, setParam } = useReportRange(timezone);
+  const { from, to, params, setRange, setParam, update } = useReportRange(timezone);
   const terminal = params.get('terminal');
+  const groupBy = parseGroupBy(params.get('group'));
 
   const exportCsv = useExportWhenReady();
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -109,6 +151,16 @@ export default function ActivityReportPage() {
     if (terminal) known.add(terminal);
     return [...known].sort();
   }, [drivers.data, terminal]);
+  // `Group by terminal` needs every row of the range, not one page: one `client.list()` read.
+  const fleet = useActivitySummaryRows(
+    { from, to, sort: SORT, status: 'ACTIVE', ...(terminal ? { terminal } : {}) },
+    groupBy === 'terminal',
+  );
+  const groups = useMemo(() => {
+    const terminalOf = new Map((drivers.data?.items ?? []).map((d) => [d.id, d.homeTerminalName]));
+    return groupByTerminal(fleet.data?.items ?? [], terminalOf);
+  }, [fleet.data, drivers.data]);
+  const fleetError = fleet.error as ApiError | null;
   const rows = summary.data?.items ?? [];
   const total = summary.data?.total ?? 0;
   const totalPages = summary.data?.totalPages ?? 1;
@@ -139,35 +191,7 @@ export default function ActivityReportPage() {
           );
         },
       },
-      { id: 'days', header: 'Days', meta: { numeric: true }, cell: ({ row }) => <Num>{row.original.days}</Num> },
-      { id: 'off', header: 'Off', meta: { numeric: true }, cell: ({ row }) => <Num className="text-text-muted">{formatHosHours(row.original.offSec)}</Num> },
-      { id: 'sb', header: 'SB', meta: { numeric: true }, cell: ({ row }) => <Num className="text-violet">{formatHosHours(row.original.sbSec)}</Num> },
-      { id: 'driving', header: 'Driving', meta: { numeric: true }, cell: ({ row }) => <Num className="font-semibold text-success">{formatHosHours(row.original.drivingSec)}</Num> },
-      { id: 'on', header: 'On', meta: { numeric: true }, cell: ({ row }) => <Num className="text-danger">{formatHosHours(row.original.onSec)}</Num> },
-      { id: 'distance', header: 'Distance', meta: { numeric: true }, cell: ({ row }) => <Num className="font-semibold text-text">{formatDistance(row.original.distanceMi)}</Num> },
-      {
-        id: 'violations',
-        header: 'Violations',
-        meta: { numeric: true },
-        cell: ({ row }) => (
-          <span className="flex justify-end">
-            {row.original.violations > 0 ? (
-              <Badge tone="danger" className="tabular-nums">{row.original.violations}</Badge>
-            ) : (
-              <Badge tone="success">None</Badge>
-            )}
-          </span>
-        ),
-      },
-      {
-        id: 'certified',
-        header: 'Certified',
-        meta: { numeric: true },
-        cell: ({ row }) => {
-          const { certifiedDays: c, days: d } = row.original;
-          return <Num className={c < d ? 'text-warning' : 'text-success'}>{`${c} / ${d}`}</Num>;
-        },
-      },
+      ...metricColumns<ActivitySummaryItem>(),
       {
         id: 'open',
         header: '',
@@ -188,6 +212,44 @@ export default function ActivityReportPage() {
     ],
     [navigate, to, nameOf],
   );
+
+  const groupColumns: ColumnDef<TerminalGroup, unknown>[] = [
+    {
+      id: 'terminal',
+      header: 'Terminal',
+      cell: ({ row }) => (
+        <span className={row.original.terminal ? 'font-medium text-text' : 'text-text-muted'}>
+          {row.original.terminal ?? NO_TERMINAL_LABEL}
+        </span>
+      ),
+    },
+    { id: 'drivers', header: 'Drivers', meta: { numeric: true }, cell: ({ row }) => <Num>{formatNumber(row.original.drivers)}</Num> },
+    ...metricColumns<TerminalGroup>(),
+    {
+      id: 'open',
+      header: '',
+      cell: ({ row }) => {
+        const name = row.original.terminal;
+        if (!name) return null;
+        return (
+          <span className="flex justify-end">
+            <Button
+              variant="secondary"
+              size="sm"
+              iconLeft={<ChevronRight size={14} strokeWidth={1.75} />}
+              aria-label={`View drivers in ${name}`}
+              onClick={() => {
+                setPage(1);
+                update({ terminal: name, group: null });
+              }}
+            >
+              View drivers
+            </Button>
+          </span>
+        );
+      },
+    },
+  ];
 
   if (error?.isForbidden) return <ForbiddenState screenName="Reports · Activity report" />;
 
@@ -214,7 +276,15 @@ export default function ActivityReportPage() {
             setParam('terminal', value === 'all' ? null : value);
           }}
         />
-        <SelectMenu name="Group by" value="driver" options={[{ value: 'driver', label: 'Group by driver' }]} disabled />
+        <SelectMenu
+          name="Group by"
+          value={groupBy}
+          options={ACTIVITY_GROUP_OPTIONS}
+          onSelect={(value) => {
+            setPage(1);
+            setParam('group', value === 'driver' ? null : value);
+          }}
+        />
         <div className="ml-auto flex items-center gap-2">
           <Can perm="reports" level="FULL">
             <Button variant="secondary" iconLeft={<Calendar size={16} strokeWidth={1.75} />} onClick={() => setScheduleOpen(true)}>
@@ -250,37 +320,66 @@ export default function ActivityReportPage() {
       {summary.isLoading ? (
         <KpiRowSkeleton />
       ) : (
-        <div className="grid grid-cols-4 gap-card-gap">
-          <KpiCard
-            label="Total driving"
-            value={summary.isError || !kpis ? EMPTY.dash : hours(kpis.drivingSec)}
-            chip={summary.isError || !kpis ? undefined : deltaChip(kpis.drivingDeltaPct, '%', true)}
-            icon={Clock}
-            iconTone="success"
-          />
-          <KpiCard
-            label="Total on-duty"
-            value={summary.isError || !kpis ? EMPTY.dash : hours(kpis.onDutySec)}
-            chip={!summary.isError && onDutyPct !== null ? { text: `${onDutyPct}% of total`, tone: 'neutral' } : undefined}
-            icon={Users}
-            iconTone="danger"
-          />
-          <KpiCard
-            label="Distance driven"
-            value={summary.isError || !kpis ? EMPTY.dash : formatDistance(kpis.distanceMi)}
-            icon={Route}
-            iconTone="info"
-          />
-          <KpiCard
-            label="Violations"
-            value={summary.isError || !kpis ? EMPTY.dash : formatNumber(kpis.violations)}
-            chip={summary.isError || !kpis ? undefined : deltaChip(kpis.violationsDelta, '', false)}
-            icon={AlertTriangle}
-            iconTone="danger"
-          />
-        </div>
+          <div className="grid grid-cols-4 gap-card-gap">
+            <KpiCard
+              label="Total driving"
+              value={summary.isError || !kpis ? EMPTY.dash : hours(kpis.drivingSec)}
+              chip={summary.isError || !kpis ? undefined : deltaChip(kpis.drivingDeltaPct, '%', true)}
+              icon={Clock}
+              iconTone="success"
+            />
+            <KpiCard
+              label="Total on-duty"
+              value={summary.isError || !kpis ? EMPTY.dash : hours(kpis.onDutySec)}
+              chip={!summary.isError && onDutyPct !== null ? { text: `${onDutyPct}% of total`, tone: 'neutral' } : undefined}
+              icon={Users}
+              iconTone="danger"
+            />
+            <KpiCard
+              label="Distance driven"
+              value={summary.isError || !kpis ? EMPTY.dash : formatDistance(kpis.distanceMi)}
+              icon={Route}
+              iconTone="info"
+            />
+            <KpiCard
+              label="Violations"
+              value={summary.isError || !kpis ? EMPTY.dash : formatNumber(kpis.violations)}
+              chip={summary.isError || !kpis ? undefined : deltaChip(kpis.violationsDelta, '', false)}
+              icon={AlertTriangle}
+              iconTone="danger"
+            />
+          </div>
       )}
 
+      {groupBy === 'terminal' ? (
+        <Card padded={false}>
+          <div className="p-card">
+            <SectionHeader
+              title="Duty totals by terminal"
+              subtitle="Totals are calculated from certified and uncertified logs"
+              action={
+                fleet.data && !fleet.isError ? (
+                  <Badge tone="neutral" className="tabular-nums">
+                    {`${formatNumber(groups.length)} terminals · ${formatNumber(fleet.data.items.length)} drivers`}
+                  </Badge>
+                ) : undefined
+              }
+            />
+          </div>
+          {fleet.isError ? (
+            <ErrorState title="Could not load duty totals" description={refusalText(fleetError)} onRetry={() => void fleet.refetch()} />
+          ) : (
+            <DataTable
+              caption="Duty totals by terminal"
+              data={groups}
+              columns={groupColumns}
+              getRowId={(g) => g.terminal ?? '__none'}
+              isLoading={fleet.isLoading}
+              emptyState={<EmptyState title={empty.title} description={empty.description} />}
+            />
+          )}
+        </Card>
+      ) : (
       <Card padded={false}>
         <div className="p-card">
           <SectionHeader
@@ -322,6 +421,7 @@ export default function ActivityReportPage() {
           </>
         )}
       </Card>
+      )}
 
       <Can perm="reports" level="FULL">
         <ScheduleReportModal

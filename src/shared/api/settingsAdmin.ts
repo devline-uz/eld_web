@@ -393,6 +393,33 @@ export function useUpsertIntegration() {
   });
 }
 
+/**
+ * WB-251 — the generic `webhook` provider's config, exactly as `WebhooksService` / the webhook
+ * worker read it: `config.url` (where deliveries are POSTed) and `config.secret` (HMAC key for
+ * `X-OneBook-Signature`). `PUT /integrations/webhook` replaces the whole config and `GET` returns
+ * the secret redacted (`[REDACTED]`), so the secret must be sent again on every save.
+ */
+export interface WebhookIntegrationConfig {
+  url: string;
+  secret: string;
+}
+
+/** The stored endpoint URL of a `webhook` integration row, if any (the secret is never readable). */
+export function webhookUrlOf(row: IntegrationRow | undefined): string {
+  const value = row?.config?.url;
+  return typeof value === 'string' ? value : '';
+}
+
+/** `POST /integrations/webhook/test` — queues a signed test event (`WebhooksSendTestResponse`). */
+export function useSendWebhookTest() {
+  return useMutation({
+    mutationFn: () =>
+      client.post<{ id: string; status: string; attempts: number }>(endpoints.integrations.testWebhook, {
+        eventType: 'test.ping',
+      }),
+  });
+}
+
 export function useDisconnectIntegration() {
   const qc = useQueryClient();
   return useMutation({

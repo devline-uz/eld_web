@@ -290,4 +290,80 @@ describe('W-13 Reports · Activity report', () => {
     expect(screen.getByRole('row', { name: /John Smith/ })).toBeInTheDocument();
     expect(requested).toEqual(['1', '3']);
   });
+
+  describe('Group by ▾ (B-46 — client-side roll-up, no vehicle-group model)', () => {
+    async function pick(menu: string, option: string) {
+      const trigger = screen.getByRole('button', { name: new RegExp(`^${menu}:`) });
+      trigger.focus();
+      await userEvent.keyboard('{Enter}');
+      await userEvent.click(await screen.findByRole('menuitem', { name: option }));
+    }
+
+    it('defaults to Group by driver and offers exactly driver and terminal', async () => {
+      renderPage(<ActivityReportPage />, ROUTE);
+      await screen.findByRole('row', { name: /John Smith/ });
+      const trigger = screen.getByRole('button', { name: 'Group by: Group by driver' });
+      expect(trigger).toBeEnabled();
+      trigger.focus();
+      await userEvent.keyboard('{Enter}');
+      const items = await screen.findAllByRole('menuitem');
+      expect(items.map((i) => i.textContent)).toEqual(['Group by driver', 'Group by terminal']);
+    });
+
+    it('rolls every row of the range up per home terminal and keeps ?group= in the URL', async () => {
+      const requests: Record<string, string>[] = [];
+      server.use(
+        http.get(url(endpoints.reports.activitySummary), ({ request }) => {
+          const search = new URL(request.url).searchParams;
+          requests.push(Object.fromEntries(search));
+          return ok(activitySummaryFixture(search));
+        }),
+      );
+      renderPage(<ActivityReportPage />, ROUTE);
+      await screen.findByRole('row', { name: /John Smith/ });
+      await pick('Group by', 'Group by terminal');
+      expect(screen.getByTestId('location')).toHaveTextContent('group=terminal');
+      const columbus = await screen.findByRole('row', { name: /Columbus, OH/ });
+      expect(screen.getAllByText('Duty totals by terminal').length).toBeGreaterThan(0);
+      expect(within(columbus).getAllByRole('cell').map((td) => td.textContent)).toEqual([
+        'Columbus, OH', '1', '2', '28:00', '00:00', '17:00', '03:00', '850 mi', '1', '1 / 2', 'View drivers',
+      ]);
+      expect(screen.getByRole('row', { name: /Dayton, OH/ })).toBeInTheDocument();
+      expect(screen.getByText('2 terminals · 2 drivers')).toBeInTheDocument();
+      expect(screen.queryByRole('row', { name: /John Smith/ })).toBeNull();
+      // The whole range, not the open page: a 200-row `client.list()` read, same filters.
+      expect(requests).toContainEqual({ from: '2026-09-01', to: '2026-09-12', sort: 'name:asc', status: 'ACTIVE', page: '1', limit: '200' });
+      await pick('Group by', 'Group by driver');
+      expect(screen.getByTestId('location')).not.toHaveTextContent('group=');
+      expect(await screen.findByRole('row', { name: /John Smith/ })).toBeInTheDocument();
+    });
+
+    it('restores the grouping from a deep link and drills into one terminal', async () => {
+      renderPage(<ActivityReportPage />, `${ROUTE}&group=terminal`);
+      await userEvent.click(await screen.findByRole('button', { name: 'View drivers in Dayton, OH' }));
+      const location = screen.getByTestId('location');
+      expect(location).toHaveTextContent('terminal=Dayton%2C+OH');
+      expect(location).not.toHaveTextContent('group=');
+      expect(await screen.findByRole('row', { name: /William Bond/ })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Group by: Group by driver' })).toBeInTheDocument();
+    });
+
+    it('falls back to Group by driver for an unknown ?group=', async () => {
+      renderPage(<ActivityReportPage />, `${ROUTE}&group=vehicle`);
+      expect(await screen.findByRole('row', { name: /John Smith/ })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Group by: Group by driver' })).toBeInTheDocument();
+    });
+
+    it('shows a failed roll-up read inside the card with Retry', async () => {
+      server.use(
+        http.get(url(endpoints.reports.activitySummary), ({ request }) => {
+          const search = new URL(request.url).searchParams;
+          return search.get('limit') === '200' ? fail(400, 'VALIDATION_ERROR', 'from/to must be YYYY-MM-DD.') : ok(activitySummaryFixture(search));
+        }),
+      );
+      renderPage(<ActivityReportPage />, `${ROUTE}&group=terminal`);
+      expect(await screen.findByText('Could not load duty totals')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Retry/ })).toBeInTheDocument();
+    });
+  });
 });

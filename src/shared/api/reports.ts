@@ -448,10 +448,29 @@ export function useActivitySummary(params: ActivitySummaryParams, enabled = true
   });
 }
 
-/* ------------------------------------------------------------------ W-15 pack RODS counts */
+/** Fleet rows read in one go — `client.list()` walks 200-row pages sequentially above 200. */
+export const ACTIVITY_FLEET_ROWS = 1_000;
 
-/** Fleet rows read for the pack KPIs — `client.list()` walks 200-row pages sequentially above 200. */
-const PACK_FLEET_ROWS = 1_000;
+/**
+ * Every row of `GET /reports/activity/summary` for the range (up to `ACTIVITY_FLEET_ROWS`), not one
+ * page — for callers that aggregate across the whole fleet (W-13 `Group by terminal`, W-15 pack
+ * counts). `kpis` are not carried: `client.list()` keeps only the page envelope.
+ */
+export function useActivitySummaryRows(
+  params: Omit<ActivitySummaryParams, 'page' | 'limit'>,
+  enabled = true,
+) {
+  const fleetParams = { ...params, page: 1, limit: ACTIVITY_FLEET_ROWS };
+  return useQuery({
+    queryKey: qk.activitySummary(fleetParams),
+    queryFn: ({ signal }) =>
+      client.list<ActivitySummaryItem>(endpoints.reports.activitySummary, fleetParams, { signal }),
+    enabled: enabled && Boolean(params.from) && Boolean(params.to),
+    ...typedCachePolicy<OffsetPage<ActivitySummaryItem>>('slowList'),
+  });
+}
+
+/* ------------------------------------------------------------------ W-15 pack RODS counts */
 
 export interface PackRodsCounts {
   /** One RODS per driver per day in the range — what the pack contains. */
@@ -471,14 +490,7 @@ export interface PackRodsCounts {
 export function usePackRodsCounts(from: string, to: string, driverId: string | null, rangeDays: number) {
   const single = useLogRange(driverId ?? undefined, from, to);
   // ACTIVE drivers, as `FmcsaPackGenerator` iterates; without `status` the backend returns every status.
-  const fleetParams = { from, to, page: 1, limit: PACK_FLEET_ROWS, sort: 'name:asc', status: 'ACTIVE' };
-  const fleet = useQuery({
-    queryKey: qk.activitySummary(fleetParams),
-    queryFn: ({ signal }) =>
-      client.list<ActivitySummaryItem>(endpoints.reports.activitySummary, fleetParams, { signal }),
-    enabled: !driverId && Boolean(from) && Boolean(to),
-    ...typedCachePolicy<OffsetPage<ActivitySummaryItem>>('slowList'),
-  });
+  const fleet = useActivitySummaryRows({ from, to, sort: 'name:asc', status: 'ACTIVE' }, !driverId);
   const source = driverId ? single : fleet;
 
   const counts = useMemo((): PackRodsCounts => {

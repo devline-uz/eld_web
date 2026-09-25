@@ -35,6 +35,21 @@ export class ApiError extends Error {
   get fieldErrors(): Record<string, string> {
     if (this.status !== 422 && this.status !== 400 && this.status !== 409) return {};
     const out: Record<string, string> = {};
+    // The live backend's ZodValidationPipe sends `details: { issues: [{ path, code, message }] }`
+    // (openapi.json 422 examples), not a field → message map. Reading `details` as a map turned
+    // every such 422 into zero field errors — the generic "Check the highlighted fields" banner
+    // with nothing highlighted. The first issue per path wins; a path-less issue is keyed `''`.
+    const issues = this.details.issues;
+    if (Array.isArray(issues)) {
+      for (const issue of issues as unknown[]) {
+        if (!issue || typeof issue !== 'object') continue;
+        const { path, message } = issue as { path?: unknown; message?: unknown };
+        if (typeof message !== 'string') continue;
+        const field = Array.isArray(path) ? path.map(String).join('.') : typeof path === 'string' ? path : '';
+        if (!(field in out)) out[field] = message;
+      }
+      return out;
+    }
     const source = (this.details.fields ?? this.details) as Record<string, unknown>;
     for (const [field, value] of Object.entries(source)) {
       if (typeof value === 'string') out[field] = value;

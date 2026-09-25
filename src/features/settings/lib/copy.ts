@@ -71,6 +71,12 @@ export const SETTINGS_TOAST = {
   /* ---------------------------------------------------------------- W-22 integrations & keys */
   integrationConnected: (name: string): ToastCopy => ({ title: `${name} connected` }),
   integrationDisconnected: (name: string): ToastCopy => ({ title: `${name} disconnected` }),
+  /** WB-251 — `Configure` on the connected Custom webhook. */
+  webhookUpdated: { title: 'Custom webhook updated', description: 'New events are sent to the saved endpoint.' } satisfies ToastCopy,
+  webhookTestQueued: {
+    title: 'Test event queued',
+    description: 'A signed test.ping event is on its way to your endpoint.',
+  } satisfies ToastCopy,
   apiKeyScopesUpdated: (name: string): ToastCopy => ({
     title: `Scopes updated for ${name}`,
     description: 'The change applies to the next request made with this key.',
@@ -116,9 +122,28 @@ export const SETTINGS_REASON = {
 export const INTEGRATION_STATUS = {
   lastSync: (relative: string) => `Last sync · ${relative}`,
   connectedNoSync: 'Connected · no sync yet',
+  /** WB-251 — a webhook row connected before the fix, with no endpoint URL: nothing is delivered. */
+  webhookNoEndpoint: 'Connected · no endpoint set',
   notConnected: 'Not connected',
   /** Catalogue entries with no provider on `PUT /integrations/:provider` — the reason the Connect button is disabled. */
   noConnector: SETTINGS_REASON.providerUnavailable,
+} as const;
+
+/** WB-251 — the Custom webhook modal (connect / configure). */
+export const WEBHOOK_COPY = {
+  connectTitle: 'Connect Custom webhook',
+  configureTitle: 'Configure Custom webhook',
+  subtitle: 'OneBook POSTs JSON events to this endpoint, signed with your secret.',
+  urlLabel: 'Endpoint URL',
+  urlPlaceholder: 'e.g. https://example.com/hooks/onebook',
+  urlHint: 'Use https:// so events are encrypted in transit.',
+  secretLabel: 'Signing secret',
+  secretHint: 'Each delivery carries an X-OneBook-Signature header signed with this secret. Copy it to your endpoint before saving.',
+  secretEditHint:
+    'The saved secret is never shown. Saving replaces the whole webhook configuration, so enter the current secret again or generate a new one and update your endpoint.',
+  generate: 'Generate',
+  connectSubmit: 'Connect',
+  configureSubmit: 'Save changes',
 } as const;
 
 /** Roles & permissions (W-21) and Create a role (11.19). */
