@@ -2,12 +2,14 @@
 // and its primary action reaches the network in the expected shape.
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http } from 'msw';
-import { render, screen } from '@testing-library/react';
+import { createEvent, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
-import { ok, url } from '@/mocks/envelope';
+import { fail, ok, url } from '@/mocks/envelope';
 import { endpoints } from '@/shared/api/endpoints';
+import { qk } from '@/shared/api/queryKeys';
+import { VALIDATION_MESSAGES } from '@/shared/forms/messages';
 import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/client';
 import { ToastProvider } from '@/shared/ui/Toast';
 import type { VehicleRow } from '@/shared/api/vehicles';
@@ -85,6 +87,86 @@ describe('11.2 Add vehicle', () => {
   });
 });
 
+// Edit unit — each 409 from `PATCH /vehicles/:id` lands on the field it collided on (B-97), and one
+// that names no field falls back to the generic toast instead of guessing.
+describe('11.2 Edit unit — duplicate values', () => {
+  async function saveEdit(unitNumber: string, queryClient?: QueryClient) {
+    const user = userEvent.setup();
+    const client = queryClient ?? new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <AddVehicleModal vehicle={VEHICLE} onClose={() => {}} />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+    const input = screen.getByLabelText(/Unit number/);
+    await user.clear(input);
+    await user.type(input, unitNumber);
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+  }
+
+  it.each([
+    ['UNIT_NUMBER_TAKEN', { unitNumber: 'Taken.' }, /Unit number/, VALIDATION_MESSAGES.unitNumberTaken],
+    ['VIN_TAKEN', { vin: 'Taken.' }, /^VIN/, VALIDATION_MESSAGES.vinTaken],
+    ['CONFLICT', { field: 'vin' }, /^VIN/, VALIDATION_MESSAGES.vinTaken],
+  ])('a 409 %s shows its message under the matching field', async (code, details, label, message) => {
+    server.use(http.patch(url(endpoints.vehicles.update(':id')), () => fail(409, code, 'Conflict', details)));
+    await saveEdit('102');
+
+    const error = await screen.findByText(message);
+    expect(screen.getByLabelText(label).closest('label')).toContainElement(error);
+    expect(screen.queryByText('That value is already in use.')).not.toBeInTheDocument();
+  });
+
+  it('an unattributed 409 keeps the generic toast and pins no field', async () => {
+    server.use(http.patch(url(endpoints.vehicles.update(':id')), () => fail(409, 'CONFLICT', 'Unique constraint failed')));
+    await saveEdit('102');
+
+    expect(await screen.findByText('That value is already in use.')).toBeInTheDocument();
+    expect(screen.queryByText(VALIDATION_MESSAGES.unitNumberTaken)).not.toBeInTheDocument();
+    expect(screen.queryByText(VALIDATION_MESSAGES.vinTaken)).not.toBeInTheDocument();
+  });
+
+  it('pre-checks the cached list case-insensitively, excluding the unit being edited', async () => {
+    let patches = 0;
+    server.use(
+      http.patch(url(endpoints.vehicles.update(':id')), () => {
+        patches += 1;
+        return ok(VEHICLE);
+      }),
+    );
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    queryClient.setQueryData(qk.vehicles({ limit: 200 }), {
+      items: [VEHICLE, { ...VEHICLE, id: 'veh_2', unitNumber: '#A7', vin: '1FUJGLDR8LLLL5678' }],
+      page: 1,
+      limit: 200,
+      total: 2,
+      totalPages: 1,
+    });
+    await saveEdit('a7', queryClient);
+
+    expect(await screen.findByText(VALIDATION_MESSAGES.unitNumberTaken)).toBeInTheDocument();
+    expect(patches).toBe(0);
+  });
+
+  it('saves unchanged: the unit\'s own cached number and VIN are not a conflict', async () => {
+    let patches = 0;
+    server.use(
+      http.patch(url(endpoints.vehicles.update(':id')), () => {
+        patches += 1;
+        return ok(VEHICLE);
+      }),
+    );
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    queryClient.setQueryData(qk.vehicles({ limit: 200 }), { items: [VEHICLE], page: 1, limit: 200, total: 1, totalPages: 1 });
+    await saveEdit('101', queryClient);
+
+    expect(await screen.findByText('Unit 101 updated')).toBeInTheDocument();
+    expect(patches).toBe(1);
+  });
+});
+
 describe('11.3 Delete unit', () => {
   it('keeps Delete disabled until the confirmation text matches, then deletes', async () => {
     server.use(http.delete(url(endpoints.vehicles.remove(':id')), () => ok({ id: 'veh_1', status: 'INACTIVE' })));
@@ -100,6 +182,47 @@ describe('11.3 Delete unit', () => {
     await user.click(confirmButton);
 
     expect(await screen.findByText('Unit #101 deleted')).toBeInTheDocument();
+  });
+
+  // Soft delete — the server keeps the row as INACTIVE, so the modal's success path has to drop
+  // it from every cached `['vehicles', {…}]` page itself and mark counts/lookups/detail stale.
+  it('on success drops the unit from every cached list page and invalidates counts, lookups and detail', async () => {
+    server.use(http.delete(url(endpoints.vehicles.remove(':id')), () => ok({ ...VEHICLE, status: 'INACTIVE' })));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const OTHER: VehicleRow = { ...VEHICLE, id: 'veh_2', unitNumber: '#102' };
+    const page = (items: VehicleRow[], limit: number) => ({ items, page: 1, limit, total: items.length, totalPages: 1 });
+    const tablePage = qk.vehicles({ page: 1, limit: 10 });
+    const lookup = qk.vehicles({ limit: 500 });
+    const allCount = qk.vehicles({ limit: 1 });
+    queryClient.setQueryData(tablePage, page([VEHICLE, OTHER], 10));
+    queryClient.setQueryData(lookup, page([VEHICLE, OTHER], 500));
+    queryClient.setQueryData(allCount, page([VEHICLE], 1));
+    queryClient.setQueryData(qk.vehicle('veh_1'), VEHICLE);
+    queryClient.setQueryData(qk.drivers({ limit: 500 }), page([], 500));
+
+    const user = userEvent.setup();
+    const onDeleted = vi.fn();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <DeleteUnitModal vehicle={VEHICLE} eldSerial={null} onClose={() => {}} onDeleted={onDeleted} />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+    await user.type(screen.getByPlaceholderText('UNIT-101'), 'UNIT-101');
+    await user.click(screen.getByRole('button', { name: 'Delete unit' }));
+    expect(await screen.findByText('Unit #101 deleted')).toBeInTheDocument();
+    expect(onDeleted).toHaveBeenCalledTimes(1);
+
+    type Page = { items: VehicleRow[]; total: number };
+    expect(queryClient.getQueryData<Page>(tablePage)!.items.map((v) => v.id)).toEqual(['veh_2']);
+    expect(queryClient.getQueryData<Page>(tablePage)!.total).toBe(1);
+    expect(queryClient.getQueryData<Page>(lookup)!.items.map((v) => v.id)).toEqual(['veh_2']);
+    expect(queryClient.getQueryData<Page>(allCount)!.total).toBe(0);
+    expect(queryClient.getQueryData(qk.vehicle('veh_1'))).toBeUndefined();
+    for (const key of [tablePage, lookup, allCount, qk.drivers({ limit: 500 })]) {
+      expect(queryClient.getQueryState(key)?.isInvalidated).toBe(true);
+    }
   });
 });
 
@@ -179,6 +302,57 @@ describe('11.5 Calibrate odometer', () => {
     await user.click(screen.getByRole('button', { name: 'Save calibration' }));
 
     expect(await screen.findByText('Odometer calibrated')).toBeInTheDocument();
+  });
+
+  it('never lets a negative dashboard reading in — typed, stepped, pasted, dropped or set', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<CalibrateOdometerModal vehicle={VEHICLE} onClose={() => {}} />);
+    const input = screen.getByLabelText(/Dashboard odometer/) as HTMLInputElement;
+
+    expect(input).toHaveAttribute('min', '0');
+    expect(input).toHaveAttribute('step', '1');
+    expect(input).toHaveAttribute('inputmode', 'numeric');
+
+    // Typing: `-`, `+`, `e`, `.` are rejected.
+    await user.type(input, '-5');
+    expect(input.value).toBe('5');
+    await user.clear(input);
+
+    // ArrowDown at blank / 0 is blocked.
+    const arrow = createEvent.keyDown(input, { key: 'ArrowDown' });
+    fireEvent(input, arrow);
+    expect(arrow.defaultPrevented).toBe(true);
+
+    // Paste and drop of negative text are blocked.
+    const paste = createEvent.paste(input, { clipboardData: { getData: () => '-993611' } });
+    fireEvent(input, paste);
+    expect(paste.defaultPrevented).toBe(true);
+    const drop = createEvent.drop(input, { dataTransfer: { getData: () => '-1' } });
+    fireEvent(input, drop);
+    expect(drop.defaultPrevented).toBe(true);
+
+    // Any other path (spinner, autofill, IME) is clamped to 0 on change.
+    fireEvent.change(input, { target: { value: '-42' } });
+    expect(input.value).toBe('0');
+    expect(screen.queryByText(/-42/)).not.toBeInTheDocument();
+  });
+
+  it('shows the schema message for an out-of-range reading and keeps Save disabled', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<CalibrateOdometerModal vehicle={VEHICLE} onClose={() => {}} />);
+    const input = screen.getByLabelText(/Dashboard odometer/);
+
+    await user.type(input, '3000001');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Enter the odometer in miles.');
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByRole('button', { name: 'Save calibration' })).toBeDisabled();
+  });
+
+  it('never previews a negative calculated odometer', () => {
+    renderWithProviders(
+      <CalibrateOdometerModal vehicle={{ ...VEHICLE, deviceOdometerMi: 100, odometerOffsetMi: -500 }} onClose={() => {}} />,
+    );
+    expect(screen.getByText('Calculated odometer').nextElementSibling).toHaveTextContent('0 mi');
   });
 });
 

@@ -8,7 +8,7 @@ import { fixture } from '../fixtures.generated';
 import { ok, url } from '../envelope';
 import { LIVE_FLEET } from './fleet';
 import { VIOLATIONS_FIXTURE } from './hosGaps';
-import { VEHICLES } from './mockState';
+import { liveVehicles } from './mockState';
 
 const DUTY_ON_STATUSES = ['DRIVING', 'ON_DUTY', 'SLEEPER'];
 
@@ -40,8 +40,8 @@ export const dashboardHandlers = [
       // Derived from the same table `GET /vehicles` pages, so the KPI tile, the Vehicles header's
       // `All` count and the sidebar never disagree (mock-layer audit, 2026-09-23).
       vehicles: {
-        active: VEHICLES.filter((v) => v.status === 'ACTIVE').length,
-        total: VEHICLES.length,
+        active: liveVehicles().filter((v) => v.status === 'ACTIVE').length,
+        total: liveVehicles().length,
       },
       generatedAt: now,
     });

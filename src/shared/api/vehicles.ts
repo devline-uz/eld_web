@@ -16,6 +16,7 @@ import { useDevicesLookup, useDriversLookup, useVehiclesLookup, vehiclesLookupQu
 import { compactParams, pagePolicy, usePagedQuery, type PageQueryOptions } from './paging';
 import type { OffsetPage } from './types';
 import { vehiclesCountQuery } from './vehicleCounts';
+import { markVehicleDeleted, withoutDeletedVehicles } from './deletedVehicles';
 
 /** The real, raw `Vehicle` row (backend/prisma/schema.prisma `model Vehicle`). */
 export interface VehicleRow {
@@ -39,6 +40,10 @@ export interface VehicleRow {
   notes: string | null;
   activatedAt: string | null;
   createdAt: string;
+  /** Soft-delete marker — not on the live API yet (backend_tasks.md B-101); the MSW mock sends it.
+   * `status` alone cannot tell a deleted unit from one merely set INACTIVE. */
+  deletedAt?: string | null;
+  isDeleted?: boolean;
 }
 
 /** The real, raw `Driver` row minus `passwordHash` (backend `DriverView`). */
@@ -119,7 +124,8 @@ export const VEHICLES_DEFAULT_PAGE: VehiclesPageParams = { page: 1, limit: 10 };
 /** One `GET /vehicles` page — shared by the W-03 table and the sidebar prefetch (WD-073). */
 export const vehiclesPageQuery = (params: VehiclesPageParams): PageQueryOptions<VehicleRow> => ({
   queryKey: qk.vehicles(compactParams(params)),
-  queryFn: ({ signal }) => client.list<VehicleRow>(endpoints.vehicles.list, compactParams(params), { signal }),
+  queryFn: async ({ signal, client: queryClient }) =>
+    withoutDeletedVehicles(await client.list<VehicleRow>(endpoints.vehicles.list, compactParams(params), { signal }), queryClient),
   ...pagePolicy('list'),
 });
 
@@ -381,12 +387,34 @@ export function useUpdateVehicle(id: string) {
   });
 }
 
+/** A cached `['vehicles', {params}]` list page (W-03 pages, counts, lookups, report pickers). */
+const isVehiclesListKey = (key: readonly unknown[]): boolean =>
+  key[0] === qkRoot.vehicles[0] && key.length === 2 && typeof key[1] === 'object' && key[1] !== null;
+
+/** `DELETE /vehicles/:id` is a soft delete — the server keeps the row as `INACTIVE` (B-65), so a
+ * plain invalidate brought the unit straight back into the table. On success the unit is
+ * remembered as deleted (`deletedVehicles.ts` filters it from every later list result), dropped
+ * from every cached list page at once, its detail/sub-queries are removed, and every list, count,
+ * lookup and the sidebar `Units` count (all under `['vehicles', {…}]`) refetch. Drivers, devices and
+ * the dashboard summary refetch too: the delete unassigns the unit's driver and ELD device. */
 export function useDeleteVehicle() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => client.delete(endpoints.vehicles.remove(id)),
-    onSuccess: () => {
+    onSuccess: async (_data, id) => {
+      markVehicleDeleted(queryClient, id);
+      await queryClient.cancelQueries({ queryKey: qkRoot.vehicles });
+      queryClient.setQueriesData<OffsetPage<VehicleRow>>(
+        { queryKey: qkRoot.vehicles, predicate: (query) => isVehiclesListKey(query.queryKey) },
+        (page) => (page && Array.isArray(page.items) ? withoutDeletedVehicles(page, queryClient) : page),
+      );
+      // The unit profile and its tabs (`['vehicles', id, …]`) — a refetch would only 404.
+      queryClient.removeQueries({ queryKey: qk.vehicle(id) });
       void queryClient.invalidateQueries({ queryKey: qkRoot.vehicles });
+      void queryClient.invalidateQueries({ queryKey: qkRoot.drivers });
+      void queryClient.invalidateQueries({ queryKey: qkRoot.devices });
+      // W-01 `Vehicles` KPI tile reads its totals from the dashboard aggregate.
+      void queryClient.invalidateQueries({ queryKey: qk.dashboardSummary });
     },
   });
 }

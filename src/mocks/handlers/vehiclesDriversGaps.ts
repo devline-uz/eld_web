@@ -212,14 +212,38 @@ const VEHICLE_HISTORIES: VehicleHistoriesResponse = {
   ],
 };
 
+/**
+ * The B-1/B-55 server filters the real `GET /drivers/roster` applies — `q` (name, username, email),
+ * `terminal` (exact home terminal), `hasOpenViolation`, `exempt` (`eldExempt`). The handler used to
+ * ignore every one of them, so the W-06 search box and the Violations tab changed nothing in
+ * `dev:mock` and in tests (the page sends them correctly; only the mock dropped them).
+ */
+function filterRoster(entries: DriverRosterEntry[], params: URLSearchParams): DriverRosterEntry[] {
+  const q = (params.get('q') ?? '').trim().toLowerCase();
+  const terminal = params.get('terminal');
+  const hasOpenViolation = params.get('hasOpenViolation');
+  const exempt = params.get('exempt');
+  return entries.filter(({ driver, openViolations }) => {
+    if (q) {
+      const haystack = [driver.firstName, driver.lastName, `${driver.firstName} ${driver.lastName}`, driver.username, driver.email ?? ''];
+      if (!haystack.some((field) => field.toLowerCase().includes(q))) return false;
+    }
+    if (terminal && driver.homeTerminalName !== terminal) return false;
+    if (hasOpenViolation !== null && (openViolations > 0) !== (hasOpenViolation === 'true')) return false;
+    if (exempt !== null && driver.eldExempt !== (exempt === 'true')) return false;
+    return true;
+  });
+}
+
 export const vehiclesDriversGapHandlers = [
   http.get(url(endpoints.drivers.roster), ({ request }) => {
     const params = new URL(request.url).searchParams;
     const page = Math.max(1, Number(params.get('page')) || 1);
     const limit = Math.max(1, Number(params.get('limit')) || 25);
-    const total = ROSTER_ENTRIES.length;
+    const rows = filterRoster(ROSTER_ENTRIES, params);
+    const total = rows.length;
     const response: DriverRosterResponse = {
-      items: ROSTER_ENTRIES.slice((page - 1) * limit, page * limit),
+      items: rows.slice((page - 1) * limit, page * limit),
       page,
       limit,
       total,

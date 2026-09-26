@@ -12,13 +12,25 @@ import type { DriverRow, VehicleRow } from '@/shared/api/vehicles';
 import { fixture } from '../fixtures.generated';
 import { fail, ok, serverPage, url } from '../envelope';
 import type { DeviceRow } from '@/shared/api/settingsAdmin';
-import { DEVICES, DRIVERS, VEHICLES, daysAgo, mockId } from './mockState';
+import { DEVICES, DRIVERS, VEHICLES, daysAgo, liveVehicles, mockId } from './mockState';
 
 const VEHICLE_Q_FIELDS = ['unitNumber', 'vin', 'make', 'model', 'licensePlate'];
 const DRIVER_Q_FIELDS = ['firstName', 'lastName', 'username', 'cdlNumber', 'email'];
 
-const findVehicle = (id: string): VehicleRow | undefined => VEHICLES.find((v) => v.id === id);
+/** A soft-deleted unit answers 404 on every `/vehicles/:id…` path, as a missing one does. */
+const findVehicle = (id: string): VehicleRow | undefined => liveVehicles().find((v) => v.id === id);
 const findDriver = (id: string): DriverRow | undefined => DRIVERS.find((d) => d.id === id);
+
+/** Phone numbers compare on digits only, a leading US `1` dropped — `+1 (614) 555-1000` = `6145551000`. */
+const phoneKey = (value: unknown): string => {
+  const digits = String(value ?? '').replace(/\D/g, '');
+  return digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
+};
+/** Unit numbers compare without the display `#` or case; VINs without case. */
+const unitNumberKey = (value: unknown): string => String(value ?? '').trim().replace(/^#/, '').toUpperCase();
+const vinKey = (value: unknown): string => String(value ?? '').trim().toUpperCase();
+/** Licence numbers compare without case, spaces or dashes. */
+const cdlKey = (value: unknown): string => String(value ?? '').toUpperCase().replace(/[\s-]/g, '');
 
 const NOT_FOUND = (what: string) => fail(404, 'NOT_FOUND', `${what} was not found.`);
 
@@ -32,7 +44,7 @@ export const fleetWriteHandlers = [
    * "export"/"import", so every static sub-path is registered before its `:id` sibling. */
   http.get(url(endpoints.vehicles.export), () =>
     ok({
-      vehicles: VEHICLES.map((v) => ({
+      vehicles: liveVehicles().map((v) => ({
         unitNumber: v.unitNumber.replace('#', ''),
         vin: v.vin,
         make: v.make,
@@ -61,7 +73,7 @@ export const fleetWriteHandlers = [
 
   /* ---------------------------------------------------------------- vehicles */
   http.get(url(endpoints.vehicles.list), ({ request }) =>
-    ok(serverPage<VehicleRow>(VEHICLES, request, VEHICLE_Q_FIELDS)),
+    ok(serverPage<VehicleRow>(liveVehicles(), request, VEHICLE_Q_FIELDS)),
   ),
   http.get(url(endpoints.vehicles.detail(':id')), ({ params }) => {
     const vehicle = findVehicle(String(params.id));
@@ -80,6 +92,11 @@ export const fleetWriteHandlers = [
     if (VEHICLES.some((v) => v.unitNumber.replace('#', '') === unitNumber.replace('#', ''))) {
       return fail(409, 'DUPLICATE_UNIT_NUMBER', 'A unit with this number already exists.', {
         unitNumber: 'A unit with this number already exists.',
+      });
+    }
+    if (VEHICLES.some((v) => v.vin?.toUpperCase() === String(dto.vin).toUpperCase())) {
+      return fail(409, 'VIN_TAKEN', 'A unit with this VIN already exists.', {
+        vin: 'A unit with this VIN already exists.',
       });
     }
     const odometerMi = Number(dto.odometerMi ?? 0);
@@ -112,18 +129,44 @@ export const fleetWriteHandlers = [
   http.patch(url(endpoints.vehicles.update(':id')), async ({ params, request }) => {
     const vehicle = findVehicle(String(params.id));
     if (!vehicle) return NOT_FOUND('Vehicle');
-    Object.assign(vehicle, await body(request));
+    const dto = await body(request);
+    // One 409 per unique value, each naming its field (the shape B-97 asks the backend for). The
+    // unit being edited is excluded, so saving it unchanged never conflicts with itself.
+    const others = VEHICLES.filter((v) => v.id !== vehicle.id);
+    if (dto.unitNumber != null) {
+      const unitNumber = unitNumberKey(String(dto.unitNumber));
+      if (others.some((v) => unitNumberKey(v.unitNumber) === unitNumber)) {
+        return fail(409, 'UNIT_NUMBER_TAKEN', 'A unit with this number already exists.', {
+          unitNumber: 'A unit with this number already exists.',
+        });
+      }
+    }
+    if (dto.vin != null) {
+      const vin = vinKey(String(dto.vin));
+      if (others.some((v) => vinKey(v.vin) === vin)) {
+        return fail(409, 'VIN_TAKEN', 'A unit with this VIN already exists.', {
+          vin: 'A unit with this VIN already exists.',
+        });
+      }
+    }
+    Object.assign(vehicle, dto);
     return ok(vehicle);
   }),
 
+  /** Soft delete (tz.md §11.3, B-65): the row is kept for audits with `deletedAt` and
+   * `status: 'INACTIVE'`, its driver and ELD device are unassigned, and it leaves every read. */
   http.delete(url(endpoints.vehicles.remove(':id')), ({ params }) => {
-    const index = VEHICLES.findIndex((v) => v.id === String(params.id));
-    if (index === -1) return NOT_FOUND('Vehicle');
-    const [removed] = VEHICLES.splice(index, 1);
+    const vehicle = findVehicle(String(params.id));
+    if (!vehicle) return NOT_FOUND('Vehicle');
+    vehicle.status = 'INACTIVE';
+    vehicle.deletedAt = new Date().toISOString();
     for (const driver of DRIVERS) {
-      if (driver.assignedVehicleId === removed!.id) driver.assignedVehicleId = null;
+      if (driver.assignedVehicleId === vehicle.id) driver.assignedVehicleId = null;
     }
-    return ok({ ...removed!, status: 'INACTIVE' });
+    for (const device of DEVICES) {
+      if (device.vehicleId === vehicle.id) device.vehicleId = null;
+    }
+    return ok(vehicle);
   }),
 
   /** 11.5 — the driver row owns the link (`assignedVehicleId`), exactly as the join in
@@ -197,6 +240,8 @@ export const fleetWriteHandlers = [
         notes: null,
         status: 'ACTIVE',
         createdAt: new Date().toISOString(),
+        // The template row may be a soft-deleted unit — an imported unit never inherits that.
+        deletedAt: null,
       });
       imported += 1;
     });
@@ -222,15 +267,43 @@ export const fleetWriteHandlers = [
     if (Object.keys(details).length) {
       return fail(422, 'VALIDATION_ERROR', 'Check the highlighted fields.', details);
     }
+    // One 409 per unique value, each naming its field — the shape B-100 asks the backend for.
     if (DRIVERS.some((d) => d.username === username)) {
       return fail(409, 'DUPLICATE_USERNAME', 'This username is already taken.', {
         username: 'This username is already taken.',
       });
     }
-    const assignedVehicleId = (dto.assignedVehicleId as string) ?? null;
+    const email = String(dto.email ?? '').trim().toLowerCase();
+    if (email && DRIVERS.some((d) => d.email?.toLowerCase() === email)) {
+      return fail(409, 'DUPLICATE_EMAIL', 'A driver with this email address already exists.', {
+        email: 'A driver with this email address already exists.',
+      });
+    }
+    const phone = phoneKey(dto.phone);
+    if (phone && DRIVERS.some((d) => d.phone && phoneKey(d.phone) === phone)) {
+      return fail(409, 'DUPLICATE_PHONE', 'A driver with this phone number already exists.', {
+        phone: 'A driver with this phone number already exists.',
+      });
+    }
+    const cdl = cdlKey(dto.cdlNumber);
+    if (cdl && DRIVERS.some((d) => cdlKey(d.cdlNumber) === cdl)) {
+      return fail(409, 'DUPLICATE_CDL_NUMBER', 'A driver with this licence number already exists.', {
+        cdlNumber: 'A driver with this licence number already exists.',
+      });
+    }
+    // A create never takes a unit away from another driver (that is 11.5's explicit reassign);
+    // it used to silently unassign the current driver here.
+    const assignedVehicleId = (dto.assignedVehicleId as string) || null;
     if (assignedVehicleId) {
-      for (const other of DRIVERS) {
-        if (other.assignedVehicleId === assignedVehicleId) other.assignedVehicleId = null;
+      if (!findVehicle(assignedVehicleId)) {
+        return fail(422, 'VALIDATION_ERROR', 'Check the highlighted fields.', {
+          assignedVehicleId: 'Select a unit.',
+        });
+      }
+      if (DRIVERS.some((d) => d.assignedVehicleId === assignedVehicleId)) {
+        return fail(409, 'VEHICLE_ALREADY_ASSIGNED', 'This unit already has a driver assigned.', {
+          assignedVehicleId: 'This unit already has a driver assigned.',
+        });
       }
     }
     const created: DriverRow = {

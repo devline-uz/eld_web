@@ -130,8 +130,7 @@ describe('W-06 Drivers', () => {
     renderPage();
     await screen.findByText('John Smith');
 
-    // §6.9 `q` is forwarded to the (mocked) roster endpoint — this only exercises the onChange
-    // handler and the URL param write, since MSW's roster fixture does not filter by query.
+    // §6.9 `q` is forwarded to the roster endpoint (asserted in the search test below).
     await user.type(screen.getByPlaceholderText('Search driver, username…'), 'smith');
     await screen.findByText('John Smith');
 
@@ -151,6 +150,33 @@ describe('W-06 Drivers', () => {
 
     await user.click(screen.getAllByRole('button', { name: 'Row actions' })[0]!);
     await user.click(await screen.findByText('View driver profile'));
+  });
+
+  // Regression — the MSW roster handler ignored `q`, so typing in the search box re-requested the
+  // same unfiltered page and the table never narrowed.
+  it('search sends `q` to GET /drivers/roster and narrows the table to the matching drivers', async () => {
+    const sentQ: Array<string | null> = [];
+    const onRequest = ({ request }: { request: Request }) => {
+      const reqUrl = new URL(request.url);
+      if (reqUrl.pathname.endsWith(endpoints.drivers.roster)) sentQ.push(reqUrl.searchParams.get('q'));
+    };
+    server.events.on('request:start', onRequest);
+    try {
+      const user = userEvent.setup();
+      renderPage(['/drivers?page=2']);
+      await screen.findByText('Barbara Davis');
+
+      await user.type(screen.getByRole('textbox', { name: 'Search drivers' }), 'webb');
+
+      await screen.findByText('Marcus Webb');
+      await vi.waitFor(() => expect(screen.queryByText('Barbara Davis')).not.toBeInTheDocument());
+      expect(screen.queryByText('John Smith')).not.toBeInTheDocument();
+      expect(sentQ).toContain('webb');
+      // Searching resets the page — a match on page 1 must not be hidden behind `page=2`.
+      expect(screen.getByTestId('location')).toHaveTextContent(/^\/drivers\?q=webb$/);
+    } finally {
+      server.events.removeListener('request:start', onRequest);
+    }
   });
 
   it("row menu Send message deep-links to that driver's conversation (WB-139)", async () => {

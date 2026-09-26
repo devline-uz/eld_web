@@ -10,7 +10,7 @@ import { http, HttpResponse } from 'msw';
 import { endpoints } from '@/shared/api/endpoints';
 import { fixture } from '../fixtures.generated';
 import { fail, ok, url } from '../envelope';
-import { DRIVERS, VEHICLES, mockId } from './mockState';
+import { DRIVERS, VEHICLES, liveVehicles, mockId } from './mockState';
 
 type Json = Record<string, unknown>;
 
@@ -41,7 +41,7 @@ export const phase13Handlers = [
   http.patch(url(endpoints.vehicles.bulkStatus), async ({ request }) => {
     const dto = await body(request);
     const ids = Array.isArray(dto.ids) ? (dto.ids as string[]) : [];
-    const known = new Set(VEHICLES.map((v) => v.id));
+    const known = new Set(liveVehicles().map((v) => v.id));
     const updated = ids.filter((id) => known.has(id));
     for (const v of VEHICLES) if (updated.includes(v.id) && typeof dto.status === 'string') v.status = dto.status;
     return ok({

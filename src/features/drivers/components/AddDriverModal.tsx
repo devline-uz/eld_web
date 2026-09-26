@@ -1,6 +1,6 @@
 // owner: web-vehicles-drivers — 11.8 Add driver (web/tz.md §11.8). Q-3: this is how a driver
 // account is created — the driver never signs in to the web panel. `drivers` FULL only.
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import { Eye, EyeOff } from 'lucide-react';
@@ -11,7 +11,10 @@ import { TOAST_COPY } from '@/shared/ui/copy';
 import { driverSchema, type DriverFormValues } from '@/shared/forms/schemas';
 import { useCreateDriver } from '@/shared/api/drivers';
 import { useVehiclesPicker } from '@/shared/api/vehicles';
-import { ApiError } from '@/shared/api/errors';
+import { useDriversLookup } from '@/shared/api/lookups';
+import { ApiError, ERROR_MESSAGES, errorMessage } from '@/shared/api/errors';
+import { conflictField, type ConflictRule } from '@/shared/api/conflicts';
+import { VALIDATION_MESSAGES } from '@/shared/forms/messages';
 import { TERMINALS } from '../lib/terminals';
 
 /** WB-187 — the list used to hold ten states, so a CDL from any other one could not be recorded. */
@@ -23,6 +26,34 @@ const US_STATES = [
 ];
 
 const DEFAULT_TERMINAL = TERMINALS[0];
+
+type DriverConflictField = 'username' | 'email' | 'phone' | 'cdlNumber' | 'assignedVehicleId';
+
+/**
+ * Which unique value a `POST /drivers` 409 collided on. Every 409 used to be pinned on `username`,
+ * so a duplicate email told the user the *username* was taken, and phone / licence / unit
+ * conflicts had no field at all. The backend sends a generic `CONFLICT` (backend_tasks.md B-100),
+ * so `conflictField` reads every hint it may carry; `null` → a generic "already in use" banner.
+ */
+const DRIVER_CONFLICT_RULES: readonly ConflictRule<DriverConflictField>[] = [
+  { field: 'username', code: /USERNAME/, hint: /username/, message: /\busername\b/i },
+  { field: 'email', code: /EMAIL/, hint: /email/, message: /\be-?mail\b/i },
+  { field: 'phone', code: /PHONE/, hint: /phone/, message: /\bphone\b/i },
+  { field: 'cdlNumber', code: /CDL|LICEN[CS]E/, hint: /cdl|licen[cs]e/, message: /\b(cdl|licen[cs]e)\b/i },
+  { field: 'assignedVehicleId', code: /VEHICLE|UNIT|ASSIGN/, hint: /vehicle|unit/, message: /\b(unit|vehicle)\b/i },
+];
+
+const CONFLICT_MESSAGES: Record<Exclude<DriverConflictField, 'assignedVehicleId'>, string> = {
+  username: VALIDATION_MESSAGES.usernameTaken,
+  email: VALIDATION_MESSAGES.driverEmailTaken,
+  phone: VALIDATION_MESSAGES.driverPhoneTaken,
+  cdlNumber: VALIDATION_MESSAGES.cdlNumberTaken,
+};
+
+/** Licence numbers compare without case, spaces or dashes — `w 123-4567` is `W1234567`. */
+function normalizeCdl(value: string): string {
+  return value.toUpperCase().replace(/[\s-]/g, '');
+}
 
 function Field({ label, required, error, children }: { label: string; required?: boolean; error?: string; children: React.ReactNode }) {
   return (
@@ -55,8 +86,23 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
   const [terminalName, setTerminalName] = useState<string>(DEFAULT_TERMINAL.name);
   const [sendInvitation, setSendInvitation] = useState(true);
   const [banner, setBanner] = useState<string | null>(null);
+  const [unitError, setUnitError] = useState<string | null>(null);
 
   const vehiclesQuery = useVehiclesPicker();
+  // The session-wide `/drivers` lookup (already cached by W-03/W-06) — the only place a unit's
+  // driver lives (`Driver.assignedVehicleId`, B-35 join), and cheap enough to pre-check licences.
+  const driversQuery = useDriversLookup();
+  const drivers = driversQuery.data?.items;
+  const assignedUnitIds = useMemo(
+    () => new Set((drivers ?? []).map((d) => d.assignedVehicleId).filter((id): id is string => Boolean(id))),
+    [drivers],
+  );
+  // A unit that already has a driver is not offered. The current pick stays listed even if it
+  // became taken since (a refetch), so the select never silently jumps and the error can explain.
+  const unitOptions = useMemo(
+    () => (vehiclesQuery.data?.items ?? []).filter((v) => !assignedUnitIds.has(v.id) || v.id === assignedVehicleId),
+    [vehiclesQuery.data, assignedUnitIds, assignedVehicleId],
+  );
   const mutation = useCreateDriver();
 
   const {
@@ -104,11 +150,15 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
 
   function onSubmit(values: DriverFormValues) {
     if (isPending) return;
-    if (eldExempt && !eldExemptReason.trim()) {
-      setEldExemptReasonError('An exemption reason is required while ELD exempt is checked.');
-      return;
-    }
-    setEldExemptReasonError(null);
+    // Client-side pre-checks against the cached lookup; the server stays the authority (409 below).
+    const exemptMissing = eldExempt && !eldExemptReason.trim();
+    setEldExemptReasonError(exemptMissing ? 'An exemption reason is required while ELD exempt is checked.' : null);
+    const unitTaken = assignedVehicleId !== '' && assignedUnitIds.has(assignedVehicleId);
+    setUnitError(unitTaken ? VALIDATION_MESSAGES.unitAlreadyAssigned : null);
+    const cdl = normalizeCdl(values.cdlNumber);
+    const cdlTaken = (drivers ?? []).some((d) => normalizeCdl(d.cdlNumber) === cdl);
+    if (cdlTaken) setError('cdlNumber', { message: VALIDATION_MESSAGES.cdlNumberTaken });
+    if (exemptMissing || unitTaken || cdlTaken) return;
     setBanner(null);
     mutation.mutate(
       {
@@ -138,14 +188,35 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
           onClose();
         },
         onError: (error) => {
+          // The unit refused for being out of service — a unit problem, shown on the unit field.
+          if (error instanceof ApiError && error.code === 'VEHICLE_OUT_OF_SERVICE') {
+            setUnitError(error.userMessage);
+            return;
+          }
           if (error instanceof ApiError && error.status === 409) {
-            setError('username', { message: 'A driver with this username already exists.' });
+            const field = conflictField(error, DRIVER_CONFLICT_RULES);
+            if (field === 'assignedVehicleId') {
+              setUnitError(VALIDATION_MESSAGES.unitAlreadyAssigned);
+              // The lookup was stale — refresh it so the dropdown drops the taken unit.
+              void driversQuery.refetch();
+              return;
+            }
+            if (field) {
+              setError(field, { message: CONFLICT_MESSAGES[field] });
+              return;
+            }
+            // Unattributed conflict — don't guess a field; say the value is in use.
+            const message = ERROR_MESSAGES[error.code] ? error.userMessage : errorMessage('CONFLICT');
+            setBanner(message);
+            toast({ kind: 'error', title: message });
             return;
           }
           if (error instanceof ApiError) {
             const fieldErrors = error.fieldErrors;
             for (const [field, message] of Object.entries(fieldErrors)) {
-              setError(field as keyof DriverFormValues, { message });
+              // The unit select lives outside RHF — its error is local state.
+              if (field === 'assignedVehicleId') setUnitError(message);
+              else setError(field as keyof DriverFormValues, { message });
             }
             if (Object.keys(fieldErrors).length > 0) return;
           }
@@ -281,10 +352,19 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
                 ))}
               </select>
             </Field>
-            <Field label="Assigned unit">
-              <select value={assignedVehicleId} onChange={(e) => setAssignedVehicleId(e.target.value)} disabled={isPending} className={inputClass}>
+            <Field label="Assigned unit" error={unitError ?? undefined}>
+              <select
+                value={assignedVehicleId}
+                onChange={(e) => {
+                  setAssignedVehicleId(e.target.value);
+                  setUnitError(null);
+                }}
+                disabled={isPending}
+                aria-invalid={unitError ? true : undefined}
+                className={inputClass}
+              >
                 <option value="">None</option>
-                {(vehiclesQuery.data?.items ?? []).map((v) => (
+                {unitOptions.map((v) => (
                   <option key={v.id} value={v.id}>
                     {v.unitNumber}
                   </option>

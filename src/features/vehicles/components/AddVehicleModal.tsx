@@ -2,13 +2,18 @@
 import { useRef, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
+import { useQueryClient } from '@tanstack/react-query';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
 import { TOAST_COPY } from '@/shared/ui/copy';
 import { vehicleSchema, type VehicleFormValues } from '@/shared/forms/schemas';
+import { VALIDATION_MESSAGES } from '@/shared/forms/messages';
+import { nonNegativeIntInputProps } from '@/shared/forms/nonNegativeIntInput';
 import { useCreateVehicle, useUpdateVehicle, type VehicleRow } from '@/shared/api/vehicles';
 import { ApiError } from '@/shared/api/errors';
+import { conflictField } from '@/shared/api/conflicts';
+import { VEHICLE_CONFLICT_RULES, findCachedVehicleConflicts } from '../lib/vehicleConflicts';
 
 const FUEL_TYPES = ['DIESEL', 'GASOLINE', 'CNG', 'LNG', 'ELECTRIC'] as const;
 
@@ -38,6 +43,7 @@ const inputClass = 'h-input rounded-md border border-border bg-bg-surface px-3 t
 
 export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; onClose: () => void }) {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const isEdit = Boolean(vehicle);
   const currentYear = new Date().getFullYear();
   // The three fields that live outside react-hook-form. Their initial values are captured once so
@@ -92,6 +98,14 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
 
   function onSubmit(values: VehicleFormValues) {
     if (inFlight.current || submitting) return;
+    // Cheap early warning from the cached `/vehicles` pages (the unit being edited excluded). The
+    // server's 409 below stays the authority for anything the cache doesn't hold.
+    const cached = findCachedVehicleConflicts(queryClient, values, vehicle);
+    if (cached.length > 0) {
+      if (cached.includes('unitNumber')) setError('unitNumber', { message: VALIDATION_MESSAGES.unitNumberTaken });
+      if (cached.includes('vin')) setError('vin', { message: VALIDATION_MESSAGES.vinTaken });
+      return;
+    }
     const payload = {
       unitNumber: values.unitNumber,
       vin: values.vin,
@@ -121,7 +135,17 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
       },
       onError: (error) => {
         if (error instanceof ApiError && error.status === 409) {
-          setError('unitNumber', { message: 'A unit with this number already exists.' });
+          const field = conflictField(error, VEHICLE_CONFLICT_RULES);
+          if (field === 'vin') {
+            setError('vin', { message: VALIDATION_MESSAGES.vinTaken });
+            return;
+          }
+          if (field === 'unitNumber') {
+            setError('unitNumber', { message: VALIDATION_MESSAGES.unitNumberTaken });
+            return;
+          }
+          // Unattributed conflict — don't guess a field; say the value is in use.
+          toast({ kind: 'error', title: error.userMessage });
           return;
         }
         if (error instanceof ApiError) {
@@ -210,9 +234,9 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
               className={inputClass}
             />
           </Field>
-          <Field label="Odometer at activation">
+          <Field label="Odometer at activation" error={errors.odometer?.message}>
             <input
-              type="number"
+              {...nonNegativeIntInputProps}
               {...register('odometer', {
                 // `valueAsNumber` turns a blank field into `NaN`, which fails `z.number()` even
                 // though the field is optional (WB-012) — coerce blank to `undefined`.

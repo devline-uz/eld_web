@@ -88,6 +88,11 @@ function seedVehicle(n: number): VehicleRow {
 
 export let VEHICLES: VehicleRow[] = [];
 
+/** Units the API still lists — `DELETE /vehicles/:id` is a soft delete (tz.md §11.3): the row
+ * stays in `VEHICLES` with `deletedAt` + `status: 'INACTIVE'` but drops out of every list, count,
+ * lookup and `GET /vehicles/:id` (404). A unit only "Set inactive" has no `deletedAt` and stays. */
+export const liveVehicles = (): VehicleRow[] => VEHICLES.filter((v) => v.deletedAt == null);
+
 /* ------------------------------------------------------------------ drivers */
 
 /** The same 58 identities `/drivers/roster` serves, widened to the full raw `Driver` row. A unit
