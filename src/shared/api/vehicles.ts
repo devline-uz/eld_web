@@ -44,6 +44,30 @@ export interface VehicleRow {
    * `status` alone cannot tell a deleted unit from one merely set INACTIVE. */
   deletedAt?: string | null;
   isDeleted?: boolean;
+  /** Backend D-107 — `/vehicle-groups` id, `null` when the unit is in no group. */
+  groupId?: string | null;
+}
+
+/** `GET /vehicle-groups` row (backend D-107). */
+export interface VehicleGroupRow {
+  id: string;
+  name: string;
+  description: string | null;
+  /** `#RRGGBB` or `null`. */
+  color: string | null;
+  vehicleCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** W-12 `Vehicle group` / W-13 `Group by` options — the whole list, name order, held like a lookup. */
+export function useVehicleGroups() {
+  return useQuery({
+    queryKey: qk.vehicleGroups,
+    queryFn: async ({ signal }) =>
+      (await client.get<{ items: VehicleGroupRow[] }>(endpoints.vehicleGroups.list, { signal })).items,
+    ...typedCachePolicy<VehicleGroupRow[]>('reference'),
+  });
 }
 
 /** The real, raw `Driver` row minus `passwordHash` (backend `DriverView`). */

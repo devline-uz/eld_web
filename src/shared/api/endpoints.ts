@@ -67,6 +67,16 @@ export const endpoints = {
     /** B-71 (shipped) — PATCH `{ ids, status }` → `{ updated, failed }`. Static path: its MSW handler must precede the vehicle-by-id one. */
     bulkStatus: '/vehicles/bulk-status',
   },
+  /** Vehicle groups (backend D-107, 2026-09-25) — W-12 `Vehicle group`, W-13 `Group by`. */
+  vehicleGroups: {
+    list: '/vehicle-groups',
+    create: '/vehicle-groups',
+    detail: (id: string) => `/vehicle-groups/${id}`,
+    update: (id: string) => `/vehicle-groups/${id}`,
+    remove: (id: string) => `/vehicle-groups/${id}`,
+    /** PUT `{ vehicleIds }` — replaces the membership. */
+    members: (id: string) => `/vehicle-groups/${id}/vehicles`,
+  },
   trailers: {
     list: '/trailers',
     create: '/trailers',
@@ -217,6 +227,8 @@ export const endpoints = {
     ifta: '/reports/ifta',
     /** B-46 (IFTA half shipped 2026-09-14) — JSON KPIs + `Miles by jurisdiction` for W-12. */
     iftaSummary: '/reports/ifta/summary',
+    /** Backend D-107 (2026-09-25) — W-12 `Jurisdiction` menu options. Static path: its MSW handler precedes `:id`. */
+    iftaJurisdictions: '/reports/ifta/jurisdictions',
     activity: '/reports/activity',
     /** B-46 (activity half, backend landing in parallel) — W-13 KPIs + paged per-driver duty totals. */
     activitySummary: '/reports/activity/summary',

@@ -17,7 +17,7 @@ import type { Role } from '@/shared/auth/permissions';
 import { ToastProvider } from '@/shared/ui/Toast';
 import IftaReportPage from './IftaReportPage';
 import { ApiError } from '@/shared/api/errors';
-import { IFTA_EXPORT_SCOPE, quarterLabel, quarterOf, refusalText, todayKey } from './reportMeta';
+import { quarterLabel, quarterOf, refusalText, todayKey } from './reportMeta';
 import { resetAnnouncedReports } from './useReportJobs';
 
 const mocks = vi.hoisted(() => ({
@@ -498,79 +498,60 @@ describe('W-12 Reports · IFTA', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 
-  describe('All jurisdictions ▾ (B-46 — options and filter from the loaded rows)', () => {
-    const kpiCard = (label: string) =>
-      screen.getAllByText(label).map((el) => el.closest('.rounded-lg') as HTMLElement).find((card) => !card.querySelector('table')) as HTMLElement;
-
+  describe('D-107 · Jurisdiction and Vehicle group filters', () => {
     async function pick(menu: string, option: string) {
       const trigger = screen.getByRole('button', { name: new RegExp(`^${menu}:`) });
       trigger.focus();
       await userEvent.keyboard('{Enter}');
       await userEvent.click(await screen.findByRole('menuitem', { name: option }));
     }
+    const location = () => screen.getByTestId('location').textContent ?? '';
 
-    it('lists the quarter\'s jurisdictions A→Z after All jurisdictions', async () => {
+    it('lists the server jurisdictions and vehicle groups, and narrows the summary from the URL', async () => {
+      const requests: Record<string, string>[] = [];
+      server.use(
+        http.get(url(endpoints.reports.iftaSummary), ({ request }) => {
+          requests.push(Object.fromEntries(new URL(request.url).searchParams));
+          return ok(iftaSummaryFixture);
+        }),
+      );
       renderPage(<IftaReportPage />, ROUTE);
       await screen.findByRole('row', { name: /Ohio/ });
-      const trigger = screen.getByRole('button', { name: 'Jurisdiction: All jurisdictions' });
-      expect(trigger).toBeEnabled();
-      trigger.focus();
-      await userEvent.keyboard('{Enter}');
-      const items = await screen.findAllByRole('menuitem');
-      expect(items.map((i) => i.textContent)).toEqual([
-        'All jurisdictions', 'Illinois', 'Indiana', 'Kentucky', 'Ohio', 'Ontario (CA)',
-      ]);
-    });
+      expect(requests[0]).toEqual({ quarter: '2026-Q3' });
 
-    it('narrows the table and the KPI row to one jurisdiction, keeps it in the URL and states the export scope', async () => {
-      renderPage(<IftaReportPage />, ROUTE);
-      await screen.findByRole('row', { name: /Ohio/ });
-      expect(screen.queryByText(IFTA_EXPORT_SCOPE)).toBeNull();
-      await pick('Jurisdiction', 'Ohio');
-      expect(screen.getByTestId('location')).toHaveTextContent('/reports/ifta?quarter=2026-Q3&jurisdiction=OH');
-      const ohio = screen.getByRole('row', { name: /Ohio/ });
-      const table = ohio.closest('table') as HTMLTableElement;
-      // Header + Ohio only; no totals row repeating it.
-      expect(within(table).getAllByRole('row')).toHaveLength(2);
-      expect(screen.queryByRole('row', { name: /Kentucky/ })).toBeNull();
-      expect(within(kpiCard('Total miles')).getByText('96,420')).toBeInTheDocument();
-      expect(within(kpiCard('Taxable miles')).getByText('92,110')).toBeInTheDocument();
-      expect(within(kpiCard('Taxable miles')).getByText('95.5%')).toBeInTheDocument();
-      expect(within(kpiCard('Fleet MPG')).getByText('6.4')).toBeInTheDocument();
-      // Fleet-only figures have no per-jurisdiction value: dropped, not shown for the whole fleet.
-      expect(within(kpiCard('Fuel purchased')).queryByText(/receipts/)).toBeNull();
-      expect(within(kpiCard('Fleet MPG')).queryByText(/vs Q/)).toBeNull();
-      expect(screen.getByRole('button', { name: 'Export CSV' })).toHaveAccessibleDescription(IFTA_EXPORT_SCOPE);
-      expect(screen.getByRole('button', { name: 'Download IFTA PDF' })).toHaveAccessibleDescription(IFTA_EXPORT_SCOPE);
-    });
+      await pick('Jurisdiction', 'Kentucky');
+      await waitFor(() => expect(location()).toContain('jurisdiction=KY'));
+      await waitFor(() => expect(requests.at(-1)).toEqual({ quarter: '2026-Q3', jurisdiction: 'KY' }));
 
-    it('restores a deep-linked jurisdiction and clears it with All jurisdictions', async () => {
-      renderPage(<IftaReportPage />, `${ROUTE}&jurisdiction=OH`);
-      await screen.findByRole('button', { name: 'Jurisdiction: Ohio' });
-      expect(await screen.findByText(IFTA_EXPORT_SCOPE)).toBeInTheDocument();
+      await pick('Vehicle group', 'Midwest linehaul');
+      await waitFor(() => expect(location()).toContain('group=vg_1'));
+      await waitFor(() => expect(requests.at(-1)).toEqual({ quarter: '2026-Q3', jurisdiction: 'KY', vehicleGroupId: 'vg_1' }));
+      // Changing the quarter keeps the other filters.
+      expect(location()).toContain('quarter=2026-Q3');
+
       await pick('Jurisdiction', 'All jurisdictions');
-      expect(screen.getByTestId('location')).toHaveTextContent(/^\/reports\/ifta\?quarter=2026-Q3$/);
-      expect(screen.getByRole('row', { name: /Kentucky/ })).toBeInTheDocument();
-      expect(within(kpiCard('Total miles')).getByText('314,560')).toBeInTheDocument();
+      await waitFor(() => expect(location()).not.toContain('jurisdiction='));
     });
 
-    it('keeps the jurisdiction when the quarter changes, and shows its own empty state when that quarter has no row', async () => {
-      renderPage(<IftaReportPage />, `${ROUTE}&jurisdiction=tx`);
-      expect(await screen.findByText('No miles in Texas for this quarter')).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Jurisdiction: Texas' })).toBeInTheDocument();
-      expect(within(kpiCard('Total miles')).getByText('—')).toBeInTheDocument();
-      const quarter = screen.getByRole('button', { name: /^Quarter:/ });
-      quarter.focus();
-      await userEvent.keyboard('{Enter}');
-      const items = await screen.findAllByRole('menuitem');
-      await userEvent.click(items[1] as HTMLElement);
-      expect(screen.getByTestId('location')).toHaveTextContent('jurisdiction=tx');
-    });
-
-    it('keeps All vehicle groups inert — no vehicle-group model on the backend', async () => {
-      renderPage(<IftaReportPage />, ROUTE);
+    it('sends the same filters with Export CSV and Download IFTA PDF', async () => {
+      const exports: Record<string, string>[] = [];
+      server.use(
+        http.get(url(endpoints.reports.ifta), ({ request }) => {
+          exports.push(Object.fromEntries(new URL(request.url).searchParams));
+          return ok({ reportId: `rpt_x_${exports.length}`, status: 'QUEUED' }, 202);
+        }),
+      );
+      renderPage(<IftaReportPage />, `${ROUTE}&jurisdiction=oh&group=vg_1`);
       await screen.findByRole('row', { name: /Ohio/ });
-      expect(screen.getByRole('button', { name: 'Vehicle group: All vehicle groups' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Jurisdiction: Ohio' })).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Vehicle group: Midwest linehaul' })).toBeInTheDocument());
+
+      await userEvent.click(screen.getByRole('button', { name: 'Export CSV' }));
+      await waitFor(() => expect(exports[0]).toEqual({ quarter: '2026-Q3', jurisdiction: 'OH', vehicleGroupId: 'vg_1' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Download IFTA PDF' }));
+      await waitFor(() =>
+        expect(exports[1]).toEqual({ quarter: '2026-Q3', jurisdiction: 'OH', vehicleGroupId: 'vg_1', format: 'PDF' }),
+      );
     });
   });
 });

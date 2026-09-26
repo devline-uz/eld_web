@@ -32,10 +32,10 @@ import {
 import { CreateApiKeyModal } from './components/CreateApiKeyModal';
 import { EditApiKeyScopesModal } from './components/EditApiKeyScopesModal';
 import { WebhookConfigModal } from './components/WebhookConfigModal';
-import { INTEGRATION_STATUS, SETTINGS_REASON, SETTINGS_TOAST } from './lib/copy';
+import { INTEGRATION_STATUS, SETTINGS_TOAST } from './lib/copy';
 
 interface CatalogEntry {
-  provider: IntegrationProvider | null;
+  provider: IntegrationProvider;
   name: string;
   description: string;
 }
@@ -44,20 +44,19 @@ interface CatalogEntry {
 // this quarter", "Last sync 4 minutes ago", "Last export Sep 01"). No endpoint returns such figures;
 // the status line is now derived from the integration record only (`integrationStatusLine`).
 const CATALOG: CatalogEntry[] = [
-  { provider: null, name: 'Pacific Track', description: 'ELD hardware · PT30 / PT40' },
+  { provider: 'pacific-track', name: 'Pacific Track', description: 'ELD hardware · PT30 / PT40' },
   { provider: 'mcleod', name: 'McLeod PowerBroker', description: 'TMS · loads, stops and BOL' },
   { provider: 'wex', name: 'WEX fuel cards', description: 'Fuel purchases for IFTA' },
   { provider: 'quickbooks', name: 'QuickBooks Online', description: 'Accounting & driver settlements' },
-  { provider: null, name: 'DAT load board', description: 'Find and book available loads' },
+  { provider: 'dat', name: 'DAT load board', description: 'Find and book available loads' },
   { provider: 'slack', name: 'Slack', description: 'Push alerts into a channel' },
-  { provider: null, name: 'Geotab', description: 'Import telematics from mixed fleets' },
-  { provider: null, name: 'Zapier', description: 'Automate with 6,000+ apps' },
+  { provider: 'geotab', name: 'Geotab', description: 'Import telematics from mixed fleets' },
+  { provider: 'zapier', name: 'Zapier', description: 'Automate with 6,000+ apps' },
   { provider: 'webhook', name: 'Custom webhook', description: 'Send events to your own endpoint' },
 ];
 
 /** The honest status line for a card: connection state and `lastSyncAt` from the API, nothing else. */
 function integrationStatusLine(entry: CatalogEntry, record: IntegrationRow | undefined): string {
-  if (!entry.provider) return INTEGRATION_STATUS.noConnector;
   if (record?.status !== 'CONNECTED') return INTEGRATION_STATUS.notConnected;
   // WB-251 — a webhook connected before the fix has no `config.url`; the backend skips it.
   if (entry.provider === 'webhook' && !webhookUrlOf(record)) return INTEGRATION_STATUS.webhookNoEndpoint;
@@ -90,7 +89,7 @@ export default function IntegrationsPage() {
     [integrationsQuery.rows],
   );
 
-  const connectedCount = CATALOG.filter((c) => c.provider && byProvider[c.provider]?.status === 'CONNECTED').length;
+  const connectedCount = CATALOG.filter((c) => byProvider[c.provider]?.status === 'CONNECTED').length;
   const availableCount = CATALOG.length - connectedCount;
 
   function handleConnect(entry: { provider: IntegrationProvider | string; name: string }) {
@@ -119,7 +118,6 @@ export default function IntegrationsPage() {
   }
 
   function handleDisconnect(entry: CatalogEntry) {
-    if (!entry.provider) return;
     disconnect.mutate(entry.provider, {
       onSuccess: () => {
         toast({ kind: 'success', ...SETTINGS_TOAST.integrationDisconnected(entry.name) });
@@ -202,7 +200,7 @@ export default function IntegrationsPage() {
       ) : (
         <div className="grid grid-cols-3 gap-4">
           {CATALOG.map((entry) => {
-            const record = entry.provider ? byProvider[entry.provider] : undefined;
+            const record = byProvider[entry.provider];
             const connected = record?.status === 'CONNECTED';
             return (
               <Card key={entry.name}>
@@ -218,7 +216,7 @@ export default function IntegrationsPage() {
                 <p className="text-card-sub text-text-muted">{entry.description}</p>
                 <div className="mt-4 flex items-center justify-between gap-2">
                   <span className="text-caption tabular-nums text-text-muted">{integrationStatusLine(entry, record)}</span>
-                  {canFull && entry.provider ? (
+                  {canFull ? (
                     connected ? (
                       <div className="flex flex-wrap items-center justify-end gap-2">
                         {entry.provider === 'webhook' && (
@@ -258,15 +256,11 @@ export default function IntegrationsPage() {
                         size="sm"
                         iconLeft={<Plus size={14} strokeWidth={1.75} />}
                         disabled={upsert.isPending}
-                        onClick={() => handleConnect({ ...entry, provider: entry.provider! })}
+                        onClick={() => handleConnect(entry)}
                       >
                         Connect
                       </Button>
                     )
-                  ) : canFull ? (
-                    <Button variant="secondary" size="sm" disabled title={SETTINGS_REASON.providerUnavailable}>
-                      Connect
-                    </Button>
                   ) : null}
                 </div>
               </Card>

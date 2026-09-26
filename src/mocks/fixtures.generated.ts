@@ -722,6 +722,68 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "updated": 0,
     "failed": []
   },
+  'GET /api/vehicle-groups': {
+    "items": [
+      {
+        "id": "vg_1",
+        "name": "Midwest linehaul",
+        "description": "OH/IN/KY lanes",
+        "color": "#2F6FED",
+        "vehicleCount": 14,
+        "createdAt": "2026-09-25T09:00:00.000Z",
+        "updatedAt": "2026-09-25T09:00:00.000Z"
+      }
+    ]
+  },
+  'POST /api/vehicle-groups': {
+    "id": "vg_1",
+    "name": "Midwest linehaul",
+    "description": "OH/IN/KY lanes",
+    "color": "#2F6FED",
+    "vehicleCount": 14,
+    "createdAt": "2026-09-25T09:00:00.000Z",
+    "updatedAt": "2026-09-25T09:00:00.000Z"
+  },
+  'GET /api/vehicle-groups/{id}': {
+    "id": "vg_1",
+    "name": "Midwest linehaul",
+    "description": "OH/IN/KY lanes",
+    "color": "#2F6FED",
+    "vehicleCount": 14,
+    "createdAt": "2026-09-25T09:00:00.000Z",
+    "updatedAt": "2026-09-25T09:00:00.000Z",
+    "vehicles": [
+      {
+        "id": "veh_1",
+        "unitNumber": "101",
+        "vin": "1FUJGLDR8LLLL1234",
+        "make": "Freightliner",
+        "model": "Cascadia",
+        "status": "ACTIVE"
+      }
+    ]
+  },
+  'PATCH /api/vehicle-groups/{id}': {
+    "id": "vg_1",
+    "name": "Midwest linehaul",
+    "description": "OH/IN/KY lanes",
+    "color": "#2F6FED",
+    "vehicleCount": 14,
+    "createdAt": "2026-09-25T09:00:00.000Z",
+    "updatedAt": "2026-09-25T09:00:00.000Z"
+  },
+  'DELETE /api/vehicle-groups/{id}': {
+    "success": true
+  },
+  'PUT /api/vehicle-groups/{id}/vehicles': {
+    "id": "vg_1",
+    "name": "Midwest linehaul",
+    "description": "OH/IN/KY lanes",
+    "color": "#2F6FED",
+    "vehicleCount": 14,
+    "createdAt": "2026-09-25T09:00:00.000Z",
+    "updatedAt": "2026-09-25T09:00:00.000Z"
+  },
   'GET /api/alert-rules': {
     "items": [
       {
@@ -840,9 +902,9 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     {
       "provider": "zapier",
       "name": "Zapier",
-      "description": "Not yet available — this provider has no connector yet.",
+      "description": "Automate with 6,000+ apps.",
       "category": "Developer",
-      "available": false
+      "available": true
     }
   ],
   'GET /api/integrations/{provider}': {
@@ -2084,6 +2146,20 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
   'GET /api/reports/ifta': {
     "reportId": "rpt_2",
     "status": "QUEUED"
+  },
+  'GET /api/reports/ifta/jurisdictions': {
+    "items": [
+      {
+        "code": "AL",
+        "name": "Alabama",
+        "country": "US"
+      },
+      {
+        "code": "ON",
+        "name": "Ontario",
+        "country": "CA"
+      }
+    ]
   },
   'GET /api/reports/ifta/summary': {
     "quarter": "2026-Q3",

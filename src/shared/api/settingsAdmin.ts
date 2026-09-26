@@ -363,7 +363,18 @@ export function useTestAlertRule() {
 
 /* ------------------------------------------------------------------ Integrations & API keys — W-22 */
 
-export type IntegrationProvider = 'mcleod' | 'wex' | 'comdata' | 'quickbooks' | 'slack' | 'webhook';
+/** Backend `INTEGRATION_PROVIDERS` — the last four joined on 2026-09-25 (backend D-107). */
+export type IntegrationProvider =
+  | 'mcleod'
+  | 'wex'
+  | 'comdata'
+  | 'quickbooks'
+  | 'slack'
+  | 'webhook'
+  | 'pacific-track'
+  | 'dat'
+  | 'geotab'
+  | 'zapier';
 export type IntegrationStatus = 'CONNECTED' | 'DISCONNECTED';
 
 export interface IntegrationRow {

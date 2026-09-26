@@ -95,10 +95,10 @@ describe('IntegrationsPage — W-22', () => {
     renderPage();
     expect(await screen.findByText('Last sync · 4 minutes ago')).toBeInTheDocument();
     expect(screen.getByText('Connected · no sync yet')).toBeInTheDocument();
-    // wex, quickbooks, webhook have a connector but no record.
-    expect(screen.getAllByText('Not connected')).toHaveLength(3);
-    // Pacific Track, DAT, Geotab, Zapier have no connector — the reason is on screen.
-    expect(screen.getAllByText('Not yet available — this provider has no connector yet.')).toHaveLength(4);
+    // wex, quickbooks, webhook, Pacific Track, DAT, Geotab, Zapier have no record (backend D-107
+    // made the last four connectable).
+    expect(screen.getAllByText('Not connected')).toHaveLength(7);
+    expect(screen.queryByText(/has no connector yet/)).not.toBeInTheDocument();
     for (const fake of [/devices syncing/, /receipts this quarter/, /Last export/, /Last sync 4 minutes ago/]) {
       expect(screen.queryByText(fake)).not.toBeInTheDocument();
     }
@@ -231,6 +231,31 @@ async function userEventClickWithin(container: Element, name: RegExp, user: Retu
 /* ------------------------------------------------------------------ stage-2 */
 
 describe('IntegrationsPage — stage-2', () => {
+  // Backend D-107 — Pacific Track / DAT / Geotab / Zapier are real providers now.
+  it.each([
+    ['Pacific Track', 'pacific-track'],
+    ['DAT load board', 'dat'],
+    ['Geotab', 'geotab'],
+    ['Zapier', 'zapier'],
+  ])('connects %s through PUT /integrations/%s', async (name, provider) => {
+    const user = userEvent.setup();
+    server.use(http.get(url(endpoints.apiKeys.list), () => ok([])));
+    let sent: unknown = null;
+    server.use(
+      http.put(url(endpoints.integrations.update(provider)), async ({ request }) => {
+        sent = await request.json();
+        return ok({ id: 'int_9', provider, enabled: true, status: 'CONNECTED' });
+      }),
+    );
+
+    renderPage();
+    await screen.findByText('McLeod PowerBroker');
+    const card = screen.getByText(name).closest('div.rounded-lg')!;
+    await userEventClickWithin(card, /connect/i, user);
+
+    await waitFor(() => expect(sent).toMatchObject({ enabled: true }));
+  });
+
   it('Browse marketplace opens the catalog modal (B-89, shipped)', async () => {
     const user = userEvent.setup();
     server.use(

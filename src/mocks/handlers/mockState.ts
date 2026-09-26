@@ -83,6 +83,8 @@ function seedVehicle(n: number): VehicleRow {
     notes: i % 6 === 0 ? 'Spare tractor — yard only.' : null,
     activatedAt: daysAgo(400 - i * 5),
     createdAt: daysAgo(420 - i * 5),
+    // Backend D-107 — seeded vehicle groups live in `handlers/vehicleGroups.ts`.
+    groupId: n % 3 === 0 ? null : n % 3 === 1 ? 'vg_1' : 'vg_2',
   };
 }
 

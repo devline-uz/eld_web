@@ -146,7 +146,7 @@ export function useGenerateReport() {
  * same shortcuts, so `Download PDF` also works at READ — VIEWER keeps it (WB-247 gate lifted).
  */
 export type QueueShortcutInput =
-  | { kind: 'ifta'; params: { quarter: string; format?: ReportFormat } }
+  | { kind: 'ifta'; params: IftaFilters & { format?: ReportFormat } }
   | { kind: 'activity'; params: { from: string; to: string; driverId?: string; format?: ReportFormat } }
   | { kind: 'dvir'; params: { from: string; to: string; vehicleId?: string; format?: ReportFormat } }
   | {
@@ -237,15 +237,54 @@ export interface IftaSummary {
   totals: IftaJurisdictionTotals;
 }
 
+/**
+ * W-12 filters (backend D-107). `jurisdiction` narrows rows, miles, gallons and receipts; fleet
+ * MPG stays fleet-wide (IFTA formula). The same bag goes to the summary, the CSV/PDF shortcut,
+ * `POST /reports/generate` and the schedule, so the screen and its files describe one slice.
+ */
+export interface IftaFilters {
+  [key: string]: string | undefined;
+  quarter: string;
+  vehicleGroupId?: string;
+  /** Two-letter code from `GET /reports/ifta/jurisdictions`. */
+  jurisdiction?: string;
+}
+
+export interface IftaJurisdictionOption {
+  code: string;
+  name: string;
+  country: 'US' | 'CA';
+}
+
+/** W-12 `Jurisdiction` menu — a static server list (US first, then Canada), held like a lookup. */
+export function useIftaJurisdictions() {
+  return useQuery({
+    queryKey: qk.iftaJurisdictions,
+    queryFn: async ({ signal }) =>
+      (await client.get<{ items: IftaJurisdictionOption[] }>(endpoints.reports.iftaJurisdictions, { signal })).items,
+    ...typedCachePolicy<IftaJurisdictionOption[]>('reference'),
+  });
+}
+
 /** W-12 KPI row + `Miles by jurisdiction` — a report read, 60 s stale like the report list. */
-export function useIftaSummary(quarter: string) {
-  const params = { quarter };
+export function useIftaSummary(filters: IftaFilters) {
+  const { quarter } = filters;
+  const params = compactIftaFilters(filters);
   return useQuery({
     queryKey: qk.iftaSummary(params),
     queryFn: ({ signal }) => client.get<IftaSummary>(endpoints.reports.iftaSummary, { params, signal }),
     enabled: /^\d{4}-Q[1-4]$/.test(quarter),
     ...typedCachePolicy<IftaSummary>('slowList'),
   });
+}
+
+/** Drops unset filters so `{ quarter }` alone keeps the pre-D-107 cache key and query string. */
+export function compactIftaFilters(filters: IftaFilters): IftaFilters {
+  return {
+    quarter: filters.quarter,
+    ...(filters.vehicleGroupId ? { vehicleGroupId: filters.vehicleGroupId } : {}),
+    ...(filters.jurisdiction ? { jurisdiction: filters.jurisdiction } : {}),
+  };
 }
 
 /* ------------------------------------------------------------------ transfers */
@@ -414,9 +453,37 @@ export interface ActivitySummaryItem {
   certifiedDays: number;
 }
 
+/**
+ * `groupBy=vehicleGroup` row (backend D-107): the same totals summed over every driver whose
+ * CURRENT unit is in the group. `groupId: null` / `name: 'Ungrouped'` = no unit or an ungrouped unit.
+ */
+export interface ActivitySummaryGroupItem {
+  groupId: string | null;
+  name: string;
+  drivers: number;
+  days: number;
+  offSec: number;
+  sbSec: number;
+  drivingSec: number;
+  onSec: number;
+  distanceMi: number;
+  violations: number;
+  certifiedDays: number;
+}
+
+export type ActivityGroupBy = 'driver' | 'vehicleGroup';
+
 /** `GET /reports/activity/summary` — web/backend-gaps.md B-46, enveloped like every endpoint. */
 export interface ActivitySummary extends OffsetPage<ActivitySummaryItem> {
   kpis: ActivitySummaryKpis;
+  /** Backend D-107 — echoes the request; absent on a pre-D-107 server (read as `driver`). */
+  groupBy?: 'driver';
+}
+
+/** `groupBy=vehicleGroup` answer — same KPIs and paging, one row per vehicle group. */
+export interface ActivityGroupSummary extends OffsetPage<ActivitySummaryGroupItem> {
+  kpis: ActivitySummaryKpis;
+  groupBy: 'vehicleGroup';
 }
 
 export interface ActivitySummaryParams {
@@ -430,6 +497,8 @@ export interface ActivitySummaryParams {
   terminal?: string;
   /** Without it the backend includes every driver status with a log in range. */
   status?: 'ACTIVE' | 'INACTIVE' | 'TERMINATED';
+  /** Backend D-107 — only drivers whose current unit is in this group. */
+  vehicleGroupId?: string;
 }
 
 /**
@@ -450,6 +519,25 @@ export function useActivitySummary(params: ActivitySummaryParams, enabled = true
 
 /** Fleet rows read in one go — `client.list()` walks 200-row pages sequentially above 200. */
 export const ACTIVITY_FLEET_ROWS = 1_000;
+
+/**
+ * W-13 `Group by vehicle group` (backend D-107) — the same endpoint with `groupBy=vehicleGroup`:
+ * identical KPIs, one row per group of each driver's CURRENT unit. A separate hook (and key) so
+ * the per-driver cache and its row type are never mixed with group rows.
+ */
+export function useActivityGroupSummary(params: ActivitySummaryParams, enabled = true) {
+  const groupParams = { ...params, groupBy: 'vehicleGroup' as const };
+  return useQuery({
+    queryKey: qk.activitySummary(groupParams),
+    queryFn: ({ signal }) =>
+      client.get<ActivityGroupSummary>(endpoints.reports.activitySummary, { params: groupParams, signal }),
+    enabled: enabled && Boolean(params.from) && Boolean(params.to),
+    placeholderData: keepPreviousData,
+    ...typedCachePolicy<ActivityGroupSummary>('slowList'),
+  });
+}
+
+/* ------------------------------------------------------------------ W-15 pack RODS counts */
 
 /**
  * Every row of `GET /reports/activity/summary` for the range (up to `ACTIVITY_FLEET_ROWS`), not one

@@ -33,6 +33,8 @@ export const qk = {
   vehicleDevice: (id: string) => ['vehicles', id, 'device'] as const,
   coDriverPairings: (params?: QueryParams) => ['co-driver-pairings', p(params)] as const,
   trailers: (params?: QueryParams) => ['trailers', p(params)] as const,
+  /** Backend D-107 — `GET /vehicle-groups` (no params, whole list). */
+  vehicleGroups: ['vehicle-groups'] as const,
   trailer: (id: string) => ['trailers', id] as const,
 
   // drivers
@@ -79,6 +81,8 @@ export const qk = {
   reportSchedules: (params?: QueryParams) => ['reports', 'schedules', p(params)] as const,
   ifta: (params?: QueryParams) => ['reports', 'ifta', p(params)] as const,
   iftaSummary: (params?: QueryParams) => ['reports', 'ifta', 'summary', p(params)] as const,
+  /** Backend D-107 — static IFTA jurisdiction list. */
+  iftaJurisdictions: ['reports', 'ifta', 'jurisdictions'] as const,
   activityReport: (params?: QueryParams) => ['reports', 'activity', p(params)] as const,
   activitySummary: (params?: QueryParams) => ['reports', 'activity', 'summary', p(params)] as const,
   dvirReport: (params?: QueryParams) => ['reports', 'dvir', p(params)] as const,

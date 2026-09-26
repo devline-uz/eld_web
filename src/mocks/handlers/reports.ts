@@ -109,6 +109,44 @@ export const iftaSummaryFixture = {
   totals: { totalMiles: 314_560, taxableMiles: 300_170, fuelGal: 47_900, mpg: 6.6, taxDueUsd: 7_296.8 },
 };
 
+/** `GET /reports/ifta/jurisdictions` (backend D-107) — the fixture rows' codes plus a few more. */
+export const iftaJurisdictionsFixture = [
+  { code: 'IL', name: 'Illinois', country: 'US' },
+  { code: 'IN', name: 'Indiana', country: 'US' },
+  { code: 'KY', name: 'Kentucky', country: 'US' },
+  { code: 'MI', name: 'Michigan', country: 'US' },
+  { code: 'OH', name: 'Ohio', country: 'US' },
+  { code: 'PA', name: 'Pennsylvania', country: 'US' },
+  { code: 'ON', name: 'Ontario', country: 'CA' },
+];
+
+/** Summary as the backend narrows it (D-107): `jurisdiction` keeps one row and scopes miles /
+ * gallons / receipts; fleet MPG stays fleet-wide. `vehicleGroupId` is echoed as-is. */
+export function iftaSummaryFor(search: URLSearchParams) {
+  const quarter = search.get('quarter') ?? iftaSummaryFixture.quarter;
+  const jurisdiction = search.get('jurisdiction')?.toUpperCase();
+  if (!jurisdiction) return { ...iftaSummaryFixture, quarter };
+  const row = iftaSummaryFixture.rows.find((r) => r.jurisdiction === jurisdiction);
+  const rows = row ? [row] : [];
+  const totals = row
+    ? { totalMiles: row.totalMiles, taxableMiles: row.taxableMiles, fuelGal: row.fuelGal, mpg: iftaSummaryFixture.kpis.fleetMpg, taxDueUsd: row.taxDueUsd }
+    : { totalMiles: 0, taxableMiles: 0, fuelGal: 0, mpg: iftaSummaryFixture.kpis.fleetMpg, taxDueUsd: null };
+  return {
+    ...iftaSummaryFixture,
+    quarter,
+    rows,
+    totals,
+    kpis: {
+      ...iftaSummaryFixture.kpis,
+      totalMiles: totals.totalMiles,
+      taxableMiles: totals.taxableMiles,
+      taxablePct: totals.totalMiles > 0 ? Math.round((totals.taxableMiles / totals.totalMiles) * 1000) / 10 : null,
+      fuelGal: totals.fuelGal,
+      receiptCount: row ? 240 : 0,
+    },
+  };
+}
+
 const page = <T,>(items: T[], limit = 25) => ({ items, page: 1, limit, total: items.length, totalPages: 1 });
 
 /** Pack jobs queued through the shortcut remember their params, so the detail read can echo them. */
@@ -123,9 +161,9 @@ export const reportsHandlers = [
   ),
   http.post(url(endpoints.reports.generate), () => ok({ reportId: 'rpt_generated', status: 'QUEUED' }, 202)),
   http.get(url(endpoints.reports.ifta), () => ok({ reportId: 'rpt_export_ifta', status: 'QUEUED' }, 202)),
-  http.get(url(endpoints.reports.iftaSummary), ({ request }) =>
-    ok({ ...iftaSummaryFixture, quarter: new URL(request.url).searchParams.get('quarter') ?? iftaSummaryFixture.quarter }),
-  ),
+  http.get(url(endpoints.reports.iftaSummary), ({ request }) => ok(iftaSummaryFor(new URL(request.url).searchParams))),
+  // Backend D-107 — static path, before `/reports/:id`.
+  http.get(url(endpoints.reports.iftaJurisdictions), () => ok({ items: iftaJurisdictionsFixture })),
   // Static `/summary` before any `:id` route (first match wins).
   http.get(url(endpoints.reports.activitySummary), ({ request }) => ok(activitySummaryFixture(new URL(request.url).searchParams))),
   http.get(url(endpoints.reports.activity), () => ok({ reportId: 'rpt_export_activity', status: 'QUEUED' }, 202)),
@@ -267,6 +305,8 @@ export const activitySummaryItems = [
 ];
 
 const activityTerminal: Record<string, string> = { drv_1: 'Columbus, OH', drv_2: 'Dayton, OH' };
+/** Vehicle group of each fixture driver's current unit (backend D-107 `groupBy=vehicleGroup`). */
+const activityGroupOf: Record<string, string | null> = { drv_1: 'vg_1', drv_2: null };
 
 export function activitySummaryFixture(search: URLSearchParams) {
   const page = Math.max(1, Number(search.get('page')) || 1);
@@ -278,7 +318,32 @@ export function activitySummaryFixture(search: URLSearchParams) {
     (i) => (!terminal || activityTerminal[i.driverId] === terminal) && (!status || status === 'ACTIVE'),
   );
   const sum = (pick: (i: (typeof activitySummaryItems)[number]) => number) => all.reduce((acc, i) => acc + pick(i), 0);
+  // Backend D-107 — `groupBy=vehicleGroup`: drv_1's unit is in `vg_1`, drv_2 has an ungrouped unit.
+  const groupItems =
+    search.get('groupBy') === 'vehicleGroup'
+      ? (['vg_1', null] as const)
+          .map((groupId) => {
+            const members = all.filter((i) => (activityGroupOf[i.driverId] ?? null) === groupId);
+            const add = (pick: (i: (typeof activitySummaryItems)[number]) => number) => members.reduce((acc, i) => acc + pick(i), 0);
+            return {
+              groupId,
+              name: groupId ? 'Midwest linehaul' : 'Ungrouped',
+              drivers: members.length,
+              days: add((i) => i.days),
+              offSec: add((i) => i.offSec),
+              sbSec: add((i) => i.sbSec),
+              drivingSec: add((i) => i.drivingSec),
+              onSec: add((i) => i.onSec),
+              distanceMi: add((i) => i.distanceMi),
+              violations: add((i) => i.violations),
+              certifiedDays: add((i) => i.certifiedDays),
+            };
+          })
+          .filter((g) => g.drivers > 0)
+      : null;
+  const rows: unknown[] = groupItems ?? all;
   return {
+    groupBy: groupItems ? 'vehicleGroup' : 'driver',
     kpis: {
       drivingSec: sum((i) => i.drivingSec),
       drivingDeltaPct: null as number | null,
@@ -287,11 +352,11 @@ export function activitySummaryFixture(search: URLSearchParams) {
       violations: sum((i) => i.violations),
       violationsDelta: null as number | null,
     },
-    items: all.slice((page - 1) * limit, page * limit),
+    items: rows.slice((page - 1) * limit, page * limit),
     page,
     limit,
-    total: all.length,
-    totalPages: Math.max(1, Math.ceil(all.length / limit)),
+    total: rows.length,
+    totalPages: Math.max(1, Math.ceil(rows.length / limit)),
   };
 }
 

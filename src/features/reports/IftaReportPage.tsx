@@ -3,11 +3,11 @@
 // Route `/reports/ifta?quarter=2026-Q3` · Perm `reports` READ · not for DISPATCHER (WB-002).
 //
 // Gap B-46 — KPI row and `Miles by jurisdiction` read `GET /reports/ifta/summary?quarter=`.
+// Backend D-107 — `?jurisdiction=` / `?group=` (URL) narrow the summary AND every file queued
+// from this screen (CSV, PDF, Generate, Schedule): one filter bag, `IftaFilters`.
 // Fuel / MPG / tax fields may be `null` (no receipts or rates on the server): they render `—`,
 // never `0`. The error state appears only when that request actually fails.
-// `All jurisdictions ▾` (`?jurisdiction=`) filters the loaded rows client-side (iftaJurisdictions.ts);
-// `All vehicle groups ▾` stays inert — the backend has no vehicle-group model (B-46).
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { ColumnDef } from '@tanstack/react-table';
 import { Download, FileText, Fuel, Route, TrendingUp, Upload } from 'lucide-react';
@@ -18,11 +18,14 @@ import { usePermission } from '@/shared/auth/usePermission';
 import {
   useTransferConfig,
   useGenerateReport,
+  useIftaJurisdictions,
   useIftaSummary,
   useReportVehicles,
+  compactIftaFilters,
   type IftaJurisdictionRow,
   type IftaKpis,
 } from '@/shared/api/reports';
+import { useVehicleGroups } from '@/shared/api/vehicles';
 import { EMPTY } from '@/shared/format/empty';
 import { formatJurisdiction } from '@/shared/format/jurisdiction';
 import { formatFuel, formatMoney, formatMpg, formatNumber, formatPercent } from '@/shared/format/numbers';
@@ -38,15 +41,7 @@ import { ReportLibraryCard } from './components/ReportLibraryCard';
 import { ScheduleReportModal } from './components/ScheduleReportModal';
 import { SelectMenu } from './components/SelectMenu';
 import {
-  ALL_JURISDICTIONS,
-  jurisdictionOptions,
-  kpisForJurisdiction,
-  parseJurisdiction,
-  rowsForJurisdiction,
-} from './iftaJurisdictions';
-import {
   CARRIER_TZ_FALLBACK,
-  IFTA_EXPORT_SCOPE,
   previousQuarters,
   quarterLabel,
   quarterOf,
@@ -59,6 +54,8 @@ import { useExportWhenReady, useGuardedMutate, useReportReadyToasts, useTrackedR
 import { useNavigate } from 'react-router-dom';
 
 const QUARTER_RE = /^\d{4}-Q[1-4]$/;
+const JURISDICTION_RE = /^[A-Z]{2}$/;
+const ALL = 'all';
 
 type IftaTableRow = IftaJurisdictionRow & { isTotal?: boolean };
 
@@ -111,32 +108,28 @@ export default function IftaReportPage() {
   const current = quarterOf(todayKey(timezone));
   const requested = params.get('quarter') ?? '';
   const quarter = QUARTER_RE.test(requested) ? requested : current;
-  const jurisdiction = parseJurisdiction(params.get('jurisdiction'));
-  const setParam = (key: string, value: string | null) => {
+  const rawJurisdiction = (params.get('jurisdiction') ?? '').toUpperCase();
+  const jurisdiction = JURISDICTION_RE.test(rawJurisdiction) ? rawJurisdiction : undefined;
+  const vehicleGroupId = params.get('group') || undefined;
+  const filters = compactIftaFilters({ quarter, jurisdiction, vehicleGroupId });
+
+  /** Merges one URL filter, keeping the others (`null`/`all` removes it). */
+  const setFilter = (key: 'quarter' | 'jurisdiction' | 'group', value: string | null) => {
     const next = new URLSearchParams(params);
-    if (value) next.set(key, value);
+    if (value && value !== ALL) next.set(key, value);
     else next.delete(key);
     setParams(next, { replace: true });
   };
 
-  const summary = useIftaSummary(quarter);
+  const summary = useIftaSummary(filters);
+  const jurisdictions = useIftaJurisdictions();
+  const groups = useVehicleGroups();
   const vehicles = useReportVehicles();
   const units = summary.data?.unitCount ?? vehicles.data?.total;
-  const allRows = summary.data?.rows;
-  const jurisdictionRows = useMemo(
-    () => (allRows && jurisdiction ? rowsForJurisdiction(allRows, jurisdiction) : null),
-    [allRows, jurisdiction],
-  );
-  const jurisdictionRow = jurisdictionRows?.[0];
-  const kpis = jurisdiction ? (jurisdictionRow ? kpisForJurisdiction(jurisdictionRow) : undefined) : summary.data?.kpis;
-  // One jurisdiction selected: its own row, no totals row (it would repeat the row).
-  const tableRows: IftaTableRow[] = jurisdictionRows
-    ? jurisdictionRows
-    : summary.data?.rows.length
-      ? [...summary.data.rows, { ...summary.data.totals, jurisdiction: 'Total', isTotal: true }]
-      : [];
-  const jurisdictionMenu = useMemo(() => jurisdictionOptions(allRows ?? [], jurisdiction), [allRows, jurisdiction]);
-  const exportScopeId = jurisdiction ? 'ifta-export-scope' : undefined;
+  const kpis = summary.data?.kpis;
+  const tableRows: IftaTableRow[] = summary.data?.rows.length
+    ? [...summary.data.rows, { ...summary.data.totals, jurisdiction: 'Total', isTotal: true }]
+    : [];
   useDynamicSubtitle(
     `${quarterLabel(quarter)} · ${quarterSpanLabel(quarter)}${typeof units === 'number' ? ` · ${units} units` : ''}`,
   );
@@ -156,11 +149,19 @@ export default function IftaReportPage() {
 
   const reportOptions = visibleReportRoutes((key) => can(key), user?.role).map((r) => ({ value: r.to, label: r.label }));
   const quarterOptions = previousQuarters(current, 5).map((q) => ({ value: q, label: quarterLabel(q) }));
+  const jurisdictionOptions = [
+    { value: ALL, label: 'All jurisdictions' },
+    ...(jurisdictions.data ?? []).map((j) => ({ value: j.code, label: formatJurisdiction(j.code) })),
+  ];
+  const groupOptions = [
+    { value: ALL, label: 'All vehicle groups' },
+    ...(groups.data ?? []).map((g) => ({ value: g.id, label: g.name })),
+  ];
 
   const generateCsv = () => {
     setActionError(null);
     generate.mutate(
-      { type: 'IFTA', format: 'CSV', params: { quarter } },
+      { type: 'IFTA', format: 'CSV', params: filters },
       {
         onSuccess: (queued) => csvJob.track(queued.reportId),
         onError: (error) => setActionError(refusalText(error)),
@@ -176,24 +177,27 @@ export default function IftaReportPage() {
           name="Quarter"
           value={quarter}
           options={quarterOptions}
-          onSelect={(q) => setParam('quarter', q)}
+          onSelect={(q) => setFilter('quarter', q)}
         />
         <SelectMenu
           name="Jurisdiction"
-          value={jurisdiction ?? ALL_JURISDICTIONS}
-          options={jurisdictionMenu}
-          onSelect={(value) => setParam('jurisdiction', value === ALL_JURISDICTIONS ? null : value)}
+          value={jurisdiction ?? ALL}
+          options={jurisdictionOptions}
+          onSelect={(code) => setFilter('jurisdiction', code)}
         />
-        {/* No vehicle-group model on the backend (B-46, web/tz.md §20.4 Q4) — the one control left inert. */}
-        <SelectMenu name="Vehicle group" value="all" options={[{ value: 'all', label: 'All vehicle groups' }]} disabled />
+        <SelectMenu
+          name="Vehicle group"
+          value={vehicleGroupId ?? ALL}
+          options={groupOptions}
+          onSelect={(id) => setFilter('group', id)}
+        />
         <div className="ml-auto flex items-center gap-2">
           <Button
             variant="secondary"
             iconLeft={<Upload size={16} strokeWidth={1.75} />}
             loading={exportCsv.isPending}
             disabled={exportCsv.isPending}
-            aria-describedby={exportScopeId}
-            onClick={() => exportCsv.start({ kind: 'ifta', params: { quarter } })}
+            onClick={() => exportCsv.start({ kind: 'ifta', params: filters })}
           >
             Export CSV
           </Button>
@@ -210,14 +214,6 @@ export default function IftaReportPage() {
           </Can>
         </div>
       </div>
-
-      {jurisdiction && (
-        // The IFTA shortcuts take only `quarter` (+ `vehicleId`): the files cannot be narrowed to a
-        // jurisdiction, so say so instead of exporting something else (as W-13's terminal note).
-        <p id="ifta-export-scope" className="text-caption text-text-muted">
-          {IFTA_EXPORT_SCOPE}
-        </p>
-      )}
 
       <ActionAlert
         message={actionError ?? csvJob.error ?? exportCsv.error}
@@ -275,8 +271,7 @@ export default function IftaReportPage() {
                   iconLeft={<Download size={16} strokeWidth={1.75} />}
                   loading={exportPdf.isPending}
                   disabled={exportPdf.isPending}
-                  aria-describedby={exportScopeId}
-                  onClick={() => exportPdf.start({ kind: 'ifta', params: { quarter, format: 'PDF' } })}
+                  onClick={() => exportPdf.start({ kind: 'ifta', params: { ...filters, format: 'PDF' } })}
                 >
                   Download IFTA PDF
                 </Button>
@@ -303,19 +298,11 @@ export default function IftaReportPage() {
               rowClassName={(r) => (r.isTotal ? 'bg-bg-subtle font-semibold' : undefined)}
               isLoading={summary.isLoading}
               emptyState={
-                jurisdiction ? (
-                  <EmptyState
-                    icon={<Route size={24} strokeWidth={1.75} />}
-                    title={`No miles in ${formatJurisdiction(jurisdiction)} for this quarter`}
-                    description="Pick All jurisdictions or another quarter to see recorded miles."
-                  />
-                ) : (
-                  <EmptyState
-                    icon={<Route size={24} strokeWidth={1.75} />}
-                    title="No jurisdiction miles for this quarter"
-                    description="Miles appear here once units drive in the selected quarter."
-                  />
-                )
+                <EmptyState
+                  icon={<Route size={24} strokeWidth={1.75} />}
+                  title="No jurisdiction miles for this quarter"
+                  description="Miles appear here once units drive in the selected quarter."
+                />
               }
             />
           )}
@@ -330,7 +317,7 @@ export default function IftaReportPage() {
           open={scheduleOpen}
           onClose={() => setScheduleOpen(false)}
           reportType="IFTA"
-          params={{ quarter }}
+          params={filters}
           timezone={timezone}
         />
       </Can>
