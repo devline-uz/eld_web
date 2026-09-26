@@ -6,7 +6,7 @@ import { endpoints } from '@/shared/api/endpoints';
 import type { NotificationItem } from '@/shared/api/notifications';
 import type { SearchDriverHit, SearchVehicleHit } from '@/shared/api/search';
 import { ok, url } from '../envelope';
-import { DRIVERS, VEHICLES } from './mockState';
+import { DRIVERS, liveVehicles } from './mockState';
 
 const MIN = 60_000;
 const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
@@ -84,7 +84,7 @@ export const shellGapHandlers = [
       ),
       // WB-176 — the palette footer used to claim 69 units while `GET /vehicles` answered the
       // real fixture; the scope counts are derived now, as the rest of `mockState` already is.
-      scope: { units: VEHICLES.length, drivers: DRIVERS.length, logs: 1284 },
+      scope: { units: liveVehicles().length, drivers: DRIVERS.length, logs: 1284 },
     });
   }),
 ];

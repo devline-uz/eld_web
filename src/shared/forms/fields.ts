@@ -56,7 +56,7 @@ export const odometer = () =>
   z
     .number({ required_error: M.odometer, invalid_type_error: M.odometer })
     .int(M.odometer)
-    .min(0, M.odometer)
+    .min(0, M.odometerNegative)
     .max(LIMITS.odometerMax, M.odometer);
 
 /**

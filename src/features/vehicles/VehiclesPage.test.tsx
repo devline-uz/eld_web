@@ -1,12 +1,13 @@
 // web/tz.md §10 W-03 — the exact empty-state copy and a populated render with the join columns.
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
 import { ok, url } from '@/mocks/envelope';
+import { resetMockState } from '@/mocks/handlers/mockState';
 import { endpoints } from '@/shared/api/endpoints';
 import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/client';
 import { ToastProvider } from '@/shared/ui/Toast';
@@ -441,5 +442,78 @@ describe('W-03 Vehicles', () => {
     );
     renderPage();
     expect(await screen.findByRole('button', { name: /retry/i })).toBeInTheDocument();
+  });
+});
+
+// `DELETE /vehicles/:id` is a soft delete: the unit becomes INACTIVE and used to stay in the table.
+// A deleted unit now leaves the table and the counters; a unit only "Set inactive" stays listed.
+describe('W-03 Vehicles — deleting a unit removes it from the table', () => {
+  beforeEach(() => resetMockState());
+  afterEach(() => resetMockState());
+
+  const rowOf = (unit: string) => screen.getByText(unit).closest('tr') as HTMLElement;
+
+  async function deleteUnit(user: ReturnType<typeof userEvent.setup>, unit: string) {
+    await user.click(within(rowOf(unit)).getByRole('button', { name: 'Row actions' }));
+    await user.click(await screen.findByText('Delete unit'));
+    const phrase = `UNIT-${unit.replace('#', '')}`;
+    await user.type(await screen.findByPlaceholderText(phrase), phrase);
+    await user.click(screen.getByRole('button', { name: 'Delete unit' }));
+    expect(await screen.findByText(`Unit ${unit} deleted`)).toBeInTheDocument();
+  }
+
+  it('the deleted row is gone and All / Active drop by one (MSW soft delete with deletedAt)', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('#101');
+    expect(await screen.findByRole('button', { name: 'All 24' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Active 19' })).toBeInTheDocument();
+
+    await deleteUnit(user, '#101');
+
+    expect(await screen.findByRole('button', { name: 'All 23' })).toBeInTheDocument();
+    expect(screen.queryByText('#101')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Active 18' })).toBeInTheDocument();
+    // Soft-deleted means INACTIVE server-side, but it is not counted as an inactive unit.
+    expect(screen.getByRole('button', { name: 'Inactive 3' })).toBeInTheDocument();
+  });
+
+  it('a unit only "Set inactive" stays listed under Inactive while a deleted one does not', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('#102');
+
+    await user.click(within(rowOf('#102')).getByRole('checkbox'));
+    await user.click(await screen.findByRole('button', { name: 'Set inactive' }));
+    expect(await screen.findByRole('button', { name: 'Inactive 4' })).toBeInTheDocument();
+
+    await deleteUnit(user, '#101');
+    expect(await screen.findByRole('button', { name: 'All 23' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Inactive 4' }));
+    expect(await screen.findByText('#102')).toBeInTheDocument();
+    expect(screen.queryByText('#101')).not.toBeInTheDocument();
+  });
+
+  it('the row stays gone even when the list keeps returning it as a plain INACTIVE row (live API, no deletedAt)', async () => {
+    // The live backend today: soft delete flips `status`, and `GET /vehicles` still lists the row.
+    let status = 'ACTIVE';
+    server.use(
+      http.get(url(endpoints.vehicles.list), () =>
+        ok({ items: [{ ...VEHICLE_ROW, status }], page: 1, limit: 10, total: 1, totalPages: 1 }),
+      ),
+      http.delete(url(endpoints.vehicles.remove(':id')), () => {
+        status = 'INACTIVE';
+        return ok({ ...VEHICLE_ROW, status });
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('#101');
+
+    await deleteUnit(user, '#101');
+
+    await vi.waitFor(() => expect(screen.queryByText('#101')).not.toBeInTheDocument());
+    expect(await screen.findByText(/No vehicles yet|Nothing matches/)).toBeInTheDocument();
   });
 });

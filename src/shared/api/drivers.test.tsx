@@ -1,6 +1,6 @@
 // Coverage for the drivers.ts composition module — read hooks (incl. the B-1/B-2 gap shapes
 // served from MSW) and every mutation (create/update/deactivate/import).
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http } from 'msw';
 import { renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
@@ -107,6 +107,34 @@ describe('mutations', () => {
       homeTerminalTimezone: 'America/New_York',
     });
     await waitFor(() => expect(result.current.isError).toBe(true));
+  });
+
+  it('useCreateDriver with a unit also invalidates the vehicles queries (the unit gains a driver)', async () => {
+    server.use(http.post(url(endpoints.drivers.create), () => ok({ id: 'drv_new', username: 'newdriver', status: 'ACTIVE' })));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    const Wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(() => useCreateDriver(), { wrapper: Wrapper });
+    const base = {
+      firstName: 'New',
+      lastName: 'Driver',
+      username: 'newdriver',
+      email: 'new.driver@example.com',
+      cdlNumber: 'X1',
+      cdlState: 'OH',
+      homeTerminalName: 'Columbus, OH',
+      homeTerminalTimezone: 'America/New_York',
+    };
+
+    result.current.mutate(base);
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(invalidate.mock.calls.map(([f]) => f?.queryKey)).toEqual([['drivers']]);
+
+    invalidate.mockClear();
+    result.current.mutate({ ...base, assignedVehicleId: 'veh_3' });
+    await waitFor(() => expect(invalidate.mock.calls.map(([f]) => f?.queryKey)).toEqual([['drivers'], ['vehicles']]));
   });
 
   it('useUpdateDriver patches PATCH /drivers/:id', async () => {

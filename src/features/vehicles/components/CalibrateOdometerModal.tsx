@@ -1,12 +1,17 @@
 // owner: web-vehicles-drivers — 11.5 Calibrate odometer (web/tz.md §11.5). Audited write —
 // server refusals surface verbatim. `vehicles` FULL only.
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
 import { useCalibrateOdometer, totalVehicleMiles, type VehicleRow } from '@/shared/api/vehicles';
 import { ApiError } from '@/shared/api/errors';
 import { formatOdometer } from '@/shared/format/numbers';
+import { calibrateOdometerSchema } from '@/shared/forms/schemas';
+import { nonNegativeIntInputProps, sanitizeNonNegativeInt } from '@/shared/forms/nonNegativeIntInput';
+
+/** The dashboard reading is validated by the same zod rule as every odometer (`.min(0)` etc.). */
+const odometerField = calibrateOdometerSchema.shape.odometer;
 
 export function CalibrateOdometerModal({ vehicle, onClose }: { vehicle: VehicleRow; onClose: () => void }) {
   const { toast } = useToast();
@@ -15,8 +20,11 @@ export function CalibrateOdometerModal({ vehicle, onClose }: { vehicle: VehicleR
   const [serverError, setServerError] = useState<string | null>(null);
   const mutation = useCalibrateOdometer(vehicle.id);
 
+  const errorId = useId();
   const dashValue = Number(dashOdometer);
-  const valid = dashOdometer.trim() !== '' && Number.isFinite(dashValue) && dashValue >= 0;
+  const parsed = dashOdometer.trim() === '' ? null : odometerField.safeParse(dashValue);
+  const valid = parsed?.success === true;
+  const fieldError = parsed && !parsed.success ? parsed.error.issues[0]?.message : undefined;
   const newOffset = valid && vehicle.deviceOdometerMi != null ? dashValue - vehicle.deviceOdometerMi : null;
 
   // WB — the >5,000 mi guard used to fail OPEN: with no ELD reading (`deviceOdometerMi == null`,
@@ -90,7 +98,8 @@ export function CalibrateOdometerModal({ vehicle, onClose }: { vehicle: VehicleR
           </div>
           <div className="flex justify-between">
             <dt className="text-text-muted">Calculated odometer</dt>
-            <dd className="tabular-nums text-text">{formatOdometer(totalVehicleMiles(vehicle))} mi</dd>
+            {/* A bad offset must never preview a negative odometer. */}
+            <dd className="tabular-nums text-text">{formatOdometer(Math.max(0, totalVehicleMiles(vehicle)))} mi</dd>
           </div>
         </dl>
         <label className="flex flex-col gap-1">
@@ -99,17 +108,25 @@ export function CalibrateOdometerModal({ vehicle, onClose }: { vehicle: VehicleR
           </span>
           <div className="flex items-center gap-2">
             <input
-              type="number"
+              {...nonNegativeIntInputProps}
               value={dashOdometer}
               onChange={(e) => {
-                setDashOdometer(e.target.value);
+                // Last line of defence: whatever path a value arrives by, it is clamped to >= 0.
+                setDashOdometer(sanitizeNonNegativeInt(e.target.value));
                 setServerError(null);
               }}
+              aria-invalid={fieldError ? true : undefined}
+              aria-describedby={fieldError ? errorId : undefined}
               className="h-input flex-1 rounded-md border border-border bg-bg-surface px-3 text-body text-text"
             />
             <span className="text-body text-text-muted">mi</span>
           </div>
         </label>
+        {fieldError && (
+          <p id={errorId} role="alert" className="text-caption text-danger">
+            {fieldError}
+          </p>
+        )}
         {newOffset != null && (
           <p className="tabular-nums text-body text-text-secondary">
             New offset: {newOffset >= 0 ? '+' : ''}

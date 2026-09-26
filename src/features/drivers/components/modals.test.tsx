@@ -222,6 +222,111 @@ describe('11.8 Add driver (Q-3)', () => {
   });
 });
 
+describe('11.8 Add driver — duplicate values and unit assignment', () => {
+  const page = <T,>(items: T[]) => ({ items, page: 1, limit: 500, total: items.length, totalPages: 1 });
+  const VEHICLES = [
+    { id: 'veh_a', unitNumber: '#201' },
+    { id: 'veh_b', unitNumber: '#202' },
+  ];
+  const DRIVERS = [{ id: 'drv_x', username: 'other', cdlNumber: 'Z9999999', assignedVehicleId: 'veh_a' }];
+
+  function stubLists(drivers: unknown[] = DRIVERS) {
+    server.use(
+      http.get(url(endpoints.vehicles.list), () => ok(page(VEHICLES))),
+      http.get(url(endpoints.drivers.list), () => ok(page(drivers))),
+    );
+  }
+
+  async function submitWithConflict(code: string, message: string, details?: Record<string, unknown>) {
+    stubLists();
+    server.use(http.post(url(endpoints.drivers.create), () => fail(409, code, message, details)));
+    const user = userEvent.setup();
+    renderWithProviders(<AddDriverModal onClose={() => {}} />);
+    await fillRequiredFields(user);
+    await user.click(screen.getByRole('button', { name: 'Save driver' }));
+  }
+
+  it('a duplicate email is shown on the email field, not on username', async () => {
+    await submitWithConflict('DUPLICATE_EMAIL', 'Email taken', { email: 'Email taken' });
+    expect(await screen.findByText('A driver with this email address already exists.')).toBeInTheDocument();
+    expect(screen.queryByText('A driver with this username already exists.')).not.toBeInTheDocument();
+  });
+
+  it('a duplicate username still lands on the username field', async () => {
+    await submitWithConflict('DUPLICATE_USERNAME', 'This username is already taken.');
+    expect(await screen.findByText('A driver with this username already exists.')).toBeInTheDocument();
+  });
+
+  it('a generic CONFLICT naming details.field: phone is shown on the phone field', async () => {
+    await submitWithConflict('CONFLICT', 'Conflict', { field: 'phone' });
+    expect(await screen.findByText('A driver with this phone number already exists.')).toBeInTheDocument();
+  });
+
+  it('a duplicate licence number from the server is shown on the licence field', async () => {
+    await submitWithConflict('DUPLICATE_CDL_NUMBER', 'Licence taken');
+    expect(await screen.findByText('A driver with this licence number already exists.')).toBeInTheDocument();
+  });
+
+  it('an unattributed 409 says the value is in use instead of guessing a field', async () => {
+    await submitWithConflict('CONFLICT', 'Unique constraint failed');
+    expect(await screen.findByRole('alert')).toHaveTextContent('That value is already in use.');
+    expect(screen.queryByText('A driver with this username already exists.')).not.toBeInTheDocument();
+  });
+
+  it('a unit that already has a driver is not offered', async () => {
+    stubLists();
+    renderWithProviders(<AddDriverModal onClose={() => {}} />);
+    const select = screen.getByLabelText(/Assigned unit/);
+    await waitFor(() => {
+      expect(within(select).getByRole('option', { name: '#202' })).toBeInTheDocument();
+      expect(within(select).queryByRole('option', { name: '#201' })).not.toBeInTheDocument();
+    });
+  });
+
+  it('a 409 for an already-assigned unit is shown on the unit field', async () => {
+    stubLists([]);
+    server.use(
+      http.post(url(endpoints.drivers.create), () =>
+        fail(409, 'VEHICLE_ALREADY_ASSIGNED', 'This unit already has a driver assigned.'),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<AddDriverModal onClose={() => {}} />);
+    await fillRequiredFields(user);
+    const select = screen.getByLabelText(/Assigned unit/);
+    await waitFor(() => expect(within(select).getByRole('option', { name: '#201' })).toBeInTheDocument());
+    await user.selectOptions(select, 'veh_a');
+    await user.click(screen.getByRole('button', { name: 'Save driver' }));
+
+    expect(await screen.findByText('This unit already has a driver assigned.')).toBeInTheDocument();
+    expect(select).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('a licence number already on file is caught before the POST', async () => {
+    let posts = 0;
+    stubLists([{ ...DRIVERS[0], cdlNumber: 'w123-4567' }]);
+    server.use(
+      http.post(url(endpoints.drivers.create), () => {
+        posts += 1;
+        return ok({ id: 'drv_new' });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<AddDriverModal onClose={() => {}} />);
+    // Both lookups loaded: #202 is listed and the assigned #201 is filtered out.
+    await waitFor(() => {
+      const select = screen.getByLabelText(/Assigned unit/);
+      expect(within(select).getByRole('option', { name: '#202' })).toBeInTheDocument();
+      expect(within(select).queryByRole('option', { name: '#201' })).not.toBeInTheDocument();
+    });
+    await fillRequiredFields(user);
+    await user.click(screen.getByRole('button', { name: 'Save driver' }));
+
+    expect(await screen.findByText('A driver with this licence number already exists.')).toBeInTheDocument();
+    expect(posts).toBe(0);
+  });
+});
+
 describe('11.7 Import drivers', () => {
   it('flags a missing email as a per-row warning (SMS is never mentioned, Q-2)', async () => {
     const user = userEvent.setup();

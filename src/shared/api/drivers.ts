@@ -270,8 +270,14 @@ export function useCreateDriver() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (payload: CreateDriverPayload) => client.post<DriverRow>(endpoints.drivers.create, payload),
-    onSuccess: () => {
+    onSuccess: (_driver, payload) => {
       void queryClient.invalidateQueries({ queryKey: qkRoot.drivers });
+      // A create with a unit changes that unit too: only `drivers` used to be invalidated, so every
+      // `vehicles`-keyed query (W-03 page/window, W-04 unit detail, counters) kept the old
+      // "Unassigned" state until its own stale time ran out.
+      if (payload.assignedVehicleId) {
+        void queryClient.invalidateQueries({ queryKey: qkRoot.vehicles });
+      }
     },
   });
 }

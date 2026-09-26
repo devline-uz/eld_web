@@ -5,6 +5,7 @@ import { VALIDATION_MESSAGES as M } from './messages';
 import {
   alertRuleFormSchema,
   alertRuleSchema,
+  calibrateOdometerSchema,
   deviceSchema,
   driverSchema,
   ticketSchema,
@@ -74,7 +75,7 @@ describe('field rules', () => {
   it('bounds the odometer at 3,000,000 whole miles', () => {
     expect(f.odometer().safeParse(993589).success).toBe(true);
     expect(firstError(f.odometer(), 3_000_001)).toBe(M.odometer);
-    expect(firstError(f.odometer(), -1)).toBe(M.odometer);
+    expect(firstError(f.odometer(), -1)).toBe(M.odometerNegative);
     expect(firstError(f.odometer(), 12.5)).toBe(M.odometer);
     expect(firstError(f.odometer(), 'x')).toBe(M.odometer);
   });
@@ -149,6 +150,13 @@ describe('field rules', () => {
 });
 
 describe('form schemas', () => {
+  it('11.5 Calibrate odometer rejects a negative dashboard reading with the §14 message', () => {
+    const odometer = calibrateOdometerSchema.shape.odometer;
+    expect(odometer.safeParse(0).success).toBe(true);
+    expect(firstError(odometer, -1)).toBe(M.odometerNegative);
+    expect(firstError(odometer, -993611)).toBe(M.odometerNegative);
+  });
+
   it('accepts a complete Add driver form (11.8 · Q-3)', () => {
     const result = driverSchema.safeParse({
       firstName: 'Marcus',

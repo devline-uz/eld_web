@@ -8,15 +8,16 @@
 // active: it loads the newest `FILTER_WINDOW` rows once (parallel 200-row pages), filters them in
 // memory and pages the result. The cap is recorded per gap; the total shown is the window's.
 import { useMemo } from 'react';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, type QueryClient } from '@tanstack/react-query';
 import { cachePolicy, type CachePolicyName } from './cache';
 import type { OffsetPage } from './types';
 
 /** Plain, serialisable query options — usable by `useQuery`, `prefetchQuery` and this hook alike. */
 export interface PageQueryOptions<T> {
   queryKey: readonly unknown[];
-  /** Receives TanStack's `signal` — client.ts rule 9, aborted when the last observer unmounts. */
-  queryFn: (context: { signal: AbortSignal }) => Promise<OffsetPage<T>>;
+  /** Receives TanStack's `signal` — client.ts rule 9, aborted when the last observer unmounts —
+   * and the owning `client` (used by `deletedVehicles.ts` to drop units deleted this session). */
+  queryFn: (context: { signal: AbortSignal; client?: QueryClient }) => Promise<OffsetPage<T>>;
   staleTime?: number;
   refetchOnWindowFocus?: boolean;
   refetchOnReconnect?: boolean;

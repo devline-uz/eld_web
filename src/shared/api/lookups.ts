@@ -12,6 +12,7 @@ import { client } from './client';
 import { endpoints } from './endpoints';
 import { qk } from './queryKeys';
 import { pagePolicy, type PageQueryOptions } from './paging';
+import { withoutDeletedVehicles } from './deletedVehicles';
 import type { OffsetPage } from './types';
 import type { DeviceRow, DriverRow, VehicleRow } from './vehicles';
 
@@ -31,7 +32,8 @@ export const driversLookupQuery = (): PageQueryOptions<DriverRow> => ({
 
 export const vehiclesLookupQuery = (): PageQueryOptions<VehicleRow> => ({
   queryKey: qk.vehicles({ limit: LOOKUP_LIMIT }),
-  queryFn: ({ signal }) => client.list<VehicleRow>(endpoints.vehicles.list, { limit: LOOKUP_LIMIT }, { signal }),
+  queryFn: async ({ signal, client: queryClient }) =>
+    withoutDeletedVehicles(await client.list<VehicleRow>(endpoints.vehicles.list, { limit: LOOKUP_LIMIT }, { signal }), queryClient),
   ...pagePolicy('reference'),
 });
 
