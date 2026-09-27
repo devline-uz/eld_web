@@ -251,8 +251,8 @@ export interface CreateDriverPayload {
   phone?: string;
   cdlNumber: string;
   cdlState: string;
-  homeTerminalName: string;
-  homeTerminalTimezone: string;
+  homeTerminalName?: string;
+  homeTerminalTimezone?: string;
   fleetManagerId?: string;
   assignedVehicleId?: string;
   allowPersonalConveyance?: boolean;

@@ -94,7 +94,12 @@ export default function VehiclesPage() {
   const liveFleet = useLiveFleet();
   const dutyByVehicle = useMemo(() => {
     const map = new Map<string, DutyStatus>();
-    for (const unit of liveFleet.data?.items ?? []) map.set(unit.vehicleId, unit.dutyStatus);
+    // `/live/fleet` says INACTIVE for a unit with no ELD paired and nobody signed in (no live
+    // data at all) — that is not the unit's record status, so it must not paint a freshly added
+    // ACTIVE unit "Inactive". Inactive on this screen comes only from `vehicle.status`.
+    for (const unit of liveFleet.data?.items ?? []) {
+      if (unit.dutyStatus !== 'INACTIVE') map.set(unit.vehicleId, unit.dutyStatus);
+    }
     return map;
   }, [liveFleet.data]);
 

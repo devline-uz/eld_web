@@ -140,18 +140,13 @@ describe('W-00 · the dev block (VITE_AUTH_MODE=dev)', () => {
     expect(screen.getByLabelText('Password')).toBeInTheDocument();
   });
 
-  it('fills both fields from a demo account link without submitting (§6.7)', async () => {
+  it('offers no demo-account quick-fill — credentials are typed', async () => {
     const user = userEvent.setup();
-    const ctx = mockAuth();
     renderSignIn();
     await user.click(screen.getByRole('button', { name: 'Developer sign-in' }));
-    await user.click(screen.getByRole('button', { name: 'dispatcher' }));
-
-    expect(screen.getByLabelText('Email')).toHaveValue(
-      'carlos.ramirez@universal-logistics.example',
-    );
-    expect(screen.getByLabelText('Password')).toHaveValue('Onebook2026');
-    expect(ctx.signInWithPassword).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Demo accounts/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Email')).toHaveValue('');
+    expect(screen.getByLabelText('Password')).toHaveValue('');
   });
 
   it('reveals and hides the password', async () => {
@@ -170,7 +165,8 @@ describe('W-00 · the dev block (VITE_AUTH_MODE=dev)', () => {
     const ctx = mockAuth();
     renderSignIn();
     await user.click(screen.getByRole('button', { name: 'Developer sign-in' }));
-    await user.click(screen.getByRole('button', { name: 'admin' }));
+    await user.type(screen.getByLabelText('Email'), 'sarah.chen@universal-logistics.example');
+    await user.type(screen.getByLabelText('Password'), 'Onebook2026');
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
 
     await waitFor(() =>
@@ -215,7 +211,8 @@ describe('W-00 · the dev block (VITE_AUTH_MODE=dev)', () => {
     });
     renderSignIn();
     await user.click(screen.getByRole('button', { name: 'Developer sign-in' }));
-    await user.click(screen.getByRole('button', { name: 'admin' }));
+    await user.type(screen.getByLabelText('Email'), 'sarah.chen@universal-logistics.example');
+    await user.type(screen.getByLabelText('Password'), 'Onebook2026');
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Incorrect email or password.');
@@ -230,7 +227,8 @@ describe('W-00 · the dev block (VITE_AUTH_MODE=dev)', () => {
     });
     renderSignIn();
     await user.click(screen.getByRole('button', { name: 'Developer sign-in' }));
-    await user.click(screen.getByRole('button', { name: 'admin' }));
+    await user.type(screen.getByLabelText('Email'), 'sarah.chen@universal-logistics.example');
+    await user.type(screen.getByLabelText('Password'), 'Onebook2026');
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
@@ -461,7 +459,8 @@ describe('W-00 developer sign-in — empty credentials', () => {
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
     expect(screen.getAllByText('This field is required.')).toHaveLength(2);
 
-    await user.click(screen.getByRole('button', { name: 'admin' }));
+    await user.type(screen.getByLabelText('Email'), 'sarah.chen@universal-logistics.example');
+    await user.type(screen.getByLabelText('Password'), 'Onebook2026');
     expect(screen.queryByText('This field is required.')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Sign in' }));

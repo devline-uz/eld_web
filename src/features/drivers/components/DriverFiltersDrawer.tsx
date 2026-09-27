@@ -28,7 +28,8 @@ const EXEMPTION_LABEL: Record<DriverExemptionFilter, string> = {
   splitSleeperEnabled: 'Split sleeper berth',
 };
 
-const selectClass = 'h-input w-full rounded-md border border-border bg-bg-surface px-3 text-body text-text';
+const selectClass =
+  'h-input w-full rounded-md border border-border bg-bg-surface px-3 text-body text-text';
 
 function toggle<T>(list: T[], value: T): T[] {
   return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
@@ -56,7 +57,13 @@ export interface DriverFiltersDrawerProps {
   terminalOptions: string[];
 }
 
-export function DriverFiltersDrawer({ open, onClose, filters, onApply, terminalOptions }: DriverFiltersDrawerProps) {
+export function DriverFiltersDrawer({
+  open,
+  onClose,
+  filters,
+  onApply,
+  terminalOptions,
+}: DriverFiltersDrawerProps) {
   // No sync effect: the parent remounts this component (`key={filtersRevision}`) each time it
   // opens, so the draft always starts fresh from the last applied `filters` without setState in
   // an effect (react-hooks/set-state-in-effect).
@@ -137,11 +144,30 @@ export function DriverFilterChips({
   onClearAll: () => void;
 }) {
   const chips: { key: string; label: string; patch: Partial<DriverFilters> }[] = [];
-  if (filters.status.length) chips.push({ key: 'status', label: `Status: ${filters.status.map((s) => STATUS_LABEL[s]).join(', ')}`, patch: { status: [] } });
-  if (filters.terminal) chips.push({ key: 'terminal', label: `Terminal: ${filters.terminal}`, patch: { terminal: null } });
-  if (filters.violationsOnly) chips.push({ key: 'violations', label: 'Open violations only', patch: { violationsOnly: false } });
+  if (filters.status.length)
+    chips.push({
+      key: 'status',
+      label: `Status: ${filters.status.map((s) => STATUS_LABEL[s]).join(', ')}`,
+      patch: { status: [] },
+    });
+  if (filters.terminal)
+    chips.push({
+      key: 'terminal',
+      label: `Terminal: ${filters.terminal}`,
+      patch: { terminal: null },
+    });
+  if (filters.violationsOnly)
+    chips.push({
+      key: 'violations',
+      label: 'Open violations only',
+      patch: { violationsOnly: false },
+    });
   if (filters.exemptions.length)
-    chips.push({ key: 'exemptions', label: `Exemptions: ${filters.exemptions.map((e) => EXEMPTION_LABEL[e]).join(', ')}`, patch: { exemptions: [] } });
+    chips.push({
+      key: 'exemptions',
+      label: `Exemptions: ${filters.exemptions.map((e) => EXEMPTION_LABEL[e]).join(', ')}`,
+      patch: { exemptions: [] },
+    });
 
   if (!chips.length) return null;
 
@@ -160,7 +186,11 @@ export function DriverFilterChips({
           <Badge tone="info">{`${chip.label} ×`}</Badge>
         </button>
       ))}
-      <button type="button" onClick={onClearAll} className="text-caption font-medium text-primary hover:underline">
+      <button
+        type="button"
+        onClick={onClearAll}
+        className="text-caption font-medium text-primary hover:underline"
+      >
         Clear all
       </button>
     </div>

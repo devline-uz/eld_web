@@ -20,6 +20,9 @@ const DRIVER_Q_FIELDS = ['firstName', 'lastName', 'username', 'cdlNumber', 'emai
 /** A soft-deleted unit answers 404 on every `/vehicles/:id…` path, as a missing one does. */
 const findVehicle = (id: string): VehicleRow | undefined => liveVehicles().find((v) => v.id === id);
 const findDriver = (id: string): DriverRow | undefined => DRIVERS.find((d) => d.id === id);
+/** Drivers whose unique values are still held — `DELETE /drivers/:id` leaves the row as
+ * `TERMINATED`, and a deleted driver's username / email / phone / licence are free to reuse. */
+const undeletedDrivers = (): DriverRow[] => DRIVERS.filter((d) => d.status !== 'TERMINATED');
 
 /** Phone numbers compare on digits only, a leading US `1` dropped — `+1 (614) 555-1000` = `6145551000`. */
 const phoneKey = (value: unknown): string => {
@@ -89,12 +92,15 @@ export const fleetWriteHandlers = [
         ...(dto.vin ? {} : { vin: 'VIN is required.' }),
       });
     }
-    if (VEHICLES.some((v) => v.unitNumber.replace('#', '') === unitNumber.replace('#', ''))) {
+    // Uniqueness only counts live units: a soft-deleted unit gives up its unit number and VIN, so
+    // they can be used again (the real API's unique indexes are partial on `deletedAt IS NULL`).
+    const live = liveVehicles();
+    if (live.some((v) => unitNumberKey(v.unitNumber) === unitNumberKey(unitNumber))) {
       return fail(409, 'DUPLICATE_UNIT_NUMBER', 'A unit with this number already exists.', {
         unitNumber: 'A unit with this number already exists.',
       });
     }
-    if (VEHICLES.some((v) => v.vin?.toUpperCase() === String(dto.vin).toUpperCase())) {
+    if (live.some((v) => vinKey(v.vin) === vinKey(dto.vin))) {
       return fail(409, 'VIN_TAKEN', 'A unit with this VIN already exists.', {
         vin: 'A unit with this VIN already exists.',
       });
@@ -131,8 +137,9 @@ export const fleetWriteHandlers = [
     if (!vehicle) return NOT_FOUND('Vehicle');
     const dto = await body(request);
     // One 409 per unique value, each naming its field (the shape B-97 asks the backend for). The
-    // unit being edited is excluded, so saving it unchanged never conflicts with itself.
-    const others = VEHICLES.filter((v) => v.id !== vehicle.id);
+    // unit being edited is excluded, so saving it unchanged never conflicts with itself, and so is
+    // every soft-deleted unit — a deleted unit's number and VIN are free to reuse.
+    const others = liveVehicles().filter((v) => v.id !== vehicle.id);
     if (dto.unitNumber != null) {
       const unitNumber = unitNumberKey(String(dto.unitNumber));
       if (others.some((v) => unitNumberKey(v.unitNumber) === unitNumber)) {
@@ -268,25 +275,27 @@ export const fleetWriteHandlers = [
       return fail(422, 'VALIDATION_ERROR', 'Check the highlighted fields.', details);
     }
     // One 409 per unique value, each naming its field — the shape B-100 asks the backend for.
-    if (DRIVERS.some((d) => d.username === username)) {
+    // A deleted (TERMINATED) driver no longer holds any of them.
+    const holders = undeletedDrivers();
+    if (holders.some((d) => d.username === username)) {
       return fail(409, 'DUPLICATE_USERNAME', 'This username is already taken.', {
         username: 'This username is already taken.',
       });
     }
     const email = String(dto.email ?? '').trim().toLowerCase();
-    if (email && DRIVERS.some((d) => d.email?.toLowerCase() === email)) {
+    if (email && holders.some((d) => d.email?.toLowerCase() === email)) {
       return fail(409, 'DUPLICATE_EMAIL', 'A driver with this email address already exists.', {
         email: 'A driver with this email address already exists.',
       });
     }
     const phone = phoneKey(dto.phone);
-    if (phone && DRIVERS.some((d) => d.phone && phoneKey(d.phone) === phone)) {
+    if (phone && holders.some((d) => d.phone && phoneKey(d.phone) === phone)) {
       return fail(409, 'DUPLICATE_PHONE', 'A driver with this phone number already exists.', {
         phone: 'A driver with this phone number already exists.',
       });
     }
     const cdl = cdlKey(dto.cdlNumber);
-    if (cdl && DRIVERS.some((d) => cdlKey(d.cdlNumber) === cdl)) {
+    if (cdl && holders.some((d) => cdlKey(d.cdlNumber) === cdl)) {
       return fail(409, 'DUPLICATE_CDL_NUMBER', 'A driver with this licence number already exists.', {
         cdlNumber: 'A driver with this licence number already exists.',
       });

@@ -128,3 +128,39 @@ describe('DELETE /vehicles/:id mock — soft delete', () => {
     expect((await fetch(url(endpoints.vehicles.detail(inactive!.id)))).status).toBe(200);
   });
 });
+
+// A deleted record gives its unique values up: a new unit / driver may reuse them without a 409.
+describe('unique values of deleted records are free to reuse', () => {
+  const createVehicle = (dto: Record<string, unknown>) =>
+    fetch(url(endpoints.vehicles.create), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(dto),
+    });
+
+  it('POST /vehicles reuses a soft-deleted unit\'s number and VIN', async () => {
+    const target = VEHICLES.find((v) => v.status === 'ACTIVE')!;
+    const { unitNumber, vin } = target;
+    expect((await createVehicle({ unitNumber: unitNumber.replace(/^#/, ''), vin })).status).toBe(409);
+
+    await fetch(url(endpoints.vehicles.remove(target.id)), { method: 'DELETE' });
+    const res = await createVehicle({ unitNumber: unitNumber.replace(/^#/, ''), vin });
+    expect(res.status).toBe(201);
+    // …and once reused, the value is held again by the new live unit.
+    expect((await createVehicle({ unitNumber: unitNumber.replace(/^#/, ''), vin: 'OTHERVIN0000000001' })).status).toBe(409);
+  });
+
+  it('PATCH /vehicles/:id may take a soft-deleted unit\'s number and VIN', async () => {
+    const [self, deleted] = VEHICLES.filter((v) => v.status === 'ACTIVE');
+    await fetch(url(endpoints.vehicles.remove(deleted!.id)), { method: 'DELETE' });
+    const res = await patchVehicle(self!.id, { unitNumber: deleted!.unitNumber.replace(/^#/, ''), vin: deleted!.vin });
+    expect(res.status).toBe(200);
+  });
+
+  it('POST /drivers reuses a deleted driver\'s username, email, phone and licence number', async () => {
+    const gone = DRIVERS[0]!;
+    await fetch(url(endpoints.drivers.remove(gone.id)), { method: 'DELETE' });
+    const res = await create({ username: gone.username, email: gone.email, phone: gone.phone, cdlNumber: gone.cdlNumber });
+    expect(res.status).toBe(201);
+  });
+});

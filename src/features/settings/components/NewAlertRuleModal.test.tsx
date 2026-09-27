@@ -109,7 +109,9 @@ describe('NewAlertRuleModal — Q-2 SMS', () => {
 
   it('shows an error toast when the create request fails', async () => {
     const user = userEvent.setup();
-    server.use(http.post(url(endpoints.alertRules.create), () => fail(500, 'INTERNAL_ERROR', 'Boom')));
+    server.use(
+      http.post(url(endpoints.alertRules.create), () => fail(500, 'INTERNAL_ERROR', 'Boom')),
+    );
 
     renderWithClient(
       <ToastProvider>
@@ -120,7 +122,9 @@ describe('NewAlertRuleModal — Q-2 SMS', () => {
     await user.type(screen.getByPlaceholderText('Break required soon'), 'Speeding');
     await user.click(screen.getByRole('button', { name: 'Create rule' }));
 
-    expect(await screen.findByText('Something went wrong on our side. Try again.')).toBeInTheDocument();
+    expect(
+      await screen.findByText('Something went wrong on our side. Try again.'),
+    ).toBeInTheDocument();
   });
 
   it('closes with Cancel', async () => {
@@ -198,11 +202,17 @@ describe('NewAlertRuleModal — conditions, Repeat and edit mode', () => {
     await user.type(screen.getByPlaceholderText('Break required soon'), 'Two conditions');
     await user.click(screen.getByRole('button', { name: '+ Add a condition' }));
     expect(screen.getAllByRole('combobox', { name: /condition .* event/i })).toHaveLength(1);
-    await user.selectOptions(screen.getByRole('combobox', { name: 'Condition 2 event' }), 'maintenance.overdue');
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: 'Condition 2 event' }),
+      'maintenance.overdue',
+    );
     await user.click(screen.getByRole('button', { name: 'Create rule' }));
 
     await waitFor(() =>
-      expect(body!.conditions).toEqual([{ event: 'hos.break_due', params: { minutes: 30 } }, { event: 'maintenance.overdue' }]),
+      expect(body!.conditions).toEqual([
+        { event: 'hos.break_due', params: { minutes: 30 } },
+        { event: 'maintenance.overdue' },
+      ]),
     );
   });
 

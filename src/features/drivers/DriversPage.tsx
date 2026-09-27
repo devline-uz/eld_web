@@ -11,7 +11,13 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
 import { useDynamicSubtitle } from '@/app/layouts/Topbar';
-import { useDriverRoster, useDriverRosterCounts, useDriverRosterWindow, useResetDriverPassword, type DriverRosterEntry } from '@/shared/api/drivers';
+import {
+  useDriverRoster,
+  useDriverRosterCounts,
+  useDriverRosterWindow,
+  useResetDriverPassword,
+  type DriverRosterEntry,
+} from '@/shared/api/drivers';
 import { useQueueReport } from '@/shared/api/reports';
 import { client } from '@/shared/api/client';
 import { ApiError } from '@/shared/api/errors';
@@ -33,7 +39,13 @@ import { AssignUnitModal } from './components/AssignUnitModal';
 import { BulkMessageModal } from './components/BulkMessageModal';
 import { ImportDriversModal } from './components/ImportDriversModal';
 import { DriverFiltersDrawer, DriverFilterChips } from './components/DriverFiltersDrawer';
-import { parseDriverFilters, writeDriverFilters, matchesDriverFilters, EMPTY_DRIVER_FILTERS, countActiveDriverFilters } from './lib/filters';
+import {
+  parseDriverFilters,
+  writeDriverFilters,
+  matchesDriverFilters,
+  EMPTY_DRIVER_FILTERS,
+  countActiveDriverFilters,
+} from './lib/filters';
 import { DRIVER_TOAST } from './lib/copy';
 import { messagesHref } from '@/shared/lib/messagesHref';
 import { tripsHrefForDriver } from './lib/links';
@@ -80,12 +92,18 @@ export default function DriversPage() {
   // groups is active the page switches to the reference-cached roster window
   // (`useDriverRosterWindow`) — the same trade-off `features/vehicles/lib/filters.ts` documents
   // for W-03/B-54 — instead of presenting the ~10 loaded rows as the complete filtered roster.
-  const useWindow = segment === 'ON_DUTY' || segment === 'OFF_DUTY' || filters.status.length > 0 || filters.exemptions.some((e) => e !== 'eldExempt');
+  const useWindow =
+    segment === 'ON_DUTY' ||
+    segment === 'OFF_DUTY' ||
+    filters.status.length > 0 ||
+    filters.exemptions.some((e) => e !== 'eldExempt');
   const serverFilters = useMemo(
     () => ({
       q: q || undefined,
       terminal: filters.terminal ?? undefined,
-      hasOpenViolation: (filters.violationsOnly || segment === 'VIOLATIONS' ? 'true' : undefined) as 'true' | undefined,
+      hasOpenViolation: (filters.violationsOnly || segment === 'VIOLATIONS'
+        ? 'true'
+        : undefined) as 'true' | undefined,
       exempt: (filters.exemptions.includes('eldExempt') ? 'true' : undefined) as 'true' | undefined,
     }),
     [q, filters, segment],
@@ -121,10 +139,14 @@ export default function DriversPage() {
   // server-filtered roster. Window mode: `filtered` is every match inside the reference-cached
   // window, paged in memory — honest against the window (its size is recorded per gap), not
   // against only the rows that happened to be on screen.
-  const totalPages = useWindow ? Math.max(1, Math.ceil(filtered.length / limit)) : Math.max(1, rosterQuery.data?.totalPages ?? 1);
+  const totalPages = useWindow
+    ? Math.max(1, Math.ceil(filtered.length / limit))
+    : Math.max(1, rosterQuery.data?.totalPages ?? 1);
   const shownPage = Math.min(page, totalPages);
   const pageTotal = useWindow ? filtered.length : (rosterQuery.data?.total ?? filtered.length);
-  const pageRows = useWindow ? filtered.slice((shownPage - 1) * limit, shownPage * limit) : filtered;
+  const pageRows = useWindow
+    ? filtered.slice((shownPage - 1) * limit, shownPage * limit)
+    : filtered;
 
   // A `page` past the end of the roster (a bookmark, the back button, or drivers deactivated since
   // the link was made) came back with no items at all — the card then showed the "No drivers yet"
@@ -142,7 +164,9 @@ export default function DriversPage() {
   const [filtersRevision, setFiltersRevision] = useState(0);
   const [selection, setSelection] = useState<string[]>([]);
   const [exporting, setExporting] = useState(false);
-  const [assignUnitTarget, setAssignUnitTarget] = useState<{ id: string; name: string } | null>(null);
+  const [assignUnitTarget, setAssignUnitTarget] = useState<{ id: string; name: string } | null>(
+    null,
+  );
   const [bulkMessageIds, setBulkMessageIds] = useState<string[] | null>(null);
   const [deactivateTargets, setDeactivateTargets] = useState<string[] | null>(null);
 
@@ -167,7 +191,10 @@ export default function DriversPage() {
       link.click();
       URL.revokeObjectURL(link.href);
     } catch (error) {
-      toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+      toast({
+        kind: 'error',
+        title: error instanceof ApiError ? error.userMessage : 'Something went wrong.',
+      });
     } finally {
       setExporting(false);
     }
@@ -190,10 +217,16 @@ export default function DriversPage() {
     mutationFn: async (ids: string[]) => {
       const { from, to } = rodsRange();
       const results = await Promise.allSettled(
-        ids.map((driverId) => queueReport.mutateAsync({ kind: 'fmcsaPack', params: { from, to, driverId } })),
+        ids.map((driverId) =>
+          queueReport.mutateAsync({ kind: 'fmcsaPack', params: { from, to, driverId } }),
+        ),
       );
       const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
-      return { total: ids.length, succeeded: ids.length - rejected.length, firstError: rejected[0]?.reason as unknown };
+      return {
+        total: ids.length,
+        succeeded: ids.length - rejected.length,
+        firstError: rejected[0]?.reason as unknown,
+      };
     },
     onSuccess: ({ total, succeeded, firstError }) => {
       if (succeeded === total) {
@@ -204,10 +237,16 @@ export default function DriversPage() {
         kind: 'error',
         ...DRIVER_TOAST.rodsExportFailed(total - succeeded, total),
         description:
-          firstError instanceof ApiError ? firstError.userMessage : DRIVER_TOAST.rodsExportFailed(total - succeeded, total).description,
+          firstError instanceof ApiError
+            ? firstError.userMessage
+            : DRIVER_TOAST.rodsExportFailed(total - succeeded, total).description,
       });
     },
-    onError: (error) => toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }),
+    onError: (error) =>
+      toast({
+        kind: 'error',
+        title: error instanceof ApiError ? error.userMessage : 'Something went wrong.',
+      }),
   });
 
   // WB-183 — `Deactivate driver` (row menu) and the bulk `Deactivate` had no handler at all. There
@@ -220,7 +259,11 @@ export default function DriversPage() {
         ids.map((id) => client.patch(endpoints.drivers.update(id), { status: 'INACTIVE' })),
       );
       const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
-      return { total: ids.length, succeeded: ids.length - rejected.length, firstError: rejected[0]?.reason as unknown };
+      return {
+        total: ids.length,
+        succeeded: ids.length - rejected.length,
+        firstError: rejected[0]?.reason as unknown,
+      };
     },
     onSuccess: ({ total, succeeded, firstError }) => {
       void queryClient.invalidateQueries({ queryKey: qkRoot.drivers });
@@ -241,7 +284,10 @@ export default function DriversPage() {
     },
     onError: (error) => {
       setDeactivateTargets(null);
-      toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+      toast({
+        kind: 'error',
+        title: error instanceof ApiError ? error.userMessage : 'Something went wrong.',
+      });
     },
   });
 
@@ -251,7 +297,11 @@ export default function DriversPage() {
     if (resetPassword.isPending) return;
     resetPassword.mutate(driverId, {
       onSuccess: (result) => toast({ kind: 'success', ...DRIVER_TOAST.passwordReset(result) }),
-      onError: (error) => toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }),
+      onError: (error) =>
+        toast({
+          kind: 'error',
+          title: error instanceof ApiError ? error.userMessage : 'Something went wrong.',
+        }),
     });
   }
 
@@ -286,22 +336,48 @@ export default function DriversPage() {
         );
       },
     },
-    { id: 'status', header: 'STATUS', cell: ({ row }) => <DutyBadge status={row.original.dutyStatus} /> },
-    { id: 'unit', header: 'UNIT', cell: ({ row }) => <span className="text-text">{row.original.unit?.unitNumber ?? '—'}</span> },
+    {
+      id: 'status',
+      header: 'STATUS',
+      cell: ({ row }) => <DutyBadge status={row.original.dutyStatus} />,
+    },
+    {
+      id: 'unit',
+      header: 'UNIT',
+      cell: ({ row }) => <span className="text-text">{row.original.unit?.unitNumber ?? '—'}</span>,
+    },
     {
       id: 'driveLeft',
       header: 'DRIVE LEFT · 11H',
-      cell: ({ row }) => <HosMeter label="" remainingSec={row.original.hos.driveRemainingSec} limitSec={LIMIT_SEC.drive} />,
+      cell: ({ row }) => (
+        <HosMeter
+          label=""
+          remainingSec={row.original.hos.driveRemainingSec}
+          limitSec={LIMIT_SEC.drive}
+        />
+      ),
     },
     {
       id: 'shiftLeft',
       header: 'SHIFT LEFT · 14H',
-      cell: ({ row }) => <HosMeter label="" remainingSec={row.original.hos.shiftRemainingSec} limitSec={LIMIT_SEC.shift} />,
+      cell: ({ row }) => (
+        <HosMeter
+          label=""
+          remainingSec={row.original.hos.shiftRemainingSec}
+          limitSec={LIMIT_SEC.shift}
+        />
+      ),
     },
     {
       id: 'cycleLeft',
       header: 'CYCLE LEFT · 70H',
-      cell: ({ row }) => <HosMeter label="" remainingSec={row.original.hos.cycleRemainingSec} limitSec={LIMIT_SEC.cycle} />,
+      cell: ({ row }) => (
+        <HosMeter
+          label=""
+          remainingSec={row.original.hos.cycleRemainingSec}
+          limitSec={LIMIT_SEC.cycle}
+        />
+      ),
     },
     {
       id: 'violations',
@@ -313,12 +389,25 @@ export default function DriversPage() {
           <Badge tone="success">None</Badge>
         ),
     },
-    { id: 'terminal', header: 'HOME TERMINAL', cell: ({ row }) => <span className="text-text-secondary">{row.original.driver.homeTerminalName}</span> },
+    {
+      id: 'terminal',
+      header: 'HOME TERMINAL',
+      cell: ({ row }) => (
+        <span className="text-text-secondary">{row.original.driver.homeTerminalName}</span>
+      ),
+    },
     {
       id: 'logs',
       header: '',
       cell: ({ row }) => (
-        <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); navigate(`/hos-logs?driverId=${row.original.driver.id}`); }}>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={(e) => {
+            e.stopPropagation();
+            navigate(`/hos-logs?driverId=${row.original.driver.id}`);
+          }}
+        >
           Logs
         </Button>
       ),
@@ -335,7 +424,8 @@ export default function DriversPage() {
         <div>
           <h1 className="text-page-title text-text">Drivers</h1>
           <p className="text-page-sub text-text-muted">
-            {counts.all} drivers · {counts.onDuty} on duty · {counts.violations} with active violations
+            {counts.all} drivers · {counts.onDuty} on duty · {counts.violations} with active
+            violations
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -370,7 +460,8 @@ export default function DriversPage() {
               setFiltersOpen(true);
             }}
           >
-            Filters{countActiveDriverFilters(filters) > 0 ? ` · ${countActiveDriverFilters(filters)}` : ''}
+            Filters
+            {countActiveDriverFilters(filters) > 0 ? ` · ${countActiveDriverFilters(filters)}` : ''}
           </Button>
           <Button
             variant="secondary"
@@ -383,10 +474,20 @@ export default function DriversPage() {
             Export Drivers
           </Button>
           <Can perm="drivers" level="FULL">
-            <Button variant="secondary" className="w-btn-wide" iconLeft={<Download size={16} strokeWidth={1.75} />} onClick={() => setImportOpen(true)}>
+            <Button
+              variant="secondary"
+              className="w-btn-wide"
+              iconLeft={<Download size={16} strokeWidth={1.75} />}
+              onClick={() => setImportOpen(true)}
+            >
               Import Drivers
             </Button>
-            <Button variant="primary" className="w-btn-add" iconLeft={<Plus size={16} strokeWidth={1.75} />} onClick={() => setAddOpen(true)}>
+            <Button
+              variant="primary"
+              className="w-btn-add"
+              iconLeft={<Plus size={16} strokeWidth={1.75} />}
+              onClick={() => setAddOpen(true)}
+            >
               Add driver
             </Button>
           </Can>
@@ -448,7 +549,11 @@ export default function DriversPage() {
               actions={
                 canFull
                   ? [
-                      { label: 'Import CSV', variant: 'secondary', onClick: () => setImportOpen(true) },
+                      {
+                        label: 'Import CSV',
+                        variant: 'secondary',
+                        onClick: () => setImportOpen(true),
+                      },
                       { label: 'Add driver', onClick: () => setAddOpen(true) },
                     ]
                   : undefined
@@ -473,31 +578,51 @@ export default function DriversPage() {
                   canFull
                     ? (row) => (
                         <>
-                          <DropdownMenu.Item onSelect={() => navigate(`/drivers/${row.driver.id}`)} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                          <DropdownMenu.Item
+                            onSelect={() => navigate(`/drivers/${row.driver.id}`)}
+                            className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle"
+                          >
                             View driver profile
                           </DropdownMenu.Item>
-                          <DropdownMenu.Item onSelect={() => navigate(`/hos-logs?driverId=${row.driver.id}`)} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                          <DropdownMenu.Item
+                            onSelect={() => navigate(`/hos-logs?driverId=${row.driver.id}`)}
+                            className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle"
+                          >
                             Open HOS logs
                           </DropdownMenu.Item>
                           <Can perm="messaging">
-                            <DropdownMenu.Item onSelect={() => navigate(messagesHref(row.driver.id))} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                            <DropdownMenu.Item
+                              onSelect={() => navigate(messagesHref(row.driver.id))}
+                              className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle"
+                            >
                               Send message
                             </DropdownMenu.Item>
                           </Can>
                           <Can perm="trips" level="FULL">
-                            <DropdownMenu.Item onSelect={() => navigate(tripsHrefForDriver(row.driver.id))} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                            <DropdownMenu.Item
+                              onSelect={() => navigate(tripsHrefForDriver(row.driver.id))}
+                              className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle"
+                            >
                               Assign trip
                             </DropdownMenu.Item>
                           </Can>
                           <DropdownMenu.Separator className="my-1 h-px bg-border" />
-                          <p className="px-2 py-1 text-caption font-semibold uppercase tracking-wide text-text-muted">Compliance</p>
+                          <p className="px-2 py-1 text-caption font-semibold uppercase tracking-wide text-text-muted">
+                            Compliance
+                          </p>
                           <Can perm="hosEdit" level="FULL">
-                            <DropdownMenu.Item onSelect={() => navigate(`/hos-logs?driverId=${row.driver.id}`)} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                            <DropdownMenu.Item
+                              onSelect={() => navigate(`/hos-logs?driverId=${row.driver.id}`)}
+                              className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle"
+                            >
                               Request log edit
                             </DropdownMenu.Item>
                           </Can>
                           <Can perm="hosCertifyOnBehalf" level="FULL">
-                            <DropdownMenu.Item onSelect={() => navigate(`/hos-logs?driverId=${row.driver.id}`)} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
+                            <DropdownMenu.Item
+                              onSelect={() => navigate(`/hos-logs?driverId=${row.driver.id}`)}
+                              className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle"
+                            >
                               Certify on behalf
                             </DropdownMenu.Item>
                           </Can>
@@ -543,7 +668,9 @@ export default function DriversPage() {
 
       {selection.length > 0 && canFull && (
         <div className="fixed inset-x-0 bottom-6 z-30 mx-auto flex h-14 w-fit min-w-bulk-bar items-center gap-3 rounded-lg bg-bg-inverse px-4 shadow-pop">
-          <span className="text-body-strong text-text-inverse">{selection.length} drivers selected</span>
+          <span className="text-body-strong text-text-inverse">
+            {selection.length} drivers selected
+          </span>
           {/* WB-184 — all four buttons used to have no `onClick` whatsoever. A unit carries exactly
               one driver (`POST /vehicles/:id/assign-driver` moves the link), so `Assign unit` is a
               single-row action and says so instead of pretending to fan out. */}
@@ -555,13 +682,18 @@ export default function DriversPage() {
               const id = selection[0];
               const entry = entries.find((e) => e.driver.id === id);
               if (!id) return;
-              setAssignUnitTarget({ id, name: entry ? `${entry.driver.firstName} ${entry.driver.lastName}` : 'This driver' });
+              setAssignUnitTarget({
+                id,
+                name: entry ? `${entry.driver.firstName} ${entry.driver.lastName}` : 'This driver',
+              });
             }}
           >
             Assign unit
           </Button>
           {selection.length !== 1 && (
-            <span className="text-caption text-text-inverse/70">A unit takes one driver — select a single row.</span>
+            <span className="text-caption text-text-inverse/70">
+              A unit takes one driver — select a single row.
+            </span>
           )}
           {canBroadcast && (
             <Button
@@ -596,7 +728,12 @@ export default function DriversPage() {
           >
             Deactivate
           </Button>
-          <button type="button" aria-label="Clear selection" onClick={() => setSelection([])} className="ml-auto text-text-inverse">
+          <button
+            type="button"
+            aria-label="Clear selection"
+            onClick={() => setSelection([])}
+            className="ml-auto text-text-inverse"
+          >
             ×
           </button>
         </div>
@@ -611,7 +748,11 @@ export default function DriversPage() {
         />
       )}
       {bulkMessageIds && bulkMessageIds.length > 0 && (
-        <BulkMessageModal driverIds={bulkMessageIds} onClose={() => setBulkMessageIds(null)} onSent={() => setSelection([])} />
+        <BulkMessageModal
+          driverIds={bulkMessageIds}
+          onClose={() => setBulkMessageIds(null)}
+          onSent={() => setSelection([])}
+        />
       )}
       <ConfirmDelete
         open={Boolean(deactivateTargets && deactivateTargets.length > 0)}

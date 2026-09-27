@@ -13,7 +13,13 @@ import { SETTINGS_TOAST } from '../lib/copy';
 /** Pacific Track versions are short alphanumeric labels (`L113`, `L112b`). */
 const FIRMWARE_RE = /^[A-Za-z0-9.\-_]{2,16}$/;
 
-export function UpdateFirmwareModal({ device, onClose }: { device: DeviceRow; onClose: () => void }) {
+export function UpdateFirmwareModal({
+  device,
+  onClose,
+}: {
+  device: DeviceRow;
+  onClose: () => void;
+}) {
   const { toast } = useToast();
   const updateFirmware = useUpdateFirmware();
   const [firmware, setFirmware] = useState('');
@@ -36,7 +42,8 @@ export function UpdateFirmwareModal({ device, onClose }: { device: DeviceRow; on
           toast({ kind: 'success', ...SETTINGS_TOAST.firmwareQueued(value, device.serial) });
           onClose();
         },
-        onError: (err) => setError(err instanceof ApiError ? err.userMessage : 'Something went wrong.'),
+        onError: (err) =>
+          setError(err instanceof ApiError ? err.userMessage : 'Something went wrong.'),
       },
     );
   }
@@ -52,7 +59,13 @@ export function UpdateFirmwareModal({ device, onClose }: { device: DeviceRow; on
       footer={
         <>
           <ModalCancelButton disabled={submitting} />
-          <Button variant="primary" size="lg" loading={submitting} disabled={submitting} onClick={submit}>
+          <Button
+            variant="primary"
+            size="lg"
+            loading={submitting}
+            disabled={submitting}
+            onClick={submit}
+          >
             Update firmware
           </Button>
         </>

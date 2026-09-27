@@ -44,7 +44,12 @@ export const driverSchema = z.object({
   cdlNumber: f.cdlNumber(),
   cdlState: z.string().trim().length(2),
   phone: f.phone().optional(),
-  homeTerminalTimezone: f.requiredString(),
+  /**
+   * Optional and typed — there is no Terminal table to pick from yet (backend D-090). Left empty,
+   * the name is not sent and the zone falls back to the carrier's own time zone.
+   */
+  homeTerminalName: z.string().trim().optional(),
+  homeTerminalTimezone: z.string().optional(),
   /** Q-2 — SMS is never a channel; notifications go by email. */
   notifyByEmail: z.boolean().default(true),
 });
@@ -242,9 +247,7 @@ export const ticketSchema = z.object({
   category: f.requiredString().max(LIMITS.ticketCategoryMax),
   priority: z.enum(TICKET_PRIORITIES),
   subject: f.ticketSubject(),
-  description: f
-    .requiredString(M.ticketDescription)
-    .max(LIMITS.ticketBodyMax, M.ticketDescription),
+  description: f.requiredString(M.ticketDescription).max(LIMITS.ticketBodyMax, M.ticketDescription),
 });
 export type TicketFormValues = z.infer<typeof ticketSchema>;
 

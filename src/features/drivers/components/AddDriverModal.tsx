@@ -11,21 +11,67 @@ import { TOAST_COPY } from '@/shared/ui/copy';
 import { driverSchema, type DriverFormValues } from '@/shared/forms/schemas';
 import { useCreateDriver } from '@/shared/api/drivers';
 import { useVehiclesPicker } from '@/shared/api/vehicles';
+import { useCarrier } from '@/shared/api/carrier';
 import { useDriversLookup } from '@/shared/api/lookups';
 import { ApiError, ERROR_MESSAGES, errorMessage } from '@/shared/api/errors';
 import { conflictField, type ConflictRule } from '@/shared/api/conflicts';
 import { VALIDATION_MESSAGES } from '@/shared/forms/messages';
-import { TERMINALS } from '../lib/terminals';
+import { HOME_TERMINAL_TIMEZONES } from '../lib/terminals';
 
 /** WB-187 — the list used to hold ten states, so a CDL from any other one could not be recorded. */
 const US_STATES = [
-  'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'DC', 'FL', 'GA', 'HI', 'ID', 'IL', 'IN', 'IA',
-  'KS', 'KY', 'LA', 'ME', 'MD', 'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM',
-  'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA',
-  'WV', 'WI', 'WY',
+  'AL',
+  'AK',
+  'AZ',
+  'AR',
+  'CA',
+  'CO',
+  'CT',
+  'DE',
+  'DC',
+  'FL',
+  'GA',
+  'HI',
+  'ID',
+  'IL',
+  'IN',
+  'IA',
+  'KS',
+  'KY',
+  'LA',
+  'ME',
+  'MD',
+  'MA',
+  'MI',
+  'MN',
+  'MS',
+  'MO',
+  'MT',
+  'NE',
+  'NV',
+  'NH',
+  'NJ',
+  'NM',
+  'NY',
+  'NC',
+  'ND',
+  'OH',
+  'OK',
+  'OR',
+  'PA',
+  'RI',
+  'SC',
+  'SD',
+  'TN',
+  'TX',
+  'UT',
+  'VT',
+  'VA',
+  'WA',
+  'WV',
+  'WI',
+  'WY',
 ];
-
-const DEFAULT_TERMINAL = TERMINALS[0];
 
 type DriverConflictField = 'username' | 'email' | 'phone' | 'cdlNumber' | 'assignedVehicleId';
 
@@ -39,8 +85,18 @@ const DRIVER_CONFLICT_RULES: readonly ConflictRule<DriverConflictField>[] = [
   { field: 'username', code: /USERNAME/, hint: /username/, message: /\busername\b/i },
   { field: 'email', code: /EMAIL/, hint: /email/, message: /\be-?mail\b/i },
   { field: 'phone', code: /PHONE/, hint: /phone/, message: /\bphone\b/i },
-  { field: 'cdlNumber', code: /CDL|LICEN[CS]E/, hint: /cdl|licen[cs]e/, message: /\b(cdl|licen[cs]e)\b/i },
-  { field: 'assignedVehicleId', code: /VEHICLE|UNIT|ASSIGN/, hint: /vehicle|unit/, message: /\b(unit|vehicle)\b/i },
+  {
+    field: 'cdlNumber',
+    code: /CDL|LICEN[CS]E/,
+    hint: /cdl|licen[cs]e/,
+    message: /\b(cdl|licen[cs]e)\b/i,
+  },
+  {
+    field: 'assignedVehicleId',
+    code: /VEHICLE|UNIT|ASSIGN/,
+    hint: /vehicle|unit/,
+    message: /\b(unit|vehicle)\b/i,
+  },
 ];
 
 const CONFLICT_MESSAGES: Record<Exclude<DriverConflictField, 'assignedVehicleId'>, string> = {
@@ -55,11 +111,26 @@ function normalizeCdl(value: string): string {
   return value.toUpperCase().replace(/[\s-]/g, '');
 }
 
-function Field({ label, required, error, children }: { label: string; required?: boolean; error?: string; children: React.ReactNode }) {
+function Field({
+  label,
+  required,
+  error,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  error?: string;
+  children: React.ReactNode;
+}) {
   return (
     <label className="flex flex-col gap-1">
       <span className="text-label text-text">
-        {label} {required && <span className="text-danger" aria-hidden="true">*</span>}
+        {label}{' '}
+        {required && (
+          <span className="text-danger" aria-hidden="true">
+            *
+          </span>
+        )}
       </span>
       {children}
       {error && <span className="text-caption text-danger">{error}</span>}
@@ -83,7 +154,6 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
   // WB-191 — the exemption reason used to be validated only by a toast on submit; the field itself
   // showed nothing, so a screen reader never learned which input was wrong.
   const [eldExemptReasonError, setEldExemptReasonError] = useState<string | null>(null);
-  const [terminalName, setTerminalName] = useState<string>(DEFAULT_TERMINAL.name);
   const [sendInvitation, setSendInvitation] = useState(true);
   const [banner, setBanner] = useState<string | null>(null);
   const [unitError, setUnitError] = useState<string | null>(null);
@@ -94,29 +164,39 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
   const driversQuery = useDriversLookup();
   const drivers = driversQuery.data?.items;
   const assignedUnitIds = useMemo(
-    () => new Set((drivers ?? []).map((d) => d.assignedVehicleId).filter((id): id is string => Boolean(id))),
+    () =>
+      new Set(
+        (drivers ?? []).map((d) => d.assignedVehicleId).filter((id): id is string => Boolean(id)),
+      ),
     [drivers],
   );
   // A unit that already has a driver is not offered. The current pick stays listed even if it
   // became taken since (a refetch), so the select never silently jumps and the error can explain.
   const unitOptions = useMemo(
-    () => (vehiclesQuery.data?.items ?? []).filter((v) => !assignedUnitIds.has(v.id) || v.id === assignedVehicleId),
+    () =>
+      (vehiclesQuery.data?.items ?? []).filter(
+        (v) => !assignedUnitIds.has(v.id) || v.id === assignedVehicleId,
+      ),
     [vehiclesQuery.data, assignedUnitIds, assignedVehicleId],
   );
   const mutation = useCreateDriver();
+  // An empty terminal zone falls back to the carrier's own zone (real `GET /carrier` data, never a
+  // hardcoded guess), so both terminal fields stay optional as they were before.
+  const carrierTimezone = useCarrier().data?.timezone;
 
   const {
     register,
     handleSubmit,
     formState: { errors, isDirty },
     setError,
-    setValue,
   } = useForm<DriverFormValues>({
     resolver: zodResolver(driverSchema),
     mode: 'onBlur',
     // Every field is seeded: RHF reads a registered control's DOM value at mount, so a field the
-    // defaults do not mention (the terminal `<select>`, which always has a value) made `isDirty`
-    // true on an untouched form and every close asked "Discard changes?".
+    // defaults do not mention (a `<select>`, which always has a value) made `isDirty` true on an
+    // untouched form and every close asked "Discard changes?". The home terminal and its zone
+    // start empty and are optional: there is no carrier terminal to default to, so an empty zone
+    // is resolved to the carrier's time zone on submit instead of a guessed one.
     defaultValues: {
       firstName: '',
       lastName: '',
@@ -126,7 +206,8 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
       phone: undefined,
       cdlNumber: '',
       cdlState: 'OH',
-      homeTerminalTimezone: DEFAULT_TERMINAL.timezone,
+      homeTerminalName: '',
+      homeTerminalTimezone: '',
       notifyByEmail: true,
     },
   });
@@ -135,7 +216,7 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
   // POST is in flight, so a double click used to create two drivers.
   const isPending = mutation.isPending;
 
-  // Honest dirty tracking: the checkboxes, the unit, the exemption reason and the terminal all
+  // Honest dirty tracking: the checkboxes, the unit and the exemption reason all
   // live outside RHF, so a real edit to any of them must confirm on close.
   const extrasDirty =
     assignedVehicleId !== '' ||
@@ -145,14 +226,15 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
     shortHaulException ||
     !splitSleeperEnabled ||
     eldExempt ||
-    eldExemptReason !== '' ||
-    terminalName !== DEFAULT_TERMINAL.name;
+    eldExemptReason !== '';
 
   function onSubmit(values: DriverFormValues) {
     if (isPending) return;
     // Client-side pre-checks against the cached lookup; the server stays the authority (409 below).
     const exemptMissing = eldExempt && !eldExemptReason.trim();
-    setEldExemptReasonError(exemptMissing ? 'An exemption reason is required while ELD exempt is checked.' : null);
+    setEldExemptReasonError(
+      exemptMissing ? 'An exemption reason is required while ELD exempt is checked.' : null,
+    );
     const unitTaken = assignedVehicleId !== '' && assignedUnitIds.has(assignedVehicleId);
     setUnitError(unitTaken ? VALIDATION_MESSAGES.unitAlreadyAssigned : null);
     const cdl = normalizeCdl(values.cdlNumber);
@@ -170,8 +252,8 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
         phone: values.phone,
         cdlNumber: values.cdlNumber,
         cdlState: values.cdlState,
-        homeTerminalName: terminalName,
-        homeTerminalTimezone: values.homeTerminalTimezone,
+        homeTerminalName: values.homeTerminalName || undefined,
+        homeTerminalTimezone: values.homeTerminalTimezone || carrierTimezone || undefined,
         assignedVehicleId: assignedVehicleId || undefined,
         allowPersonalConveyance,
         allowYardMove,
@@ -206,7 +288,9 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
               return;
             }
             // Unattributed conflict — don't guess a field; say the value is in use.
-            const message = ERROR_MESSAGES[error.code] ? error.userMessage : errorMessage('CONFLICT');
+            const message = ERROR_MESSAGES[error.code]
+              ? error.userMessage
+              : errorMessage('CONFLICT');
             setBanner(message);
             toast({ kind: 'error', title: message });
             return;
@@ -242,11 +326,22 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
         <>
           {/* B-82 shipped — `sendInvitation` rides on `POST /drivers`. */}
           <label className="mr-auto flex items-center gap-2 text-body text-text-secondary">
-            <input type="checkbox" checked={sendInvitation} onChange={(e) => setSendInvitation(e.target.checked)} disabled={isPending} />
+            <input
+              type="checkbox"
+              checked={sendInvitation}
+              onChange={(e) => setSendInvitation(e.target.checked)}
+              disabled={isPending}
+            />
             Send invitation now
           </label>
           <ModalCancelButton disabled={isPending} />
-          <Button variant="primary" size="lg" loading={isPending} disabled={isPending} onClick={handleSubmit(onSubmit)}>
+          <Button
+            variant="primary"
+            size="lg"
+            loading={isPending}
+            disabled={isPending}
+            onClick={handleSubmit(onSubmit)}
+          >
             Save driver
           </Button>
         </>
@@ -259,7 +354,9 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
           </p>
         )}
         <div>
-          <p className="mb-2 text-caption font-semibold uppercase tracking-wide text-text-muted">Personal details</p>
+          <p className="mb-2 text-caption font-semibold uppercase tracking-wide text-text-muted">
+            Personal details
+          </p>
           <div className="grid grid-cols-3 gap-4">
             <Field label="First name" required error={errors.firstName?.message}>
               <input {...register('firstName')} disabled={isPending} className={inputClass} />
@@ -268,7 +365,12 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
               <input {...register('lastName')} disabled={isPending} className={inputClass} />
             </Field>
             <Field label="Username" required error={errors.username?.message}>
-              <input {...register('username')} placeholder="Used to sign in to the app" disabled={isPending} className={inputClass} />
+              <input
+                {...register('username')}
+                placeholder="Used to sign in to the app"
+                disabled={isPending}
+                className={inputClass}
+              />
             </Field>
             {/* Not `<Field>`: the show/hide toggle is a `<button aria-label>` — nested inside a
                 `<label>`, its accessible name would be appended to the label's name-from-content
@@ -276,7 +378,10 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
                 input+button group instead of their ancestor. */}
             <div className="flex flex-col gap-1">
               <label className="text-label text-text" htmlFor="add-driver-password">
-                Password <span className="text-danger" aria-hidden="true">*</span>
+                Password{' '}
+                <span className="text-danger" aria-hidden="true">
+                  *
+                </span>
               </label>
               <div className="relative">
                 <input
@@ -294,13 +399,25 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
                   // WB-190 — the icon alone was a 16×16 target, under the 24px minimum (§5.6).
                   className="absolute right-1 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-text-muted hover:bg-bg-subtle"
                 >
-                  {showPassword ? <EyeOff size={16} strokeWidth={1.75} /> : <Eye size={16} strokeWidth={1.75} />}
+                  {showPassword ? (
+                    <EyeOff size={16} strokeWidth={1.75} />
+                  ) : (
+                    <Eye size={16} strokeWidth={1.75} />
+                  )}
                 </button>
               </div>
-              {errors.password?.message && <span className="text-caption text-danger">{errors.password.message}</span>}
+              {errors.password?.message && (
+                <span className="text-caption text-danger">{errors.password.message}</span>
+              )}
             </div>
             <Field label="Email address" required error={errors.email?.message}>
-              <input {...register('email')} type="email" placeholder="driver@gmail.com" disabled={isPending} className={inputClass} />
+              <input
+                {...register('email')}
+                type="email"
+                placeholder="driver@gmail.com"
+                disabled={isPending}
+                className={inputClass}
+              />
             </Field>
             <Field label="Phone number" error={errors.phone?.message}>
               <input
@@ -320,7 +437,9 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <div>
-          <p className="mb-2 text-caption font-semibold uppercase tracking-wide text-text-muted">Licence & terminal</p>
+          <p className="mb-2 text-caption font-semibold uppercase tracking-wide text-text-muted">
+            Licence & terminal
+          </p>
           <div className="grid grid-cols-3 gap-4">
             <Field label="Driver licence number" required error={errors.cdlNumber?.message}>
               <input {...register('cdlNumber')} disabled={isPending} className={inputClass} />
@@ -334,19 +453,24 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
                 ))}
               </select>
             </Field>
-            <Field label="Home terminal" required error={errors.homeTerminalTimezone?.message}>
+            <Field label="Home terminal" error={errors.homeTerminalName?.message}>
+              <input
+                {...register('homeTerminalName')}
+                disabled={isPending}
+                className={inputClass}
+              />
+            </Field>
+            <Field label="Home terminal time zone" error={errors.homeTerminalTimezone?.message}>
               <select
-                value={terminalName}
-                onChange={(e) => {
-                  const next = TERMINALS.find((t) => t.name === e.target.value) ?? DEFAULT_TERMINAL;
-                  setTerminalName(next.name);
-                  setValue('homeTerminalTimezone', next.timezone, { shouldDirty: true });
-                }}
+                {...register('homeTerminalTimezone')}
                 disabled={isPending}
                 className={inputClass}
               >
-                {TERMINALS.map((t) => (
-                  <option key={t.name} value={t.name}>
+                <option value="">
+                  {carrierTimezone ? `Carrier time zone (${carrierTimezone})` : 'Carrier time zone'}
+                </option>
+                {HOME_TERMINAL_TIMEZONES.map((t) => (
+                  <option key={t.value} value={t.value}>
                     {t.label}
                   </option>
                 ))}
@@ -380,27 +504,51 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
           </p>
           <div className="grid grid-cols-3 gap-2">
             <label className="flex items-center gap-2 text-body text-text">
-              <input type="checkbox" checked={allowPersonalConveyance} onChange={(e) => setAllowPersonalConveyance(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={allowPersonalConveyance}
+                onChange={(e) => setAllowPersonalConveyance(e.target.checked)}
+              />
               Allow personal conveyance
             </label>
             <label className="flex items-center gap-2 text-body text-text">
-              <input type="checkbox" checked={allowYardMove} onChange={(e) => setAllowYardMove(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={allowYardMove}
+                onChange={(e) => setAllowYardMove(e.target.checked)}
+              />
               Allow yard move
             </label>
             <label className="flex items-center gap-2 text-body text-text">
-              <input type="checkbox" checked={adverseDrivingEnabled} onChange={(e) => setAdverseDrivingEnabled(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={adverseDrivingEnabled}
+                onChange={(e) => setAdverseDrivingEnabled(e.target.checked)}
+              />
               Adverse driving conditions
             </label>
             <label className="flex items-center gap-2 text-body text-text">
-              <input type="checkbox" checked={shortHaulException} onChange={(e) => setShortHaulException(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={shortHaulException}
+                onChange={(e) => setShortHaulException(e.target.checked)}
+              />
               Short-haul exception (150 air-mile)
             </label>
             <label className="flex items-center gap-2 text-body text-text">
-              <input type="checkbox" checked={splitSleeperEnabled} onChange={(e) => setSplitSleeperEnabled(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={splitSleeperEnabled}
+                onChange={(e) => setSplitSleeperEnabled(e.target.checked)}
+              />
               Enable split sleeper berth
             </label>
             <label className="flex items-center gap-2 text-body text-text">
-              <input type="checkbox" checked={eldExempt} onChange={(e) => setEldExempt(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={eldExempt}
+                onChange={(e) => setEldExempt(e.target.checked)}
+              />
               Exempt from ELD (8-day rule)
             </label>
           </div>

@@ -49,11 +49,15 @@ export function parseDriverFilters(params: URLSearchParams): DriverFilters {
     status: (params.get(PARAM.status)?.split(',').filter(Boolean) ?? []) as DriverStatusFilter[],
     terminal: params.get(PARAM.terminal) || null,
     violationsOnly: params.get(PARAM.violationsOnly) === '1',
-    exemptions: (params.get(PARAM.exemptions)?.split(',').filter(Boolean) ?? []) as DriverExemptionFilter[],
+    exemptions: (params.get(PARAM.exemptions)?.split(',').filter(Boolean) ??
+      []) as DriverExemptionFilter[],
   };
 }
 
-export function writeDriverFilters(params: URLSearchParams, filters: DriverFilters): URLSearchParams {
+export function writeDriverFilters(
+  params: URLSearchParams,
+  filters: DriverFilters,
+): URLSearchParams {
   const next = new URLSearchParams(params);
   const setOrDelete = (key: string, value: string | null) => {
     if (value) next.set(key, value);
@@ -80,6 +84,7 @@ export function matchesDriverFilters(entry: DriverRosterEntry, filters: DriverFi
   if (filters.status.length && !filters.status.includes(entry.dutyStatus)) return false;
   if (filters.terminal && entry.driver.homeTerminalName !== filters.terminal) return false;
   if (filters.violationsOnly && entry.openViolations <= 0) return false;
-  if (filters.exemptions.length && !filters.exemptions.every((key) => entry.driver[key])) return false;
+  if (filters.exemptions.length && !filters.exemptions.every((key) => entry.driver[key]))
+    return false;
   return true;
 }

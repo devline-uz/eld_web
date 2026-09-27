@@ -9,7 +9,13 @@ import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
 import { useDynamicSubtitle } from '@/app/layouts/Topbar';
 import { useRoom } from '@/shared/realtime/useRoom';
-import { useDeactivateDriver, useDriver, useDriverHos, useResetDriverPassword, useSendDriverVerification } from '@/shared/api/drivers';
+import {
+  useDeactivateDriver,
+  useDriver,
+  useDriverHos,
+  useResetDriverPassword,
+  useSendDriverVerification,
+} from '@/shared/api/drivers';
 import { useCoDriverPairings, useVehicle } from '@/shared/api/vehicles';
 import { client } from '@/shared/api/client';
 import { endpoints } from '@/shared/api/endpoints';
@@ -81,7 +87,10 @@ export default function DriverProfilePage() {
   const hosQuery = useDriverHos(id);
   const vehicleQuery = useVehicle(driverQuery.data?.assignedVehicleId ?? undefined);
   const fleetManagerQuery = useDriverFleetManager(driverQuery.data?.fleetManagerId ?? null);
-  const coDriverPairingQuery = useCoDriverPairings({ driverId: id, active: true, limit: 1 }, Boolean(id));
+  const coDriverPairingQuery = useCoDriverPairings(
+    { driverId: id, active: true, limit: 1 },
+    Boolean(id),
+  );
   const coDriverPairing = coDriverPairingQuery.data?.items[0] ?? null;
   const coDriverPartnerId = coDriverPairing
     ? coDriverPairing.primaryDriverId === id
@@ -90,7 +99,11 @@ export default function DriverProfilePage() {
     : undefined;
   const coDriverQuery = useDriver(coDriverPartnerId);
 
-  useDynamicSubtitle(driverQuery.data ? `Drivers › ${driverQuery.data.firstName} ${driverQuery.data.lastName}` : null);
+  useDynamicSubtitle(
+    driverQuery.data
+      ? `Drivers › ${driverQuery.data.firstName} ${driverQuery.data.lastName}`
+      : null,
+  );
   useRoom(id ? `driver:${id}` : null, {});
 
   const { toast } = useToast();
@@ -107,7 +120,11 @@ export default function DriverProfilePage() {
     if (!id || resetPassword.isPending) return;
     resetPassword.mutate(id, {
       onSuccess: (result) => toast({ kind: 'success', ...DRIVER_TOAST.passwordReset(result) }),
-      onError: (error) => toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }),
+      onError: (error) =>
+        toast({
+          kind: 'error',
+          title: error instanceof ApiError ? error.userMessage : 'Something went wrong.',
+        }),
     });
   }
 
@@ -115,7 +132,11 @@ export default function DriverProfilePage() {
     if (!id || sendVerification.isPending) return;
     sendVerification.mutate(id, {
       onSuccess: () => toast({ kind: 'success', ...DRIVER_TOAST.verificationSent(email) }),
-      onError: (error) => toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }),
+      onError: (error) =>
+        toast({
+          kind: 'error',
+          title: error instanceof ApiError ? error.userMessage : 'Something went wrong.',
+        }),
     });
   }
 
@@ -129,14 +150,18 @@ export default function DriverProfilePage() {
       },
       onError: (error) => {
         setConfirmDeactivate(false);
-        toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+        toast({
+          kind: 'error',
+          title: error instanceof ApiError ? error.userMessage : 'Something went wrong.',
+        });
       },
     });
   }
 
   if (!can('drivers')) return <ForbiddenState screenName="Driver profile" />;
   if (driverQuery.isLoading) return <LoadingState rows={8} />;
-  if (driverQuery.isError || !driverQuery.data) return <ErrorState onRetry={() => driverQuery.refetch()} />;
+  if (driverQuery.isError || !driverQuery.data)
+    return <ErrorState onRetry={() => driverQuery.refetch()} />;
 
   const driver = driverQuery.data;
   const name = `${driver.firstName} ${driver.lastName}`;
@@ -174,9 +199,15 @@ export default function DriverProfilePage() {
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-page-title text-text">{name}</h1>
-                {driver.status === 'ACTIVE' && <Badge tone="success" dot>Active</Badge>}
+                {driver.status === 'ACTIVE' && (
+                  <Badge tone="success" dot>
+                    Active
+                  </Badge>
+                )}
                 {driver.email && !driver.emailVerifiedAt && (
-                  <Badge tone="warning" dot>Email not verified</Badge>
+                  <Badge tone="warning" dot>
+                    Email not verified
+                  </Badge>
                 )}
               </div>
               <p className="mt-1 text-body text-text-muted">
@@ -189,7 +220,11 @@ export default function DriverProfilePage() {
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {canMessage && (
-              <Button variant="secondary" iconLeft={<MessageSquare size={16} strokeWidth={1.75} />} onClick={() => navigate(messagesHref(driver.id))}>
+              <Button
+                variant="secondary"
+                iconLeft={<MessageSquare size={16} strokeWidth={1.75} />}
+                onClick={() => navigate(messagesHref(driver.id))}
+              >
                 Message
               </Button>
             )}
@@ -197,7 +232,11 @@ export default function DriverProfilePage() {
               View logs
             </Button>
             {canAssignTrip && (
-              <Button variant="primary" iconLeft={<UserPlus size={16} strokeWidth={1.75} />} onClick={() => navigate(tripsHrefForDriver(driver.id))}>
+              <Button
+                variant="primary"
+                iconLeft={<UserPlus size={16} strokeWidth={1.75} />}
+                onClick={() => navigate(tripsHrefForDriver(driver.id))}
+              >
                 Assign trip
               </Button>
             )}
@@ -209,7 +248,10 @@ export default function DriverProfilePage() {
                   </Button>
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Portal>
-                  <DropdownMenu.Content align="end" className="z-50 min-w-48 rounded-md border border-border bg-bg-surface p-1 shadow-pop">
+                  <DropdownMenu.Content
+                    align="end"
+                    className="z-50 min-w-48 rounded-md border border-border bg-bg-surface p-1 shadow-pop"
+                  >
                     {/* B-81 shipped — `POST /drivers/:id/reset-password`. */}
                     <DropdownMenu.Item
                       onSelect={runResetPassword}
@@ -261,7 +303,10 @@ export default function DriverProfilePage() {
         <div className="grid grid-cols-[1fr_348px] gap-4">
           <div className="flex flex-col gap-4">
             <Card>
-              <SectionHeader title="Hours of service · right now" subtitle="Property-carrying · 70 hr / 8 day cycle" />
+              <SectionHeader
+                title="Hours of service · right now"
+                subtitle="Property-carrying · 70 hr / 8 day cycle"
+              />
               {hosQuery.isLoading ? (
                 <LoadingState rows={4} className="mt-3" />
               ) : hosQuery.isError || !hosQuery.data ? (
@@ -276,16 +321,36 @@ export default function DriverProfilePage() {
               ) : (
                 <div className="mt-3 grid grid-cols-4 gap-3">
                   <div className="rounded-md border border-border p-3.5">
-                    <HosMeter label="Drive left" remainingSec={hosQuery.data.driveRemainingSec} limitSec={hosQuery.data.driveLimitSec} ofHint="limit exceeded" />
+                    <HosMeter
+                      label="Drive left"
+                      remainingSec={hosQuery.data.driveRemainingSec}
+                      limitSec={hosQuery.data.driveLimitSec}
+                      ofHint="limit exceeded"
+                    />
                   </div>
                   <div className="rounded-md border border-border p-3.5">
-                    <HosMeter label="Shift left" remainingSec={hosQuery.data.shiftRemainingSec} limitSec={hosQuery.data.shiftLimitSec} ofHint="of 14:00" />
+                    <HosMeter
+                      label="Shift left"
+                      remainingSec={hosQuery.data.shiftRemainingSec}
+                      limitSec={hosQuery.data.shiftLimitSec}
+                      ofHint="of 14:00"
+                    />
                   </div>
                   <div className="rounded-md border border-border p-3.5">
-                    <HosMeter label="Cycle left" remainingSec={hosQuery.data.cycleRemainingSec} limitSec={hosQuery.data.cycleLimitSec} ofHint="of 70:00" />
+                    <HosMeter
+                      label="Cycle left"
+                      remainingSec={hosQuery.data.cycleRemainingSec}
+                      limitSec={hosQuery.data.cycleLimitSec}
+                      ofHint="of 70:00"
+                    />
                   </div>
                   <div className="rounded-md border border-border p-3.5">
-                    <HosMeter label="Break in" remainingSec={hosQuery.data.breakInSec} limitSec={hosQuery.data.breakLimitSec} ofHint="of 08:00 driving" />
+                    <HosMeter
+                      label="Break in"
+                      remainingSec={hosQuery.data.breakInSec}
+                      limitSec={hosQuery.data.breakLimitSec}
+                      ofHint="of 08:00 driving"
+                    />
                   </div>
                 </div>
               )}
@@ -299,18 +364,34 @@ export default function DriverProfilePage() {
                   // WB-186 — the button had no handler. Per-driver violations are rendered by
                   // W-08, so `View all` opens this driver's log there, exactly like the sentence
                   // below it says.
-                  <Button variant="link" onClick={() => navigate(`/hos-logs?driverId=${driver.id}`)}>
+                  <Button
+                    variant="link"
+                    onClick={() => navigate(`/hos-logs?driverId=${driver.id}`)}
+                  >
                     View all ›
                   </Button>
                 }
               />
               {/* ⛔ GAP B-6 — no GET /violations; per-driver violations only surface inside the
                   logs response, which HOS Logs (W-08, owned elsewhere) already renders. */}
-              <p className="mt-3 text-body text-text-muted">Open HOS Logs to review violations for this driver.</p>
+              <p className="mt-3 text-body text-text-muted">
+                Open HOS Logs to review violations for this driver.
+              </p>
             </Card>
 
             <Card>
-              <SectionHeader title="Recent daily logs" subtitle="Last 8 days available" action={<Button variant="link" onClick={() => navigate(`/hos-logs?driverId=${driver.id}`)}>Open HOS logs ›</Button>} />
+              <SectionHeader
+                title="Recent daily logs"
+                subtitle="Last 8 days available"
+                action={
+                  <Button
+                    variant="link"
+                    onClick={() => navigate(`/hos-logs?driverId=${driver.id}`)}
+                  >
+                    Open HOS logs ›
+                  </Button>
+                }
+              />
               <p className="mt-3 text-body text-text-muted">
                 Daily totals and certification status come from{' '}
                 <Link to={`/hos-logs?driverId=${driver.id}`} className="text-primary">
@@ -326,7 +407,12 @@ export default function DriverProfilePage() {
               title="Driver profile"
               action={
                 <Can perm="drivers" level="FULL">
-                  <Button variant="ghost" size="sm" iconLeft={<Pencil size={14} strokeWidth={1.75} />} onClick={() => setEditOpen(true)}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    iconLeft={<Pencil size={14} strokeWidth={1.75} />}
+                    onClick={() => setEditOpen(true)}
+                  >
                     Edit
                   </Button>
                 </Can>
@@ -345,11 +431,26 @@ export default function DriverProfilePage() {
               <DetailRow label="Fleet manager" value={fleetManagerQuery.data?.name ?? '—'} />
               <DetailRow
                 label="Co-driver"
-                value={coDriverQuery.data ? `${coDriverQuery.data.firstName} ${coDriverQuery.data.lastName}` : '—'}
+                value={
+                  coDriverQuery.data
+                    ? `${coDriverQuery.data.firstName} ${coDriverQuery.data.lastName}`
+                    : '—'
+                }
               />
-              <DetailRow label="Assigned unit" value={vehicleQuery.data?.unitNumber ?? 'Unassigned'} />
-              <DetailRow label="App version" value={driver.appVersion ? `${driver.appVersion} · ${driver.appPlatform ?? ''}` : '—'} />
-              <DetailRow label="Registered on" value={formatLocal(driver.registeredAt, 'shortDate')} />
+              <DetailRow
+                label="Assigned unit"
+                value={vehicleQuery.data?.unitNumber ?? 'Unassigned'}
+              />
+              <DetailRow
+                label="App version"
+                value={
+                  driver.appVersion ? `${driver.appVersion} · ${driver.appPlatform ?? ''}` : '—'
+                }
+              />
+              <DetailRow
+                label="Registered on"
+                value={formatLocal(driver.registeredAt, 'shortDate')}
+              />
               <DetailRow label="Exemptions" value={orNone(exemptionsList(driver) || null)} />
             </div>
           </Card>
@@ -377,8 +478,8 @@ export default function DriverProfilePage() {
             <Link to={DVIR_HREF} className="text-primary">
               DVIR &amp; Maintenance
             </Link>
-            . It cannot be filtered to one driver yet — look for {driver.firstName} {driver.lastName} in the
-            DRIVER column.
+            . It cannot be filtered to one driver yet — look for {driver.firstName}{' '}
+            {driver.lastName} in the DRIVER column.
           </p>
         </Card>
       )}
@@ -421,7 +522,9 @@ function useDriverFleetManager(userId: string | null) {
     queryKey: qk.user(userId ?? ''),
     queryFn: async () => {
       if (!userId) return null;
-      const user = await client.get<{ firstName?: string; lastName?: string; fullName?: string }>(endpoints.users.detail(userId));
+      const user = await client.get<{ firstName?: string; lastName?: string; fullName?: string }>(
+        endpoints.users.detail(userId),
+      );
       const name = user.fullName ?? [user.firstName, user.lastName].filter(Boolean).join(' ');
       return name ? { name } : null;
     },

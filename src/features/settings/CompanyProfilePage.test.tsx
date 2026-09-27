@@ -1,7 +1,7 @@
 // web/tz.md W-17 — four states, `Save changes` gating, and the exact `Settings saved` toast.
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http } from 'msw';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
@@ -150,7 +150,8 @@ describe('CompanyProfilePage — W-17', () => {
     await retype('compliance@universal-logistics.example', 'ops@example.com');
     await retype('4517 Washington Ave.', '1 Main St.');
     await retype('Columbus', 'Dayton');
-    await user.selectOptions(screen.getByDisplayValue('OH'), 'NY');
+    await user.click(screen.getByRole('combobox', { name: /^State/ }));
+    await user.click(screen.getByRole('option', { name: 'NY' }));
     await retype('43004', '10001');
 
     await user.selectOptions(screen.getByDisplayValue('US 70 hr / 8 day — Property carrying'), 'US_60_7_PROPERTY');
@@ -305,5 +306,202 @@ describe('CompanyProfilePage — onBlur validation', () => {
 
     await user.type(dot, '7654321');
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+});
+
+/* ------------------------------------------------------------------ field-level save errors */
+
+/** The `<label>` wrapping the field whose caption starts with `caption`. */
+function fieldOf(caption: string) {
+  const escaped = caption.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+  const label = screen.getByText(new RegExp(`^${escaped}`), { selector: 'span.text-label' }).closest('label');
+  if (!label) throw new Error(`No field labelled ${caption}`);
+  return label;
+}
+
+/** Asserts `message` is the error shown under `caption`, and that its control is marked invalid. */
+function expectFieldError(caption: string, message: string) {
+  const label = fieldOf(caption);
+  expect(within(label).getByRole('alert')).toHaveTextContent(message);
+  expect(label.querySelector('input, select, [role="combobox"]')).toHaveAttribute('aria-invalid', 'true');
+}
+
+/** Loads a carrier with `overrides`, makes the form dirty, and presses Save. */
+async function saveWith(overrides: Record<string, unknown>, onPatch: (body: unknown) => Response | Promise<Response> = () => ok(CARRIER)) {
+  const user = userEvent.setup();
+  server.use(http.get(url(endpoints.carrier.root), () => ok({ ...CARRIER, ...overrides })));
+  server.use(http.patch(url(endpoints.carrier.root), async ({ request }) => onPatch(await request.json())));
+  renderPage();
+  const name = await screen.findByDisplayValue(String(overrides.name ?? CARRIER.name));
+  await user.type(name, ' II');
+  await user.click(screen.getByRole('button', { name: 'Save changes' }));
+  return user;
+}
+
+describe('CompanyProfilePage — every save error is shown under its own field', () => {
+  it.each([
+    ['US DOT number', { dotNumber: '12AB45' }, 'A USDOT number is 1 to 8 digits.'],
+    ['MC number', { mcNumber: 'MC-12AB' }, 'An MC number is 1 to 8 digits, optionally after MC-.'],
+    ['EIN / Tax ID', { ein: '12-345' }, 'Enter the EIN as 12-3456789.'],
+    ['Compliance email', { complianceEmail: 'ops@acme' }, 'Enter a valid email address.'],
+    ['State', { state: 'XX' }, 'Select a state from the list.'],
+    ['ZIP', { zip: '4321' }, 'Enter a 5-digit ZIP or ZIP+4 (43215-1234).'],
+  ])('%s — an invalid value is named under the field and not sent', async (caption, overrides, message) => {
+    let patched = false;
+    await saveWith(overrides, () => {
+      patched = true;
+      return ok(CARRIER);
+    });
+    await waitFor(() => expectFieldError(caption, message));
+    expect(patched).toBe(false);
+  });
+
+  it('an empty US DOT number and company name each say what is missing', async () => {
+    const user = userEvent.setup();
+    server.use(http.get(url(endpoints.carrier.root), () => ok(CARRIER)));
+    renderPage();
+    await user.clear(await screen.findByDisplayValue('Universal Logistics Inc.'));
+    await user.clear(screen.getByDisplayValue('1234567'));
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expectFieldError('Company name', 'Enter the company name.'));
+    expectFieldError('US DOT number', 'A USDOT number is 1 to 8 digits.');
+  });
+
+  it('shows every invalid field at once', async () => {
+    await saveWith({ dotNumber: '12AB', mcNumber: 'MC-X', ein: '1234', complianceEmail: 'nope', state: 'XX', zip: '123' });
+    await waitFor(() => expectFieldError('US DOT number', 'A USDOT number is 1 to 8 digits.'));
+    expectFieldError('MC number', 'An MC number is 1 to 8 digits, optionally after MC-.');
+    expectFieldError('EIN / Tax ID', 'Enter the EIN as 12-3456789.');
+    expectFieldError('Compliance email', 'Enter a valid email address.');
+    expectFieldError('State', 'Select a state from the list.');
+    expectFieldError('ZIP', 'Enter a 5-digit ZIP or ZIP+4 (43215-1234).');
+    // Valid fields stay clean.
+    expect(within(fieldOf('Main phone')).queryByRole('alert')).toBeNull();
+  });
+
+  it('puts a backend 422 (ZodValidationPipe issues) under the mapped fields and lists unmapped ones', async () => {
+    await saveWith({}, () =>
+      fail(422, 'VALIDATION_FAILED', 'Request validation failed.', {
+        issues: [
+          { path: 'complianceEmail', code: 'invalid_string', message: 'Invalid email' },
+          { path: 'mcNumber', code: 'too_big', message: 'String must contain at most 20 character(s)' },
+          { path: 'address.zip', code: 'custom', message: 'ZIP 43004 is not in NY.' },
+          { path: 'us_dot_number', code: 'custom', message: 'USDOT 1234567 is inactive at FMCSA.' },
+          { path: 'logoUrl', code: 'invalid_type', message: 'Expected string, received null' },
+        ],
+      }),
+    );
+    await waitFor(() => expectFieldError('Compliance email', 'Enter a valid email address.'));
+    expectFieldError('MC number', 'String must contain at most 20 character(s)');
+    expectFieldError('ZIP', 'ZIP 43004 is not in NY.');
+    expectFieldError('US DOT number', 'USDOT 1234567 is inactive at FMCSA.');
+    // Not a field on this form — shown in the banner, never swallowed.
+    expect(screen.getByText('logoUrl: Expected string, received null')).toBeInTheDocument();
+    expect(await screen.findByText('Check the highlighted fields and try again.')).toBeInTheDocument();
+  });
+
+  it('puts a service-rule 422 that names its field in `details.field` under that field', async () => {
+    await saveWith({ eldRegistrationId: null }, () =>
+      fail(422, 'TRANSFER_VALIDATION_FAILED', 'erodsMode=PRODUCTION requires a 4-character eldRegistrationId (§395 Appendix A header segment).', {
+        field: 'eldRegistrationId',
+      }),
+    );
+    await waitFor(() =>
+      expectFieldError(
+        'ELD registration ID',
+        'erodsMode=PRODUCTION requires a 4-character eldRegistrationId (§395 Appendix A header segment).',
+      ),
+    );
+  });
+
+  it('shows a 4xx that names no field as a form banner', async () => {
+    await saveWith({}, () => fail(409, 'CONFLICT', 'The carrier profile was changed by someone else.'));
+    expect(await screen.findByText('The carrier profile was changed by someone else.')).toBeInTheDocument();
+  });
+
+  it('never sends the null columns of the loaded row (they were a 422 on untouched fields)', async () => {
+    let body: Record<string, unknown> | null = null;
+    await saveWith({ ein: null, eldRegistrationId: null, logoUrl: null, updatedAt: '2026-09-01T00:00:00Z' }, (sent) => {
+      body = sent as Record<string, unknown>;
+      return ok(CARRIER);
+    });
+    await waitFor(() => expect(body).not.toBeNull());
+    expect(Object.values(body!)).not.toContain(null);
+    expect(body).not.toHaveProperty('logoUrl');
+    expect(body).not.toHaveProperty('id');
+    expect(body).toMatchObject({ name: 'Universal Logistics Inc. II', dotNumber: '1234567' });
+  });
+});
+
+/* ------------------------------------------------------------------ State dropdown */
+
+describe('CompanyProfilePage — State dropdown', () => {
+  async function openStateMenu(overrides: Record<string, unknown> = {}) {
+    const user = userEvent.setup();
+    server.use(http.get(url(endpoints.carrier.root), () => ok({ ...CARRIER, ...overrides })));
+    renderPage();
+    await screen.findByDisplayValue(CARRIER.name);
+    const trigger = screen.getByRole('combobox', { name: /^State/ });
+    await user.click(trigger);
+    return { user, trigger, listbox: await screen.findByRole('listbox') };
+  }
+
+  it('lists every US state (50 + DC) plus the empty choice, in a scrolling menu', async () => {
+    const { listbox } = await openStateMenu();
+    const options = within(listbox).getAllByRole('option');
+    expect(options).toHaveLength(52);
+    expect(options[0]).toHaveTextContent('—');
+    for (const code of ['AL', 'AK', 'CA', 'DC', 'TX', 'WY', 'OH']) {
+      expect(within(listbox).getByRole('option', { name: code })).toBeInTheDocument();
+    }
+    // Ontario is not a US state — it is no longer offered.
+    expect(within(listbox).queryByRole('option', { name: 'ON' })).toBeNull();
+    expect(within(listbox).getByRole('option', { name: 'OH' })).toHaveAttribute('aria-selected', 'true');
+    // The menu scrolls itself instead of growing the page.
+    expect(listbox).toHaveClass('max-h-72', 'overflow-y-auto');
+  });
+
+  it('selecting a state updates the field and enables Save', async () => {
+    const { user, trigger } = await openStateMenu();
+    await user.click(screen.getByRole('option', { name: 'TX' }));
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(trigger).toHaveTextContent('TX');
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
+  });
+
+  it('supports the keyboard: arrows move, Enter picks, Esc closes', async () => {
+    const { user, trigger, listbox } = await openStateMenu();
+    expect(listbox).toHaveFocus();
+    await user.keyboard('{ArrowDown}{Enter}');
+    expect(trigger).toHaveTextContent('OK'); // OH → next option
+    await user.keyboard('{ArrowDown}');
+    const reopened = await screen.findByRole('listbox');
+    await user.keyboard('w');
+    expect(reopened.getAttribute('aria-activedescendant')).toBe(
+      within(reopened).getByRole('option', { name: 'WA' }).id,
+    );
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(trigger).toHaveTextContent('OK');
+  });
+
+  it('keeps showing a stored state that is not in the list', async () => {
+    const { listbox, trigger } = await openStateMenu({ state: 'ON' });
+    expect(trigger).toHaveTextContent('ON');
+    expect(within(listbox).getByRole('option', { name: 'ON' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('an out-of-list state is flagged under the field on save', async () => {
+    await saveWith({ state: 'ZZ' });
+    await waitFor(() => expectFieldError('State', 'Select a state from the list.'));
+  });
+
+  it('clearing the state to the empty choice is allowed (the field is optional)', async () => {
+    const { user, trigger } = await openStateMenu();
+    await user.click(screen.getByRole('option', { name: '—' }));
+    expect(trigger).toHaveTextContent('—');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save changes' })).toBeInTheDocument());
+    expect(within(fieldOf('State')).queryByRole('alert')).toBeNull();
   });
 });

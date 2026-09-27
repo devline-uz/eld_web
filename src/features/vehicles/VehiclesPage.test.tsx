@@ -369,6 +369,49 @@ describe('W-03 Vehicles', () => {
     expect(screen.queryByText('900,000 mi')).not.toBeInTheDocument();
   });
 
+  // A newly added ACTIVE unit with no ELD paired comes back from /live/fleet as dutyStatus
+  // INACTIVE ("no live data") — the STATUS column must not show it as Inactive.
+  it('a new ACTIVE unit with no ELD is not shown Inactive just because /live/fleet says INACTIVE', async () => {
+    server.use(
+      http.get(url(endpoints.vehicles.list), () =>
+        ok({ items: [{ ...VEHICLE_ROW, status: 'ACTIVE' }], page: 1, limit: 10, total: 1, totalPages: 1 }),
+      ),
+      http.get(url(endpoints.drivers.list), () => ok({ items: [], page: 1, limit: 500, total: 0, totalPages: 1 })),
+      http.get(url(endpoints.devices.list), () => ok({ items: [], page: 1, limit: 500, total: 0, totalPages: 1 })),
+      http.get(url(endpoints.live.fleet), () =>
+        ok({
+          generatedAt: '2026-09-27T00:00:00.000Z',
+          items: [
+            {
+              vehicleId: 'veh_1',
+              unitNumber: '#101',
+              driverId: null,
+              driverName: null,
+              driverPhone: null,
+              dutyStatus: 'INACTIVE',
+              speedMph: null,
+              headingDeg: null,
+              odometerMi: null,
+              lat: null,
+              lon: null,
+              locationLabel: null,
+              lastSeenAt: null,
+              driveRemainingSec: null,
+              shiftEndsAt: null,
+              eldSerial: null,
+              bleState: null,
+            },
+          ],
+        }),
+      ),
+    );
+    renderPage();
+
+    const row = (await screen.findByText('#101')).closest('tr')!;
+    expect(await within(row).findByText('Active')).toBeInTheDocument();
+    expect(within(row).queryByText('Inactive')).not.toBeInTheDocument();
+  });
+
   // WB-161 — the bulk-bar button had no onClick at all.
   it('bulk "Assign driver" opens 11.4 for the one selected unit', async () => {
     usePopulatedFleet();

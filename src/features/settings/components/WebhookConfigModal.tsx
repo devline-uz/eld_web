@@ -85,7 +85,9 @@ export function WebhookConfigModal({
         onSuccess: () => {
           toast({
             kind: 'success',
-            ...(mode === 'connect' ? SETTINGS_TOAST.integrationConnected(name) : SETTINGS_TOAST.webhookUpdated),
+            ...(mode === 'connect'
+              ? SETTINGS_TOAST.integrationConnected(name)
+              : SETTINGS_TOAST.webhookUpdated),
           });
           onClose();
         },
@@ -124,7 +126,13 @@ export function WebhookConfigModal({
       footer={
         <>
           <ModalCancelButton disabled={submitting} />
-          <Button variant="primary" size="lg" loading={submitting} disabled={submitting} onClick={handleSubmit(onSubmit)}>
+          <Button
+            variant="primary"
+            size="lg"
+            loading={submitting}
+            disabled={submitting}
+            onClick={handleSubmit(onSubmit)}
+          >
             {mode === 'connect' ? WEBHOOK_COPY.connectSubmit : WEBHOOK_COPY.configureSubmit}
           </Button>
         </>
@@ -136,7 +144,12 @@ export function WebhookConfigModal({
             {banner}
           </p>
         )}
-        <Field label={WEBHOOK_COPY.urlLabel} required error={errors.url?.message} hint={WEBHOOK_COPY.urlHint}>
+        <Field
+          label={WEBHOOK_COPY.urlLabel}
+          required
+          error={errors.url?.message}
+          hint={WEBHOOK_COPY.urlHint}
+        >
           <input
             {...register('url')}
             type="url"
@@ -152,7 +165,10 @@ export function WebhookConfigModal({
             name if nested inside a `<label>` (same reason as AddDriverModal's password). */}
         <div className="flex flex-col gap-1">
           <label className="text-label text-text" htmlFor="webhook-secret">
-            {WEBHOOK_COPY.secretLabel} <span className="text-danger" aria-hidden="true">*</span>
+            {WEBHOOK_COPY.secretLabel}{' '}
+            <span className="text-danger" aria-hidden="true">
+              *
+            </span>
           </label>
           <div className="flex items-center gap-2">
             <div className="relative flex-1">
@@ -164,7 +180,9 @@ export function WebhookConfigModal({
                 spellCheck={false}
                 disabled={submitting}
                 aria-invalid={Boolean(secretError)}
-                aria-describedby={secretError ? 'webhook-secret-error webhook-secret-help' : 'webhook-secret-help'}
+                aria-describedby={
+                  secretError ? 'webhook-secret-error webhook-secret-help' : 'webhook-secret-help'
+                }
                 className={`${inputClass} w-full pr-9 font-mono`}
               />
               <button
@@ -173,7 +191,11 @@ export function WebhookConfigModal({
                 onClick={() => setShowSecret((v) => !v)}
                 className="absolute right-1 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-text-muted hover:bg-bg-subtle"
               >
-                {showSecret ? <EyeOff size={16} strokeWidth={1.75} /> : <Eye size={16} strokeWidth={1.75} />}
+                {showSecret ? (
+                  <EyeOff size={16} strokeWidth={1.75} />
+                ) : (
+                  <Eye size={16} strokeWidth={1.75} />
+                )}
               </button>
             </div>
             <Button

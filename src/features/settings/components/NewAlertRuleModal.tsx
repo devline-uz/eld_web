@@ -23,14 +23,23 @@ import { SETTINGS_TOAST } from '../lib/copy';
 // Validation comes from the shared `alertRuleFormSchema`, which matches `CreateAlertRuleDto` (WB-025).
 import { alertRuleFormSchema, type AlertRuleFormValues } from '@/shared/forms/schemas';
 
-const RECIPIENT_OPTIONS = ['Assigned fleet manager', 'Fleet managers', 'Dispatchers', 'Safety team'] as const;
+const RECIPIENT_OPTIONS = [
+  'Assigned fleet manager',
+  'Fleet managers',
+  'Dispatchers',
+  'Safety team',
+] as const;
 
 /** The event vocabulary the rule engine evaluates (`conditions[].event`). */
 const EVENT_OPTIONS: { value: string; label: string; minutesLabel?: string }[] = [
   { value: 'hos.break_due', label: '30-minute break is due', minutesLabel: 'within (minutes)' },
   { value: 'hos.violation', label: 'HOS violation recorded' },
   { value: 'device.offline', label: 'ELD stopped reporting', minutesLabel: 'for (minutes)' },
-  { value: 'unidentified.created', label: 'Unassigned driving detected', minutesLabel: 'longer than (minutes)' },
+  {
+    value: 'unidentified.created',
+    label: 'Unassigned driving detected',
+    minutesLabel: 'longer than (minutes)',
+  },
   { value: 'maintenance.overdue', label: 'Maintenance is overdue' },
   { value: 'safety.harsh', label: 'Harsh driving event' },
   { value: 'geofence.exit', label: 'Unit left a geofence' },
@@ -57,7 +66,8 @@ function repeatOf(throttle: Throttle): RepeatKey {
   if (!throttle || (throttle.perDriverPerDay === undefined && throttle.cooldownMin === undefined)) {
     return 'every-occurrence';
   }
-  if (throttle.perDriverPerDay === 1 && throttle.cooldownMin === undefined) return 'once-per-driver-per-day';
+  if (throttle.perDriverPerDay === 1 && throttle.cooldownMin === undefined)
+    return 'once-per-driver-per-day';
   if (throttle.cooldownMin === 60 && throttle.perDriverPerDay === undefined) return 'once-per-hour';
   return 'custom';
 }
@@ -96,7 +106,8 @@ export function NewAlertRuleModal({ onClose, rule, mode = 'create' }: AlertRuleM
   const [inApp, setInApp] = useState(rule ? rule.channels.includes('IN_APP') : true);
   const [email, setEmail] = useState(rule ? rule.channels.includes('EMAIL') : true);
   const [webhook, setWebhook] = useState(rule ? rule.channels.includes('WEBHOOK') : false);
-  const [recipientRole, setRecipientRole] = useState<(typeof RECIPIENT_OPTIONS)[number]>(seededRecipient);
+  const [recipientRole, setRecipientRole] =
+    useState<(typeof RECIPIENT_OPTIONS)[number]>(seededRecipient);
   const [quietHours, setQuietHours] = useState(rule ? Boolean(rule.quietHours) : true);
   const [enableNow, setEnableNow] = useState(rule ? rule.enabled : true);
   const [conditions, setConditions] = useState<AlertRuleCondition[]>(
@@ -127,7 +138,8 @@ export function NewAlertRuleModal({ onClose, rule, mode = 'create' }: AlertRuleM
     quietHours !== (rule ? Boolean(rule.quietHours) : true) ||
     enableNow !== (rule ? rule.enabled : true) ||
     repeat !== repeatOf(rule?.throttle) ||
-    JSON.stringify(conditions) !== JSON.stringify(rule && rule.conditions.length > 0 ? rule.conditions : [DEFAULT_CONDITION]);
+    JSON.stringify(conditions) !==
+      JSON.stringify(rule && rule.conditions.length > 0 ? rule.conditions : [DEFAULT_CONDITION]);
 
   function setConditionEvent(index: number, event: string) {
     setConditionError(null);
@@ -135,21 +147,29 @@ export function NewAlertRuleModal({ onClose, rule, mode = 'create' }: AlertRuleM
       prev.map((c, i) => {
         if (i !== index) return c;
         const hasMinutes = Boolean(EVENT_BY_VALUE.get(event)?.minutesLabel);
-        return hasMinutes ? { event, params: { minutes: Number(c.params?.minutes ?? 30) } } : { event };
+        return hasMinutes
+          ? { event, params: { minutes: Number(c.params?.minutes ?? 30) } }
+          : { event };
       }),
     );
   }
 
   function setConditionMinutes(index: number, minutes: string) {
     const parsed = Number(minutes.replace(/\D/g, '').slice(0, 4));
-    setConditions((prev) => prev.map((c, i) => (i === index ? { ...c, params: { ...c.params, minutes: parsed } } : c)));
+    setConditions((prev) =>
+      prev.map((c, i) => (i === index ? { ...c, params: { ...c.params, minutes: parsed } } : c)),
+    );
   }
 
   function addCondition() {
     setConditionError(null);
-    const unused = EVENT_OPTIONS.find((o) => !conditions.some((c) => c.event === o.value)) ?? EVENT_OPTIONS[0]!;
+    const unused =
+      EVENT_OPTIONS.find((o) => !conditions.some((c) => c.event === o.value)) ?? EVENT_OPTIONS[0]!;
     const hasMinutes = Boolean(unused.minutesLabel);
-    setConditions((prev) => [...prev, hasMinutes ? { event: unused.value, params: { minutes: 30 } } : { event: unused.value }]);
+    setConditions((prev) => [
+      ...prev,
+      hasMinutes ? { event: unused.value, params: { minutes: 30 } } : { event: unused.value },
+    ]);
   }
 
   function removeCondition(index: number) {
@@ -207,34 +227,63 @@ export function NewAlertRuleModal({ onClose, rule, mode = 'create' }: AlertRuleM
         onClose();
       },
       onError: (error: unknown) => {
-        toast({ kind: 'error' as const, title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+        toast({
+          kind: 'error' as const,
+          title: error instanceof ApiError ? error.userMessage : 'Something went wrong.',
+        });
       },
     };
 
     // `key` is the rule's stable identifier: it is minted on create only. Re-deriving it from an
     // edited name on PATCH would silently re-key the rule.
     if (editing) updateRule.mutate({ id: rule.id, dto: payload }, handlers);
-    else createRule.mutate({ ...payload, key: values.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_') }, handlers);
+    else
+      createRule.mutate(
+        {
+          ...payload,
+          key: values.name
+            .trim()
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, '_'),
+        },
+        handlers,
+      );
   }
 
   return (
     <Modal
       open
       onClose={onClose}
-      title={editing ? 'Edit alert rule' : mode === 'duplicate' ? 'Duplicate alert rule' : 'New alert rule'}
+      title={
+        editing
+          ? 'Edit alert rule'
+          : mode === 'duplicate'
+            ? 'Duplicate alert rule'
+            : 'New alert rule'
+      }
       subtitle="Alerts are evaluated against live ELD telemetry"
       size="lg"
       isDirty={dirty}
       footer={
         <>
           <label className="mr-auto flex items-center gap-2 text-body text-text">
-            <input type="checkbox" checked={enableNow} onChange={(e) => setEnableNow(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={enableNow}
+              onChange={(e) => setEnableNow(e.target.checked)}
+            />
             {editing ? 'Rule is enabled' : 'Enable the rule immediately'}
           </label>
           <ModalCancelButton disabled={submitting} />
           {/* ⛔ GAP B-9 — `POST /alert-rules/:id/test` does not exist on the live API; `Test rule`
               stays out of the DOM. */}
-          <Button variant="primary" size="lg" loading={submitting} disabled={submitting} onClick={handleSubmit(onSubmit)}>
+          <Button
+            variant="primary"
+            size="lg"
+            loading={submitting}
+            disabled={submitting}
+            onClick={handleSubmit(onSubmit)}
+          >
             {editing ? 'Save changes' : mode === 'duplicate' ? 'Create copy' : 'Create rule'}
           </Button>
         </>
@@ -243,7 +292,12 @@ export function NewAlertRuleModal({ onClose, rule, mode = 'create' }: AlertRuleM
       <form className="flex flex-col gap-4" onSubmit={handleSubmit(onSubmit)}>
         <div className="grid grid-cols-2 gap-4">
           <Field label="Rule name" required error={errors.name?.message}>
-            <input {...register('name')} placeholder="Break required soon" disabled={submitting} className={inputClass} />
+            <input
+              {...register('name')}
+              placeholder="Break required soon"
+              disabled={submitting}
+              className={inputClass}
+            />
           </Field>
           <Field label="Severity" required>
             <select {...register('severity')} disabled={submitting} className={inputClass}>
@@ -267,7 +321,9 @@ export function NewAlertRuleModal({ onClose, rule, mode = 'create' }: AlertRuleM
                     <Field label={index === 0 ? 'When' : 'And when'}>
                       <select
                         value={condition.event}
-                        aria-label={index === 0 ? 'Condition event' : `Condition ${index + 1} event`}
+                        aria-label={
+                          index === 0 ? 'Condition event' : `Condition ${index + 1} event`
+                        }
                         onChange={(e) => setConditionEvent(index, e.target.value)}
                         disabled={submitting}
                         className={inputClass}
@@ -327,7 +383,9 @@ export function NewAlertRuleModal({ onClose, rule, mode = 'create' }: AlertRuleM
         </div>
 
         <div>
-          <p className="mb-2 text-nav-section font-semibold uppercase tracking-wide text-text-muted">Delivery</p>
+          <p className="mb-2 text-nav-section font-semibold uppercase tracking-wide text-text-muted">
+            Delivery
+          </p>
           <div className="flex flex-col gap-2">
             <label className="flex items-center gap-2 text-body text-text">
               <input
@@ -354,7 +412,10 @@ export function NewAlertRuleModal({ onClose, rule, mode = 'create' }: AlertRuleM
               Email
             </label>
             {/* Q-2 — permanently disabled; SMS never enters the channels array. */}
-            <label className="flex items-center gap-2 text-body text-text-muted" title="SMS is not available">
+            <label
+              className="flex items-center gap-2 text-body text-text-muted"
+              title="SMS is not available"
+            >
               <input type="checkbox" checked={false} disabled />
               SMS
             </label>
@@ -380,7 +441,12 @@ export function NewAlertRuleModal({ onClose, rule, mode = 'create' }: AlertRuleM
 
         <div className="grid grid-cols-2 gap-4">
           <Field label="Recipients">
-            <select value={recipientRole} onChange={(e) => setRecipientRole(e.target.value as typeof recipientRole)} disabled={submitting} className={inputClass}>
+            <select
+              value={recipientRole}
+              onChange={(e) => setRecipientRole(e.target.value as typeof recipientRole)}
+              disabled={submitting}
+              className={inputClass}
+            >
               {RECIPIENT_OPTIONS.map((opt) => (
                 <option key={opt} value={opt}>
                   {opt}
@@ -396,10 +462,14 @@ export function NewAlertRuleModal({ onClose, rule, mode = 'create' }: AlertRuleM
               disabled={submitting}
               className={inputClass}
             >
-              <option value="once-per-driver-per-day">{REPEAT_LABEL['once-per-driver-per-day']}</option>
+              <option value="once-per-driver-per-day">
+                {REPEAT_LABEL['once-per-driver-per-day']}
+              </option>
               <option value="every-occurrence">{REPEAT_LABEL['every-occurrence']}</option>
               <option value="once-per-hour">{REPEAT_LABEL['once-per-hour']}</option>
-              {repeatOf(rule?.throttle) === 'custom' && <option value="custom">{REPEAT_LABEL.custom}</option>}
+              {repeatOf(rule?.throttle) === 'custom' && (
+                <option value="custom">{REPEAT_LABEL.custom}</option>
+              )}
             </select>
           </Field>
         </div>

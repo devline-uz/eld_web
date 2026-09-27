@@ -87,7 +87,10 @@ describe('matchesDriverFilters', () => {
     const filters = { ...EMPTY_DRIVER_FILTERS, terminal: 'Raleigh, NC' };
     expect(matchesDriverFilters(entry(), filters)).toBe(false);
     expect(
-      matchesDriverFilters(entry({ driver: { ...entry().driver, homeTerminalName: 'Raleigh, NC' } }), filters),
+      matchesDriverFilters(
+        entry({ driver: { ...entry().driver, homeTerminalName: 'Raleigh, NC' } }),
+        filters,
+      ),
     ).toBe(true);
   });
 
@@ -98,11 +101,17 @@ describe('matchesDriverFilters', () => {
   });
 
   it('exemptions require every selected flag to be true (AND, not OR)', () => {
-    const filters = { ...EMPTY_DRIVER_FILTERS, exemptions: ['allowYardMove', 'splitSleeperEnabled'] as DriverFilters['exemptions'] };
+    const filters = {
+      ...EMPTY_DRIVER_FILTERS,
+      exemptions: ['allowYardMove', 'splitSleeperEnabled'] as DriverFilters['exemptions'],
+    };
     // has allowYardMove but not splitSleeperEnabled
     expect(matchesDriverFilters(entry(), filters)).toBe(false);
     expect(
-      matchesDriverFilters(entry({ driver: { ...entry().driver, splitSleeperEnabled: true } }), filters),
+      matchesDriverFilters(
+        entry({ driver: { ...entry().driver, splitSleeperEnabled: true } }),
+        filters,
+      ),
     ).toBe(true);
   });
 });

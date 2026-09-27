@@ -55,7 +55,11 @@ const role = (id: string, key: string, name: string): RoleRow => ({
   isSystem: true,
   permissions: { ...NO_PERMISSIONS },
 });
-const ROLES = [role('rol_admin', 'ADMIN', 'Admin'), role('rol_fm', 'FLEET_MANAGER', 'Fleet manager'), role('rol_disp', 'DISPATCHER', 'Dispatcher')];
+const ROLES = [
+  role('rol_admin', 'ADMIN', 'Admin'),
+  role('rol_fm', 'FLEET_MANAGER', 'Fleet manager'),
+  role('rol_disp', 'DISPATCHER', 'Dispatcher'),
+];
 const USER: UserRow = {
   id: 'usr_5',
   email: 'jo@example.com',
@@ -69,8 +73,18 @@ describe('EditUserModal', () => {
   it('says why a PATCH failed instead of closing', async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
-    server.use(http.patch(url(endpoints.users.update('usr_5')), () => fail(500, 'INTERNAL_ERROR', 'Boom')));
-    renderModal(<EditUserModal user={USER} roles={ROLES} mode="profile" activeAdminCount={2} onClose={onClose} />);
+    server.use(
+      http.patch(url(endpoints.users.update('usr_5')), () => fail(500, 'INTERNAL_ERROR', 'Boom')),
+    );
+    renderModal(
+      <EditUserModal
+        user={USER}
+        roles={ROLES}
+        mode="profile"
+        activeAdminCount={2}
+        onClose={onClose}
+      />,
+    );
 
     await user.clear(screen.getByDisplayValue('Jo'));
     await user.type(screen.getByRole('textbox', { name: /first name/i }), 'Joanna');
@@ -88,14 +102,24 @@ describe('EditUserModal', () => {
         ok({ ...USER, emailVerification: { pendingEmail: 'jo.park@example.com' } }),
       ),
     );
-    renderModal(<EditUserModal user={USER} roles={ROLES} mode="profile" activeAdminCount={2} onClose={onClose} />);
+    renderModal(
+      <EditUserModal
+        user={USER}
+        roles={ROLES}
+        mode="profile"
+        activeAdminCount={2}
+        onClose={onClose}
+      />,
+    );
 
     const email = screen.getByDisplayValue('jo@example.com');
     await user.clear(email);
     await user.type(email, 'jo.park@example.com');
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
-    expect(await screen.findByText(/A verification link was sent to jo\.park@example\.com/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/A verification link was sent to jo\.park@example\.com/),
+    ).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
   });
 
@@ -110,7 +134,15 @@ describe('EditUserModal', () => {
         return ok({ ...USER, role: { id: 'rol_fm', key: 'FLEET_MANAGER', name: 'Fleet manager' } });
       }),
     );
-    renderModal(<EditUserModal user={USER} roles={ROLES} mode="role" activeAdminCount={2} onClose={() => {}} />);
+    renderModal(
+      <EditUserModal
+        user={USER}
+        roles={ROLES}
+        mode="role"
+        activeAdminCount={2}
+        onClose={() => {}}
+      />,
+    );
 
     await user.selectOptions(screen.getByRole('combobox', { name: 'Role' }), 'rol_fm');
     const save = screen.getByRole('button', { name: 'Save changes' });
@@ -120,7 +152,11 @@ describe('EditUserModal', () => {
     await waitFor(() => expect(bodies).toHaveLength(1));
     expect(bodies[0]).toEqual({ roleId: 'rol_fm' });
     release();
-    expect(await screen.findByText('Jo Park is now Fleet manager. The new permissions apply on their next page load.')).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        'Jo Park is now Fleet manager. The new permissions apply on their next page load.',
+      ),
+    ).toBeInTheDocument();
   });
 
   it('closes an unchanged role picker without a request', async () => {
@@ -133,7 +169,15 @@ describe('EditUserModal', () => {
         return ok(USER);
       }),
     );
-    renderModal(<EditUserModal user={USER} roles={ROLES} mode="role" activeAdminCount={2} onClose={onClose} />);
+    renderModal(
+      <EditUserModal
+        user={USER}
+        roles={ROLES}
+        mode="role"
+        activeAdminCount={2}
+        onClose={onClose}
+      />,
+    );
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
     expect(onClose).toHaveBeenCalled();
     expect(sent).toBe(false);
@@ -142,7 +186,15 @@ describe('EditUserModal', () => {
   it('confirms before discarding an edited name', async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
-    renderModal(<EditUserModal user={USER} roles={ROLES} mode="profile" activeAdminCount={2} onClose={onClose} />);
+    renderModal(
+      <EditUserModal
+        user={USER}
+        roles={ROLES}
+        mode="profile"
+        activeAdminCount={2}
+        onClose={onClose}
+      />,
+    );
     await user.type(screen.getByDisplayValue('Park'), 'er');
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(await screen.findByText('Discard changes?')).toBeInTheDocument();
@@ -209,7 +261,11 @@ describe('PairDeviceModal', () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
     withVehicles();
-    server.use(http.post(url(endpoints.devices.pair('dev_1')), () => fail(409, 'DEVICE_IN_USE', 'That unit already has a device.')));
+    server.use(
+      http.post(url(endpoints.devices.pair('dev_1')), () =>
+        fail(409, 'DEVICE_IN_USE', 'That unit already has a device.'),
+      ),
+    );
     renderModal(<PairDeviceModal device={DEVICE} onClose={onClose} />);
     await screen.findByRole('option', { name: '#107' });
     await user.selectOptions(screen.getByRole('combobox', { name: 'Unit' }), 'veh_7');
@@ -249,7 +305,11 @@ describe('PairDeviceModal', () => {
 describe('UpdateFirmwareModal', () => {
   it('shows the server refusal instead of a queued toast', async () => {
     const user = userEvent.setup();
-    server.use(http.patch(url(endpoints.devices.firmware('dev_1')), () => fail(422, 'VALIDATION_ERROR', 'Unknown firmware version.')));
+    server.use(
+      http.patch(url(endpoints.devices.firmware('dev_1')), () =>
+        fail(422, 'VALIDATION_ERROR', 'Unknown firmware version.'),
+      ),
+    );
     renderModal(<UpdateFirmwareModal device={DEVICE} onClose={() => {}} />);
     await user.type(screen.getByRole('textbox', { name: 'Target version' }), 'L999');
     await user.click(screen.getByRole('button', { name: 'Update firmware' }));

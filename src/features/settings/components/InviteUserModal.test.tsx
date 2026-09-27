@@ -13,8 +13,22 @@ import { InviteUserModal } from './InviteUserModal';
 
 const ROLES = [
   { id: 'rol_admin', key: 'ADMIN', name: 'Admin', isSystem: true, permissions: {}, userCount: 3 },
-  { id: 'rol_fm', key: 'FLEET_MANAGER', name: 'Fleet manager', isSystem: true, permissions: {}, userCount: 5 },
-  { id: 'rol_disp', key: 'DISPATCHER', name: 'Dispatcher', isSystem: true, permissions: {}, userCount: 3 },
+  {
+    id: 'rol_fm',
+    key: 'FLEET_MANAGER',
+    name: 'Fleet manager',
+    isSystem: true,
+    permissions: {},
+    userCount: 5,
+  },
+  {
+    id: 'rol_disp',
+    key: 'DISPATCHER',
+    name: 'Dispatcher',
+    isSystem: true,
+    permissions: {},
+    userCount: 3,
+  },
   { id: 'rol_view', key: 'VIEWER', name: 'Viewer', isSystem: true, permissions: {}, userCount: 1 },
 ] as never;
 
@@ -67,21 +81,36 @@ describe('InviteUserModal — 11.18', () => {
     renderModal();
     await user.click(screen.getByText('Fleet manager'));
     await user.type(screen.getByPlaceholderText('Anna Weiss'), 'Anna Weiss');
-    await user.type(screen.getByPlaceholderText('anna.weiss@example.com'), 'anna.weiss@example.com');
+    await user.type(
+      screen.getByPlaceholderText('anna.weiss@example.com'),
+      'anna.weiss@example.com',
+    );
     await user.click(screen.getByRole('button', { name: 'Send invitation' }));
 
     await waitFor(() => expect(body).not.toBeNull());
-    expect(body).toMatchObject({ email: 'anna.weiss@example.com', firstName: 'Anna', lastName: 'Weiss', roleId: 'rol_fm' });
+    expect(body).toMatchObject({
+      email: 'anna.weiss@example.com',
+      firstName: 'Anna',
+      lastName: 'Weiss',
+      roleId: 'rol_fm',
+    });
     expect(await screen.findByText('Invitation sent')).toBeInTheDocument();
   });
 
   it('maps a 409 conflict onto the email field', async () => {
     const user = userEvent.setup();
-    server.use(http.post(url(endpoints.users.create), () => fail(409, 'CONFLICT', 'A user with this email already exists.')));
+    server.use(
+      http.post(url(endpoints.users.create), () =>
+        fail(409, 'CONFLICT', 'A user with this email already exists.'),
+      ),
+    );
 
     renderModal();
     await user.type(screen.getByPlaceholderText('Anna Weiss'), 'Anna Weiss');
-    await user.type(screen.getByPlaceholderText('anna.weiss@example.com'), 'anna.weiss@example.com');
+    await user.type(
+      screen.getByPlaceholderText('anna.weiss@example.com'),
+      'anna.weiss@example.com',
+    );
     await user.click(screen.getByRole('button', { name: 'Send invitation' }));
 
     expect(await screen.findByText('A user with this email already exists.')).toBeInTheDocument();
@@ -91,13 +120,18 @@ describe('InviteUserModal — 11.18', () => {
     const user = userEvent.setup();
     server.use(
       http.post(url(endpoints.users.create), () =>
-        fail(422, 'VALIDATION_FAILED', 'Check the highlighted fields and try again.', { fields: { email: 'Enter a valid email address.' } }),
+        fail(422, 'VALIDATION_FAILED', 'Check the highlighted fields and try again.', {
+          fields: { email: 'Enter a valid email address.' },
+        }),
       ),
     );
 
     renderModal();
     await user.type(screen.getByPlaceholderText('Anna Weiss'), 'Anna Weiss');
-    await user.type(screen.getByPlaceholderText('anna.weiss@example.com'), 'anna.weiss@example.com');
+    await user.type(
+      screen.getByPlaceholderText('anna.weiss@example.com'),
+      'anna.weiss@example.com',
+    );
     await user.click(screen.getByRole('button', { name: 'Send invitation' }));
 
     expect(await screen.findByText('Enter a valid email address.')).toBeInTheDocument();
@@ -109,11 +143,16 @@ describe('InviteUserModal — 11.18', () => {
 
     renderModal();
     await user.type(screen.getByPlaceholderText('Anna Weiss'), 'Anna Weiss');
-    await user.type(screen.getByPlaceholderText('anna.weiss@example.com'), 'anna.weiss@example.com');
+    await user.type(
+      screen.getByPlaceholderText('anna.weiss@example.com'),
+      'anna.weiss@example.com',
+    );
     await user.click(screen.getByRole('button', { name: 'Send invitation' }));
 
     // Visible twice on purpose: the toast (§13.3) and the banner inside the modal (rule 6).
-    expect(await screen.findAllByText('Something went wrong on our side. Try again.')).toHaveLength(2);
+    expect(await screen.findAllByText('Something went wrong on our side. Try again.')).toHaveLength(
+      2,
+    );
   });
 
   it('closes through the discard-changes confirmation once the form is dirty', async () => {
@@ -132,8 +171,22 @@ describe('InviteUserModal — 11.18', () => {
 describe('InviteUserModal — role error, double submit and dirty close', () => {
   // No DISPATCHER in the list, so `roleKey` starts empty and validation rejects the submit.
   const ROLES_WITHOUT_DEFAULT = [
-    { id: 'rol_fm', key: 'FLEET_MANAGER', name: 'Fleet manager', isSystem: true, permissions: {}, userCount: 5 },
-    { id: 'rol_view', key: 'VIEWER', name: 'Viewer', isSystem: true, permissions: {}, userCount: 1 },
+    {
+      id: 'rol_fm',
+      key: 'FLEET_MANAGER',
+      name: 'Fleet manager',
+      isSystem: true,
+      permissions: {},
+      userCount: 5,
+    },
+    {
+      id: 'rol_view',
+      key: 'VIEWER',
+      name: 'Viewer',
+      isSystem: true,
+      permissions: {},
+      userCount: 1,
+    },
   ] as never;
 
   function renderWithRoles(roles: typeof ROLES_WITHOUT_DEFAULT) {
@@ -152,11 +205,19 @@ describe('InviteUserModal — role error, double submit and dirty close', () => 
   it('shows the role error under the role group instead of failing silently', async () => {
     const user = userEvent.setup();
     let posted = 0;
-    server.use(http.post(url(endpoints.users.create), () => { posted += 1; return ok({}, 201); }));
+    server.use(
+      http.post(url(endpoints.users.create), () => {
+        posted += 1;
+        return ok({}, 201);
+      }),
+    );
 
     renderWithRoles(ROLES_WITHOUT_DEFAULT);
     await user.type(screen.getByPlaceholderText('Anna Weiss'), 'Anna Weiss');
-    await user.type(screen.getByPlaceholderText('anna.weiss@example.com'), 'anna.weiss@example.com');
+    await user.type(
+      screen.getByPlaceholderText('anna.weiss@example.com'),
+      'anna.weiss@example.com',
+    );
     await user.click(screen.getByRole('button', { name: 'Send invitation' }));
 
     const error = await screen.findByText('This field is required.');
@@ -182,7 +243,10 @@ describe('InviteUserModal — role error, double submit and dirty close', () => 
 
     renderModal();
     await user.type(screen.getByPlaceholderText('Anna Weiss'), 'Anna Weiss');
-    await user.type(screen.getByPlaceholderText('anna.weiss@example.com'), 'anna.weiss@example.com');
+    await user.type(
+      screen.getByPlaceholderText('anna.weiss@example.com'),
+      'anna.weiss@example.com',
+    );
     const send = screen.getByRole('button', { name: 'Send invitation' });
     await user.click(send);
     await user.click(send);
@@ -216,7 +280,7 @@ describe('InviteUserModal — role error, double submit and dirty close', () => 
 /* ------------------------------------------------------------------ stage-2 (B-85) */
 
 describe('InviteUserModal — Terminal access and Message (B-85, shipped)', () => {
-  it('sends checked terminalIds and a trimmed message', async () => {
+  it('sends typed terminalIds (one per line) and a trimmed message', async () => {
     const user = userEvent.setup();
     let body: unknown = null;
     server.use(
@@ -227,12 +291,15 @@ describe('InviteUserModal — Terminal access and Message (B-85, shipped)', () =
     );
     renderModal();
     await user.type(screen.getByPlaceholderText('Anna Weiss'), 'Anna Weiss');
-    await user.type(screen.getByPlaceholderText('anna.weiss@example.com'), 'anna.weiss@example.com');
-    await user.click(screen.getByRole('checkbox', { name: /Columbus, OH/i }));
+    await user.type(
+      screen.getByPlaceholderText('anna.weiss@example.com'),
+      'anna.weiss@example.com',
+    );
+    await user.type(screen.getByPlaceholderText('One terminal per line'), 'Dayton, OH');
     await user.type(screen.getByRole('textbox', { name: /message/i }), 'Welcome aboard!');
     await user.click(screen.getByRole('button', { name: 'Send invitation' }));
 
     await waitFor(() => expect(body).not.toBeNull());
-    expect(body).toMatchObject({ terminalIds: ['Columbus, OH'], message: 'Welcome aboard!' });
+    expect(body).toMatchObject({ terminalIds: ['Dayton, OH'], message: 'Welcome aboard!' });
   });
 });

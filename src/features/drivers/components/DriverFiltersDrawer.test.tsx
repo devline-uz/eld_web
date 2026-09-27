@@ -6,7 +6,15 @@ import { EMPTY_DRIVER_FILTERS, type DriverFilters } from '../lib/filters';
 import { DriverFiltersDrawer, DriverFilterChips } from './DriverFiltersDrawer';
 
 function renderDrawer(filters: DriverFilters, onApply = vi.fn(), onClose = vi.fn()) {
-  render(<DriverFiltersDrawer open onClose={onClose} filters={filters} onApply={onApply} terminalOptions={['Columbus, OH']} />);
+  render(
+    <DriverFiltersDrawer
+      open
+      onClose={onClose}
+      filters={filters}
+      onApply={onApply}
+      terminalOptions={['Columbus, OH']}
+    />,
+  );
   return { onApply, onClose };
 }
 
@@ -94,7 +102,9 @@ describe('DriverFilterChips — 11.23', () => {
   };
 
   it('renders nothing when empty', () => {
-    const { container } = render(<DriverFilterChips filters={EMPTY_DRIVER_FILTERS} onRemove={vi.fn()} onClearAll={vi.fn()} />);
+    const { container } = render(
+      <DriverFilterChips filters={EMPTY_DRIVER_FILTERS} onRemove={vi.fn()} onClearAll={vi.fn()} />,
+    );
     expect(container.firstChild).toBeNull();
   });
 

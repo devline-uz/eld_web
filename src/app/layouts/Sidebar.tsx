@@ -95,7 +95,7 @@ function OrganisationCard({ collapsed }: { collapsed: boolean }) {
   // than guessed.
   const carrier = useCarrier();
   const units = useQuery(vehiclesCountQuery());
-  const name = carrier.data?.name ?? user?.carrierName ?? 'Universal Logistics';
+  const name = carrier.data?.name ?? user?.carrierName ?? '';
   const initials = name
     .split(/\s+/)
     .slice(0, 2)
