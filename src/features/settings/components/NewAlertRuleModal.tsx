@@ -22,6 +22,7 @@ import { SETTINGS_TOAST } from '../lib/copy';
 
 // Validation comes from the shared `alertRuleFormSchema`, which matches `CreateAlertRuleDto` (WB-025).
 import { alertRuleFormSchema, type AlertRuleFormValues } from '@/shared/forms/schemas';
+import { EVENT_BY_VALUE, EVENT_OPTIONS } from '../lib/alertConditions';
 
 const RECIPIENT_OPTIONS = [
   'Assigned fleet manager',
@@ -29,23 +30,6 @@ const RECIPIENT_OPTIONS = [
   'Dispatchers',
   'Safety team',
 ] as const;
-
-/** The event vocabulary the rule engine evaluates (`conditions[].event`). */
-const EVENT_OPTIONS: { value: string; label: string; minutesLabel?: string }[] = [
-  { value: 'hos.break_due', label: '30-minute break is due', minutesLabel: 'within (minutes)' },
-  { value: 'hos.violation', label: 'HOS violation recorded' },
-  { value: 'device.offline', label: 'ELD stopped reporting', minutesLabel: 'for (minutes)' },
-  {
-    value: 'unidentified.created',
-    label: 'Unassigned driving detected',
-    minutesLabel: 'longer than (minutes)',
-  },
-  { value: 'maintenance.overdue', label: 'Maintenance is overdue' },
-  { value: 'safety.harsh', label: 'Harsh driving event' },
-  { value: 'geofence.exit', label: 'Unit left a geofence' },
-];
-
-const EVENT_BY_VALUE = new Map(EVENT_OPTIONS.map((o) => [o.value, o]));
 
 /**
  * `Repeat` maps onto the real `throttle` field of `CreateAlertRuleDto`. A rule whose existing

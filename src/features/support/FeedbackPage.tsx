@@ -9,6 +9,7 @@ import { ApiError } from '@/shared/api/errors';
 import { useSubmitFeedback } from '@/shared/api/settingsAdmin';
 import { usePermission } from '@/shared/auth/usePermission';
 import { SUPPORT_REASON } from './lib/copy';
+import { usePageHeader } from '@/app/layouts/Topbar';
 
 const QUESTIONS: { id: string; question: string; options: string[] }[] = [
   {
@@ -53,10 +54,16 @@ export default function FeedbackPage() {
   const [error, setError] = useState<string | null>(null);
 
   function handleSubmit() {
-    if (!canSubmit) return;
+    if (!canSubmit || submitFeedback.isPending) return;
     setError(null);
+    // An untouched form used to post `{ answers: { contactMe: false } }` — an empty response
+    // stored as real feedback.
+    if (Object.keys(answers).length === 0 && comment.trim() === '') {
+      setError('Answer at least one question or add a comment.');
+      return;
+    }
     submitFeedback.mutate(
-      { answers: { ...answers, contactMe }, comment: comment || undefined },
+      { answers: { ...answers, contactMe }, comment: comment.trim() || undefined },
       {
         onSuccess: () => setSubmitted(true),
         onError: (err) => {
@@ -73,14 +80,10 @@ export default function FeedbackPage() {
     );
   }
 
+  usePageHeader({ title: 'Support · Feedback', subtitle: 'Help us improve OneBook ELD · your answers stay anonymous to other carriers' });
+
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h1 className="text-page-title text-text">Support · Feedback</h1>
-        <p className="text-page-sub text-text-muted">
-          Help us improve OneBook ELD · your answers stay anonymous to other carriers
-        </p>
-      </div>
 
       {/* No endpoint serves fleet satisfaction scores, driver feedback or feature requests yet,
           so the page is the survey form alone — nothing on it is invented. */}
@@ -96,7 +99,16 @@ export default function FeedbackPage() {
               <p className="text-card-title font-semibold text-text">
                 Thank you — your feedback was sent.
               </p>
-              <Button variant="secondary" onClick={() => setSubmitted(false)}>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  // `Send another` used to reopen the form with the previous answers still picked.
+                  setAnswers({});
+                  setComment('');
+                  setContactMe(false);
+                  setSubmitted(false);
+                }}
+              >
                 Send another
               </Button>
             </div>
@@ -118,7 +130,11 @@ export default function FeedbackPage() {
                       <button
                         key={opt}
                         type="button"
-                        onClick={() => setAnswers((prev) => ({ ...prev, [q.id]: opt }))}
+                        aria-pressed={answers[q.id] === opt}
+                        onClick={() => {
+                          setError(null);
+                          setAnswers((prev) => ({ ...prev, [q.id]: opt }));
+                        }}
                         className={
                           'rounded-md border px-2 py-2 text-center text-caption ' +
                           (answers[q.id] === opt

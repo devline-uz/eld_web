@@ -2,7 +2,22 @@
 // Design: web/roles and screens/admin panel/Settings — integrations and API keys.jpg
 import { useMemo, useState } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
-import { ExternalLink, Plus, Copy, Send, Settings2 } from 'lucide-react';
+import {
+  Copy,
+  Cpu,
+  CreditCard,
+  ExternalLink,
+  FileText,
+  Globe,
+  Link2,
+  MessageSquare,
+  Plus,
+  Send,
+  Settings2,
+  Truck,
+  Workflow,
+  type LucideIcon,
+} from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
@@ -15,6 +30,7 @@ import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
 import { useToast } from '@/shared/ui/Toast';
 import { orDash } from '@/shared/format/empty';
 import { formatRelative } from '@/shared/format/relative';
+import { formatCarrier } from '@/shared/format/datetime';
 import { ApiError } from '@/shared/api/errors';
 import {
   useIntegrationsList,
@@ -24,6 +40,7 @@ import {
   useRevokeApiKey,
   useIntegrationsCatalog,
   useSendWebhookTest,
+  useCarrier,
   webhookUrlOf,
   type IntegrationProvider,
   type ApiKeyRow,
@@ -32,27 +49,42 @@ import {
 import { CreateApiKeyModal } from './components/CreateApiKeyModal';
 import { EditApiKeyScopesModal } from './components/EditApiKeyScopesModal';
 import { WebhookConfigModal } from './components/WebhookConfigModal';
+import { IntegrationCredentialsModal } from './components/IntegrationCredentialsModal';
+import { isCredentialProvider, type CredentialProvider } from './lib/integrationCredentials';
 import { INTEGRATION_STATUS, SETTINGS_REASON, SETTINGS_TOAST } from './lib/copy';
+import { usePageHeader } from '@/app/layouts/Topbar';
 
 interface CatalogEntry {
   provider: IntegrationProvider | null;
   name: string;
   description: string;
+  /** WB-QA-S-03 — the icon tile drawn on each card (Lucide, per web-design-tokens). */
+  icon: LucideIcon;
+  tone: 'primary' | 'violet' | 'danger' | 'success' | 'neutral';
 }
+
+/** Tile colours as drawn in `Settings — integrations and API keys.jpg`. */
+const TILE_TONE: Record<CatalogEntry['tone'], string> = {
+  primary: 'bg-primary-soft text-primary',
+  violet: 'bg-violet-soft text-violet',
+  danger: 'bg-danger-soft text-danger',
+  success: 'bg-success-soft text-success',
+  neutral: 'bg-bg-subtle text-text-secondary',
+};
 
 // WB-232 — the cards used to carry hardcoded status lines ("69 devices syncing", "1,842 receipts
 // this quarter", "Last sync 4 minutes ago", "Last export Sep 01"). No endpoint returns such figures;
 // the status line is now derived from the integration record only (`integrationStatusLine`).
 const CATALOG: CatalogEntry[] = [
-  { provider: null, name: 'Pacific Track', description: 'ELD hardware · PT30 / PT40' },
-  { provider: 'mcleod', name: 'McLeod PowerBroker', description: 'TMS · loads, stops and BOL' },
-  { provider: 'wex', name: 'WEX fuel cards', description: 'Fuel purchases for IFTA' },
-  { provider: 'quickbooks', name: 'QuickBooks Online', description: 'Accounting & driver settlements' },
-  { provider: null, name: 'DAT load board', description: 'Find and book available loads' },
-  { provider: 'slack', name: 'Slack', description: 'Push alerts into a channel' },
-  { provider: null, name: 'Geotab', description: 'Import telematics from mixed fleets' },
-  { provider: null, name: 'Zapier', description: 'Automate with 6,000+ apps' },
-  { provider: 'webhook', name: 'Custom webhook', description: 'Send events to your own endpoint' },
+  { provider: null, name: 'Pacific Track', description: 'ELD hardware · PT30 / PT40', icon: Cpu, tone: 'primary' },
+  { provider: 'mcleod', name: 'McLeod PowerBroker', description: 'TMS · loads, stops and BOL', icon: Workflow, tone: 'violet' },
+  { provider: 'wex', name: 'WEX fuel cards', description: 'Fuel purchases for IFTA', icon: CreditCard, tone: 'danger' },
+  { provider: 'quickbooks', name: 'QuickBooks Online', description: 'Accounting & driver settlements', icon: FileText, tone: 'success' },
+  { provider: null, name: 'DAT load board', description: 'Find and book available loads', icon: Globe, tone: 'neutral' },
+  { provider: 'slack', name: 'Slack', description: 'Push alerts into a channel', icon: MessageSquare, tone: 'neutral' },
+  { provider: null, name: 'Geotab', description: 'Import telematics from mixed fleets', icon: Truck, tone: 'neutral' },
+  { provider: null, name: 'Zapier', description: 'Automate with 6,000+ apps', icon: Link2, tone: 'neutral' },
+  { provider: 'webhook', name: 'Custom webhook', description: 'Send events to your own endpoint', icon: Send, tone: 'neutral' },
 ];
 
 /** The honest status line for a card: connection state and `lastSyncAt` from the API, nothing else. */
@@ -70,12 +102,18 @@ export default function IntegrationsPage() {
   const { toast } = useToast();
   const integrationsQuery = useIntegrationsList();
   const apiKeysQuery = useApiKeysList();
+  // `DELETE /api-keys/:id` soft-revokes (sets `revokedAt`) and the list still returns the row, so a
+  // revoked key stayed in the table looking live, with `Edit scopes`/`Revoke` still offered.
+  const activeKeys = useMemo(() => apiKeysQuery.rows.filter((k) => !k.revokedAt), [apiKeysQuery.rows]);
   const upsert = useUpsertIntegration();
   const disconnect = useDisconnectIntegration();
   const revokeKey = useRevokeApiKey();
   const sendWebhookTest = useSendWebhookTest();
+  const carrierTimezone = useCarrier().data?.timezone ?? 'UTC';
   // WB-251 — the Custom webhook needs a URL and a signing secret, so it connects through a modal.
   const [webhookModal, setWebhookModal] = useState<{ mode: 'connect' | 'configure'; name: string } | null>(null);
+  // WB-QA-S-01 — McLeod / WEX / Comdata / QuickBooks / Slack connect with credentials, never `config: {}`.
+  const [credentialsModal, setCredentialsModal] = useState<{ provider: CredentialProvider; name: string } | null>(null);
   const [createKeyOpen, setCreateKeyOpen] = useState(false);
   const [scopesTarget, setScopesTarget] = useState<ApiKeyRow | null>(null);
   const [disconnectTarget, setDisconnectTarget] = useState<CatalogEntry | null>(null);
@@ -99,6 +137,11 @@ export default function IntegrationsPage() {
     if (entry.provider === 'webhook') {
       setMarketplaceOpen(false);
       setWebhookModal({ mode: 'connect', name: entry.name });
+      return;
+    }
+    if (isCredentialProvider(entry.provider)) {
+      setMarketplaceOpen(false);
+      setCredentialsModal({ provider: entry.provider, name: entry.name });
       return;
     }
     upsert.mutate(
@@ -166,19 +209,24 @@ export default function IntegrationsPage() {
       ),
     },
     { id: 'scope', header: 'SCOPE', cell: ({ row }) => <span className="text-text-secondary">{row.original.scopes.join(' · ')}</span> },
-    { id: 'created', header: 'CREATED', cell: ({ row }) => <span className="text-text-secondary">{orDash(row.original.createdAt, formatRelative)}</span> },
+    // Design: CREATED is a date (`Jun 02, 2025`) in company context; only LAST USED is relative.
+    {
+      id: 'created',
+      header: 'CREATED',
+      cell: ({ row }) => (
+        <span className="tabular-nums text-text-secondary">
+          {orDash(row.original.createdAt, (v) => formatCarrier(v, carrierTimezone, 'shortDate'))}
+        </span>
+      ),
+    },
     { id: 'lastUsed', header: 'LAST USED', cell: ({ row }) => <span className="text-text-secondary">{orDash(row.original.lastUsedAt, formatRelative)}</span> },
   ];
 
+  usePageHeader({ title: 'Settings · Integrations', subtitle: `${connectedCount} connected · ${availableCount} available` });
+
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-page-title text-text">Settings · Integrations</h1>
-          <p className="text-page-sub text-text-muted">
-            {connectedCount} connected · {availableCount} available
-          </p>
-        </div>
+      <div className="flex items-center justify-end">
         {/* B-89 (shipped 2026-09-24) — `GET /integrations/catalog`. */}
         <Button
           variant="secondary"
@@ -207,8 +255,11 @@ export default function IntegrationsPage() {
             return (
               <Card key={entry.name}>
                 <div className="flex items-start justify-between">
-                  <span className="flex size-10 items-center justify-center rounded-md bg-bg-subtle text-body-strong text-text-secondary">
-                    {entry.name.slice(0, 1)}
+                  <span
+                    aria-hidden="true"
+                    className={`flex size-10 items-center justify-center rounded-md ${TILE_TONE[entry.tone]}`}
+                  >
+                    <entry.icon size={20} strokeWidth={1.75} />
                   </span>
                   <Badge tone={connected ? 'success' : 'neutral'} dot={connected}>
                     {connected ? 'Connected' : 'Available'}
@@ -292,11 +343,11 @@ export default function IntegrationsPage() {
             description="The key list did not load. Existing keys keep working — try again in a moment."
             onRetry={() => apiKeysQuery.refetch()}
           />
-        ) : apiKeysQuery.rows.length === 0 ? (
+        ) : activeKeys.length === 0 ? (
           <EmptyState title="No API keys yet" description="Create a key to let another system read your fleet data." />
         ) : (
           <DataTable
-            data={apiKeysQuery.rows}
+            data={activeKeys}
             columns={keyColumns}
             caption="API keys"
             getRowId={(r) => r.id}
@@ -379,6 +430,13 @@ export default function IntegrationsPage() {
           name={webhookModal.name}
           initialUrl={webhookModal.mode === 'configure' ? webhookUrlOf(byProvider.webhook) : ''}
           onClose={() => setWebhookModal(null)}
+        />
+      )}
+      {credentialsModal && (
+        <IntegrationCredentialsModal
+          provider={credentialsModal.provider}
+          name={credentialsModal.name}
+          onClose={() => setCredentialsModal(null)}
         />
       )}
       {createKeyOpen && <CreateApiKeyModal onClose={() => setCreateKeyOpen(false)} />}

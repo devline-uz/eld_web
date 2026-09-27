@@ -184,6 +184,10 @@ export interface DeviceRow {
   firmwareVersion: string | null;
   firmwareOutdated: boolean;
   lastHeartbeatAt: string | null;
+  /** What `GET /devices` actually returns (Prisma `Device` spread) — the Swagger example's
+   * `firmwareVersion`/`lastHeartbeatAt` are never sent; read these as the fallback. */
+  firmware?: string | null;
+  lastSeenAt?: string | null;
   storedEventsCount?: number;
   /** B-88 (shipped 2026-09-24). */
   autoFirmware?: boolean;
@@ -494,6 +498,10 @@ export interface AuditEntry {
   traceId?: string | null;
   userAgent?: string | null;
   ipAddress?: string | null;
+  /** What the live `GET /audit-log` actually sends (`AuditLog.detail` / `.ip`); `details` /
+   * `ipAddress` above were never populated, so DETAILS and IP ADDRESS always rendered `—`. */
+  detail?: string | null;
+  ip?: string | null;
 }
 
 export interface AuditListParams {

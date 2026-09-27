@@ -23,6 +23,7 @@ import {
   type CarrierFieldKey,
 } from './lib/carrierErrors';
 import { ConfirmDelete } from '@/shared/ui/Modal';
+import { usePageHeader } from '@/app/layouts/Topbar';
 
 const HOS_RULESETS: { value: HosRuleset; label: string }[] = [
   { value: 'US_70_8_PROPERTY', label: 'US 70 hr / 8 day — Property carrying' },
@@ -80,6 +81,7 @@ function companyErrors(form: Partial<CarrierRow>): CarrierFieldErrors {
 }
 
 export default function CompanyProfilePage() {
+  usePageHeader({ title: 'Settings', subtitle: 'Company profile, compliance ruleset and preferences' });
   const { data: carrier, isLoading, isError, refetch } = useCarrier();
 
   if (isLoading) {
@@ -201,11 +203,7 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-page-title text-text">Settings</h1>
-          <p className="text-page-sub text-text-muted">Company profile, compliance ruleset and preferences</p>
-        </div>
+      <div className="flex items-start justify-end">
         {canFull && (
           <Button
             variant="primary"
@@ -228,7 +226,7 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
       )}
 
       <Card>
-        <SectionHeader title="Company profile" className="mb-4" />
+        <SectionHeader title="Company profile" subtitle="Shown on IFTA, FMCSA and DVIR exports" className="mb-4" />
         <div className="grid grid-cols-3 gap-4">
           <Field label="Company name" required error={errors.name}>
             <input

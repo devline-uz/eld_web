@@ -142,6 +142,9 @@ describe('IntegrationsPage — W-22', () => {
     await screen.findByText('McLeod PowerBroker');
     const slackCard = screen.getByText('Slack').closest('div.rounded-lg')!;
     await userEventClickWithin(slackCard, /connect/i, user);
+    const dialog = await screen.findByRole('dialog', { name: 'Connect Slack' });
+    await user.type(within(dialog).getByLabelText(/Incoming webhook URL/), 'https://hooks.slack.com/services/T0/B0/x');
+    await user.click(within(dialog).getByRole('button', { name: 'Connect' }));
 
     await waitFor(() => expect(enabled).toMatchObject({ enabled: true }));
   });
@@ -492,21 +495,129 @@ describe('IntegrationsPage — Custom webhook (WB-251)', () => {
     expect(screen.queryByRole('button', { name: /send test/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /disconnect/i })).not.toBeInTheDocument();
   });
+});
 
-  it('other providers still connect in one click with an empty config (Slack)', async () => {
-    const user = userEvent.setup();
-    let body: unknown = null;
+describe('IntegrationsPage — provider credentials (WB-QA-S-01)', () => {
+  function card(name: string) {
+    return screen.getByText(name).closest('div.rounded-lg')!;
+  }
+
+  function trackPut(provider: string) {
+    const calls: unknown[] = [];
     server.use(
+      http.get(url(endpoints.integrations.list), () => ok([])),
       http.get(url(endpoints.apiKeys.list), () => ok([])),
-      http.put(url(endpoints.integrations.update('slack')), async ({ request }) => {
-        body = await request.json();
-        return ok({ id: 'int_2', provider: 'slack', enabled: true, status: 'CONNECTED' });
+      http.put(url(endpoints.integrations.update(provider)), async ({ request }) => {
+        calls.push(await request.json());
+        return ok({ id: 'int_x', provider, enabled: true, status: 'CONNECTED' });
       }),
     );
+    return calls;
+  }
+
+  it.each([
+    ['McLeod PowerBroker', 'mcleod', ['API base URL', 'Username', 'API key']],
+    ['WEX fuel cards', 'wex', ['Account number', 'API key']],
+    ['QuickBooks Online', 'quickbooks', ['Company (realm) ID', 'Client ID', 'Client secret']],
+    ['Slack', 'slack', ['Incoming webhook URL']],
+  ])('%s — Connect opens a credentials modal, sends nothing, and flags every empty field', async (name, provider, labels) => {
+    const user = userEvent.setup();
+    const calls = trackPut(provider);
+    renderPage();
+    await screen.findByText(name);
+    await userEventClickWithin(card(name), /connect/i, user);
+
+    const dialog = await screen.findByRole('dialog', { name: `Connect ${name}` });
+    await user.click(within(dialog).getByRole('button', { name: 'Connect' }));
+    for (const label of labels) {
+      expect(await within(dialog).findByText(`${label} is required.`)).toBeInTheDocument();
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  it('secret fields are password inputs; QuickBooks says OAuth is not wired', async () => {
+    const user = userEvent.setup();
+    trackPut('quickbooks');
+    renderPage();
+    await screen.findByText('QuickBooks Online');
+    await userEventClickWithin(card('QuickBooks Online'), /connect/i, user);
+    const dialog = await screen.findByRole('dialog', { name: 'Connect QuickBooks Online' });
+    expect(within(dialog).getByLabelText(/^Client secret/)).toHaveAttribute('type', 'password');
+    expect(within(dialog).getByLabelText(/^Client ID/)).toHaveAttribute('type', 'text');
+    expect(within(dialog).getByText(/OAuth\) is not available yet/)).toBeInTheDocument();
+  });
+
+  it('Slack rejects a URL that is not https://hooks.slack.com/…', async () => {
+    const user = userEvent.setup();
+    const calls = trackPut('slack');
+    renderPage();
+    await screen.findByText('Slack');
+    await userEventClickWithin(card('Slack'), /connect/i, user);
+    const dialog = await screen.findByRole('dialog', { name: 'Connect Slack' });
+    const input = within(dialog).getByLabelText(/Incoming webhook URL/);
+    expect(input).toHaveAttribute('type', 'password');
+    await user.type(input, 'https://example.com/services/T0/B0/x');
+    await user.click(within(dialog).getByRole('button', { name: 'Connect' }));
+    expect(
+      await within(dialog).findByText('Enter a Slack incoming webhook URL starting with https://hooks.slack.com/.'),
+    ).toBeInTheDocument();
+    expect(calls).toHaveLength(0);
+  });
+
+  it('McLeod submits every field under config and toasts', async () => {
+    const user = userEvent.setup();
+    const calls = trackPut('mcleod');
     renderPage();
     await screen.findByText('McLeod PowerBroker');
-    await userEventClickWithin(screen.getByText('Slack').closest('div.rounded-lg')!, /connect/i, user);
-    await waitFor(() => expect(body).toEqual({ enabled: true, config: {} }));
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await userEventClickWithin(card('McLeod PowerBroker'), /connect/i, user);
+    const dialog = await screen.findByRole('dialog', { name: 'Connect McLeod PowerBroker' });
+    await user.type(within(dialog).getByLabelText(/API base URL/), 'http://tms.example.com');
+    await user.type(within(dialog).getByLabelText(/Username/), ' ops ');
+    await user.type(within(dialog).getByLabelText(/^API key/), 'k-123');
+    await user.click(within(dialog).getByRole('button', { name: 'Connect' }));
+    expect(await within(dialog).findByText('API base URL must be a full https:// URL.')).toBeInTheDocument();
+    expect(calls).toHaveLength(0);
+
+    await user.clear(within(dialog).getByLabelText(/API base URL/));
+    await user.type(within(dialog).getByLabelText(/API base URL/), 'https://tms.example.com');
+    await user.click(within(dialog).getByRole('button', { name: 'Connect' }));
+    await waitFor(() =>
+      expect(calls[0]).toEqual({
+        enabled: true,
+        config: { baseUrl: 'https://tms.example.com', username: 'ops', apiKey: 'k-123' },
+      }),
+    );
+    expect(await screen.findByText('McLeod PowerBroker connected')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
+  it('maps a backend 422 (config.<key>) under the field and keeps the modal open', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(url(endpoints.integrations.list), () => ok([])),
+      http.get(url(endpoints.apiKeys.list), () => ok([])),
+      http.put(url(endpoints.integrations.update('wex')), () =>
+        fail(422, 'VALIDATION_FAILED', 'Invalid', {
+          issues: [{ path: 'config.accountNumber', code: 'required', message: 'Account number is required.' }],
+        }),
+      ),
+    );
+    renderPage();
+    await screen.findByText('WEX fuel cards');
+    await userEventClickWithin(card('WEX fuel cards'), /connect/i, user);
+    const dialog = await screen.findByRole('dialog', { name: 'Connect WEX fuel cards' });
+    await user.type(within(dialog).getByLabelText(/Account number/), '4821');
+    await user.type(within(dialog).getByLabelText(/^API key/), 'k');
+    await user.click(within(dialog).getByRole('button', { name: 'Connect' }));
+    expect(await within(dialog).findByText('Account number is required.')).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Connect WEX fuel cards' })).toBeInTheDocument();
+  });
+
+  it('renders an icon tile on every card (design)', async () => {
+    trackPut('slack');
+    const { container } = renderPage();
+    await screen.findByText('Custom webhook');
+    expect(container.querySelectorAll('div.rounded-lg span.size-10 svg')).toHaveLength(9);
   });
 });
+
