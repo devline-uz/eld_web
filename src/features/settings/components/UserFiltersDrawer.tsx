@@ -99,18 +99,31 @@ export function UserFilterChips({
       patch: { role: [] as UserRoleFilter[] },
     });
   if (filters.status.length)
-    chips.push({ key: 'status', label: `Status: ${filters.status.map((s) => STATUS_LABEL[s]).join(', ')}`, patch: { status: [] } });
+    chips.push({
+      key: 'status',
+      label: `Status: ${filters.status.map((s) => STATUS_LABEL[s]).join(', ')}`,
+      patch: { status: [] },
+    });
 
   if (!chips.length) return null;
 
   return (
     <div className="flex flex-wrap items-center gap-2">
       {chips.map((chip) => (
-        <button key={chip.key} type="button" onClick={() => onRemove(chip.patch)} className="rounded-full">
+        <button
+          key={chip.key}
+          type="button"
+          onClick={() => onRemove(chip.patch)}
+          className="rounded-full"
+        >
           <Badge tone="info">{`${chip.label} ×`}</Badge>
         </button>
       ))}
-      <button type="button" onClick={onClearAll} className="text-caption font-medium text-primary hover:underline">
+      <button
+        type="button"
+        onClick={onClearAll}
+        className="text-caption font-medium text-primary hover:underline"
+      >
         Clear all
       </button>
     </div>

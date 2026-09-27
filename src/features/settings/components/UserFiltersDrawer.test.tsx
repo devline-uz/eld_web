@@ -53,7 +53,9 @@ describe('UserFilterChips — 11.23', () => {
   };
 
   it('renders nothing when empty', () => {
-    const { container } = render(<UserFilterChips filters={EMPTY_USER_FILTERS} onRemove={vi.fn()} onClearAll={vi.fn()} />);
+    const { container } = render(
+      <UserFilterChips filters={EMPTY_USER_FILTERS} onRemove={vi.fn()} onClearAll={vi.fn()} />,
+    );
     expect(container.firstChild).toBeNull();
   });
 

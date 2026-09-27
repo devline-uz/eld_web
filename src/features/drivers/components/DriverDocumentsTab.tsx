@@ -79,7 +79,10 @@ export function DriverDocumentsTab({ driverId }: { driverId: string }) {
       },
       onError: (err) => {
         setPendingDelete(null);
-        toast({ kind: 'error', title: err instanceof ApiError ? err.userMessage : 'Something went wrong.' });
+        toast({
+          kind: 'error',
+          title: err instanceof ApiError ? err.userMessage : 'Something went wrong.',
+        });
       },
     });
   }
@@ -88,7 +91,10 @@ export function DriverDocumentsTab({ driverId }: { driverId: string }) {
     <div className="flex flex-col gap-4">
       <Can perm="drivers" level="FULL">
         <Card>
-          <SectionHeader title="Upload document" subtitle="PDF, JPEG, PNG, HEIC or WebP · up to 5 MB" />
+          <SectionHeader
+            title="Upload document"
+            subtitle="PDF, JPEG, PNG, HEIC or WebP · up to 5 MB"
+          />
           <div className="mt-3 flex flex-wrap items-end gap-3">
             <label className="flex flex-col gap-1">
               <span className="text-label text-text">Type</span>
@@ -141,7 +147,10 @@ export function DriverDocumentsTab({ driverId }: { driverId: string }) {
 
       <Card padded={false}>
         <div className="p-card pb-0">
-          <SectionHeader title="Documents" subtitle={docsQuery.data ? `${docsQuery.data.length} on file` : undefined} />
+          <SectionHeader
+            title="Documents"
+            subtitle={docsQuery.data ? `${docsQuery.data.length} on file` : undefined}
+          />
         </div>
         {docsQuery.isLoading ? (
           <LoadingState className="p-4" />
@@ -164,7 +173,12 @@ export function DriverDocumentsTab({ driverId }: { driverId: string }) {
               {docsQuery.data?.map((doc) => (
                 <tr key={doc.id} className="border-t border-border">
                   <td className="p-3">
-                    <a href={doc.url} target="_blank" rel="noreferrer" className="flex items-center gap-2 text-primary hover:underline">
+                    <a
+                      href={doc.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="flex items-center gap-2 text-primary hover:underline"
+                    >
                       <FileText size={16} strokeWidth={1.75} />
                       {doc.fileName}
                     </a>
@@ -173,7 +187,9 @@ export function DriverDocumentsTab({ driverId }: { driverId: string }) {
                     <Badge tone="neutral">{TYPE_LABEL[doc.type]}</Badge>
                   </td>
                   <td className="p-3 tabular-nums">{formatLocal(doc.uploadedAt, 'shortDate')}</td>
-                  <td className="p-3 tabular-nums">{doc.expiresAt ? formatLocal(doc.expiresAt, 'shortDate') : '—'}</td>
+                  <td className="p-3 tabular-nums">
+                    {doc.expiresAt ? formatLocal(doc.expiresAt, 'shortDate') : '—'}
+                  </td>
                   <td className="p-3 text-right">
                     <Can perm="drivers" level="FULL">
                       <Button

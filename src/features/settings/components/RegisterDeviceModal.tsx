@@ -104,7 +104,10 @@ export function RegisterDeviceModal({ onClose }: { onClose: () => void }) {
             setError('serial', { message: 'A device with this serial is already registered.' });
             return;
           }
-          toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+          toast({
+            kind: 'error',
+            title: error instanceof ApiError ? error.userMessage : 'Something went wrong.',
+          });
         },
       },
     );
@@ -140,11 +143,17 @@ export function RegisterDeviceModal({ onClose }: { onClose: () => void }) {
               variant="secondary"
               type="button"
               disabled={diagnostics.isPending}
-              iconLeft={diagnostics.isPending ? <Loader2 size={16} className="animate-spin" /> : undefined}
+              iconLeft={
+                diagnostics.isPending ? <Loader2 size={16} className="animate-spin" /> : undefined
+              }
               onClick={() =>
                 diagnostics.mutate(registered.id, {
                   onError: (error) =>
-                    toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }),
+                    toast({
+                      kind: 'error',
+                      title:
+                        error instanceof ApiError ? error.userMessage : 'Something went wrong.',
+                    }),
                 })
               }
             >
@@ -153,9 +162,20 @@ export function RegisterDeviceModal({ onClose }: { onClose: () => void }) {
           </div>
           {result && (
             <div className="flex flex-col gap-1 rounded-md border border-border p-3 text-body text-text">
-              <p>Signal strength: <span className="text-body-strong capitalize">{result.signalStrength}</span></p>
-              <p>GPS lock: <span className="text-body-strong">{result.gpsLock ? 'Acquired' : 'Not acquired'}</span></p>
-              <p>Device responded: <span className="text-body-strong">{result.responded ? 'Yes' : 'No'}</span></p>
+              <p>
+                Signal strength:{' '}
+                <span className="text-body-strong capitalize">{result.signalStrength}</span>
+              </p>
+              <p>
+                GPS lock:{' '}
+                <span className="text-body-strong">
+                  {result.gpsLock ? 'Acquired' : 'Not acquired'}
+                </span>
+              </p>
+              <p>
+                Device responded:{' '}
+                <span className="text-body-strong">{result.responded ? 'Yes' : 'No'}</span>
+              </p>
             </div>
           )}
         </div>
@@ -174,7 +194,13 @@ export function RegisterDeviceModal({ onClose }: { onClose: () => void }) {
       footer={
         <>
           <ModalCancelButton disabled={submitting} />
-          <Button variant="primary" size="lg" loading={submitting} disabled={submitting} onClick={handleSubmit(onSubmit)}>
+          <Button
+            variant="primary"
+            size="lg"
+            loading={submitting}
+            disabled={submitting}
+            onClick={handleSubmit(onSubmit)}
+          >
             Register device
           </Button>
         </>
@@ -189,7 +215,12 @@ export function RegisterDeviceModal({ onClose }: { onClose: () => void }) {
             </select>
           </Field>
           <Field label="Serial number" required error={errors.serial?.message}>
-            <input {...register('serial')} placeholder="PT30_1C4F" disabled={submitting} className={inputClass} />
+            <input
+              {...register('serial')}
+              placeholder="PT30_1C4F"
+              disabled={submitting}
+              className={inputClass}
+            />
           </Field>
         </div>
 
@@ -202,9 +233,7 @@ export function RegisterDeviceModal({ onClose }: { onClose: () => void }) {
             <QrCode size={40} strokeWidth={1.5} className="text-text-muted" />
             <div>
               <p className="text-body-strong text-text">Scan the QR code on the device</p>
-              <p className="text-caption text-text-muted">
-                {SETTINGS_REASON.scanner}
-              </p>
+              <p className="text-caption text-text-muted">{SETTINGS_REASON.scanner}</p>
             </div>
           </div>
           <Button variant="secondary" type="button" disabled title={SETTINGS_REASON.scannerTooltip}>

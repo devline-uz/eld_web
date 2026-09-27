@@ -16,7 +16,11 @@ import DriversPage from './DriversPage';
 vi.mock('@/shared/auth/usePermission', () => ({ usePermission: () => ({ can: () => true }) }));
 
 /** One `DriverRosterEntry` (B-1 shape) — enough for the paging regressions below. */
-function rosterEntry(id: string, firstName: string, dutyStatus: 'DRIVING' | 'ON_DUTY' | 'SLEEPER' | 'OFF_DUTY') {
+function rosterEntry(
+  id: string,
+  firstName: string,
+  dutyStatus: 'DRIVING' | 'ON_DUTY' | 'SLEEPER' | 'OFF_DUTY',
+) {
   return {
     driver: {
       id,
@@ -75,14 +79,18 @@ beforeEach(() => {
 describe('W-06 Drivers', () => {
   it('renders the exact §13.2 empty-state copy when the roster is empty', async () => {
     server.use(
-      http.get(url(endpoints.drivers.roster), () => ok({ items: [], page: 1, limit: 10, total: 0, totalPages: 1 })),
+      http.get(url(endpoints.drivers.roster), () =>
+        ok({ items: [], page: 1, limit: 10, total: 0, totalPages: 1 }),
+      ),
     );
 
     renderPage();
 
     expect(await screen.findByText('No drivers yet')).toBeInTheDocument();
     expect(
-      screen.getByText('Add drivers so they can sign in to the mobile app and start logging hours.'),
+      screen.getByText(
+        'Add drivers so they can sign in to the mobile app and start logging hours.',
+      ),
     ).toBeInTheDocument();
   });
 
@@ -158,7 +166,8 @@ describe('W-06 Drivers', () => {
     const sentQ: Array<string | null> = [];
     const onRequest = ({ request }: { request: Request }) => {
       const reqUrl = new URL(request.url);
-      if (reqUrl.pathname.endsWith(endpoints.drivers.roster)) sentQ.push(reqUrl.searchParams.get('q'));
+      if (reqUrl.pathname.endsWith(endpoints.drivers.roster))
+        sentQ.push(reqUrl.searchParams.get('q'));
     };
     server.events.on('request:start', onRequest);
     try {
@@ -220,7 +229,10 @@ describe('W-06 Drivers', () => {
       http.get(url(endpoints.drivers.roster), ({ request }) => {
         const page = Number(new URL(request.url).searchParams.get('page') ?? 1);
         return ok({
-          items: page === 1 ? [rosterEntry('drv_a', 'Ada', 'OFF_DUTY'), rosterEntry('drv_b', 'Bob', 'DRIVING')] : [],
+          items:
+            page === 1
+              ? [rosterEntry('drv_a', 'Ada', 'OFF_DUTY'), rosterEntry('drv_b', 'Bob', 'DRIVING')]
+              : [],
           page,
           limit: 10,
           total: 58,
@@ -329,7 +341,9 @@ describe('W-06 Drivers', () => {
 
     await screen.findByText('Ada Tester');
     expect(requestedPages).toContain('1');
-    expect(requestedPages.some((p) => p === null || !Number.isInteger(Number(p)) || Number(p) < 1)).toBe(false);
+    expect(
+      requestedPages.some((p) => p === null || !Number.isInteger(Number(p)) || Number(p) < 1),
+    ).toBe(false);
   });
 
   // Regression — a `page` past the end of the roster came back empty and the card showed the
@@ -395,7 +409,11 @@ describe('W-06 Drivers', () => {
     expect(screen.getByRole('button', { name: `On duty ${ALL - OFF_DUTY}` })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: `Off duty ${OFF_DUTY}` })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: `Violations ${VIOLATIONS}` })).toBeInTheDocument();
-    expect(screen.getByText(`25 drivers · ${ALL - OFF_DUTY} on duty · ${VIOLATIONS} with active violations`)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        `25 drivers · ${ALL - OFF_DUTY} on duty · ${VIOLATIONS} with active violations`,
+      ),
+    ).toBeInTheDocument();
     // The counters read the roster in one pass instead of the table's 10-row page.
     expect(requestedLimits.some((l) => Number(l) > 10)).toBe(true);
   });
@@ -410,13 +428,18 @@ describe('W-06 Drivers', () => {
     const offDuty = screen.getByRole('button', { name: /^Off duty \d+$/ });
 
     expect(number(onDuty) + number(offDuty)).toBe(58);
-    expect(screen.getByText(new RegExp(`^58 drivers · ${number(onDuty)} on duty · `))).toBeInTheDocument();
+    expect(
+      screen.getByText(new RegExp(`^58 drivers · ${number(onDuty)} on duty · `)),
+    ).toBeInTheDocument();
   });
 
   it('error: renders <ErrorState> with Retry when the list fails', async () => {
     server.use(
       http.get(url(endpoints.drivers.roster), () =>
-        HttpResponse.json({ statusCode: 404, code: 'NOT_FOUND', message: 'Not found' }, { status: 404 }),
+        HttpResponse.json(
+          { statusCode: 404, code: 'NOT_FOUND', message: 'Not found' },
+          { status: 404 },
+        ),
       ),
     );
     renderPage();
@@ -479,7 +502,10 @@ describe('W-06 Drivers', () => {
         seen += 1;
         return seen === 1
           ? ok({ id: 'drv_1', status: 'INACTIVE' })
-          : HttpResponse.json({ statusCode: 500, code: 'INTERNAL_ERROR', message: 'nope' }, { status: 500 });
+          : HttpResponse.json(
+              { statusCode: 500, code: 'INTERNAL_ERROR', message: 'nope' },
+              { status: 500 },
+            );
       }),
     );
     renderPage();
@@ -530,7 +556,11 @@ describe('W-06 Drivers', () => {
   });
 
   it('B-81 shipped · `Reset app password` calls POST /drivers/:id/reset-password', async () => {
-    server.use(http.post(url(endpoints.drivers.resetPassword('drv_1')), () => ok({ emailedTo: 'john.smith@example.com' })));
+    server.use(
+      http.post(url(endpoints.drivers.resetPassword('drv_1')), () =>
+        ok({ emailedTo: 'john.smith@example.com' }),
+      ),
+    );
     const user = userEvent.setup();
     renderPage();
     await screen.findByText('John Smith');
@@ -567,14 +597,19 @@ describe('W-06 Drivers', () => {
     const user = userEvent.setup();
     server.use(
       http.get(url(endpoints.drivers.export), () =>
-        HttpResponse.json({ statusCode: 500, code: 'INTERNAL_ERROR', message: 'Export failed' }, { status: 500 }),
+        HttpResponse.json(
+          { statusCode: 500, code: 'INTERNAL_ERROR', message: 'Export failed' },
+          { status: 500 },
+        ),
       ),
     );
     renderPage();
     await screen.findByText('John Smith');
 
     await user.click(screen.getByRole('button', { name: /Export Drivers/ }));
-    expect(await screen.findByText('Something went wrong on our side. Try again.')).toBeInTheDocument();
+    expect(
+      await screen.findByText('Something went wrong on our side. Try again.'),
+    ).toBeInTheDocument();
   });
 
   it('bulk bar `Send message` with 2+ rows opens the broadcast modal, sends, toasts and clears the selection', async () => {
@@ -596,9 +631,14 @@ describe('W-06 Drivers', () => {
 
     await user.click(screen.getByRole('button', { name: 'Send message' }));
     const dialog = await screen.findByRole('dialog', { name: 'Send message' });
-    expect(within(dialog).getByText('2 drivers · each one receives it in their own conversation')).toBeInTheDocument();
+    expect(
+      within(dialog).getByText('2 drivers · each one receives it in their own conversation'),
+    ).toBeInTheDocument();
 
-    await user.type(within(dialog).getByRole('textbox', { name: /Message/ }), 'Fuel stop at exit 12.');
+    await user.type(
+      within(dialog).getByRole('textbox', { name: /Message/ }),
+      'Fuel stop at exit 12.',
+    );
     await user.click(within(dialog).getByRole('button', { name: 'Send message' }));
 
     expect(await screen.findByText('Message sent to 2 drivers')).toBeInTheDocument();

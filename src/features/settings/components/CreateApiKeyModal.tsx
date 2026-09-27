@@ -29,7 +29,11 @@ export function CreateApiKeyModal({ onClose }: { onClose: () => void }) {
     register,
     handleSubmit,
     formState: { errors, isDirty },
-  } = useForm<CreateKeyValues>({ resolver: zodResolver(createKeySchema), mode: 'onBlur', defaultValues: { name: '' } });
+  } = useForm<CreateKeyValues>({
+    resolver: zodResolver(createKeySchema),
+    mode: 'onBlur',
+    defaultValues: { name: '' },
+  });
 
   const submitting = createKey.isPending;
   // `scopes` lives outside react-hook-form.
@@ -43,14 +47,29 @@ export function CreateApiKeyModal({ onClose }: { onClose: () => void }) {
       { name: values.name, scopes },
       {
         onSuccess: (result) => setPlaintext(result.plaintextKey),
-        onError: (error) => toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }),
+        onError: (error) =>
+          toast({
+            kind: 'error',
+            title: error instanceof ApiError ? error.userMessage : 'Something went wrong.',
+          }),
       },
     );
   }
 
   if (plaintext) {
     return (
-      <Modal open onClose={onClose} title="Key created" subtitle="Copy this key now — it will not be shown again." size="sm" footer={<Button variant="primary" size="lg" onClick={onClose}>Done</Button>}>
+      <Modal
+        open
+        onClose={onClose}
+        title="Key created"
+        subtitle="Copy this key now — it will not be shown again."
+        size="sm"
+        footer={
+          <Button variant="primary" size="lg" onClick={onClose}>
+            Done
+          </Button>
+        }
+      >
         <div className="flex items-center gap-2 rounded-md border border-border bg-bg-subtle px-3 py-2">
           <code className="flex-1 truncate text-body">{plaintext}</code>
           <Button
@@ -76,7 +95,13 @@ export function CreateApiKeyModal({ onClose }: { onClose: () => void }) {
       footer={
         <>
           <ModalCancelButton disabled={submitting} />
-          <Button variant="primary" size="lg" loading={submitting} disabled={submitting} onClick={handleSubmit(onSubmit)}>
+          <Button
+            variant="primary"
+            size="lg"
+            loading={submitting}
+            disabled={submitting}
+            onClick={handleSubmit(onSubmit)}
+          >
             Create key
           </Button>
         </>
@@ -84,7 +109,12 @@ export function CreateApiKeyModal({ onClose }: { onClose: () => void }) {
     >
       <form className="flex flex-col gap-4" onSubmit={handleSubmit(onSubmit)}>
         <Field label="Name" required error={errors.name?.message}>
-          <input {...register('name')} placeholder="McLeod TMS" disabled={submitting} className={inputClass} />
+          <input
+            {...register('name')}
+            placeholder="McLeod TMS"
+            disabled={submitting}
+            className={inputClass}
+          />
         </Field>
         <div>
           <p className="mb-2 text-label text-text">Scopes</p>
@@ -95,7 +125,9 @@ export function CreateApiKeyModal({ onClose }: { onClose: () => void }) {
                   type="checkbox"
                   checked={scopes.includes(scope)}
                   onChange={(e) =>
-                    setScopes((prev) => (e.target.checked ? [...prev, scope] : prev.filter((s) => s !== scope)))
+                    setScopes((prev) =>
+                      e.target.checked ? [...prev, scope] : prev.filter((s) => s !== scope),
+                    )
                   }
                 />
                 {scope}

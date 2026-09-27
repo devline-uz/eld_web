@@ -16,7 +16,13 @@ const API_KEY_SCOPES: { value: string; label: string }[] = [
   { value: 'hos:read', label: 'Read HOS logs' },
 ];
 
-export function EditApiKeyScopesModal({ apiKey, onClose }: { apiKey: ApiKeyRow; onClose: () => void }) {
+export function EditApiKeyScopesModal({
+  apiKey,
+  onClose,
+}: {
+  apiKey: ApiKeyRow;
+  onClose: () => void;
+}) {
   const { toast } = useToast();
   const updateScopes = useUpdateApiKeyScopes();
   const [scopes, setScopes] = useState<string[]>(apiKey.scopes);
@@ -48,7 +54,8 @@ export function EditApiKeyScopesModal({ apiKey, onClose }: { apiKey: ApiKeyRow; 
           toast({ kind: 'success', ...SETTINGS_TOAST.apiKeyScopesUpdated(apiKey.name) });
           onClose();
         },
-        onError: (err) => setError(err instanceof ApiError ? err.userMessage : 'Something went wrong.'),
+        onError: (err) =>
+          setError(err instanceof ApiError ? err.userMessage : 'Something went wrong.'),
       },
     );
   }
@@ -64,7 +71,13 @@ export function EditApiKeyScopesModal({ apiKey, onClose }: { apiKey: ApiKeyRow; 
       footer={
         <>
           <ModalCancelButton disabled={submitting} />
-          <Button variant="primary" size="lg" loading={submitting} disabled={submitting} onClick={submit}>
+          <Button
+            variant="primary"
+            size="lg"
+            loading={submitting}
+            disabled={submitting}
+            onClick={submit}
+          >
             Save scopes
           </Button>
         </>
@@ -79,7 +92,8 @@ export function EditApiKeyScopesModal({ apiKey, onClose }: { apiKey: ApiKeyRow; 
               disabled={submitting}
               onChange={(e) => toggle(scope.value, e.target.checked)}
             />
-            {scope.label} <span className="font-mono text-caption text-text-muted">{scope.value}</span>
+            {scope.label}{' '}
+            <span className="font-mono text-caption text-text-muted">{scope.value}</span>
           </label>
         ))}
         {/* A key may carry a scope granted before this list existed — never silently dropped. */}
@@ -87,7 +101,12 @@ export function EditApiKeyScopesModal({ apiKey, onClose }: { apiKey: ApiKeyRow; 
           .filter((s) => !API_KEY_SCOPES.some((o) => o.value === s))
           .map((s) => (
             <label key={s} className="flex items-center gap-2 text-body text-text">
-              <input type="checkbox" checked disabled={submitting} onChange={(e) => toggle(s, e.target.checked)} />
+              <input
+                type="checkbox"
+                checked
+                disabled={submitting}
+                onChange={(e) => toggle(s, e.target.checked)}
+              />
               <span className="font-mono text-caption text-text-muted">{s}</span>
             </label>
           ))}

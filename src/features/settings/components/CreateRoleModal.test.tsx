@@ -90,7 +90,9 @@ describe('CreateRoleModal — 11.19', () => {
 
     renderModal();
     const pack = screen.getByRole('checkbox', { name: 'Can export FMCSA / DOT pack' });
-    const transfer = screen.getByRole('checkbox', { name: 'Can send data transfers to an inspector' });
+    const transfer = screen.getByRole('checkbox', {
+      name: 'Can send data transfers to an inspector',
+    });
     expect(pack).toBeChecked();
     expect(transfer).toBeChecked();
 
@@ -128,7 +130,11 @@ describe('CreateRoleModal — 11.19', () => {
 
   it('maps a 409 conflict onto the role name field', async () => {
     const user = userEvent.setup();
-    server.use(http.post(url(endpoints.roles.create), () => fail(409, 'CONFLICT', 'A role with this name already exists.')));
+    server.use(
+      http.post(url(endpoints.roles.create), () =>
+        fail(409, 'CONFLICT', 'A role with this name already exists.'),
+      ),
+    );
 
     renderModal();
     await user.type(screen.getByPlaceholderText('Compliance auditor'), 'Dispatcher');

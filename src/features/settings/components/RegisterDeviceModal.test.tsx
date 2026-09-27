@@ -55,7 +55,16 @@ describe('RegisterDeviceModal — 11.20', () => {
     let patched: unknown = null;
     server.use(
       http.post(url(endpoints.devices.create), () =>
-        ok({ id: 'dev_9', serial: 'PT30_1C4F', model: 'PT30', status: 'UNASSIGNED', bleState: 'DISCONNECTED' }, 201),
+        ok(
+          {
+            id: 'dev_9',
+            serial: 'PT30_1C4F',
+            model: 'PT30',
+            status: 'UNASSIGNED',
+            bleState: 'DISCONNECTED',
+          },
+          201,
+        ),
       ),
       http.patch(url(endpoints.devices.update('dev_9')), async ({ request }) => {
         patched = await request.json();
@@ -80,7 +89,16 @@ describe('RegisterDeviceModal — 11.20', () => {
     let paired: unknown = null;
     server.use(
       http.post(url(endpoints.devices.create), () =>
-        ok({ id: 'dev_9', serial: 'PT30_1C4F', model: 'PT30', status: 'UNASSIGNED', bleState: 'DISCONNECTED' }, 201),
+        ok(
+          {
+            id: 'dev_9',
+            serial: 'PT30_1C4F',
+            model: 'PT30',
+            status: 'UNASSIGNED',
+            bleState: 'DISCONNECTED',
+          },
+          201,
+        ),
       ),
       http.post(url(endpoints.devices.pair('dev_9')), async ({ request }) => {
         paired = await request.json();
@@ -108,13 +126,19 @@ describe('RegisterDeviceModal — 11.20', () => {
 
   it('maps a 409 conflict onto the serial field', async () => {
     const user = userEvent.setup();
-    server.use(http.post(url(endpoints.devices.create), () => fail(409, 'CONFLICT', 'A device with this serial is already registered.')));
+    server.use(
+      http.post(url(endpoints.devices.create), () =>
+        fail(409, 'CONFLICT', 'A device with this serial is already registered.'),
+      ),
+    );
 
     renderModal();
     await user.type(screen.getByPlaceholderText('PT30_1C4F'), 'PT30_A86E');
     await user.click(screen.getByRole('button', { name: 'Register device' }));
 
-    expect(await screen.findByText('A device with this serial is already registered.')).toBeInTheDocument();
+    expect(
+      await screen.findByText('A device with this serial is already registered.'),
+    ).toBeInTheDocument();
   });
 
   it('closes with Cancel', async () => {
@@ -135,7 +159,16 @@ describe('RegisterDeviceModal — double submit and dirty close', () => {
       http.post(url(endpoints.devices.create), async ({ request }) => {
         posts.push(await request.json());
         await gate;
-        return ok({ id: 'dev_9', serial: 'PT30_1C4F', model: 'PT30', status: 'UNASSIGNED', bleState: 'DISCONNECTED' }, 201);
+        return ok(
+          {
+            id: 'dev_9',
+            serial: 'PT30_1C4F',
+            model: 'PT30',
+            status: 'UNASSIGNED',
+            bleState: 'DISCONNECTED',
+          },
+          201,
+        );
       }),
     );
 

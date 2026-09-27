@@ -113,7 +113,9 @@ describe('W-07 Driver profile — four states', () => {
     permission = false;
     server.use(http.get(url(endpoints.drivers.detail('drv_1')), () => ok(DRIVER)));
     renderPage();
-    expect(await screen.findByText(/forbidden|do not have permission|do not have access/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/forbidden|do not have permission|do not have access/i),
+    ).toBeInTheDocument();
   });
 
   it('loading: shows a skeleton before the driver resolves', async () => {
@@ -124,13 +126,20 @@ describe('W-07 Driver profile — four states', () => {
       }),
     );
     renderPage();
-    expect(document.querySelectorAll('[class*="skeleton"], [class*="animate-pulse"]').length).toBeGreaterThan(0);
+    expect(
+      document.querySelectorAll('[class*="skeleton"], [class*="animate-pulse"]').length,
+    ).toBeGreaterThan(0);
     expect(await screen.findByRole('heading', { name: 'John Smith' })).toBeInTheDocument();
   });
 
   it('error: renders <ErrorState> with Retry when the driver fetch fails', async () => {
     server.use(
-      http.get(url(endpoints.drivers.detail('drv_1')), () => HttpResponse.json({ statusCode: 404, code: 'NOT_FOUND', message: 'Not found' }, { status: 404 })),
+      http.get(url(endpoints.drivers.detail('drv_1')), () =>
+        HttpResponse.json(
+          { statusCode: 404, code: 'NOT_FOUND', message: 'Not found' },
+          { status: 404 },
+        ),
+      ),
     );
     renderPage();
     expect(await screen.findByRole('button', { name: /retry/i })).toBeInTheDocument();
@@ -155,12 +164,29 @@ describe('W-07 Driver profile — Documents tab', () => {
       http.get(url(endpoints.drivers.documents('drv_1')), () =>
         ok(
           uploaded
-            ? [{ id: 'doc_1', type: 'CDL', fileName: 'cdl.pdf', expiresAt: null, uploadedAt: '2026-01-01T00:00:00.000Z', url: 'https://mock/doc_1' }]
+            ? [
+                {
+                  id: 'doc_1',
+                  type: 'CDL',
+                  fileName: 'cdl.pdf',
+                  expiresAt: null,
+                  uploadedAt: '2026-01-01T00:00:00.000Z',
+                  url: 'https://mock/doc_1',
+                },
+              ]
             : [],
         ),
       ),
       http.post(url(endpoints.drivers.documents('drv_1')), () =>
-        ok({ id: 'doc_1', type: 'CDL', fileName: 'cdl.pdf', expiresAt: null, uploadedAt: '2026-01-01T00:00:00.000Z', url: 'https://mock/doc_1', uploadUrl: 'https://mock-storage/put' }),
+        ok({
+          id: 'doc_1',
+          type: 'CDL',
+          fileName: 'cdl.pdf',
+          expiresAt: null,
+          uploadedAt: '2026-01-01T00:00:00.000Z',
+          url: 'https://mock/doc_1',
+          uploadUrl: 'https://mock-storage/put',
+        }),
       ),
     );
     // `putToPresignedUrl` calls the raw `fetch` against a foreign (non-MSW) origin on purpose
@@ -207,7 +233,9 @@ describe('W-07 Driver profile — long values stay inside the profile card', () 
   const LONG_EMAIL = 'mock_justinadams106@mock.onebook.example.longsubdomain.invalid';
 
   it('wraps a long email inside its row instead of overflowing the card', async () => {
-    server.use(http.get(url(endpoints.drivers.detail('drv_1')), () => ok({ ...DRIVER, email: LONG_EMAIL })));
+    server.use(
+      http.get(url(endpoints.drivers.detail('drv_1')), () => ok({ ...DRIVER, email: LONG_EMAIL })),
+    );
     renderPage();
     await screen.findByRole('heading', { name: 'John Smith' });
 
@@ -252,7 +280,10 @@ describe('W-07 Driver profile — long values stay inside the profile card', () 
     await screen.findByRole('heading', { name: 'John Smith' });
 
     await user.click(screen.getByRole('button', { name: 'Trips' }));
-    expect(await screen.findByRole('link', { name: 'Dispatch & Trips' })).toHaveAttribute('href', '/trips?fDriver=drv_1');
+    expect(await screen.findByRole('link', { name: 'Dispatch & Trips' })).toHaveAttribute(
+      'href',
+      '/trips?fDriver=drv_1',
+    );
 
     // Navigating away unmounts the profile (no /trips route here), so this click comes last.
     await user.click(screen.getByRole('button', { name: 'Assign trip' }));
@@ -266,14 +297,20 @@ describe('W-07 Driver profile — long values stay inside the profile card', () 
     await screen.findByRole('heading', { name: 'John Smith' });
 
     await user.click(screen.getByRole('button', { name: 'DVIRs' }));
-    expect(await screen.findByRole('link', { name: 'DVIR & Maintenance' })).toHaveAttribute('href', '/dvir');
+    expect(await screen.findByRole('link', { name: 'DVIR & Maintenance' })).toHaveAttribute(
+      'href',
+      '/dvir',
+    );
   });
 
   it('WB-185 · a failing HOS card shows a human error with Retry, never the gap id', async () => {
     server.use(
       http.get(url(endpoints.drivers.detail('drv_1')), () => ok(DRIVER)),
       http.get(url(endpoints.drivers.hos('drv_1')), () =>
-        HttpResponse.json({ statusCode: 500, code: 'INTERNAL_ERROR', message: 'nope' }, { status: 500 }),
+        HttpResponse.json(
+          { statusCode: 500, code: 'INTERNAL_ERROR', message: 'nope' },
+          { status: 500 },
+        ),
       ),
     );
     renderPage();
@@ -308,7 +345,9 @@ describe('W-07 Driver profile — long values stay inside the profile card', () 
   it('B-81 shipped · `Reset app password` calls POST /drivers/:id/reset-password', async () => {
     server.use(
       http.get(url(endpoints.drivers.detail('drv_1')), () => ok(DRIVER)),
-      http.post(url(endpoints.drivers.resetPassword('drv_1')), () => ok({ emailedTo: 'john.smith@example.com' })),
+      http.post(url(endpoints.drivers.resetPassword('drv_1')), () =>
+        ok({ emailedTo: 'john.smith@example.com' }),
+      ),
     );
     const user = userEvent.setup();
     renderPage();
@@ -341,6 +380,10 @@ describe('W-07 Driver profile — long values stay inside the profile card', () 
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
     expect(await screen.findByText('Jonathan Smith updated')).toBeInTheDocument();
-    expect(patched).toMatchObject({ firstName: 'Jonathan', lastName: 'Smith', cdlNumber: 'W8569238' });
+    expect(patched).toMatchObject({
+      firstName: 'Jonathan',
+      lastName: 'Smith',
+      cdlNumber: 'W8569238',
+    });
   });
 });

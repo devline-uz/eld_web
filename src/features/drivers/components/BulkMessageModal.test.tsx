@@ -15,11 +15,18 @@ import { BulkMessageModal } from './BulkMessageModal';
 function renderModal(props: Partial<React.ComponentProps<typeof BulkMessageModal>> = {}) {
   const onClose = vi.fn();
   const onSent = vi.fn();
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
   render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
-        <BulkMessageModal driverIds={['drv_1', 'drv_2']} onClose={onClose} onSent={onSent} {...props} />
+        <BulkMessageModal
+          driverIds={['drv_1', 'drv_2']}
+          onClose={onClose}
+          onSent={onSent}
+          {...props}
+        />
       </ToastProvider>
     </QueryClientProvider>,
   );
@@ -44,7 +51,9 @@ beforeEach(() => {
 describe('W-06 bulk Send message', () => {
   it('names the recipient count in the subtitle', () => {
     renderModal({ driverIds: ['drv_1', 'drv_2', 'drv_3'] });
-    expect(screen.getByText('3 drivers · each one receives it in their own conversation')).toBeInTheDocument();
+    expect(
+      screen.getByText('3 drivers · each one receives it in their own conversation'),
+    ).toBeInTheDocument();
   });
 
   it('blocks an empty (or whitespace-only) message with the §14.2 copy and posts nothing', async () => {
@@ -59,12 +68,16 @@ describe('W-06 bulk Send message', () => {
     const { onClose } = renderModal();
 
     await user.click(sendButton());
-    expect(await screen.findByText('Messages are limited to 2,000 characters.')).toBeInTheDocument();
+    expect(
+      await screen.findByText('Messages are limited to 2,000 characters.'),
+    ).toBeInTheDocument();
     expect(messageBox()).toHaveAttribute('aria-invalid', 'true');
 
     await user.type(messageBox(), '   ');
     await user.click(sendButton());
-    expect(await screen.findByText('Messages are limited to 2,000 characters.')).toBeInTheDocument();
+    expect(
+      await screen.findByText('Messages are limited to 2,000 characters.'),
+    ).toBeInTheDocument();
     expect(posts).toBe(0);
     expect(onClose).not.toHaveBeenCalled();
   });
@@ -75,7 +88,9 @@ describe('W-06 bulk Send message', () => {
     await user.click(messageBox());
     await user.paste('x'.repeat(2001));
     await user.click(sendButton());
-    expect(await screen.findByText('Messages are limited to 2,000 characters.')).toBeInTheDocument();
+    expect(
+      await screen.findByText('Messages are limited to 2,000 characters.'),
+    ).toBeInTheDocument();
   });
 
   it('sends the body to every selected driver, fires the "Message sent to …" toast and closes', async () => {
@@ -93,14 +108,18 @@ describe('W-06 bulk Send message', () => {
     await user.click(sendButton());
 
     expect(await screen.findByText('Message sent to 2 drivers')).toBeInTheDocument();
-    expect(screen.getByText('It appears in each driver conversation in Messages.')).toBeInTheDocument();
+    expect(
+      screen.getByText('It appears in each driver conversation in Messages.'),
+    ).toBeInTheDocument();
     expect(body).toEqual({ body: 'Weigh station on I-70 is open.', driverIds: ['drv_1', 'drv_2'] });
     expect(onSent).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it('the toast counts what the backend actually delivered, not what was selected', async () => {
-    server.use(http.post(url(endpoints.conversations.broadcast), () => ok({ sent: 1, deliveries: [] })));
+    server.use(
+      http.post(url(endpoints.conversations.broadcast), () => ok({ sent: 1, deliveries: [] })),
+    );
     const user = userEvent.setup();
     renderModal();
     await user.type(messageBox(), 'Hello');
@@ -109,14 +128,18 @@ describe('W-06 bulk Send message', () => {
   });
 
   it('shows the §14.3 error toast on failure and keeps the modal open with the draft', async () => {
-    server.use(http.post(url(endpoints.conversations.broadcast), () => fail(500, 'INTERNAL_ERROR', 'boom')));
+    server.use(
+      http.post(url(endpoints.conversations.broadcast), () => fail(500, 'INTERNAL_ERROR', 'boom')),
+    );
     const user = userEvent.setup();
     const { onClose, onSent } = renderModal();
 
     await user.type(messageBox(), 'Hello');
     await user.click(sendButton());
 
-    expect(await screen.findByText('Something went wrong on our side. Try again.')).toBeInTheDocument();
+    expect(
+      await screen.findByText('Something went wrong on our side. Try again.'),
+    ).toBeInTheDocument();
     expect(onSent).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
     expect(messageBox()).toHaveValue('Hello');
@@ -129,7 +152,9 @@ describe('W-06 bulk Send message', () => {
     renderModal();
     await user.type(messageBox(), 'Hello');
     await user.click(sendButton());
-    expect(await screen.findByText('No connection. Check your network and try again.')).toBeInTheDocument();
+    expect(
+      await screen.findByText('No connection. Check your network and try again.'),
+    ).toBeInTheDocument();
   });
 
   it('a double click on Send message posts exactly once', async () => {

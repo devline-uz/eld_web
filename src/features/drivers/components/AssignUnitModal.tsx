@@ -19,9 +19,15 @@ export interface AssignUnitModalProps {
   onAssigned?: () => void;
 }
 
-const selectClass = 'h-input w-full rounded-md border border-border bg-bg-surface px-3 text-body text-text';
+const selectClass =
+  'h-input w-full rounded-md border border-border bg-bg-surface px-3 text-body text-text';
 
-export function AssignUnitModal({ driverId, driverName, onClose, onAssigned }: AssignUnitModalProps) {
+export function AssignUnitModal({
+  driverId,
+  driverName,
+  onClose,
+  onAssigned,
+}: AssignUnitModalProps) {
   const { toast } = useToast();
   const vehiclesQuery = useVehiclesPicker();
   const [vehicleId, setVehicleId] = useState('');
@@ -38,7 +44,13 @@ export function AssignUnitModal({ driverId, driverName, onClose, onAssigned }: A
       { driverId },
       {
         onSuccess: () => {
-          toast({ kind: 'success', ...DRIVER_TOAST.unitAssigned((selected?.unitNumber ?? '').replace(/^#+/, ''), driverName) });
+          toast({
+            kind: 'success',
+            ...DRIVER_TOAST.unitAssigned(
+              (selected?.unitNumber ?? '').replace(/^#+/, ''),
+              driverName,
+            ),
+          });
           onAssigned?.();
           onClose();
         },
@@ -60,7 +72,13 @@ export function AssignUnitModal({ driverId, driverName, onClose, onAssigned }: A
       footer={
         <>
           <ModalCancelButton disabled={mutation.isPending} />
-          <Button variant="primary" size="lg" disabled={!vehicleId || mutation.isPending} loading={mutation.isPending} onClick={submit}>
+          <Button
+            variant="primary"
+            size="lg"
+            disabled={!vehicleId || mutation.isPending}
+            loading={mutation.isPending}
+            onClick={submit}
+          >
             Assign unit
           </Button>
         </>
@@ -74,7 +92,10 @@ export function AssignUnitModal({ driverId, driverName, onClose, onAssigned }: A
         )}
         <label className="flex flex-col gap-1">
           <span className="text-label text-text">
-            Unit <span className="text-danger" aria-hidden="true">*</span>
+            Unit{' '}
+            <span className="text-danger" aria-hidden="true">
+              *
+            </span>
           </span>
           <select
             value={vehicleId}
@@ -91,7 +112,9 @@ export function AssignUnitModal({ driverId, driverName, onClose, onAssigned }: A
           </select>
         </label>
         {vehiclesQuery.isError && (
-          <p className="text-caption text-danger">The unit list could not be loaded. Close and try again.</p>
+          <p className="text-caption text-danger">
+            The unit list could not be loaded. Close and try again.
+          </p>
         )}
       </div>
     </Modal>

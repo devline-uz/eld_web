@@ -30,7 +30,9 @@ const DEFAULT_SEGMENT_LEVELS: Record<string, PermissionLevel> = Object.fromEntri
 
 /** The six grid rows read back off an existing role's permission map. */
 function levelsOf(role: RoleRow): Record<string, PermissionLevel> {
-  return Object.fromEntries(SEGMENT_ROWS.map((row) => [row.label, role.permissions[row.keys[0]!] ?? 'NONE']));
+  return Object.fromEntries(
+    SEGMENT_ROWS.map((row) => [row.label, role.permissions[row.keys[0]!] ?? 'NONE']),
+  );
 }
 
 export function CreateRoleModal({
@@ -127,20 +129,31 @@ export function CreateRoleModal({
           setError('name', { message: 'A role with this name already exists.' });
           return;
         }
-        toast({ kind: 'error' as const, title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+        toast({
+          kind: 'error' as const,
+          title: error instanceof ApiError ? error.userMessage : 'Something went wrong.',
+        });
       },
     };
 
     if (editing) {
       updateRole.mutate(
-        { id: role.id, dto: { name: values.name, description: values.description, permissions: base } },
+        {
+          id: role.id,
+          dto: { name: values.name, description: values.description, permissions: base },
+        },
         handlers,
       );
       return;
     }
 
     createRole.mutate(
-      { key: key || 'CUSTOM_ROLE', name: values.name, description: values.description, permissions: base },
+      {
+        key: key || 'CUSTOM_ROLE',
+        name: values.name,
+        description: values.description,
+        permissions: base,
+      },
       handlers,
     );
   }
@@ -150,13 +163,23 @@ export function CreateRoleModal({
       open
       onClose={onClose}
       title={editing ? `Edit ${role.name}` : 'Create a role'}
-      subtitle={editing ? 'Changes apply immediately to every user with this role' : 'Start from a template and adjust the permissions'}
+      subtitle={
+        editing
+          ? 'Changes apply immediately to every user with this role'
+          : 'Start from a template and adjust the permissions'
+      }
       size="lg"
       isDirty={dirty}
       footer={
         <>
           <ModalCancelButton disabled={submitting} />
-          <Button variant="primary" size="lg" loading={submitting} disabled={submitting} onClick={handleSubmit(onSubmit)}>
+          <Button
+            variant="primary"
+            size="lg"
+            loading={submitting}
+            disabled={submitting}
+            onClick={handleSubmit(onSubmit)}
+          >
             {editing ? 'Save changes' : 'Create role'}
           </Button>
         </>
@@ -165,11 +188,23 @@ export function CreateRoleModal({
       <form className="flex flex-col gap-4" onSubmit={handleSubmit(onSubmit)}>
         <div className="grid grid-cols-2 gap-4">
           <Field label="Role name" required error={errors.name?.message}>
-            <input {...register('name')} placeholder="Compliance auditor" disabled={submitting} className={inputClass} />
+            <input
+              {...register('name')}
+              placeholder="Compliance auditor"
+              disabled={submitting}
+              className={inputClass}
+            />
           </Field>
           <Field label="Copy permissions from">
-            <select value={copyFrom} onChange={(e) => applyTemplate(e.target.value)} disabled={submitting} className={inputClass}>
-              <option value="">{editing ? '— Keep the current permissions —' : '— Start from scratch —'}</option>
+            <select
+              value={copyFrom}
+              onChange={(e) => applyTemplate(e.target.value)}
+              disabled={submitting}
+              className={inputClass}
+            >
+              <option value="">
+                {editing ? '— Keep the current permissions —' : '— Start from scratch —'}
+              </option>
               {templates
                 .filter((t) => t.id !== role?.id)
                 .filter((t) => !t.isSystem || t.key !== 'ADMIN')
@@ -192,10 +227,15 @@ export function CreateRoleModal({
         </Field>
 
         <div>
-          <p className="mb-2 text-nav-section font-semibold uppercase tracking-wide text-text-muted">Permissions</p>
+          <p className="mb-2 text-nav-section font-semibold uppercase tracking-wide text-text-muted">
+            Permissions
+          </p>
           <div className="flex flex-col gap-2">
             {SEGMENT_ROWS.map((row) => (
-              <div key={row.label} className="flex items-center justify-between rounded-md border border-border px-3 py-2">
+              <div
+                key={row.label}
+                className="flex items-center justify-between rounded-md border border-border px-3 py-2"
+              >
                 <span className="text-body text-text">{row.label}</span>
                 <div className="flex h-8 overflow-hidden rounded-md border border-border">
                   {LEVELS.map((level) => (
@@ -220,7 +260,12 @@ export function CreateRoleModal({
         </div>
 
         <label className="flex items-center gap-2 text-body text-text">
-          <input type="checkbox" checked={canExportFmcsa} onChange={(e) => setCanExportFmcsa(e.target.checked)} disabled={submitting} />
+          <input
+            type="checkbox"
+            checked={canExportFmcsa}
+            onChange={(e) => setCanExportFmcsa(e.target.checked)}
+            disabled={submitting}
+          />
           {ROLE_COPY.fmcsaPackCheckbox}
         </label>
         <label className="flex items-center gap-2 text-body text-text">

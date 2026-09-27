@@ -28,7 +28,11 @@ export function BulkMessageModal({ driverIds, onClose, onSent }: BulkMessageModa
     register,
     handleSubmit,
     formState: { errors, isDirty },
-  } = useForm<MessageFormValues>({ resolver: zodResolver(messageSchema), mode: 'onBlur', defaultValues: { body: '' } });
+  } = useForm<MessageFormValues>({
+    resolver: zodResolver(messageSchema),
+    mode: 'onBlur',
+    defaultValues: { body: '' },
+  });
 
   function send(values: MessageFormValues) {
     if (broadcast.isPending) return;
@@ -56,7 +60,13 @@ export function BulkMessageModal({ driverIds, onClose, onSent }: BulkMessageModa
       footer={
         <>
           <ModalCancelButton disabled={broadcast.isPending} />
-          <Button variant="primary" size="lg" loading={broadcast.isPending} disabled={broadcast.isPending} onClick={handleSubmit(send)}>
+          <Button
+            variant="primary"
+            size="lg"
+            loading={broadcast.isPending}
+            disabled={broadcast.isPending}
+            onClick={handleSubmit(send)}
+          >
             Send message
           </Button>
         </>
@@ -64,7 +74,10 @@ export function BulkMessageModal({ driverIds, onClose, onSent }: BulkMessageModa
     >
       <label className="flex flex-col gap-1">
         <span className="text-label text-text">
-          Message <span className="text-danger" aria-hidden="true">*</span>
+          Message{' '}
+          <span className="text-danger" aria-hidden="true">
+            *
+          </span>
         </span>
         <textarea
           {...register('body')}
@@ -73,7 +86,9 @@ export function BulkMessageModal({ driverIds, onClose, onSent }: BulkMessageModa
           aria-invalid={errors.body ? true : undefined}
           className="rounded-md border border-border bg-bg-surface p-3 text-body text-text"
         />
-        {errors.body?.message && <span className="text-caption text-danger">{errors.body.message}</span>}
+        {errors.body?.message && (
+          <span className="text-caption text-danger">{errors.body.message}</span>
+        )}
       </label>
     </Modal>
   );

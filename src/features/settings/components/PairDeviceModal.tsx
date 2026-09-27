@@ -38,7 +38,8 @@ export function PairDeviceModal({ device, onClose }: { device: DeviceRow; onClos
           toast({ kind: 'success', ...SETTINGS_TOAST.devicePaired(device.serial, unitNumber) });
           onClose();
         },
-        onError: (err) => setError(err instanceof ApiError ? err.userMessage : 'Something went wrong.'),
+        onError: (err) =>
+          setError(err instanceof ApiError ? err.userMessage : 'Something went wrong.'),
       },
     );
   }
@@ -87,11 +88,13 @@ export function PairDeviceModal({ device, onClose }: { device: DeviceRow; onClos
           </select>
         </Field>
         {vehiclesQuery.isError && (
-          <p className="text-caption text-danger">The unit list could not be loaded. Close and try again.</p>
+          <p className="text-caption text-danger">
+            The unit list could not be loaded. Close and try again.
+          </p>
         )}
         <p className="text-caption text-text-muted">
-          The device starts recording hours of service for this unit as soon as a driver connects to it
-          over Bluetooth.
+          The device starts recording hours of service for this unit as soon as a driver connects to
+          it over Bluetooth.
         </p>
       </div>
     </Modal>
