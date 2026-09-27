@@ -36,6 +36,8 @@ const KeyboardShortcutsModal = lazy(() =>
   import('./KeyboardShortcutsModal').then((module) => ({ default: module.KeyboardShortcutsModal })),
 );
 
+const APP_NAME = 'OneBook ELD';
+
 /** The two always-visible overlays are fetched right after first paint, not on first click. */
 export const OVERLAY_PRELOAD_DELAY_MS = 1_000;
 
@@ -53,33 +55,63 @@ export interface RouteHandle {
 }
 
 /**
- * A dynamic override for `handle.subtitle`, for the handful of screens whose subtitle depends on
- * fetched data (W-01's carrier name + carrier-timezone date, W-02's "refreshed N seconds ago").
- * `handle.subtitle` stays the default; a mounted screen calling `useDynamicSubtitle` wins.
+ * The page header lives in the top bar only (WB — duplicate page titles): every design image
+ * under `roles and screens/` draws the title + subtitle in the 62px top bar and starts the content
+ * area with the tabs / filters / actions row. Screens never render their own `<h1>`; a screen
+ * whose title or subtitle depends on data (counts, a driver name, a breadcrumb) pushes it here
+ * with `usePageHeader` / `useDynamicSubtitle`. `handle.title` / `handle.subtitle` stay the
+ * defaults while nothing is pushed (and before the screen's data arrives).
+ *
+ * Two contexts on purpose: screens only subscribe to the stable setters, so pushing a new
+ * subtitle node never re-renders the screen that pushed it (a ReactNode breadcrumb would loop).
  */
-const DynamicSubtitleContext = createContext<{
-  subtitle: string | null;
-  setSubtitle: (value: string | null) => void;
-} | null>(null);
+interface PageHeaderValue {
+  title: string | null;
+  subtitle: ReactNode | null;
+}
+interface PageHeaderSetters {
+  setTitle: (value: string | null) => void;
+  setSubtitle: (value: ReactNode | null) => void;
+}
+const PageHeaderValueContext = createContext<PageHeaderValue | null>(null);
+const PageHeaderSettersContext = createContext<PageHeaderSetters | null>(null);
 
-export function DynamicSubtitleProvider({ children }: { children: ReactNode }) {
-  const [subtitle, setSubtitle] = useState<string | null>(null);
+export function PageHeaderProvider({ children }: { children: ReactNode }) {
+  const [title, setTitle] = useState<string | null>(null);
+  const [subtitle, setSubtitle] = useState<ReactNode | null>(null);
+  const setters = useMemo(() => ({ setTitle, setSubtitle }), []);
+  const value = useMemo(() => ({ title, subtitle }), [title, subtitle]);
   return (
-    <DynamicSubtitleContext.Provider value={{ subtitle, setSubtitle }}>
-      {children}
-    </DynamicSubtitleContext.Provider>
+    <PageHeaderSettersContext.Provider value={setters}>
+      <PageHeaderValueContext.Provider value={value}>{children}</PageHeaderValueContext.Provider>
+    </PageHeaderSettersContext.Provider>
   );
 }
 
-/** Call from a screen with the live subtitle string; it clears itself on unmount. */
-export function useDynamicSubtitle(value: string | null): void {
-  const ctx = useContext(DynamicSubtitleContext);
+/** Call from a screen with the live top-bar title; it clears itself on unmount. */
+export function usePageTitle(value: string | null): void {
+  const ctx = useContext(PageHeaderSettersContext);
+  useEffect(() => {
+    if (!ctx) return;
+    ctx.setTitle(value);
+    return () => ctx.setTitle(null);
+  }, [ctx, value]);
+}
+
+/** Call from a screen with the live subtitle (text or a breadcrumb node); clears on unmount. */
+export function useDynamicSubtitle(value: ReactNode | null): void {
+  const ctx = useContext(PageHeaderSettersContext);
   useEffect(() => {
     if (!ctx) return;
     ctx.setSubtitle(value);
     return () => ctx.setSubtitle(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- ctx is a stable provider value
-  }, [value]);
+  }, [ctx, value]);
+}
+
+/** Title + subtitle in one call — what a screen uses instead of rendering its own `<h1>`. */
+export function usePageHeader({ title, subtitle }: { title?: string | null; subtitle?: ReactNode | null }): void {
+  usePageTitle(title ?? null);
+  useDynamicSubtitle(subtitle ?? null);
 }
 
 const ROLE_CHIP: Record<Exclude<Role, 'ADMIN'>, { label: string; className: string }> = {
@@ -102,21 +134,53 @@ function RoleChip({ role }: { role: Role | null }) {
   );
 }
 
+/**
+ * The screen's one `<h1>` (+ subtitle and role chip), resolved from what the mounted screen pushed
+ * through `usePageHeader`, falling back to the route handle. Also mirrors the title into
+ * `document.title`. Exported so screen tests can render the real heading without the whole top bar.
+ */
+export function PageHeading({
+  fallbackTitle = APP_NAME,
+  fallbackSubtitle,
+  role = null,
+}: {
+  fallbackTitle?: string;
+  fallbackSubtitle?: string;
+  role?: Role | null;
+}) {
+  const dynamic = useContext(PageHeaderValueContext);
+  const title = dynamic?.title ?? fallbackTitle;
+  const subtitle = dynamic?.subtitle ?? fallbackSubtitle;
+
+  // The one sensible document title per screen (a11y): the same text as the <h1>.
+  useEffect(() => {
+    document.title = title === APP_NAME ? APP_NAME : `${title} · ${APP_NAME}`;
+  }, [title]);
+
+  return (
+    <div className="min-w-0 flex-1">
+      <div className="flex items-center gap-2">
+        <h1 className="truncate text-page-title text-text">{title}</h1>
+        <RoleChip role={role} />
+      </div>
+      {subtitle ? <div className="truncate text-page-sub text-text-muted">{subtitle}</div> : null}
+    </div>
+  );
+}
+
 function usePageMeta(): RouteHandle {
   const matches = useMatches();
   for (let i = matches.length - 1; i >= 0; i -= 1) {
     const handle = matches[i]?.handle as RouteHandle | undefined;
     if (handle?.title) return handle;
   }
-  return { title: 'OneBook ELD' };
+  return { title: APP_NAME };
 }
 
 export function Topbar() {
   const { user, isAuthenticated } = useAuth();
   const { can } = usePermission();
-  const { title, subtitle: staticSubtitle } = usePageMeta();
-  const dynamicSubtitle = useContext(DynamicSubtitleContext)?.subtitle ?? null;
-  const subtitle = dynamicSubtitle ?? staticSubtitle;
+  const { title: staticTitle, subtitle: staticSubtitle } = usePageMeta();
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const isFetching = useIsFetching() > 0;
@@ -169,13 +233,7 @@ export function Topbar() {
 
   return (
     <header className="flex h-topbar shrink-0 items-center gap-4 border-b border-border bg-bg-surface px-page">
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <h1 className="truncate text-page-title text-text">{title}</h1>
-          <RoleChip role={role} />
-        </div>
-        {subtitle ? <p className="truncate text-page-sub text-text-muted">{subtitle}</p> : null}
-      </div>
+      <PageHeading fallbackTitle={staticTitle} fallbackSubtitle={staticSubtitle} role={role} />
 
       {/* 1. Context filter — screens that have one render it into this slot (§4.4). */}
       <div id="topbar-context-filter" className="flex items-center gap-2" />
