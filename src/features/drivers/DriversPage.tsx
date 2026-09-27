@@ -10,7 +10,7 @@ import { Search, Plus, Download, Filter, Upload, X } from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
-import { useDynamicSubtitle } from '@/app/layouts/Topbar';
+import { usePageHeader } from '@/app/layouts/Topbar';
 import {
   useDriverRoster,
   useDriverRosterCounts,
@@ -73,7 +73,6 @@ export default function DriversPage() {
   const page = positiveIntParam(params.get('page'), 1);
   const limit = positiveIntParam(params.get('limit'), 10);
 
-  useDynamicSubtitle(null);
 
   function setParam(key: string, value: string | null) {
     const next = new URLSearchParams(params);
@@ -319,10 +318,10 @@ export default function DriversPage() {
           <span className="flex items-center gap-2">
             <Avatar name={name} size="md" />
             <span>
-              <span className="flex items-center gap-1.5 text-body-strong text-text">
+              <span className="flex items-center gap-1.5 whitespace-nowrap text-body-strong text-text">
                 {name}
                 {row.original.emailVerified === false && (
-                  <Badge tone="warning" dot>
+                  <Badge tone="warning" dot className="whitespace-nowrap">
                     Email not verified
                   </Badge>
                 )}
@@ -339,7 +338,9 @@ export default function DriversPage() {
     {
       id: 'status',
       header: 'STATUS',
-      cell: ({ row }) => <DutyBadge status={row.original.dutyStatus} />,
+      cell: ({ row }) => (
+        <DutyBadge status={row.original.dutyStatus} className="whitespace-nowrap" />
+      ),
     },
     {
       id: 'unit',
@@ -401,7 +402,7 @@ export default function DriversPage() {
       header: '',
       cell: ({ row }) => (
         <Button
-          variant="ghost"
+          variant="secondary"
           size="sm"
           onClick={(e) => {
             e.stopPropagation();
@@ -418,16 +419,11 @@ export default function DriversPage() {
   const isError = useWindow ? windowQuery.isError : rosterQuery.isError;
   const refetch = () => (useWindow ? windowQuery.refetch() : rosterQuery.refetch());
 
+  usePageHeader({ title: 'Drivers', subtitle: `${counts.all} drivers · ${counts.onDuty} on duty · ${counts.violations} with active violations` });
+
   return (
     <div className="flex flex-col gap-4 xl:max-h-content-h">
-      <div className="flex items-center justify-between xl:shrink-0">
-        <div>
-          <h1 className="text-page-title text-text">Drivers</h1>
-          <p className="text-page-sub text-text-muted">
-            {counts.all} drivers · {counts.onDuty} on duty · {counts.violations} with active
-            violations
-          </p>
-        </div>
+      <div className="flex items-center justify-end xl:shrink-0">
         <div className="flex items-center gap-2">
           <div className="flex h-input items-center gap-2 rounded-md border border-border bg-bg-surface px-3">
             <Search size={16} strokeWidth={1.75} className="text-text-muted" />

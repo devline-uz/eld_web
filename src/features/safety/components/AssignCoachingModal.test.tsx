@@ -59,4 +59,31 @@ describe('AssignCoachingModal', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(body).toEqual({ driverId: 'drv_1', note: 'Follow up next week' });
   });
+
+  it('QA — a note over 1,000 characters is refused on the field, not sent', async () => {
+    let posts = 0;
+    server.use(
+      http.post(url(endpoints.safety.coaching), () => {
+        posts += 1;
+        return HttpResponse.json(ok({ id: 'evt_1' }));
+      }),
+    );
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <AssignCoachingModal driver={DRIVER as never} onClose={() => {}} />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByLabelText('Note'));
+    await user.paste('x'.repeat(1001));
+    await user.click(screen.getByRole('button', { name: 'Assign coaching' }));
+
+    expect(await screen.findByText('Notes are limited to 1,000 characters.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Note')).toHaveAttribute('aria-invalid', 'true');
+    expect(posts).toBe(0);
+  });
 });

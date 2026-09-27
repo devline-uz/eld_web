@@ -73,6 +73,27 @@ describe('AssignLoadModal — 11.4 load variant', () => {
     expect(posts).toEqual([{ driverId: 'drv_1', notify: true }]);
   });
 
+  it('QA fix — lists ACTIVE drivers only (`?status=ACTIVE`)', async () => {
+    const statuses: (string | null)[] = [];
+    server.use(
+      http.get(url(endpoints.drivers.list), ({ request }) => {
+        const status = new URL(request.url).searchParams.get('status');
+        statuses.push(status);
+        const all = [
+          { id: 'drv_1', firstName: 'John', lastName: 'Smith', status: 'ACTIVE', homeTerminalName: 'Columbus, OH' },
+          { id: 'drv_2', firstName: 'Old', lastName: 'Timer', status: 'INACTIVE', homeTerminalName: 'Columbus, OH' },
+        ];
+        const items = status ? all.filter((d) => d.status === status) : all;
+        return ok({ items, page: 1, limit: 25, total: items.length, totalPages: 1 });
+      }),
+    );
+    renderModal();
+    expect(await screen.findByText('John Smith')).toBeInTheDocument();
+    expect(screen.queryByText('Old Timer')).not.toBeInTheDocument();
+    expect(statuses.length).toBeGreaterThan(0);
+    expect(statuses.every((s) => s === 'ACTIVE')).toBe(true);
+  });
+
   it('renders drivers as one native radio group — no radio nested in a button, arrow keys move the pick', async () => {
     server.use(
       http.get(url(endpoints.drivers.list), () =>

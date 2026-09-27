@@ -26,7 +26,8 @@ export function NewConversationModal({ onClose, onCreated }: { onClose: () => vo
   const [driverId, setDriverId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
-  const driversQuery = useDriversList({ q: query || undefined, limit: 50 });
+  // QA fix — an INACTIVE driver has no app session to receive messages (`?status=ACTIVE`).
+  const driversQuery = useDriversList({ q: query || undefined, limit: 50, status: 'ACTIVE' });
   const createConversation = useCreateConversation();
   const broadcast = useBroadcastMessage();
 

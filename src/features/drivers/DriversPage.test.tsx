@@ -12,6 +12,7 @@ import { endpoints } from '@/shared/api/endpoints';
 import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/client';
 import { ToastProvider } from '@/shared/ui/Toast';
 import DriversPage from './DriversPage';
+import { PageHeaderProvider, PageHeading } from '@/app/layouts/Topbar';
 
 vi.mock('@/shared/auth/usePermission', () => ({ usePermission: () => ({ can: () => true }) }));
 
@@ -56,7 +57,10 @@ function renderPage(initialEntries: string[] = ['/drivers']) {
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
         <MemoryRouter initialEntries={initialEntries}>
-          <DriversPage />
+          <PageHeaderProvider>
+            <PageHeading />
+            <DriversPage />
+          </PageHeaderProvider>
           <LocationProbe />
         </MemoryRouter>
       </ToastProvider>

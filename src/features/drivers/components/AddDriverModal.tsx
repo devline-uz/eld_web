@@ -279,8 +279,11 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
       },
       {
         onSuccess: (driver) => {
+          const addedToast = sendInvitation
+            ? TOAST_COPY.driverAdded(values.email)
+            : DRIVER_TOAST.driverAddedNoInvitation();
           if (!assignedVehicleId) {
-            toast({ kind: 'success', ...TOAST_COPY.driverAdded(values.email) });
+            toast({ kind: 'success', ...addedToast });
             onClose();
             return;
           }
@@ -291,7 +294,7 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
             { driverId: driver.id },
             {
               onSuccess: () => {
-                toast({ kind: 'success', ...TOAST_COPY.driverAdded(values.email) });
+                toast({ kind: 'success', ...addedToast });
                 onClose();
               },
               // The driver exists either way: the modal closes (a retry here would create a
@@ -398,14 +401,25 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
           </p>
           <div className="grid grid-cols-3 gap-4">
             <Field label="First name" required error={errors.firstName?.message}>
-              <input {...register('firstName')} disabled={isPending} className={inputClass} />
+              <input
+                {...register('firstName')}
+                aria-invalid={errors.firstName ? true : undefined}
+                disabled={isPending}
+                className={inputClass}
+              />
             </Field>
             <Field label="Last name" required error={errors.lastName?.message}>
-              <input {...register('lastName')} disabled={isPending} className={inputClass} />
+              <input
+                {...register('lastName')}
+                aria-invalid={errors.lastName ? true : undefined}
+                disabled={isPending}
+                className={inputClass}
+              />
             </Field>
             <Field label="Username" required error={errors.username?.message}>
               <input
                 {...register('username')}
+                aria-invalid={errors.username ? true : undefined}
                 placeholder="Used to sign in to the app"
                 disabled={isPending}
                 className={inputClass}
@@ -427,6 +441,7 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
                   id="add-driver-password"
                   type={showPassword ? 'text' : 'password'}
                   {...register('password')}
+                  aria-invalid={errors.password ? true : undefined}
                   placeholder="Minimum 8 characters"
                   disabled={isPending}
                   className={`${inputClass} w-full pr-9`}
@@ -452,6 +467,7 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
             <Field label="Email address" required error={errors.email?.message}>
               <input
                 {...register('email')}
+                aria-invalid={errors.email ? true : undefined}
                 type="email"
                 placeholder="driver@gmail.com"
                 disabled={isPending}
@@ -491,7 +507,12 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
           </p>
           <div className="grid grid-cols-3 gap-4">
             <Field label="Driver licence number" required error={errors.cdlNumber?.message}>
-              <input {...register('cdlNumber')} disabled={isPending} className={inputClass} />
+              <input
+                {...register('cdlNumber')}
+                aria-invalid={errors.cdlNumber ? true : undefined}
+                disabled={isPending}
+                className={inputClass}
+              />
             </Field>
             <Field label="Issuing state" required error={errors.cdlState?.message}>
               <select {...register('cdlState')} disabled={isPending} className={inputClass}>

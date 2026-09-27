@@ -1,13 +1,13 @@
 // owner: web-vehicles-drivers — W-07 Driver profile (web/tz.md §10 W-07).
 // Design: web/roles and screens/admin panel/Driver profile — HOS clocks, violations, logs.jpg
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronRight, MoreHorizontal, Pencil, MessageSquare, UserPlus } from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
-import { useDynamicSubtitle } from '@/app/layouts/Topbar';
+import { usePageHeader } from '@/app/layouts/Topbar';
 import { useRoom } from '@/shared/realtime/useRoom';
 import {
   useDeactivateDriver,
@@ -30,6 +30,7 @@ import { useToast } from '@/shared/ui/Toast';
 import { ErrorState, LoadingState, ForbiddenState } from '@/shared/ui/states';
 import { formatLocal } from '@/shared/format/datetime';
 import { orNone } from '@/shared/format/empty';
+import { phoneForDisplay } from '@/shared/forms/phoneNumber';
 import { qk, qkRoot } from '@/shared/api/queryKeys';
 import { messagesHref } from '@/shared/lib/messagesHref';
 import { EditDriverModal } from './components/EditDriverModal';
@@ -99,11 +100,28 @@ export default function DriverProfilePage() {
     : undefined;
   const coDriverQuery = useDriver(coDriverPartnerId);
 
-  useDynamicSubtitle(
-    driverQuery.data
-      ? `Drivers › ${driverQuery.data.firstName} ${driverQuery.data.lastName}`
-      : null,
+  // Design: the top bar carries the driver's name and the `Drivers › …` breadcrumb (the only
+  // breadcrumb on the page); the profile card below repeats the name as its own heading.
+  const headerDriver = driverQuery.data;
+  const headerUnit = vehicleQuery.data?.unitNumber;
+  const headerName = headerDriver ? `${headerDriver.firstName} ${headerDriver.lastName}` : null;
+  const breadcrumb = useMemo(
+    () =>
+      headerDriver ? (
+        <nav aria-label="Breadcrumb" className="flex items-center gap-1">
+          <Link to="/drivers" className="hover:text-text">
+            Drivers
+          </Link>
+          <ChevronRight size={12} strokeWidth={1.75} aria-hidden="true" />
+          <span className="truncate">
+            {headerDriver.firstName} {headerDriver.lastName} · @{headerDriver.username}
+            {headerUnit ? ` · Unit ${headerUnit}` : ''}
+          </span>
+        </nav>
+      ) : null,
+    [headerDriver, headerUnit],
   );
+  usePageHeader({ title: headerName, subtitle: breadcrumb });
   useRoom(id ? `driver:${id}` : null, {});
 
   const { toast } = useToast();
@@ -181,24 +199,13 @@ export default function DriverProfilePage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-1 text-caption text-text-muted">
-        <Link to="/drivers" className="hover:text-text">
-          Drivers
-        </Link>
-        <ChevronRight size={12} strokeWidth={1.75} />
-        <span>
-          {name} · @{driver.username}
-          {vehicleQuery.data ? ` · Unit ${vehicleQuery.data.unitNumber}` : ''}
-        </span>
-      </div>
-
       <Card>
         <div className="flex items-start justify-between gap-4">
           <div className="flex gap-4">
             <Avatar name={name} size="xl" />
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-page-title text-text">{name}</h1>
+                <h2 className="text-page-title text-text">{name}</h2>
                 {driver.status === 'ACTIVE' && (
                   <Badge tone="success" dot>
                     Active
@@ -214,7 +221,7 @@ export default function DriverProfilePage() {
                 {vehicleQuery.data ? `Unit ${vehicleQuery.data.unitNumber} · ` : ''}
                 CDL {driver.cdlState}-{driver.cdlNumber} · {driver.homeTerminalName} terminal
                 {driver.email ? ` · ${driver.email}` : ''}
-                {driver.phone ? ` · ${driver.phone}` : ''}
+                {driver.phone ? ` · ${phoneForDisplay(driver.phone)}` : ''}
               </p>
             </div>
           </div>
@@ -325,7 +332,8 @@ export default function DriverProfilePage() {
                       label="Drive left"
                       remainingSec={hosQuery.data.driveRemainingSec}
                       limitSec={hosQuery.data.driveLimitSec}
-                      ofHint="limit exceeded"
+                      // Static "limit exceeded" used to label a fresh 11:00 clock as exceeded.
+                      ofHint={hosQuery.data.driveRemainingSec <= 0 ? 'limit exceeded' : 'of 11:00'}
                     />
                   </div>
                   <div className="rounded-md border border-border p-3.5">
@@ -424,7 +432,7 @@ export default function DriverProfilePage() {
                 label={driver.email && !driver.emailVerifiedAt ? 'Email · not verified' : 'Email'}
                 value={driver.email ?? '—'}
               />
-              <DetailRow label="Phone" value={driver.phone ?? '—'} />
+              <DetailRow label="Phone" value={driver.phone ? phoneForDisplay(driver.phone) : '—'} />
               <DetailRow label="CDL number" value={driver.cdlNumber} />
               <DetailRow label="CDL state" value={driver.cdlState} />
               <DetailRow label="Home terminal" value={driver.homeTerminalName} />

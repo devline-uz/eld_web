@@ -10,11 +10,15 @@ import { useToast } from '@/shared/ui/Toast';
 import { useAssignCoaching, type ScorecardTableRow } from '@/shared/api/safety';
 import { ApiError } from '@/shared/api/errors';
 
+const NOTE_MAX = 1000;
+const NOTE_TOO_LONG = 'Notes are limited to 1,000 characters.';
+
 export function AssignCoachingModal({ driver, onClose }: { driver: ScorecardTableRow; onClose: () => void }) {
   const { toast } = useToast();
   const mutation = useAssignCoaching();
   const [note, setNote] = useState('');
   const [serverError, setServerError] = useState<string | null>(null);
+  const [noteError, setNoteError] = useState<string | null>(null);
 
   const driverName = driver.driver ? `${driver.driver.firstName} ${driver.driver.lastName}` : 'this driver';
 
@@ -37,6 +41,13 @@ export function AssignCoachingModal({ driver, onClose }: { driver: ScorecardTabl
               // `mutate()` returns immediately — without this a double click coaches twice.
               if (mutation.isPending) return;
               setServerError(null);
+              // `CreateCoachingDto.note` is `max(1000)`: a longer note used to reach the server and
+              // come back as a bare "Check the highlighted fields" with nothing highlighted.
+              if (note.length > NOTE_MAX) {
+                setNoteError(NOTE_TOO_LONG);
+                return;
+              }
+              setNoteError(null);
               mutation.mutate(
                 { driverId: driver.driverId, note: note || undefined },
                 {
@@ -44,7 +55,14 @@ export function AssignCoachingModal({ driver, onClose }: { driver: ScorecardTabl
                     toast({ kind: 'success', title: 'Coaching assigned', description: `${driverName} was scheduled for coaching.` });
                     onClose();
                   },
-                  onError: (error) => setServerError(error instanceof ApiError ? error.userMessage : 'Something went wrong.'),
+                  onError: (error) => {
+                    const fieldMessage = error instanceof ApiError ? error.fieldErrors.note : undefined;
+                    if (fieldMessage) {
+                      setNoteError(NOTE_TOO_LONG);
+                      return;
+                    }
+                    setServerError(error instanceof ApiError ? error.userMessage : 'Something went wrong.');
+                  },
                 },
               );
             }}
@@ -62,12 +80,22 @@ export function AssignCoachingModal({ driver, onClose }: { driver: ScorecardTabl
           <span className="text-label text-text">Note</span>
           <textarea
             value={note}
-            onChange={(e) => setNote(e.target.value)}
+            onChange={(e) => {
+              setNote(e.target.value);
+              if (noteError && e.target.value.length <= NOTE_MAX) setNoteError(null);
+            }}
             rows={3}
             placeholder="Coaching focus, follow-up date, etc."
+            aria-invalid={noteError ? true : undefined}
+            aria-describedby={noteError ? 'coaching-note-error' : undefined}
             className="rounded-md border border-border bg-bg-surface px-3 py-2 text-body text-text"
           />
         </label>
+        {noteError && (
+          <span id="coaching-note-error" className="-mt-3 text-caption text-danger">
+            {noteError}
+          </span>
+        )}
         {serverError && (
           <p role="alert" className="rounded-md bg-danger-soft p-3 text-body text-danger">
             {serverError}

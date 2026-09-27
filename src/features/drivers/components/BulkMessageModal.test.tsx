@@ -68,16 +68,12 @@ describe('W-06 bulk Send message', () => {
     const { onClose } = renderModal();
 
     await user.click(sendButton());
-    expect(
-      await screen.findByText('Messages are limited to 2,000 characters.'),
-    ).toBeInTheDocument();
+    expect(await screen.findByText('This field is required.')).toBeInTheDocument();
     expect(messageBox()).toHaveAttribute('aria-invalid', 'true');
 
     await user.type(messageBox(), '   ');
     await user.click(sendButton());
-    expect(
-      await screen.findByText('Messages are limited to 2,000 characters.'),
-    ).toBeInTheDocument();
+    expect(await screen.findByText('This field is required.')).toBeInTheDocument();
     expect(posts).toBe(0);
     expect(onClose).not.toHaveBeenCalled();
   });

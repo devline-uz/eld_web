@@ -21,6 +21,14 @@ export const DRIVER_TOAST = {
     title: `Unit #${unitNumber} assigned`,
     description: `${driverName} drives it from the next sign-in to the app.`,
   }),
+  /**
+   * 11.8 with `Send invitation now` unticked — `TOAST_COPY.driverAdded` says an invitation was
+   * sent, which is false when `sendInvitation: false` rode on `POST /drivers`.
+   */
+  driverAddedNoInvitation: (): ToastCopy => ({
+    title: 'Driver added',
+    description: 'No invitation was sent. Share the mobile app password with the driver directly.',
+  }),
   /** 11.8 — the driver was created, but the follow-up `POST /vehicles/:id/assign-driver` failed. */
   driverAddedUnitNotAssigned: (unitNumber: string, reason: string): ToastCopy => ({
     title: `Driver added, but Unit #${unitNumber} was not assigned`,

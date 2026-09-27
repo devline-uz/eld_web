@@ -261,7 +261,8 @@ export function CreateTripModal({ onClose }: { onClose: () => void }) {
   // to join `formState.isDirty` — otherwise a real edit closed without the 11.30 confirm.
   const dirty = isDirty || estimatedDriveHours !== '' || intermediateStops.length > 0;
 
-  const driversQuery = useDriversList({ limit: 200 });
+  // QA fix — only ACTIVE drivers can be dispatched (`?status=ACTIVE`).
+  const driversQuery = useDriversList({ limit: 200, status: 'ACTIVE' });
   const vehiclesQuery = useVehiclesPicker();
   const trailersQuery = useTrailersLookup();
   const driverHos = useDriverHos(driverId ?? undefined);

@@ -10,6 +10,7 @@ import { client } from './client';
 import { endpoints } from './endpoints';
 import { qk } from './queryKeys';
 import { pagePolicy, type PageQueryOptions } from './paging';
+import type { OffsetPage } from './types';
 
 /** The real, raw `Trailer` row (`GET /trailers` — `TrailersListResponse`). */
 export interface TrailerRow {
@@ -25,7 +26,14 @@ export const TRAILERS_LOOKUP_LIMIT = 500;
 
 export const trailersLookupQuery = (): PageQueryOptions<TrailerRow> => ({
   queryKey: qk.trailers({ limit: TRAILERS_LOOKUP_LIMIT }),
-  queryFn: ({ signal }) => client.list<TrailerRow>(endpoints.trailers.list, { limit: TRAILERS_LOOKUP_LIMIT }, { signal }),
+  // The live `GET /trailers` returns a bare array (`data: []`), not the `{ items }` page its
+  // OpenAPI example shows — `client.list` then rejected every response and the Create trip picker
+  // always read "Trailers unavailable — try again." Accept both shapes.
+  queryFn: async ({ signal }) => {
+    const body = await client.get<TrailerRow[] | OffsetPage<TrailerRow>>(endpoints.trailers.list, { signal });
+    const items = Array.isArray(body) ? body : (body?.items ?? []);
+    return { items, page: 1, limit: items.length, total: items.length, totalPages: 1 };
+  },
   ...pagePolicy('reference'),
 });
 

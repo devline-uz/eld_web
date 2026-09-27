@@ -6,7 +6,7 @@ import type { ColumnDef } from '@tanstack/react-table';
 import { Search, Plus, Filter, Users, MapPin, X } from 'lucide-react';
 import { usePermission } from '@/shared/auth/usePermission';
 import { Can } from '@/shared/auth/Can';
-import { useDynamicSubtitle } from '@/app/layouts/Topbar';
+import { usePageHeader } from '@/app/layouts/Topbar';
 import { useRoom } from '@/shared/realtime/useRoom';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -47,7 +47,6 @@ export default function TripsPage() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const canFull = can('trips', 'FULL');
-  useDynamicSubtitle(null);
 
   const [segment, setSegmentState] = useState<Segment>('ACTIVE');
   const [search, setSearch] = useState('');
@@ -143,6 +142,22 @@ export default function TripsPage() {
   };
 
   const filteredRows = trips.rows;
+
+  // The `Active trips` chip and the `Running late` hint were the mock's literals ("6 arriving
+  // today", "avg 48 min") whatever the fleet did. Both now come from the active trips on screen.
+  const todayKey = formatLocal(new Date(), 'yyyy-MM-dd');
+  const arrivingToday = trips.activeRows.filter((t) => {
+    const at = t.etaAt ?? t.plannedEndAt;
+    return at ? formatLocal(at, 'yyyy-MM-dd') === todayKey : false;
+  }).length;
+  const lateMinutes = trips.activeRows
+    .filter((t) => t.displayStatus === 'Late' && t.etaAt && t.plannedEndAt)
+    .map((t) => (Date.parse(t.etaAt as string) - Date.parse(t.plannedEndAt as string)) / 60_000)
+    .filter((m) => m > 0);
+  const avgLateHint =
+    lateMinutes.length > 0
+      ? `avg ${Math.round(lateMinutes.reduce((sum, m) => sum + m, 0) / lateMinutes.length)} min`
+      : undefined;
 
   const selectedTrip = useMemo(
     () => trips.activeRows.find((t) => t.id === selectedTripId) ?? filteredRows.find((t) => t.id === selectedTripId) ?? filteredRows[0] ?? null,
@@ -296,15 +311,11 @@ export default function TripsPage() {
 
   const isLoading = trips.isKpiLoading || unassigned.isLoading;
 
+  usePageHeader({ title: 'Dispatch & Trips', subtitle: `${counts.active} active trips · ${counts.unassignedCount} unassigned loads · on-time ${counts.onTimePct}%` });
+
   return (
     <div className="flex flex-col gap-4 xl:max-h-content-h">
-      <div className="flex items-center justify-between xl:shrink-0">
-        <div>
-          <h1 className="text-page-title text-text">Dispatch &amp; Trips</h1>
-          <p className="text-page-sub text-text-muted">
-            {counts.active} active trips · {counts.unassignedCount} unassigned loads · on-time {counts.onTimePct}%
-          </p>
-        </div>
+      <div className="flex items-center justify-end xl:shrink-0">
         <div className="flex items-center gap-2">
           <div className="flex h-input items-center gap-2 rounded-md border border-border bg-bg-surface px-3">
             <Search size={16} strokeWidth={1.75} className="text-text-muted" />
@@ -363,8 +374,8 @@ export default function TripsPage() {
         ) : (
           <div className="grid grid-cols-4 gap-card-gap">
             <KpiCard label="On-time delivery" value={`${counts.onTimePct}%`} icon={MapPin} iconTone="success" hint={`last ${trips.kpis.onTimeWindow} deliveries`} />
-            <KpiCard label="Active trips" value={counts.active} icon={MapPin} iconTone="info" chip={{ text: '6 arriving today', tone: 'info' }} />
-            <KpiCard label="Running late" value={counts.lateCount} icon={MapPin} iconTone="warning" hint="avg 48 min" />
+            <KpiCard label="Active trips" value={counts.active} icon={MapPin} iconTone="info" chip={{ text: `${arrivingToday} arriving today`, tone: 'info' }} />
+            <KpiCard label="Running late" value={counts.lateCount} icon={MapPin} iconTone="warning" hint={avgLateHint} />
             <KpiCard label="Unassigned loads" value={counts.unassignedCount} icon={Users} iconTone="warning" hint="needs driver" />
           </div>
         )}

@@ -12,6 +12,7 @@ import { endpoints } from '@/shared/api/endpoints';
 import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/client';
 import { ToastProvider } from '@/shared/ui/Toast';
 import SafetyPage from './SafetyPage';
+import { PageHeaderProvider, PageHeading } from '@/app/layouts/Topbar';
 
 let mockCan = (_key: string, _level?: 'READ' | 'FULL') => true;
 vi.mock('@/shared/auth/usePermission', () => ({ usePermission: () => ({ can: (k: string, l?: 'READ' | 'FULL') => mockCan(k, l) }) }));
@@ -26,7 +27,10 @@ function renderPage() {
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
         <MemoryRouter>
-          <SafetyPage />
+          <PageHeaderProvider>
+            <PageHeading />
+            <SafetyPage />
+          </PageHeaderProvider>
         </MemoryRouter>
       </ToastProvider>
     </QueryClientProvider>,
@@ -49,7 +53,7 @@ beforeEach(() => {
 describe('SafetyPage', () => {
   it('renders the header and KPI row', async () => {
     renderPage();
-    expect(await screen.findByText('Safety')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Safety' })).toBeInTheDocument();
     expect(await screen.findByText('Fleet safety score')).toBeInTheDocument();
     expect(await screen.findByText('Harsh events')).toBeInTheDocument();
     expect(await screen.findByText('Speeding events')).toBeInTheDocument();
@@ -69,7 +73,7 @@ describe('SafetyPage', () => {
   it('removes `Assign coaching` without safety FULL', async () => {
     mockCan = (key, level) => !(key === 'safety' && level === 'FULL');
     renderPage();
-    await screen.findByText('Safety');
+    await screen.findByRole('heading', { level: 1, name: 'Safety' });
     expect(screen.queryByRole('button', { name: 'Assign coaching' })).not.toBeInTheDocument();
   });
 
