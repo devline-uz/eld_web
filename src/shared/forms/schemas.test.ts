@@ -166,6 +166,7 @@ describe('form schemas', () => {
       password: 'Onebook2026',
       cdlNumber: 'OH-4471982',
       cdlState: 'OH',
+      homeTerminalName: 'Main terminal',
       homeTerminalTimezone: 'America/New_York',
       notifyByEmail: true,
     });

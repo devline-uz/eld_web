@@ -9,7 +9,6 @@ import { useToast } from '@/shared/ui/Toast';
 import { useImportDrivers, type ImportDriversOptions } from '@/shared/api/drivers';
 import { ApiError } from '@/shared/api/errors';
 import { parseCsv } from '@/shared/lib/csv';
-import { TERMINALS } from '../lib/terminals';
 
 const MAX_BYTES = 5 * 1024 * 1024;
 const MAX_ROWS = 500;
@@ -25,8 +24,9 @@ export function ImportDriversModal({ onClose }: { onClose: () => void }) {
   // warnings), so the "N valid" figure was fabricated.
   const [rowsNeedingAttention, setRowsNeedingAttention] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [duplicateStrategy, setDuplicateStrategy] = useState<NonNullable<ImportDriversOptions['duplicateStrategy']>>('SKIP');
-  const [defaultHomeTerminalName, setDefaultHomeTerminalName] = useState<string>(TERMINALS[0].name);
+  const [duplicateStrategy, setDuplicateStrategy] =
+    useState<NonNullable<ImportDriversOptions['duplicateStrategy']>>('SKIP');
+  const [defaultHomeTerminalName, setDefaultHomeTerminalName] = useState('');
   const [sendInvitations, setSendInvitations] = useState(true);
   const [applyDefaultExemptions, setApplyDefaultExemptions] = useState(true);
   const mutation = useImportDrivers();
@@ -62,7 +62,9 @@ export function ImportDriversModal({ onClose }: { onClose: () => void }) {
           problemRows.add(index);
         }
         if (!row.cdlState) {
-          rowWarnings.push(`Row ${index + 2}  Missing CDL issuing state — driver will be created as incomplete`);
+          rowWarnings.push(
+            `Row ${index + 2}  Missing CDL issuing state — driver will be created as incomplete`,
+          );
           problemRows.add(index);
         }
       });
@@ -93,7 +95,13 @@ export function ImportDriversModal({ onClose }: { onClose: () => void }) {
               mutation.mutate(
                 {
                   drivers: rows,
-                  options: { duplicateStrategy, defaultHomeTerminalName, sendInvitations, applyDefaultExemptions },
+                  options: {
+                    duplicateStrategy,
+                    // Optional and typed — no Terminal table to pick from yet (backend D-090).
+                    defaultHomeTerminalName: defaultHomeTerminalName.trim() || undefined,
+                    sendInvitations,
+                    applyDefaultExemptions,
+                  },
                 },
                 {
                   onSuccess: (summary) => {
@@ -106,7 +114,8 @@ export function ImportDriversModal({ onClose }: { onClose: () => void }) {
                     onClose();
                   },
                   onError: (err) => {
-                    const message = err instanceof ApiError ? err.userMessage : 'Something went wrong.';
+                    const message =
+                      err instanceof ApiError ? err.userMessage : 'Something went wrong.';
                     setError(message);
                     toast({ kind: 'error', title: message });
                   },
@@ -135,7 +144,9 @@ export function ImportDriversModal({ onClose }: { onClose: () => void }) {
           >
             <Upload size={20} strokeWidth={1.75} className="text-text-muted" aria-hidden="true" />
             <span className="text-body text-text">Drop your CSV here or click to browse</span>
-            <span className="text-caption text-text-muted">Up to 5 MB · one driver per row · 500 rows maximum</span>
+            <span className="text-caption text-text-muted">
+              Up to 5 MB · one driver per row · 500 rows maximum
+            </span>
           </button>
         ) : (
           <div className="flex items-center gap-3 rounded-md border border-border p-3">
@@ -143,8 +154,8 @@ export function ImportDriversModal({ onClose }: { onClose: () => void }) {
             <div className="flex-1">
               <p className="text-body-strong text-text">{file.name}</p>
               <p className="text-caption text-text-muted">
-                {(file.size / 1024).toFixed(0)} KB · {rows.length} rows detected · {rows.length - rowsNeedingAttention} valid,{' '}
-                {rowsNeedingAttention} need attention
+                {(file.size / 1024).toFixed(0)} KB · {rows.length} rows detected ·{' '}
+                {rows.length - rowsNeedingAttention} valid, {rowsNeedingAttention} need attention
               </p>
             </div>
             {warnings.length > 0 ? (
@@ -208,25 +219,29 @@ export function ImportDriversModal({ onClose }: { onClose: () => void }) {
             </label>
             <label className="flex flex-col gap-1">
               <span className="text-label text-text">Default terminal</span>
-              <select
+              <input
                 value={defaultHomeTerminalName}
                 onChange={(e) => setDefaultHomeTerminalName(e.target.value)}
+                placeholder="Optional"
                 className="h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text"
-              >
-                {TERMINALS.map((t) => (
-                  <option key={t.name} value={t.name}>
-                    {t.label}
-                  </option>
-                ))}
-              </select>
+              />
             </label>
           </div>
           <label className="flex items-center gap-2 text-body text-text">
-            <input type="checkbox" checked={sendInvitations} onChange={(e) => setSendInvitations(e.target.checked)} />
-            Send app invitations after import — each driver receives an email with a one-time sign-in code
+            <input
+              type="checkbox"
+              checked={sendInvitations}
+              onChange={(e) => setSendInvitations(e.target.checked)}
+            />
+            Send app invitations after import — each driver receives an email with a one-time
+            sign-in code
           </label>
           <label className="flex items-center gap-2 text-body text-text">
-            <input type="checkbox" checked={applyDefaultExemptions} onChange={(e) => setApplyDefaultExemptions(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={applyDefaultExemptions}
+              onChange={(e) => setApplyDefaultExemptions(e.target.checked)}
+            />
             Apply default HOS exemptions — personal conveyance and yard move enabled
           </label>
         </fieldset>

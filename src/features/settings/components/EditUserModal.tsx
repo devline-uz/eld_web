@@ -16,18 +16,13 @@ import { useUpdateUser, type RoleRow, type UserRow } from '@/shared/api/settings
 import { Field, inputClass } from './formKit';
 import { SETTINGS_TOAST } from '../lib/copy';
 
-/** Same static home-terminal list `InviteUserModal` seeds — no Terminal table yet (D-090). */
-const TERMINALS = [
-  { name: 'Columbus, OH', label: 'Columbus, OH' },
-  { name: 'Raleigh, NC', label: 'Raleigh, NC' },
-] as const;
-
 const editUserSchema = z.object({
   firstName: fields.requiredString(),
   lastName: fields.requiredString(),
   email: fields.email(),
   jobTitle: z.string().trim().max(100).optional(),
   phone: z.string().trim().optional(),
+  /** Typed — no Terminal table to pick from yet (backend D-090). Empty = all terminals. */
   homeTerminalName: z.string().trim().optional(),
 });
 type EditUserValues = z.infer<typeof editUserSchema>;
@@ -42,7 +37,13 @@ export interface EditUserModalProps {
   onClose: () => void;
 }
 
-export function EditUserModal({ user, roles, mode, activeAdminCount, onClose }: EditUserModalProps) {
+export function EditUserModal({
+  user,
+  roles,
+  mode,
+  activeAdminCount,
+  onClose,
+}: EditUserModalProps) {
   const { toast } = useToast();
   const updateUser = useUpdateUser();
   const [banner, setBanner] = useState<string | null>(null);
@@ -101,7 +102,10 @@ export function EditUserModal({ user, roles, mode, activeAdminCount, onClose }: 
       { id: user.id, dto },
       {
         onSuccess: (result) => {
-          const name = mode === 'profile' ? `${values.firstName} ${values.lastName}` : `${user.firstName} ${user.lastName}`;
+          const name =
+            mode === 'profile'
+              ? `${values.firstName} ${values.lastName}`
+              : `${user.firstName} ${user.lastName}`;
           const roleName = roles.find((r) => r.id === roleId)?.name ?? user.role.name;
           if (result.emailVerification?.pendingEmail) {
             setPendingEmail(result.emailVerification.pendingEmail);
@@ -159,7 +163,8 @@ export function EditUserModal({ user, roles, mode, activeAdminCount, onClose }: 
         )}
         {pendingEmail && (
           <p role="status" className="rounded-md bg-info-soft px-3 py-2 text-body text-info">
-            A verification link was sent to {pendingEmail}. The address changes once the user confirms it — until then sign-in still uses {user.email}.
+            A verification link was sent to {pendingEmail}. The address changes once the user
+            confirms it — until then sign-in still uses {user.email}.
           </p>
         )}
         {mode === 'profile' && (
@@ -188,22 +193,23 @@ export function EditUserModal({ user, roles, mode, activeAdminCount, onClose }: 
                 <input {...register('phone')} disabled={submitting} className={inputClass} />
               </Field>
             </div>
-            <Field label="Home terminal">
-              <select {...register('homeTerminalName')} disabled={submitting} className={inputClass}>
-                <option value="">All terminals</option>
-                {TERMINALS.map((t) => (
-                  <option key={t.name} value={t.name}>
-                    {t.label}
-                  </option>
-                ))}
-              </select>
+            <Field label="Home terminal" hint="Leave empty for all terminals.">
+              <input
+                {...register('homeTerminalName')}
+                disabled={submitting}
+                className={inputClass}
+              />
             </Field>
           </>
         )}
         <Field
           label="Role"
           required
-          error={demotingLastAdmin ? 'This is the last active admin. Promote another user to Admin first.' : undefined}
+          error={
+            demotingLastAdmin
+              ? 'This is the last active admin. Promote another user to Admin first.'
+              : undefined
+          }
         >
           <select
             value={roleId}

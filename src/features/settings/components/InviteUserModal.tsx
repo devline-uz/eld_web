@@ -15,23 +15,41 @@ import type { z } from 'zod';
 type InviteUserFormValues = z.infer<typeof inviteUserSchema>;
 
 /** Only these keys have a rendered error slot — anything else in a 422 goes to the banner. */
-const FORM_FIELDS = new Set<keyof InviteUserFormValues>(['email', 'firstName', 'lastName', 'roleKey']);
+const FORM_FIELDS = new Set<keyof InviteUserFormValues>([
+  'email',
+  'firstName',
+  'lastName',
+  'roleKey',
+]);
 
 const INVITABLE_ROLES = ['FLEET_MANAGER', 'DISPATCHER', 'VIEWER'] as const;
 
-/** B-85 (shipped) — `POST /users` `terminalIds`. No Terminal table yet (backend D-090); home
- * terminal names, same static list `AddDriverModal` seeds (features/* cannot import features/*,
- * so this is its own copy). Empty selection = every terminal, per the field's own description. */
-const TERMINALS = [
-  { name: 'Columbus, OH', label: 'Columbus, OH' },
-  { name: 'Raleigh, NC', label: 'Raleigh, NC' },
-] as const;
+/** B-85 (shipped) — `POST /users` `terminalIds`. No Terminal table yet (backend D-090), so the
+ * names are typed, one per line (a name such as `Dayton, OH` carries its own comma). Nothing
+ * typed = no scope recorded, per the field's own description. */
+function parseTerminalNames(text: string): string[] {
+  return [
+    ...new Set(
+      text
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean),
+    ),
+  ];
+}
 
-const ROLE_COPY: Record<(typeof INVITABLE_ROLES)[number], { title: string; description: string }> = {
-  FLEET_MANAGER: { title: 'Fleet manager', description: 'Full access to vehicles, drivers, HOS and maintenance' },
-  DISPATCHER: { title: 'Dispatcher', description: 'Trips, messaging and read-only compliance data' },
-  VIEWER: { title: 'Viewer', description: 'Read-only across the whole account' },
-};
+const ROLE_COPY: Record<(typeof INVITABLE_ROLES)[number], { title: string; description: string }> =
+  {
+    FLEET_MANAGER: {
+      title: 'Fleet manager',
+      description: 'Full access to vehicles, drivers, HOS and maintenance',
+    },
+    DISPATCHER: {
+      title: 'Dispatcher',
+      description: 'Trips, messaging and read-only compliance data',
+    },
+    VIEWER: { title: 'Viewer', description: 'Read-only across the whole account' },
+  };
 
 export function InviteUserModal({ roles, onClose }: { roles: RoleRow[]; onClose: () => void }) {
   const { toast } = useToast();
@@ -47,7 +65,8 @@ export function InviteUserModal({ roles, onClose }: { roles: RoleRow[]; onClose:
   // Compiler memoization (same pattern as `CreateGeofenceModal`, web/decisions.md). `setValue`
   // keeps react-hook-form's own copy in sync for validation/submit.
   const [roleKey, setRoleKey] = useState(dispatcherRole?.id ?? '');
-  const [terminalIds, setTerminalIds] = useState<string[]>([]);
+  const [terminalsText, setTerminalsText] = useState('');
+  const terminalIds = parseTerminalNames(terminalsText);
   const [message, setMessage] = useState('');
 
   const {
@@ -67,7 +86,6 @@ export function InviteUserModal({ roles, onClose }: { roles: RoleRow[]; onClose:
     },
   });
 
-
   function onSubmit(values: InviteUserFormValues) {
     // `mutate()` returns immediately, so RHF's `isSubmitting` is false again before the request
     // lands — a second click would send a second invitation. Guard on the mutation itself.
@@ -84,7 +102,11 @@ export function InviteUserModal({ roles, onClose }: { roles: RoleRow[]; onClose:
       },
       {
         onSuccess: () => {
-          toast({ kind: 'success', title: 'Invitation sent', description: `An invitation was sent to ${values.email}.` });
+          toast({
+            kind: 'success',
+            title: 'Invitation sent',
+            description: `An invitation was sent to ${values.email}.`,
+          });
           onClose();
         },
         onError: (error) => {
@@ -125,9 +147,17 @@ export function InviteUserModal({ roles, onClose }: { roles: RoleRow[]; onClose:
       isDirty={dirty}
       footer={
         <>
-          <span className="mr-auto text-caption text-text-muted">The invitation expires in 7 days.</span>
+          <span className="mr-auto text-caption text-text-muted">
+            The invitation expires in 7 days.
+          </span>
           <ModalCancelButton disabled={submitting} />
-          <Button variant="primary" size="lg" loading={submitting} disabled={submitting} onClick={handleSubmit(onSubmit)}>
+          <Button
+            variant="primary"
+            size="lg"
+            loading={submitting}
+            disabled={submitting}
+            onClick={handleSubmit(onSubmit)}
+          >
             Send invitation
           </Button>
         </>
@@ -140,7 +170,11 @@ export function InviteUserModal({ roles, onClose }: { roles: RoleRow[]; onClose:
           </p>
         )}
         <div className="grid grid-cols-2 gap-4">
-          <Field label="Full name" required error={errors.firstName?.message ?? errors.lastName?.message}>
+          <Field
+            label="Full name"
+            required
+            error={errors.firstName?.message ?? errors.lastName?.message}
+          >
             <input
               placeholder="Anna Weiss"
               disabled={submitting}
@@ -158,7 +192,12 @@ export function InviteUserModal({ roles, onClose }: { roles: RoleRow[]; onClose:
             error={errors.email?.message}
             hint="Must be the Google account the user signs in with."
           >
-            <input {...register('email')} placeholder="anna.weiss@example.com" disabled={submitting} className={inputClass} />
+            <input
+              {...register('email')}
+              placeholder="anna.weiss@example.com"
+              disabled={submitting}
+              className={inputClass}
+            />
           </Field>
         </div>
 
@@ -189,7 +228,9 @@ export function InviteUserModal({ roles, onClose }: { roles: RoleRow[]; onClose:
                   }}
                   className={
                     'rounded-md border p-3 text-left ' +
-                    (selected ? 'border-primary bg-primary-soft' : 'border-border hover:bg-bg-subtle')
+                    (selected
+                      ? 'border-primary bg-primary-soft'
+                      : 'border-border hover:bg-bg-subtle')
                   }
                 >
                   <p className="text-body-strong text-text">{ROLE_COPY[key].title}</p>
@@ -199,7 +240,11 @@ export function InviteUserModal({ roles, onClose }: { roles: RoleRow[]; onClose:
             })}
           </div>
           {errors.roleKey?.message && (
-            <span id="invite-role-error" role="alert" className="mt-1 block text-caption text-danger">
+            <span
+              id="invite-role-error"
+              role="alert"
+              className="mt-1 block text-caption text-danger"
+            >
               {errors.roleKey.message}
             </span>
           )}
@@ -208,25 +253,16 @@ export function InviteUserModal({ roles, onClose }: { roles: RoleRow[]; onClose:
         {/* B-85 (shipped 2026-09-24) — `POST /users` now takes `terminalIds`/`message`. */}
         <Field
           label="Terminal access"
-          hint="Stored on the user record only — it is not an access boundary yet; the user still sees every terminal's data. Leave every box unchecked to record no scope."
+          hint="Stored on the user record only — it is not an access boundary yet; the user still sees every terminal's data. Leave it empty to record no scope."
         >
-          <div className="flex flex-col gap-1.5 rounded-md border border-border p-2">
-            {TERMINALS.map((t) => (
-              <label key={t.name} className="flex items-center gap-2 text-body text-text">
-                <input
-                  type="checkbox"
-                  checked={terminalIds.includes(t.name)}
-                  disabled={submitting}
-                  onChange={(e) =>
-                    setTerminalIds((prev) =>
-                      e.target.checked ? [...prev, t.name] : prev.filter((name) => name !== t.name),
-                    )
-                  }
-                />
-                {t.label}
-              </label>
-            ))}
-          </div>
+          <textarea
+            value={terminalsText}
+            onChange={(e) => setTerminalsText(e.target.value)}
+            disabled={submitting}
+            rows={2}
+            placeholder="One terminal per line"
+            className="rounded-md border border-border bg-bg-surface px-3 py-2 text-body text-text"
+          />
         </Field>
 
         <Field label="Message (optional)">

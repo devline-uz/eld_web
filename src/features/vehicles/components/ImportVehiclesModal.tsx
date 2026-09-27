@@ -13,12 +13,22 @@ import { parseCsv, toCsv } from '@/shared/lib/csv';
 
 const MAX_BYTES = 5 * 1024 * 1024;
 const MAX_ROWS = 2000;
-const optionClass = 'h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text';
+const optionClass =
+  'h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text';
 
 /** The columns `POST /vehicles/import` reads — also the template's header row. */
-const TEMPLATE_COLUMNS = ['unitNumber', 'vin', 'make', 'model', 'year', 'licensePlate', 'plateState', 'fuelType', 'odometerMi', 'notes'];
-
-const IMPORT_TERMINALS = ['Columbus, OH', 'Raleigh, NC'];
+const TEMPLATE_COLUMNS = [
+  'unitNumber',
+  'vin',
+  'make',
+  'model',
+  'year',
+  'licensePlate',
+  'plateState',
+  'fuelType',
+  'odometerMi',
+  'notes',
+];
 
 export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
   const { toast } = useToast();
@@ -27,8 +37,9 @@ export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
   const [rows, setRows] = useState<Array<Record<string, unknown>>>([]);
   const [error, setError] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
-  const [duplicateStrategy, setDuplicateStrategy] = useState<NonNullable<ImportVehiclesOptions['duplicateStrategy']>>('UPDATE_BY_VIN');
-  const [defaultTerminal, setDefaultTerminal] = useState(IMPORT_TERMINALS[0]);
+  const [duplicateStrategy, setDuplicateStrategy] =
+    useState<NonNullable<ImportVehiclesOptions['duplicateStrategy']>>('UPDATE_BY_VIN');
+  const [defaultTerminal, setDefaultTerminal] = useState('');
   const [pairDevices, setPairDevices] = useState(true);
   const [emailSummary, setEmailSummary] = useState(true);
   const mutation = useImportVehicles();
@@ -36,9 +47,28 @@ export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
   function downloadTemplate() {
     // Built in the browser from the columns the endpoint reads — no `/vehicles/template` endpoint
     // exists, and inventing one would be worse than generating the two lines here.
-    const blob = new Blob([toCsv([TEMPLATE_COLUMNS, ['201', '1FUJGLDR8LLLL0001', 'Freightliner', 'Cascadia', '2023', '', '', 'DIESEL', '', '']])], {
-      type: 'text/csv',
-    });
+    const blob = new Blob(
+      [
+        toCsv([
+          TEMPLATE_COLUMNS,
+          [
+            '201',
+            '1FUJGLDR8LLLL0001',
+            'Freightliner',
+            'Cascadia',
+            '2023',
+            '',
+            '',
+            'DIESEL',
+            '',
+            '',
+          ],
+        ]),
+      ],
+      {
+        type: 'text/csv',
+      },
+    );
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
     link.download = 'vehicles-template.csv';
@@ -84,18 +114,35 @@ export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
             loading={mutation.isPending}
             onClick={() =>
               mutation.mutate(
-                { vehicles: rows, options: { duplicateStrategy, defaultTerminal, pairDevices, emailSummary } },
+                {
+                  vehicles: rows,
+                  // Optional and typed — no Terminal table to pick from yet (backend D-090).
+                  options: {
+                    duplicateStrategy,
+                    defaultTerminal: defaultTerminal.trim() || undefined,
+                    pairDevices,
+                    emailSummary,
+                  },
+                },
                 {
                   onSuccess: (summary) => {
                     const total = summary.imported + summary.updated;
                     toast({
                       kind: 'success',
-                      ...TOAST_COPY.importFinished(summary.imported, summary.updated, summary.failed.length, total),
+                      ...TOAST_COPY.importFinished(
+                        summary.imported,
+                        summary.updated,
+                        summary.failed.length,
+                        total,
+                      ),
                     });
                     onClose();
                   },
                   onError: (err) => {
-                    toast({ kind: 'error', title: err instanceof ApiError ? err.userMessage : 'Something went wrong.' });
+                    toast({
+                      kind: 'error',
+                      title: err instanceof ApiError ? err.userMessage : 'Something went wrong.',
+                    });
                   },
                 },
               )
@@ -130,7 +177,9 @@ export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
           >
             <Upload size={20} strokeWidth={1.75} className="text-text-muted" aria-hidden="true" />
             <span className="text-body text-text">Drop your CSV here or click to browse</span>
-            <span className="text-caption text-text-muted">Up to 5 MB · one unit per row · 2,000 rows maximum</span>
+            <span className="text-caption text-text-muted">
+              Up to 5 MB · one unit per row · 2,000 rows maximum
+            </span>
           </button>
         ) : (
           <div className="flex items-center gap-3 rounded-md border border-border p-3">
@@ -146,7 +195,14 @@ export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
             <Badge tone="success" dot>
               Ready
             </Badge>
-            <button type="button" aria-label="Remove file" onClick={() => { setFile(null); setRows([]); }}>
+            <button
+              type="button"
+              aria-label="Remove file"
+              onClick={() => {
+                setFile(null);
+                setRows([]);
+              }}
+            >
               <X size={16} strokeWidth={1.75} className="text-text-muted" />
             </button>
           </div>
@@ -178,21 +234,28 @@ export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-label text-text">Default terminal</span>
-            <select value={defaultTerminal} onChange={(e) => setDefaultTerminal(e.target.value)} className={optionClass}>
-              {IMPORT_TERMINALS.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
+            <input
+              value={defaultTerminal}
+              onChange={(e) => setDefaultTerminal(e.target.value)}
+              placeholder="Optional"
+              className={optionClass}
+            />
           </label>
         </div>
         <label className="flex items-center gap-2 text-body text-text">
-          <input type="checkbox" checked={pairDevices} onChange={(e) => setPairDevices(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={pairDevices}
+            onChange={(e) => setPairDevices(e.target.checked)}
+          />
           Pair ELD devices automatically — match the ELD serial column to unpaired devices
         </label>
         <label className="flex items-center gap-2 text-body text-text">
-          <input type="checkbox" checked={emailSummary} onChange={(e) => setEmailSummary(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={emailSummary}
+            onChange={(e) => setEmailSummary(e.target.checked)}
+          />
           Send a summary email when the import finishes
         </label>
         <p className="text-caption text-text-muted">
