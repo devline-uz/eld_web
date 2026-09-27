@@ -4,19 +4,26 @@
 // the subset that `PATCH /drivers/:id` really accepts — identity, contact, licence, terminal and
 // the HOS allowances. The username and the password are deliberately not here: the username is the
 // driver's sign-in identity, and there is no carrier-side password reset at all (gap B-81).
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useForm } from 'react-hook-form';
+import { Controller, useForm, type Resolver } from 'react-hook-form';
 import { z } from 'zod';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
 import * as f from '@/shared/forms/fields';
+import { internationalPhone, phoneForDisplay, phoneProblem } from '@/shared/forms/phoneNumber';
+import {
+  licenceNumber,
+  normalizeLicenceNumber,
+  withLicenceStateCheck,
+} from '@/shared/forms/driverLicence';
 import { useUpdateDriver } from '@/shared/api/drivers';
 import type { DriverRow } from '@/shared/api/drivers';
 import { ApiError } from '@/shared/api/errors';
 import { DRIVER_TOAST } from '../lib/copy';
 import { HOME_TERMINAL_TIMEZONES } from '../lib/terminals';
+import { PhoneNumberInput } from './PhoneNumberInput';
 
 const US_STATES = [
   'AL',
@@ -76,8 +83,10 @@ const editDriverSchema = z.object({
   firstName: f.requiredString(),
   lastName: f.requiredString(),
   email: f.email(),
-  phone: f.phone().optional(),
-  cdlNumber: f.cdlNumber(),
+  /** Same international rule as Add driver: per-country validation, E.164 out. */
+  phone: internationalPhone(),
+  /** Trimmed, upper-cased, `[A-Z0-9-]`, 4–20; the issuing-state format is checked by the resolver. */
+  cdlNumber: licenceNumber(),
   cdlState: z.string().trim().length(2),
   /** Optional and typed — there is no Terminal table to pick from yet (backend D-090). */
   homeTerminalName: z.string().trim().optional(),
@@ -134,19 +143,42 @@ export function EditDriverModal({ driver, onClose }: EditDriverModalProps) {
   const [eldExemptReason, setEldExemptReason] = useState(driver.eldExemptReason ?? '');
   const [exemptReasonError, setExemptReasonError] = useState<string | null>(null);
 
+  // The stored phone is shown formatted from the start (the default itself is formatted, so opening
+  // the form never makes it dirty). A legacy value these rules would reject is left alone while it
+  // is untouched: it is neither re-validated nor re-sent, so it cannot block an unrelated edit.
+  // Likewise an unchanged licence number/state pair is not held to the per-state format.
+  const initialPhone = useMemo(() => phoneForDisplay(driver.phone), [driver.phone]);
+  const resolver = useMemo<Resolver<EditDriverValues>>(() => {
+    const legacyPhone = initialPhone !== '' && phoneProblem(initialPhone) !== null;
+    const base = zodResolver(editDriverSchema);
+    const phoneAware: Resolver<EditDriverValues> = (values, context, options) =>
+      base(
+        legacyPhone && values.phone === initialPhone ? { ...values, phone: undefined } : values,
+        context,
+        options,
+      );
+    return withLicenceStateCheck(
+      phoneAware,
+      (values) =>
+        normalizeLicenceNumber(values.cdlNumber) === normalizeLicenceNumber(driver.cdlNumber) &&
+        values.cdlState === driver.cdlState,
+    );
+  }, [initialPhone, driver.cdlNumber, driver.cdlState]);
+
   const {
     register,
+    control,
     handleSubmit,
     setError,
     formState: { errors, isDirty },
   } = useForm<EditDriverValues>({
-    resolver: zodResolver(editDriverSchema),
+    resolver,
     mode: 'onBlur',
     defaultValues: {
       firstName: driver.firstName,
       lastName: driver.lastName,
       email: driver.email ?? '',
-      phone: driver.phone ?? undefined,
+      phone: initialPhone,
       cdlNumber: driver.cdlNumber,
       cdlState: driver.cdlState,
       homeTerminalName: driver.homeTerminalName ?? '',
@@ -177,7 +209,8 @@ export function EditDriverModal({ driver, onClose }: EditDriverModalProps) {
         firstName: values.firstName,
         lastName: values.lastName,
         email: values.email,
-        phone: values.phone,
+        // E.164 from the schema; empty or an untouched legacy value → not sent (unchanged).
+        phone: values.phone || undefined,
         cdlNumber: values.cdlNumber,
         cdlState: values.cdlState,
         homeTerminalName: values.homeTerminalName || undefined,
@@ -272,10 +305,21 @@ export function EditDriverModal({ driver, onClose }: EditDriverModalProps) {
             />
           </Field>
           <Field label="Phone number" error={errors.phone?.message}>
-            <input
-              {...register('phone', { setValueAs: (v: string) => (v === '' ? undefined : v) })}
-              disabled={isPending}
-              className={inputClass}
+            <Controller
+              control={control}
+              name="phone"
+              render={({ field }) => (
+                <PhoneNumberInput
+                  name={field.name}
+                  value={field.value}
+                  onChange={field.onChange}
+                  onBlur={field.onBlur}
+                  inputRef={field.ref}
+                  disabled={isPending}
+                  aria-invalid={errors.phone ? true : undefined}
+                  className={inputClass}
+                />
+              )}
             />
           </Field>
           <Field label="Driver licence number" required error={errors.cdlNumber?.message}>

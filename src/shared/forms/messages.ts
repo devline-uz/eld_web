@@ -16,6 +16,10 @@ export const VALIDATION_MESSAGES = {
   username:
     'Usernames may contain lowercase letters, numbers, dots, dashes and underscores.',
   cdlNumber: 'Enter the driver licence number.',
+  cdlNumberCharset: 'Use only letters, digits and hyphens.',
+  cdlNumberLength: 'A licence number is 4 to 20 characters.',
+  /** `{state}` is replaced with the issuing state code. */
+  cdlNumberStateFormat: 'This does not match the {state} licence number format.',
   odometer: 'Enter the odometer in miles.',
   odometerNegative: 'Odometer cannot be negative.',
   yearMin: 'Year must be 1970 or later.',
@@ -34,6 +38,8 @@ export const VALIDATION_MESSAGES = {
   csvFile: 'Upload a CSV file up to 5 MB.',
   images: 'Up to 5 images, 5 MB each.',
   phone: 'Enter a valid phone number.',
+  phoneIncomplete: 'This phone number is incomplete.',
+  phoneCountryCode: 'Enter a valid country code after +.',
   dotNumber: 'A USDOT number is 1 to 8 digits.',
   mcNumber: 'An MC number is 1 to 8 digits, optionally after MC-.',
   ein: 'Enter the EIN as 12-3456789.',
@@ -59,6 +65,7 @@ export const LIMITS = {
   unitNumberMax: 20,
   usernameMin: 3,
   usernameMax: 30,
+  cdlNumberMin: 4,
   cdlNumberMax: 20,
   odometerMax: 3_000_000,
   vehicleYearMin: 1970,

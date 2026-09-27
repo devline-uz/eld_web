@@ -127,7 +127,13 @@ describe('11.8 Add driver (Q-3)', () => {
         ok({ items: [], page: 1, limit: 500, total: 0, totalPages: 1 }),
       ),
       http.get(url(endpoints.carrier.root), () =>
-        ok({ id: 'c1', name: 'Carrier', dotNumber: '1', timezone: 'America/Denver', erodsMode: 'PRODUCTION' }),
+        ok({
+          id: 'c1',
+          name: 'Carrier',
+          dotNumber: '1',
+          timezone: 'America/Denver',
+          erodsMode: 'PRODUCTION',
+        }),
       ),
       http.post(url(endpoints.drivers.create), async ({ request }) => {
         body = (await request.json()) as Record<string, unknown>;
@@ -299,6 +305,154 @@ describe('11.8 Add driver (Q-3)', () => {
   });
 });
 
+describe('11.8 Add driver — international phone number', () => {
+  function capturePost() {
+    const posted: { body: Record<string, unknown> | null; count: number } = {
+      body: null,
+      count: 0,
+    };
+    server.use(
+      http.get(url(endpoints.vehicles.list), () =>
+        ok({ items: [], page: 1, limit: 500, total: 0, totalPages: 1 }),
+      ),
+      http.post(url(endpoints.drivers.create), async ({ request }) => {
+        posted.count += 1;
+        posted.body = (await request.json()) as Record<string, unknown>;
+        return ok({ id: 'drv_new', username: 'kwatson', status: 'ACTIVE' });
+      }),
+    );
+    return posted;
+  }
+  const phoneInput = () => screen.getByLabelText(/Phone number/) as HTMLInputElement;
+
+  it('formats as the user types, adding the + and grouping by the detected country', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AddDriverModal onClose={() => {}} />);
+    await user.type(phoneInput(), '998901234567');
+    expect(phoneInput()).toHaveValue('+998 90 123 45 67');
+    await user.clear(phoneInput());
+    await user.type(phoneInput(), '+12345678900');
+    expect(phoneInput()).toHaveValue('+1 234 567 8900');
+  });
+
+  it('rejects letters and a second +', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AddDriverModal onClose={() => {}} />);
+    await user.type(phoneInput(), '+44a20+1234b5678');
+    expect(phoneInput()).toHaveValue('+44 20 1234 5678');
+  });
+
+  it('a pasted formatted number is normalized', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AddDriverModal onClose={() => {}} />);
+    await user.click(phoneInput());
+    await user.paste('+1 (234) 567-8900');
+    expect(phoneInput()).toHaveValue('+1 234 567 8900');
+  });
+
+  it('deleting every digit leaves the field empty, not a lone +', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AddDriverModal onClose={() => {}} />);
+    await user.type(phoneInput(), '99890');
+    await user.type(phoneInput(), '{Backspace}{Backspace}{Backspace}{Backspace}{Backspace}');
+    expect(phoneInput()).toHaveValue('');
+    await user.type(phoneInput(), '998');
+    expect(phoneInput()).toHaveValue('+998');
+  });
+
+  it('shows the incomplete-number error on blur', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AddDriverModal onClose={() => {}} />);
+    await user.type(phoneInput(), '+998 90 123');
+    await user.tab();
+    expect(await screen.findByText('This phone number is incomplete.')).toBeInTheDocument();
+  });
+
+  it('an unknown country code blocks the submit with its own error', async () => {
+    const posted = capturePost();
+    const user = userEvent.setup();
+    renderWithProviders(<AddDriverModal onClose={() => {}} />);
+    await fillRequiredFields(user);
+    await user.type(phoneInput(), '+999123456789');
+    await user.click(screen.getByRole('button', { name: 'Save driver' }));
+    expect(await screen.findByText('Enter a valid country code after +.')).toBeInTheDocument();
+    expect(posted.count).toBe(0);
+  });
+
+  it('submits the E.164 value, not the formatted display value', async () => {
+    const posted = capturePost();
+    const user = userEvent.setup();
+    renderWithProviders(<AddDriverModal onClose={() => {}} />);
+    await fillRequiredFields(user);
+    await user.type(phoneInput(), '+998 90 123 45 67');
+    expect(phoneInput()).toHaveValue('+998 90 123 45 67');
+    await user.click(screen.getByRole('button', { name: 'Save driver' }));
+    await waitFor(() => expect(posted.body).not.toBeNull());
+    expect(posted.body!.phone).toBe('+998901234567');
+  });
+
+  it('an empty phone is not sent', async () => {
+    const posted = capturePost();
+    const user = userEvent.setup();
+    renderWithProviders(<AddDriverModal onClose={() => {}} />);
+    await fillRequiredFields(user);
+    await user.click(screen.getByRole('button', { name: 'Save driver' }));
+    await waitFor(() => expect(posted.body).not.toBeNull());
+    expect(posted.body!.phone).toBeUndefined();
+  });
+});
+
+describe('11.8 Add driver — licence number', () => {
+  const licence = () => screen.getByLabelText(/Driver licence number/);
+
+  it('flags a number that does not match the issuing state on blur, before the rest is filled', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AddDriverModal onClose={() => {}} />);
+    await user.selectOptions(screen.getByLabelText(/Issuing state/), 'CA');
+    await user.type(licence(), '12345678');
+    await user.tab();
+    expect(
+      await screen.findByText('This does not match the CA licence number format.'),
+    ).toBeInTheDocument();
+  });
+
+  it('rejects letters-and-symbols and a too-long number', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AddDriverModal onClose={() => {}} />);
+    await user.type(licence(), 'W123#4567');
+    await user.tab();
+    expect(await screen.findByText('Use only letters, digits and hyphens.')).toBeInTheDocument();
+    await user.clear(licence());
+    await user.type(licence(), 'W'.repeat(21));
+    await user.tab();
+    expect(await screen.findByText('A licence number is 4 to 20 characters.')).toBeInTheDocument();
+  });
+
+  it('posts the number trimmed and upper-cased', async () => {
+    let body: Record<string, unknown> | null = null;
+    server.use(
+      http.get(url(endpoints.vehicles.list), () =>
+        ok({ items: [], page: 1, limit: 500, total: 0, totalPages: 1 }),
+      ),
+      http.post(url(endpoints.drivers.create), async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>;
+        return ok({ id: 'drv_new', username: 'kwatson', status: 'ACTIVE' });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<AddDriverModal onClose={() => {}} />);
+    await user.type(screen.getByLabelText(/First name/), 'Kristin');
+    await user.type(screen.getByLabelText(/Last name/), 'Watson');
+    await user.type(screen.getByLabelText(/^Username/), 'kwatson');
+    await user.type(screen.getByLabelText(/^Password/), 'password1');
+    await user.type(screen.getByLabelText(/Email address/), 'kristin.watson@gmail.com');
+    await user.type(licence(), ' w1234567 ');
+    await user.click(screen.getByRole('button', { name: 'Save driver' }));
+    await waitFor(() => expect(body).not.toBeNull());
+    expect(body!.cdlNumber).toBe('W1234567');
+  });
+});
+
 describe('11.8 Add driver — duplicate values and unit assignment', () => {
   const page = <T,>(items: T[]) => ({
     items,
@@ -308,8 +462,9 @@ describe('11.8 Add driver — duplicate values and unit assignment', () => {
     totalPages: 1,
   });
   const VEHICLES = [
-    { id: 'veh_a', unitNumber: '#201' },
-    { id: 'veh_b', unitNumber: '#202' },
+    { id: 'veh_a', unitNumber: '#201', status: 'ACTIVE' },
+    { id: 'veh_b', unitNumber: '#202', status: 'ACTIVE' },
+    { id: 'veh_c', unitNumber: '#203', status: 'OUT_OF_SERVICE' },
   ];
   const DRIVERS = [
     { id: 'drv_x', username: 'other', cdlNumber: 'Z9999999', assignedVehicleId: 'veh_a' },
@@ -382,6 +537,102 @@ describe('11.8 Add driver — duplicate values and unit assignment', () => {
       expect(within(select).getByRole('option', { name: '#202' })).toBeInTheDocument();
       expect(within(select).queryByRole('option', { name: '#201' })).not.toBeInTheDocument();
     });
+  });
+
+  it('an out-of-service unit is not offered (assign-driver refuses it)', async () => {
+    stubLists([]);
+    renderWithProviders(<AddDriverModal onClose={() => {}} />);
+    const select = screen.getByLabelText(/Assigned unit/);
+    await waitFor(() =>
+      expect(within(select).getByRole('option', { name: '#202' })).toBeInTheDocument(),
+    );
+    expect(within(select).queryByRole('option', { name: '#203' })).not.toBeInTheDocument();
+  });
+
+  /** Stubs create + assign, recording what each received. */
+  function stubCreateAndAssign(
+    assign: () => Response | Promise<Response> = () => ok({ id: 'veh_b' }),
+  ) {
+    const calls: {
+      created: Record<string, unknown> | null;
+      assigned: { vehicleId: string; body: unknown }[];
+    } = {
+      created: null,
+      assigned: [],
+    };
+    server.use(
+      http.post(url(endpoints.drivers.create), async ({ request }) => {
+        calls.created = (await request.json()) as Record<string, unknown>;
+        return ok({ id: 'drv_new', username: 'kwatson', status: 'ACTIVE' });
+      }),
+      http.post(url(endpoints.vehicles.assignDriver(':vehicleId')), async ({ request, params }) => {
+        calls.assigned.push({ vehicleId: String(params.vehicleId), body: await request.json() });
+        return assign();
+      }),
+    );
+    return calls;
+  }
+
+  it('the unit picked in Add driver is assigned to the new driver right after the create', async () => {
+    stubLists([]);
+    const calls = stubCreateAndAssign();
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    renderWithProviders(<AddDriverModal onClose={onClose} />);
+    await fillRequiredFields(user);
+    const select = screen.getByLabelText(/Assigned unit/);
+    await waitFor(() =>
+      expect(within(select).getByRole('option', { name: '#202' })).toBeInTheDocument(),
+    );
+    await user.selectOptions(select, 'veh_b');
+    await user.click(screen.getByRole('button', { name: 'Save driver' }));
+
+    await waitFor(() => expect(calls.assigned).toHaveLength(1));
+    expect(calls.assigned[0]).toEqual({ vehicleId: 'veh_b', body: { driverId: 'drv_new' } });
+    expect(await screen.findByText('Driver added')).toBeInTheDocument();
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('no unit picked → no assign call', async () => {
+    stubLists([]);
+    const calls = stubCreateAndAssign();
+    const user = userEvent.setup();
+    renderWithProviders(<AddDriverModal onClose={() => {}} />);
+    await fillRequiredFields(user);
+    await user.click(screen.getByRole('button', { name: 'Save driver' }));
+
+    expect(await screen.findByText('Driver added')).toBeInTheDocument();
+    expect(calls.created).not.toBeNull();
+    expect(calls.assigned).toHaveLength(0);
+  });
+
+  it('a failed assign keeps the driver and says the unit was not assigned', async () => {
+    stubLists([]);
+    const calls = stubCreateAndAssign(() =>
+      fail(
+        409,
+        'VEHICLE_OUT_OF_SERVICE',
+        'Unit is OUT_OF_SERVICE — assign a driver only after the critical defect is closed.',
+      ),
+    );
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    renderWithProviders(<AddDriverModal onClose={onClose} />);
+    await fillRequiredFields(user);
+    const select = screen.getByLabelText(/Assigned unit/);
+    await waitFor(() =>
+      expect(within(select).getByRole('option', { name: '#202' })).toBeInTheDocument(),
+    );
+    await user.selectOptions(select, 'veh_b');
+    await user.click(screen.getByRole('button', { name: 'Save driver' }));
+
+    expect(
+      await screen.findByText('Driver added, but Unit #202 was not assigned'),
+    ).toBeInTheDocument();
+    expect(calls.created).not.toBeNull();
+    expect(calls.assigned).toHaveLength(1);
+    // Closed: the driver exists, so a second Save would create a duplicate.
+    expect(onClose).toHaveBeenCalled();
   });
 
   it('a 409 for an already-assigned unit is shown on the unit field', async () => {

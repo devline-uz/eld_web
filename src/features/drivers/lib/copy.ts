@@ -21,6 +21,11 @@ export const DRIVER_TOAST = {
     title: `Unit #${unitNumber} assigned`,
     description: `${driverName} drives it from the next sign-in to the app.`,
   }),
+  /** 11.8 — the driver was created, but the follow-up `POST /vehicles/:id/assign-driver` failed. */
+  driverAddedUnitNotAssigned: (unitNumber: string, reason: string): ToastCopy => ({
+    title: `Driver added, but Unit #${unitNumber} was not assigned`,
+    description: `${reason} Assign the unit from Vehicles.`,
+  }),
   rodsExportQueued: (count: number): ToastCopy => ({
     title: count === 1 ? 'RODS export queued' : `${count} RODS exports queued`,
     description: 'The file appears under Reports as soon as it is ready.',

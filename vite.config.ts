@@ -44,6 +44,8 @@ export default defineConfig({
           // bucket: a named manual chunk absorbed the facade and was hoisted into the entry
           // (+28 KB initial). Left to Rollup, it lands in the dynamic sentrySdk chunk (WD-057).
           if (pkg.startsWith('@sentry/') || pkg.startsWith('@sentry-internal/')) return undefined;
+          // Lazy — phone metadata (11.8 Add driver's international phone field only).
+          if (pkg.startsWith('libphonenumber-js/')) return 'vendor-phone';
           // Lazy — recharts and every transitive dep it alone pulls in.
           if (
             /^(recharts|victory-vendor|d3-|lodash|decimal\.js-light|react-smooth|fast-equals|eventemitter3)/.test(
