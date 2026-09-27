@@ -2,21 +2,24 @@
 // account is created — the driver never signs in to the web panel. `drivers` FULL only.
 import { useMemo, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useForm } from 'react-hook-form';
+import { Controller, useForm } from 'react-hook-form';
 import { Eye, EyeOff } from 'lucide-react';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
 import { TOAST_COPY } from '@/shared/ui/copy';
-import { driverSchema, type DriverFormValues } from '@/shared/forms/schemas';
+import { driverSchema, type DriverFormValues } from '@/shared/forms/driverSchema';
+import { withLicenceStateCheck } from '@/shared/forms/driverLicence';
 import { useCreateDriver } from '@/shared/api/drivers';
-import { useVehiclesPicker } from '@/shared/api/vehicles';
+import { useAssignDriver, useVehiclesPicker } from '@/shared/api/vehicles';
 import { useCarrier } from '@/shared/api/carrier';
 import { useDriversLookup } from '@/shared/api/lookups';
 import { ApiError, ERROR_MESSAGES, errorMessage } from '@/shared/api/errors';
 import { conflictField, type ConflictRule } from '@/shared/api/conflicts';
 import { VALIDATION_MESSAGES } from '@/shared/forms/messages';
 import { HOME_TERMINAL_TIMEZONES } from '../lib/terminals';
+import { DRIVER_TOAST } from '../lib/copy';
+import { PhoneNumberInput } from './PhoneNumberInput';
 
 /** WB-187 — the list used to hold ten states, so a CDL from any other one could not be recorded. */
 const US_STATES = [
@@ -106,6 +109,9 @@ const CONFLICT_MESSAGES: Record<Exclude<DriverConflictField, 'assignedVehicleId'
   cdlNumber: VALIDATION_MESSAGES.cdlNumberTaken,
 };
 
+/** The licence number is also checked against its issuing state's format on blur. */
+const addDriverResolver = withLicenceStateCheck(zodResolver(driverSchema));
+
 /** Licence numbers compare without case, spaces or dashes — `w 123-4567` is `W1234567`. */
 function normalizeCdl(value: string): string {
   return value.toUpperCase().replace(/[\s-]/g, '');
@@ -170,27 +176,34 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
       ),
     [drivers],
   );
-  // A unit that already has a driver is not offered. The current pick stays listed even if it
-  // became taken since (a refetch), so the select never silently jumps and the error can explain.
+  // A unit that already has a driver is not offered, and — the rule 11.5 / Assign unit uses, since
+  // `assign-driver` refuses an OUT_OF_SERVICE unit — only ACTIVE units are. The current pick stays
+  // listed even if it became taken since (a refetch), so the select never silently jumps and the
+  // error can explain.
   const unitOptions = useMemo(
     () =>
       (vehiclesQuery.data?.items ?? []).filter(
-        (v) => !assignedUnitIds.has(v.id) || v.id === assignedVehicleId,
+        (v) => v.id === assignedVehicleId || (v.status === 'ACTIVE' && !assignedUnitIds.has(v.id)),
       ),
     [vehiclesQuery.data, assignedUnitIds, assignedVehicleId],
   );
   const mutation = useCreateDriver();
+  // `POST /drivers` has no unit field (the backend DTO drops `assignedVehicleId`), so the picked
+  // unit is linked right after the create through the same `POST /vehicles/:id/assign-driver` the
+  // Vehicles screen uses; its `onSuccess` invalidates the drivers + vehicles lists and details.
+  const assignMutation = useAssignDriver(assignedVehicleId);
   // An empty terminal zone falls back to the carrier's own zone (real `GET /carrier` data, never a
   // hardcoded guess), so both terminal fields stay optional as they were before.
   const carrierTimezone = useCarrier().data?.timezone;
 
   const {
     register,
+    control,
     handleSubmit,
     formState: { errors, isDirty },
     setError,
   } = useForm<DriverFormValues>({
-    resolver: zodResolver(driverSchema),
+    resolver: addDriverResolver,
     mode: 'onBlur',
     // Every field is seeded: RHF reads a registered control's DOM value at mount, so a field the
     // defaults do not mention (a `<select>`, which always has a value) made `isDirty` true on an
@@ -203,7 +216,7 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
       username: '',
       password: '',
       email: '',
-      phone: undefined,
+      phone: '',
       cdlNumber: '',
       cdlState: 'OH',
       homeTerminalName: '',
@@ -214,7 +227,7 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
 
   // The submit guard is the mutation, not RHF: `isSubmitting` is already false again while the
   // POST is in flight, so a double click used to create two drivers.
-  const isPending = mutation.isPending;
+  const isPending = mutation.isPending || assignMutation.isPending;
 
   // Honest dirty tracking: the checkboxes, the unit and the exemption reason all
   // live outside RHF, so a real edit to any of them must confirm on close.
@@ -249,12 +262,12 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
         username: values.username,
         password: values.password,
         email: values.email,
-        phone: values.phone,
+        // Already E.164 (`+998901234567`) — the schema's transform; empty → not sent.
+        phone: values.phone || undefined,
         cdlNumber: values.cdlNumber,
         cdlState: values.cdlState,
         homeTerminalName: values.homeTerminalName || undefined,
         homeTerminalTimezone: values.homeTerminalTimezone || carrierTimezone || undefined,
-        assignedVehicleId: assignedVehicleId || undefined,
         allowPersonalConveyance,
         allowYardMove,
         adverseDrivingEnabled,
@@ -265,9 +278,35 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
         sendInvitation,
       },
       {
-        onSuccess: () => {
-          toast({ kind: 'success', ...TOAST_COPY.driverAdded(values.email) });
-          onClose();
+        onSuccess: (driver) => {
+          if (!assignedVehicleId) {
+            toast({ kind: 'success', ...TOAST_COPY.driverAdded(values.email) });
+            onClose();
+            return;
+          }
+          const unitNumber = (
+            unitOptions.find((v) => v.id === assignedVehicleId)?.unitNumber ?? ''
+          ).replace(/^#+/, '');
+          assignMutation.mutate(
+            { driverId: driver.id },
+            {
+              onSuccess: () => {
+                toast({ kind: 'success', ...TOAST_COPY.driverAdded(values.email) });
+                onClose();
+              },
+              // The driver exists either way: the modal closes (a retry here would create a
+              // second driver) and the toast says exactly what did not happen.
+              onError: (error) => {
+                const reason =
+                  error instanceof ApiError ? error.userMessage : 'Something went wrong.';
+                toast({
+                  kind: 'error',
+                  ...DRIVER_TOAST.driverAddedUnitNotAssigned(unitNumber, reason),
+                });
+                onClose();
+              },
+            },
+          );
         },
         onError: (error) => {
           // The unit refused for being out of service — a unit problem, shown on the unit field.
@@ -420,14 +459,24 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
               />
             </Field>
             <Field label="Phone number" error={errors.phone?.message}>
-              <input
-                {...register('phone', {
-                  // Same empty-string-vs-undefined trap as WB-012/WB-019: an untouched optional
-                  // field defaults to '', which fails the phone regex even though it is optional.
-                  setValueAs: (v: string) => (v === '' ? undefined : v),
-                })}
-                disabled={isPending}
-                className={inputClass}
+              {/* International: `+` first, grouped as the detected country writes it. The schema
+                  validates per country on blur/submit and hands `onSubmit` the E.164 value. */}
+              <Controller
+                control={control}
+                name="phone"
+                render={({ field }) => (
+                  <PhoneNumberInput
+                    name={field.name}
+                    value={field.value}
+                    onChange={field.onChange}
+                    onBlur={field.onBlur}
+                    inputRef={field.ref}
+                    placeholder="+1 234 567 8900"
+                    disabled={isPending}
+                    aria-invalid={errors.phone ? true : undefined}
+                    className={inputClass}
+                  />
+                )}
               />
             </Field>
           </div>

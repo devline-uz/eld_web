@@ -31,29 +31,8 @@ export const assignDriverSchema = z.object({
   effectiveAt: z.string().optional(),
 });
 
-/**
- * 11.8 · Add driver (Q-3 — every driver account is created here).
- * `Email address` is required and unique; the password is the mobile-app password.
- */
-export const driverSchema = z.object({
-  firstName: f.requiredString(),
-  lastName: f.requiredString(),
-  email: f.email(),
-  username: f.username(),
-  password: f.driverPassword(),
-  cdlNumber: f.cdlNumber(),
-  cdlState: z.string().trim().length(2),
-  phone: f.phone().optional(),
-  /**
-   * Optional and typed — there is no Terminal table to pick from yet (backend D-090). Left empty,
-   * the name is not sent and the zone falls back to the carrier's own time zone.
-   */
-  homeTerminalName: z.string().trim().optional(),
-  homeTerminalTimezone: z.string().optional(),
-  /** Q-2 — SMS is never a channel; notifications go by email. */
-  notifyByEmail: z.boolean().default(true),
-});
-export type DriverFormValues = z.infer<typeof driverSchema>;
+// 11.8 · Add driver — `driverSchema` lives in `driverSchema.ts`: its phone rule pulls in the
+// libphonenumber metadata, which must not ride along with every screen that imports this file.
 
 /** 11.6 / 11.7 · CSV import */
 export const csvImportSchema = z.object({ file: f.csvFile() });

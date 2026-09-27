@@ -7,11 +7,11 @@ import {
   alertRuleSchema,
   calibrateOdometerSchema,
   deviceSchema,
-  driverSchema,
   ticketSchema,
   transferSchema,
   vehicleSchema,
 } from './schemas';
+import { driverSchema } from './driverSchema';
 
 const firstError = (schema: { safeParse: (v: unknown) => { success: boolean; error?: { issues: { message: string }[] } } }, value: unknown) => {
   const result = schema.safeParse(value);
