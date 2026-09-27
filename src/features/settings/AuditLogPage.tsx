@@ -25,10 +25,49 @@ import { useCarrier, useUsersList, type AuditEntry } from '@/shared/api/settings
 import { DateRangePicker, resolvePreset, type DateRange, type DateRangePreset } from '@/shared/ui/DateRangePicker';
 import { FilterDrawer, FilterGroup, FilterCheckbox } from '@/shared/ui/FilterDrawer';
 import { AUDIT_SEARCH_COPY } from './lib/copy';
+import { usePageHeader } from '@/app/layouts/Topbar';
 
 const ACTION_TONE: Record<string, BadgeTone> = { CREATE: 'success', UPDATE: 'info', DELETE: 'danger', VIEW: 'neutral' };
 const ACTION_LABEL: Record<string, string> = { CREATE: 'Created', UPDATE: 'Updated', DELETE: 'Deleted', VIEW: 'Viewed' };
 const ACTION_OPTIONS = ['CREATE', 'UPDATE', 'DELETE', 'VIEW'] as const;
+
+/** `UPDATE_SCOPES` → `Update scopes` — the server writes ~40 verbs beyond the four above. */
+function actionLabel(action: string): string {
+  const known = ACTION_LABEL[action];
+  if (known) return known;
+  const words = action.toLowerCase().replace(/_/g, ' ');
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+const TRACE_ID_DETAIL = /^traceId=([\w-]+)$/;
+
+/** `detail` often only carries `traceId=…` (the `@Audit` decorator default) — that is not a detail. */
+function detailOf(entry: AuditEntry): string | null {
+  const text = entry.details ?? entry.detail ?? null;
+  return text && !TRACE_ID_DETAIL.test(text) ? text : null;
+}
+
+function traceIdOf(entry: AuditEntry): string | null {
+  return entry.traceId ?? TRACE_ID_DETAIL.exec(entry.detail ?? '')?.[1] ?? null;
+}
+
+function ipOf(entry: AuditEntry): string | null {
+  return entry.ipAddress ?? entry.ip ?? null;
+}
+
+const LABEL_KEYS = ['name', 'unitNumber', 'number', 'serial', 'subject', 'email'] as const;
+
+/** `Role · QA Auditor`, as drawn — the server sends no `objectLabel`, so take the record's name. */
+function objectOf(entry: AuditEntry): string {
+  if (entry.objectLabel) return entry.objectLabel;
+  for (const snapshot of [entry.after, entry.before]) {
+    if (typeof snapshot !== 'object' || snapshot === null) continue;
+    const record = snapshot as Record<string, unknown>;
+    const key = LABEL_KEYS.find((k) => typeof record[k] === 'string' && record[k] !== '');
+    if (key) return `${entry.objectType} · ${String(record[key])}`;
+  }
+  return entry.objectType;
+}
 
 type AuditPage = { items: AuditEntry[]; nextCursor: string | null };
 
@@ -161,7 +200,9 @@ export default function AuditLogPage() {
       out = out.filter(
         (e) =>
           e.action.toLowerCase().includes(needle) ||
-          (e.objectLabel ?? e.objectType).toLowerCase().includes(needle) ||
+          actionLabel(e.action).toLowerCase().includes(needle) ||
+          objectOf(e).toLowerCase().includes(needle) ||
+          (detailOf(e) ?? '').toLowerCase().includes(needle) ||
           (e.actorName ?? '').toLowerCase().includes(needle),
       );
     }
@@ -208,7 +249,7 @@ export default function AuditLogPage() {
     // and actor/object names can contain commas, quotes or line breaks.
     const csv = toCsv([
       ['timestamp', 'user', 'action', 'object', 'ip'],
-      ...rows.map((e) => [formatCarrier(e.createdAt, timezone, 'dateTimeSeconds'), e.actorName, e.action, e.objectLabel ?? e.objectType, e.ipAddress]),
+      ...rows.map((e) => [formatCarrier(e.createdAt, timezone, 'dateTimeSeconds'), e.actorName, actionLabel(e.action), objectOf(e), ipOf(e)]),
     ]);
     const blob = new Blob([csv], { type: 'text/csv' });
     const link = document.createElement('a');
@@ -218,13 +259,11 @@ export default function AuditLogPage() {
     URL.revokeObjectURL(link.href);
   }
 
+  usePageHeader({ title: 'Settings · Audit log', subtitle: 'Every change made in the back office · retained 24 months' });
+
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-page-title text-text">Settings · Audit log</h1>
-          <p className="text-page-sub text-text-muted">Every change made in the back office · retained 24 months</p>
-        </div>
+      <div className="flex items-center justify-end">
         <Can perm="auditLog" level="READ">
           <Button variant="secondary" iconLeft={<Download size={16} strokeWidth={1.75} />} onClick={handleExportCsv}>
             Export CSV
@@ -353,11 +392,11 @@ export default function AuditLogPage() {
                       </span>
                     </td>
                     <td className="px-3">
-                      <Badge tone={ACTION_TONE[entry.action] ?? 'neutral'}>{ACTION_LABEL[entry.action] ?? entry.action}</Badge>
+                      <Badge tone={ACTION_TONE[entry.action] ?? 'neutral'}>{actionLabel(entry.action)}</Badge>
                     </td>
-                    <td className="px-3 text-text">{entry.objectLabel ?? entry.objectType}</td>
-                    <td className="max-w-64 truncate px-3 text-caption text-text-muted">{entry.details ?? '—'}</td>
-                    <td className="px-3 text-right tabular-nums text-text-secondary">{entry.ipAddress ?? '—'}</td>
+                    <td className="px-3 text-text">{objectOf(entry)}</td>
+                    <td className="max-w-64 truncate px-3 text-caption text-text-muted">{detailOf(entry) ?? '—'}</td>
+                    <td className="px-3 text-right tabular-nums text-text-secondary">{ipOf(entry) ?? '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -375,7 +414,7 @@ export default function AuditLogPage() {
         )}
       </Card>
 
-      <Drawer open={Boolean(selected)} onClose={() => setSelected(null)} title="Audit entry" subtitle={selected?.objectLabel ?? selected?.objectType}>
+      <Drawer open={Boolean(selected)} onClose={() => setSelected(null)} title="Audit entry" subtitle={selected ? objectOf(selected) : undefined}>
         {selected && (
           <div className="flex flex-col gap-4">
             <div>
@@ -390,7 +429,7 @@ export default function AuditLogPage() {
                 {JSON.stringify(selected.after ?? {}, null, 2)}
               </pre>
             </div>
-            <p className="text-caption text-text-muted">Trace ID: {selected.traceId ?? '—'}</p>
+            <p className="text-caption text-text-muted">Trace ID: {traceIdOf(selected) ?? '—'}</p>
             <p className="text-caption text-text-muted">User agent: {selected.userAgent ?? '—'}</p>
           </div>
         )}

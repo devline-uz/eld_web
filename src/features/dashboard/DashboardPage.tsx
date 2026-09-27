@@ -117,6 +117,9 @@ export default function DashboardPage() {
   const units: LiveFleetUnit[] = summary.data?.liveFleet.items ?? [];
   const counts = summary.data?.liveFleet.counts;
   const onDutyCount = counts?.onDuty ?? 0;
+  // QA-B — the live feed has one row per unit; a unit with no driver is not a driver, so the
+  // "N drivers" subtitle no longer disagrees with the donut's own total.
+  const driverCount = units.filter((u) => u.driverId).length;
   const movingCount = counts?.moving ?? 0;
   const idleCount = counts?.idle ?? 0;
   const offlineCount = counts?.offline ?? 0;
@@ -262,7 +265,7 @@ export default function DashboardPage() {
         <Card>
           <SectionHeader
             title="Duty status · now"
-            subtitle={summary.isError ? undefined : `${units.length} drivers · ${onDutyCount} on duty`}
+            subtitle={summary.isError ? undefined : `${driverCount} drivers · ${onDutyCount} on duty`}
           />
           <div className="mt-4">
             {summary.isLoading ? (

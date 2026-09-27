@@ -273,7 +273,8 @@ describe('W-16 Messages', () => {
       },
     });
 
-    expect(await screen.findByText('Pulling in now.')).toBeInTheDocument();
+    // The bubble in the thread, and (QA) the sidebar preview, which used to keep the old text.
+    await waitFor(() => expect(screen.getAllByText('Pulling in now.')).toHaveLength(2));
   });
 
   it('marks a failed send with a red-border/Retry state, never left looking delivered (WB-116)', async () => {

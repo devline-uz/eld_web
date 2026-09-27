@@ -1,6 +1,6 @@
 // owner: web-vehicles-drivers — 11.7 Import drivers (web/tz.md §11.7). Same mechanics as 11.6;
 // SMS is never a channel (Q-2) — invitations always go by email, not the SMS wording in the design.
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Upload, FileText, X } from 'lucide-react';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
@@ -13,26 +13,144 @@ import { parseCsv } from '@/shared/lib/csv';
 const MAX_BYTES = 5 * 1024 * 1024;
 const MAX_ROWS = 500;
 
+/** `CreateDriverDto` columns every row must carry — the backend refuses the whole batch otherwise. */
+const REQUIRED_COLUMNS: ReadonlyArray<readonly [string, string]> = [
+  ['username', 'username'],
+  ['firstName', 'first name'],
+  ['lastName', 'last name'],
+  ['cdlNumber', 'licence number'],
+];
+const BOOLEAN_COLUMNS = new Set([
+  'allowPersonalConveyance',
+  'allowYardMove',
+  'adverseDrivingEnabled',
+  'shortHaulException',
+  'splitSleeperEnabled',
+  'eldExempt',
+]);
+const TEMPLATE_HEADER =
+  'username,firstName,lastName,email,phone,cdlNumber,cdlState,homeTerminalName,homeTerminalTimezone';
+
+type CsvRow = Record<string, unknown>;
+
+/**
+ * A CSV cell is always a string: `""` for a blank optional column failed `z.string().email()` /
+ * `min(1)` server-side, and `"true"` never matched `z.boolean()`. Blank cells are dropped and the
+ * HOS flag columns become booleans, so a row reaches `POST /drivers/import` in the DTO's shape.
+ */
+function toDriverRow(raw: CsvRow): CsvRow {
+  const row: CsvRow = {};
+  for (const [key, value] of Object.entries(raw)) {
+    const text = typeof value === 'string' ? value.trim() : value;
+    if (text === '' || text === undefined || text === null) continue;
+    if (BOOLEAN_COLUMNS.has(key) && typeof text === 'string') {
+      row[key] = /^(true|yes|y|1)$/i.test(text);
+      continue;
+    }
+    row[key] = text;
+  }
+  return row;
+}
+
+interface ImportPlan {
+  /** Rows that go to the server (blank cells dropped, default terminal applied). */
+  payload: CsvRow[];
+  /** CSV row index (0-based, header excluded) of each payload entry — maps `failed[].index` back. */
+  sourceIndex: number[];
+  warnings: string[];
+  rowsNeedingAttention: number;
+}
+
+/**
+ * Per-row checks. A row the backend would refuse (missing required column, missing CDL state, a
+ * username already used earlier in the file) is **skipped** — one bad row used to sink the whole
+ * batch with a bare 422. The design's "created as incomplete" wording is not what the API does.
+ */
+function planImport(parsed: CsvRow[], defaultTerminal: string): ImportPlan {
+  const plan: ImportPlan = { payload: [], sourceIndex: [], warnings: [], rowsNeedingAttention: 0 };
+  const emailCounts = new Map<string, number>();
+  const seenUsernames = new Set<string>();
+  const rows = parsed.map(toDriverRow);
+  rows.forEach((row) => {
+    const email = typeof row.email === 'string' ? row.email.toLowerCase() : '';
+    if (email) emailCounts.set(email, (emailCounts.get(email) ?? 0) + 1);
+  });
+  rows.forEach((row, index) => {
+    const line = index + 2;
+    let attention = false;
+    let skip = false;
+    const email = typeof row.email === 'string' ? row.email.toLowerCase() : '';
+    if (!email || (emailCounts.get(email) ?? 0) > 1) {
+      plan.warnings.push(`Row ${line}  Missing or duplicate email — driver cannot sign in`);
+      attention = true;
+    }
+    const missing = REQUIRED_COLUMNS.filter(([key]) => !row[key]).map(([, label]) => label);
+    if (!row.homeTerminalName && !defaultTerminal) missing.push('home terminal');
+    if (missing.length > 0) {
+      plan.warnings.push(`Row ${line}  Missing ${missing.join(', ')} — will be skipped`);
+      attention = true;
+      skip = true;
+    }
+    if (!row.cdlState) {
+      plan.warnings.push(`Row ${line}  Missing CDL issuing state — will be skipped`);
+      attention = true;
+      skip = true;
+    }
+    const username = typeof row.username === 'string' ? row.username.toLowerCase() : '';
+    if (username && seenUsernames.has(username)) {
+      plan.warnings.push(`Row ${line}  Duplicate username "${username}" — will be skipped`);
+      attention = true;
+      skip = true;
+    }
+    if (username) seenUsernames.add(username);
+    if (attention) plan.rowsNeedingAttention += 1;
+    if (skip) return;
+    plan.payload.push(row.homeTerminalName ? row : { ...row, homeTerminalName: defaultTerminal });
+    plan.sourceIndex.push(index);
+  });
+  return plan;
+}
+
+function downloadTemplate() {
+  const blob = new Blob([`${TEMPLATE_HEADER}\n`], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'drivers-import-template.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export function ImportDriversModal({ onClose }: { onClose: () => void }) {
   const { toast } = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
-  const [rows, setRows] = useState<Array<Record<string, unknown>>>([]);
-  const [warnings, setWarnings] = useState<string[]>([]);
-  // Rows carrying at least one warning — the row count the summary line quotes. It used to read
-  // `rows.length - warnings.length` valid, which is not a row count at all (a row can raise two
-  // warnings), so the "N valid" figure was fabricated.
-  const [rowsNeedingAttention, setRowsNeedingAttention] = useState(0);
+  const [rows, setRows] = useState<CsvRow[]>([]);
   const [error, setError] = useState<string | null>(null);
+  /** Rows the server refused (`failed[]` of a 200, or the issues of a 422), as `Row N  reason`. */
+  const [serverProblems, setServerProblems] = useState<string[]>([]);
   const [duplicateStrategy, setDuplicateStrategy] =
     useState<NonNullable<ImportDriversOptions['duplicateStrategy']>>('SKIP');
   const [defaultHomeTerminalName, setDefaultHomeTerminalName] = useState('');
   const [sendInvitations, setSendInvitations] = useState(true);
   const [applyDefaultExemptions, setApplyDefaultExemptions] = useState(true);
   const mutation = useImportDrivers();
+  // Row counts are rows, not warnings (a row can raise two), and follow the default terminal.
+  const plan = useMemo(
+    () => planImport(rows, defaultHomeTerminalName.trim()),
+    [rows, defaultHomeTerminalName],
+  );
+  const { warnings, rowsNeedingAttention } = plan;
+
+  function clearFile() {
+    setFile(null);
+    setRows([]);
+    setServerProblems([]);
+  }
 
   function handleFile(selected: File) {
     setError(null);
+    setServerProblems([]);
     if (selected.size > MAX_BYTES) {
       setError('File is larger than 5 MB.');
       return;
@@ -41,38 +159,63 @@ export function ImportDriversModal({ onClose }: { onClose: () => void }) {
       const parsed = parseCsv(text);
       if (parsed.length > MAX_ROWS) {
         setError(`File has ${parsed.length} rows — 500 rows maximum.`);
-        setFile(null);
-        setRows([]);
-        setWarnings([]);
-        setRowsNeedingAttention(0);
+        clearFile();
         return;
       }
-      const rowWarnings: string[] = [];
-      const problemRows = new Set<number>();
-      const emailCounts = new Map<string, number>();
-      parsed.forEach((row) => {
-        const email = typeof row.email === 'string' ? row.email.trim().toLowerCase() : '';
-        if (email) emailCounts.set(email, (emailCounts.get(email) ?? 0) + 1);
-      });
-      parsed.forEach((row, index) => {
-        const email = typeof row.email === 'string' ? row.email.trim().toLowerCase() : '';
-        const isDuplicate = email !== '' && (emailCounts.get(email) ?? 0) > 1;
-        if (!email || isDuplicate) {
-          rowWarnings.push(`Row ${index + 2}  Missing or duplicate email — driver cannot sign in`);
-          problemRows.add(index);
-        }
-        if (!row.cdlState) {
-          rowWarnings.push(
-            `Row ${index + 2}  Missing CDL issuing state — driver will be created as incomplete`,
-          );
-          problemRows.add(index);
-        }
-      });
       setRows(parsed);
-      setWarnings(rowWarnings);
-      setRowsNeedingAttention(problemRows.size);
       setFile(selected);
     });
+  }
+
+  /** `drivers.3.cdlState` → `Row 5  cdlState: …` (CSV line = payload index → source row + 2). */
+  function rowLabel(payloadIndex: number): string {
+    return `Row ${(plan.sourceIndex[payloadIndex] ?? payloadIndex) + 2}`;
+  }
+
+  function submit() {
+    setError(null);
+    setServerProblems([]);
+    mutation.mutate(
+      {
+        drivers: plan.payload,
+        options: {
+          duplicateStrategy,
+          // Optional and typed — no Terminal table to pick from yet (backend D-090).
+          defaultHomeTerminalName: defaultHomeTerminalName.trim() || undefined,
+          sendInvitations,
+          applyDefaultExemptions,
+        },
+      },
+      {
+        onSuccess: (summary) => {
+          const total = summary.imported + summary.updated;
+          toast({
+            kind: summary.failed.length > 0 ? 'warning' : 'success',
+            title: `${total} ${total === 1 ? 'driver' : 'drivers'} imported`,
+            // `skipped` (existing usernames under "Skip existing") was never mentioned.
+            description: `${summary.imported} created · ${summary.updated} updated · ${summary.skipped ?? 0} skipped · ${summary.failed.length} failed.`,
+          });
+          if (summary.failed.length === 0) {
+            onClose();
+            return;
+          }
+          // Keep the modal open on partial failure — the toast alone never said which rows.
+          setServerProblems(summary.failed.map((f) => `${rowLabel(f.index)}  ${f.error}`));
+        },
+        onError: (err) => {
+          const message = err instanceof ApiError ? err.userMessage : 'Something went wrong.';
+          if (err instanceof ApiError) {
+            const problems = Object.entries(err.fieldErrors).flatMap(([path, text]) => {
+              const match = /^drivers\.(\d+)\.(.+)$/.exec(path);
+              return match ? [`${rowLabel(Number(match[1]))}  ${match[2]}: ${text}`] : [];
+            });
+            setServerProblems(problems);
+          }
+          setError(message);
+          toast({ kind: 'error', title: message });
+        },
+      },
+    );
   }
 
   return (
@@ -89,41 +232,11 @@ export function ImportDriversModal({ onClose }: { onClose: () => void }) {
           <Button
             variant="primary"
             size="lg"
-            disabled={!file || rows.length === 0}
+            disabled={!file || plan.payload.length === 0}
             loading={mutation.isPending}
-            onClick={() =>
-              mutation.mutate(
-                {
-                  drivers: rows,
-                  options: {
-                    duplicateStrategy,
-                    // Optional and typed — no Terminal table to pick from yet (backend D-090).
-                    defaultHomeTerminalName: defaultHomeTerminalName.trim() || undefined,
-                    sendInvitations,
-                    applyDefaultExemptions,
-                  },
-                },
-                {
-                  onSuccess: (summary) => {
-                    const total = summary.imported + summary.updated;
-                    toast({
-                      kind: 'success',
-                      title: `${total} drivers imported`,
-                      description: `${summary.imported} created · ${summary.updated} updated · ${summary.failed.length} failed.`,
-                    });
-                    onClose();
-                  },
-                  onError: (err) => {
-                    const message =
-                      err instanceof ApiError ? err.userMessage : 'Something went wrong.';
-                    setError(message);
-                    toast({ kind: 'error', title: message });
-                  },
-                },
-              )
-            }
+            onClick={submit}
           >
-            {rows.length > 0 ? `Import ${rows.length} drivers` : 'Import drivers'}
+            {plan.payload.length > 0 ? `Import ${plan.payload.length} drivers` : 'Import drivers'}
           </Button>
         </>
       }
@@ -171,10 +284,7 @@ export function ImportDriversModal({ onClose }: { onClose: () => void }) {
               type="button"
               aria-label="Remove file"
               onClick={() => {
-                setFile(null);
-                setRows([]);
-                setWarnings([]);
-                setRowsNeedingAttention(0);
+                clearFile();
                 // WB-193 — without this the same file re-selected fires no `change` event and the
                 // modal stays empty.
                 if (inputRef.current) inputRef.current.value = '';
@@ -195,6 +305,16 @@ export function ImportDriversModal({ onClose }: { onClose: () => void }) {
           }}
         />
         {error && <p className="text-body text-danger">{error}</p>}
+        {serverProblems.length > 0 && (
+          <div
+            role="alert"
+            className="flex flex-col gap-1 rounded-md bg-danger-soft p-3 text-body text-danger"
+          >
+            {serverProblems.map((p) => (
+              <p key={p}>{p}</p>
+            ))}
+          </div>
+        )}
         {warnings.length > 0 && (
           <div className="flex flex-col gap-1 rounded-md bg-warning-soft p-3 text-body text-warning">
             {warnings.map((w) => (
@@ -245,6 +365,12 @@ export function ImportDriversModal({ onClose }: { onClose: () => void }) {
             Apply default HOS exemptions — personal conveyance and yard move enabled
           </label>
         </fieldset>
+        <div className="flex items-center justify-between rounded-md bg-info-soft px-3 py-2.5 text-body text-text-secondary">
+          <span>Not sure about the format?</span>
+          <Button variant="link" onClick={downloadTemplate}>
+            Download CSV template
+          </Button>
+        </div>
       </div>
     </Modal>
   );

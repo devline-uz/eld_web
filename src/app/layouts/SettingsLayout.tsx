@@ -23,13 +23,14 @@ export function SettingsLayout() {
                 to={item.to}
                 className={({ isActive }) =>
                   [
-                    'flex h-nav-item items-center rounded-md px-3 text-nav',
+                    'flex h-nav-item items-center gap-3 rounded-md px-3 text-nav',
                     isActive
                       ? 'bg-bg-nav-active text-primary'
                       : 'text-text-secondary hover:bg-bg-subtle',
                   ].join(' ')
                 }
               >
+                {item.icon && <item.icon size={18} strokeWidth={1.75} aria-hidden="true" className="shrink-0" />}
                 {item.label}
               </NavLink>
             </li>

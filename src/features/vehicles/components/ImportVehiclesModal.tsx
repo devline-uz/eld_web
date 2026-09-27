@@ -10,6 +10,7 @@ import { TOAST_COPY } from '@/shared/ui/copy';
 import { useImportVehicles, type ImportVehiclesOptions } from '@/shared/api/vehicles';
 import { ApiError } from '@/shared/api/errors';
 import { parseCsv, toCsv } from '@/shared/lib/csv';
+import { importIssues, normalizeImportRow } from '../lib/importRows';
 
 const MAX_BYTES = 5 * 1024 * 1024;
 const MAX_ROWS = 2000;
@@ -115,7 +116,7 @@ export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
             onClick={() =>
               mutation.mutate(
                 {
-                  vehicles: rows,
+                  vehicles: rows.map(normalizeImportRow),
                   // Optional and typed — no Terminal table to pick from yet (backend D-090).
                   options: {
                     duplicateStrategy,
@@ -139,6 +140,13 @@ export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
                     onClose();
                   },
                   onError: (err) => {
+                    // A rejected file is fixed in the file — the per-row reasons stay in the
+                    // modal next to it instead of vanishing with the toast.
+                    const rowIssues = err instanceof ApiError ? importIssues(err) : [];
+                    if (rowIssues.length > 0) {
+                      setError(`The file was not imported. ${rowIssues.join(' · ')}`);
+                      return;
+                    }
                     toast({
                       kind: 'error',
                       title: err instanceof ApiError ? err.userMessage : 'Something went wrong.',
@@ -148,7 +156,7 @@ export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
               )
             }
           >
-            {rows.length > 0 ? `Import ${rows.length} units` : 'Import units'}
+            {rows.length > 0 ? `Import ${rows.length} unit${rows.length === 1 ? '' : 's'}` : 'Import units'}
           </Button>
         </>
       }
@@ -201,6 +209,7 @@ export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
               onClick={() => {
                 setFile(null);
                 setRows([]);
+                setError(null);
               }}
             >
               <X size={16} strokeWidth={1.75} className="text-text-muted" />
@@ -217,7 +226,11 @@ export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
             if (selected) handleFile(selected);
           }}
         />
-        {error && <p className="text-body text-danger">{error}</p>}
+        {error && (
+          <p role="alert" className="text-body text-danger">
+            {error}
+          </p>
+        )}
         {/* B-69 shipped — `ImportVehiclesOptionsDto` rides alongside the parsed rows. */}
         <div className="grid grid-cols-2 gap-4">
           <label className="flex flex-col gap-1">

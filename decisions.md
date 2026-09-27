@@ -1365,3 +1365,15 @@ ends the fetch much sooner.
 **Options.** (a) Move the whole toast into `shared/` and edit `features/reports` (another agent owns it and is editing it now). (b) Have the shell handle every screen and de-duplicate by listener count (unreliable: `useRoom` attaches every event). (c) Split by route: the shell always invalidates `qkRoot.reports` and seeds `qk.report(id)`, and toasts only outside `/reports/*`; the report screens keep their own toast, deduplicated against their 3 s `reportStatus` poll.
 **Choice.** (c), in `shared/realtime/reportReady.ts`, mounted from `Topbar`. `REPORT_TYPE_LABEL`/`fileSizeLabel`/`saveFile` are added to a new `shared/api/reportFiles.ts`. **Hand-off to web-reports-transfer:** make `reportMeta.ts` re-export these three instead of keeping copies.
 **Why.** Each screen gets at most one toast, the report pages keep their Download and failure UX unchanged, and no `features/*` import is added. Polling stays the fallback for a frame missed across a reconnect, since there is no resume/seq.
+
+## WD-095 — Report schedules: list/edit/pause/delete card on each report page; schedule toasts (2026-09-27, QA pass)
+**Problem.** Schedules could only be created (WD-043). No §10/§11 entry draws a schedules list, and §13.3 has no schedule toast.
+**Options.** (a) A new `/reports/schedules` route, which would need a nav entry nobody drew. (b) One shared `Scheduled reports` card on the IFTA / Activity / DVIR pages, next to their `Schedule` action.
+**Choice.** (b). The card lists every schedule, whatever its type. The row actions are for `reports` FULL only. `Edit` reuses `ScheduleReportModal`. The success toasts are added to `copy.ts` as `reportSchedule*` and named like the W-09 maintenance-schedule toasts (WB-074). This supersedes WD-043's silent close.
+**Why.** It is reachable for every role that can see a report page, including DISPATCHER, who only has Activity. It needs no new route or nav item.
+
+## WD-096 — Geofence colour is a closed enum, not free text (2026-09-27)
+**Problem.** Overlay 11.1 offers five colours; the backend had no column for them.
+**Options.** (a) `colour String @default("BLUE")`; (b) a Prisma enum `GeofenceColour`.
+**Choice.** (b), `BLUE|GREEN|AMBER|RED|VIOLET`, matching `geofenceSchema.colour` and `GeofenceType`'s style. The web maps each value to a design token in `FleetMap.tsx`; hex values stay out of the API.
+**Why.** The map can only resolve these five to tokens, so an enum rejects anything else at the DTO (422) instead of storing a colour no screen can draw. A new colour means a migration plus a token, on purpose.

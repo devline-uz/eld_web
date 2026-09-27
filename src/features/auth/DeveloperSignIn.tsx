@@ -7,6 +7,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { ChevronDown, ChevronRight, Eye, EyeOff } from 'lucide-react';
 import { Button } from '@/shared/ui/Button';
 import { VALIDATION_MESSAGES } from '@/shared/forms/messages';
+import { fields } from '@/shared/forms';
 
 export function DeveloperSignIn({
   onSubmit,
@@ -34,7 +35,10 @@ export function DeveloperSignIn({
     event.preventDefault();
     if (busy || submittingRef.current) return;
     const next: { email?: string; password?: string } = {};
+    // QA-B — a malformed address used to go straight to `POST /auth/login` (and burn one of the
+    // 5/min throttle slots) instead of showing the shared §14.2 email message.
     if (!email.trim()) next.email = VALIDATION_MESSAGES.required;
+    else if (!fields.email().safeParse(email).success) next.email = VALIDATION_MESSAGES.email;
     if (!password) next.password = VALIDATION_MESSAGES.required;
     setErrors(next);
     if (next.email || next.password) return;

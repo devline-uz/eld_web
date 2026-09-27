@@ -444,7 +444,9 @@ describe('EditScheduleModal — clearing a field clears it', () => {
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() => expect(body).toBeTruthy());
-    expect(body).toMatchObject({ name: 'Oil & filter', intervalMi: null, intervalDays: 180, lastServiceMi: null });
+    expect(body).toMatchObject({ name: 'Oil & filter', intervalMi: null, intervalDays: 180 });
+    // QA-B — `UpdateMaintenanceScheduleDto.lastServiceMi` is not nullable; `null` was answered 422.
+    expect(body).not.toHaveProperty('lastServiceMi');
   });
 
   it('is not dirty until something changes', async () => {
@@ -558,5 +560,36 @@ describe('DvirDrawer — 11.15', () => {
     await waitFor(() => expect(presignCalls).toBe(2));
     expect(openSpy).toHaveBeenCalledWith('https://cdn.example.com/att_1?n=2', '_blank', 'noopener,noreferrer');
     openSpy.mockRestore();
+  });
+});
+
+describe('EditScheduleModal — create mode (QA-B)', () => {
+  it('needs a unit, a name and an interval, then POSTs the new schedule', async () => {
+    const user = userEvent.setup();
+    let body: unknown;
+    server.use(
+      http.get(url(endpoints.vehicles.list), () =>
+        ok({ items: [{ id: 'veh_9', unitNumber: '7301' }], page: 1, limit: 200, total: 1, totalPages: 1 }),
+      ),
+      http.post(url(endpoints.maintenanceSchedules.create), async ({ request }) => {
+        body = await request.json();
+        return ok({ id: 'sch_9' }, 201);
+      }),
+    );
+    renderModal(<EditScheduleModal onClose={vi.fn()} />);
+
+    const create = screen.getByRole('button', { name: 'Create schedule' });
+    expect(create).toBeDisabled();
+    await user.selectOptions(await screen.findByRole('combobox'), await screen.findByRole('option', { name: 'Unit 7301' }));
+    await user.type(screen.getByPlaceholderText('Oil & filter'), 'Oil & filter');
+    await user.type(screen.getByLabelText('Interval (miles)'), '0');
+    expect(screen.getByRole('alert')).toHaveTextContent('intervals start at 1');
+    expect(create).toBeDisabled();
+    await user.clear(screen.getByLabelText('Interval (miles)'));
+    await user.type(screen.getByLabelText('Interval (miles)'), '25000');
+    await user.click(create);
+
+    await waitFor(() => expect(body).toBeTruthy());
+    expect(body).toEqual({ vehicleId: 'veh_9', name: 'Oil & filter', intervalMi: 25000, enabled: true });
   });
 });

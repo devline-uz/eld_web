@@ -8,7 +8,7 @@ import { Filter, Plus, Search, Download, Wrench, AlertTriangle, ClipboardList, S
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
-import { useDynamicSubtitle } from '@/app/layouts/Topbar';
+import { usePageHeader } from '@/app/layouts/Topbar';
 import { Button } from '@/shared/ui/Button';
 import { Card, SectionHeader } from '@/shared/ui/Card';
 import { Badge, SeverityBadge } from '@/shared/ui/Badge';
@@ -108,7 +108,6 @@ export default function DvirPage() {
     setParams(writeDvirFilters(params, next), { replace: true });
   }
 
-  useDynamicSubtitle('Driver vehicle inspection reports, defects and service schedule');
 
   function setTab(next: Tab) {
     const nextParams = new URLSearchParams(params);
@@ -282,13 +281,11 @@ export default function DvirPage() {
     }
   }
 
+  usePageHeader({ title: 'DVIR & Maintenance', subtitle: 'Driver vehicle inspection reports, defects and service schedule' });
+
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-page-title text-text">DVIR &amp; Maintenance</h1>
-          <p className="text-page-sub text-text-muted">Driver vehicle inspection reports, defects and service schedule</p>
-        </div>
+      <div className="flex items-center justify-end">
         <div className="flex items-center gap-2">
           <div className="flex h-input items-center gap-2 rounded-md border border-border bg-bg-surface px-3">
             <Search size={16} strokeWidth={1.75} className="text-text-muted" />
@@ -981,10 +978,21 @@ function SchedulesTab({ search, onRows }: { search: string; onRows: (rows: Sched
   const [completeTarget, setCompleteTarget] = useState<ScheduleTableRow | null>(null);
   const [editTarget, setEditTarget] = useState<ScheduleTableRow | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ScheduleTableRow | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
   return (
     <Card padded={false}>
       <div className="p-card pb-0">
-        <SectionHeader title="Schedules" subtitle={`${total} total`} />
+        <SectionHeader
+          title="Schedules"
+          subtitle={`${total} total`}
+          action={
+            canFull ? (
+              <Button variant="secondary" iconLeft={<Plus size={16} strokeWidth={1.75} />} onClick={() => setCreateOpen(true)}>
+                New schedule
+              </Button>
+            ) : undefined
+          }
+        />
       </div>
       <div className="p-card">
         {isLoading ? (
@@ -1074,6 +1082,7 @@ function SchedulesTab({ search, onRows }: { search: string; onRows: (rows: Sched
       </div>
       {completeTarget && <ScheduleCompleteModal schedule={completeTarget} onClose={() => setCompleteTarget(null)} />}
       {editTarget && <EditScheduleModal schedule={editTarget} onClose={() => setEditTarget(null)} />}
+      {createOpen && <EditScheduleModal onClose={() => setCreateOpen(false)} />}
       {deleteTarget && <ScheduleDeleteModal schedule={deleteTarget} onClose={() => setDeleteTarget(null)} />}
     </Card>
   );

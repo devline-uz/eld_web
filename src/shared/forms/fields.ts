@@ -70,8 +70,9 @@ export const vehicleYear = () =>
     .min(LIMITS.vehicleYearMin, M.yearMin)
     .refine((value) => value <= new Date().getFullYear(), M.yearFuture);
 
+/** Empty used to say "Maximum 60 characters." — the length rule, not the missing value. */
 export const outputFileComment = () =>
-  requiredString(M.outputFileComment).max(LIMITS.outputFileCommentMax, M.outputFileComment);
+  requiredString().max(LIMITS.outputFileCommentMax, M.outputFileComment);
 
 /** FMCSA requires a meaningful annotation — 4 characters minimum, never 1. */
 export const annotation = () =>
@@ -84,8 +85,9 @@ export const editReason = () =>
     .min(LIMITS.editReasonMin, M.editReason)
     .max(LIMITS.editReasonMax, M.editReason);
 
+/** An empty body used to read "Messages are limited to 2,000 characters." — the wrong rule. */
 export const messageBody = () =>
-  requiredString(M.messageBody).max(LIMITS.messageBodyMax, M.messageBody);
+  requiredString().max(LIMITS.messageBodyMax, M.messageBody);
 
 export const ticketSubject = () =>
   requiredString(M.ticketSubject)

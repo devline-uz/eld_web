@@ -280,4 +280,69 @@ describe('RolesPage — stage-2', () => {
     expect(await screen.findByText('Export FMCSA / DOT pack')).toBeInTheDocument();
     expect(screen.getByText('Send data transfers to an inspector')).toBeInTheDocument();
   });
+  // WB-QA-S-02 — custom roles from `GET /roles` get their own matrix column, editable like the
+  // built-in non-admin columns and saved through the same `PATCH /roles/:id`.
+  it('adds a column per custom role after the four built-ins, inside a horizontal scroller', async () => {
+    renderPage();
+    await screen.findByText('View vehicles / Add & edit vehicles');
+    const headers = screen.getAllByRole('columnheader').map((h) => h.textContent);
+    expect(headers).toEqual(['PERMISSION', 'ADMIN', 'FLEET MANAGER', 'DISPATCHER', 'VIEWER', 'Compliance auditor']);
+    expect(screen.getByTestId('permission-matrix-scroll')).toHaveClass('overflow-x-auto');
+    const cell = screen.getByRole('button', { name: 'View & generate reports — Compliance auditor: Read only' });
+    expect(cell).toBeEnabled();
+    expect(cell).not.toHaveAttribute('title');
+  });
+
+  it('cycles a custom-role cell and PATCHes that role with its full permission set', async () => {
+    const user = userEvent.setup();
+    let body: { permissions: Record<string, string> } | null = null;
+    server.use(
+      http.patch(url(endpoints.roles.update('rol_auditor')), async ({ request }) => {
+        body = (await request.json()) as { permissions: Record<string, string> };
+        return ok({ id: 'rol_auditor' });
+      }),
+    );
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: 'View & generate reports — Compliance auditor: Read only' }));
+    await waitFor(() => expect(body).not.toBeNull());
+    expect(body!.permissions.reports).toBe('FULL');
+    expect(body!.permissions.vehicles).toBe('NONE');
+    expect(Object.keys(body!.permissions)).toHaveLength(Object.keys(NO_PERMISSIONS).length);
+  });
+
+  it('writes both keys of the shared "Manage users & roles" row for a custom role', async () => {
+    const user = userEvent.setup();
+    let body: { permissions: Record<string, string> } | null = null;
+    server.use(
+      http.patch(url(endpoints.roles.update('rol_auditor')), async ({ request }) => {
+        body = (await request.json()) as { permissions: Record<string, string> };
+        return ok({ id: 'rol_auditor' });
+      }),
+    );
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: 'Manage users & roles — Compliance auditor: No access' }));
+    await waitFor(() => expect(body).not.toBeNull());
+    expect(body!.permissions.users).toBe('READ');
+    expect(body!.permissions.roles).toBe('READ');
+  });
+
+  it('group header rows span every column, custom ones included', async () => {
+    renderPage();
+    const group = await screen.findByText('FLEET');
+    expect(group.closest('td')).toHaveAttribute('colspan', '6');
+  });
+
+  it('does not draw a built-in column for a role GET /roles did not return (ADMIN always stays)', async () => {
+    server.use(
+      http.get(url(endpoints.roles.list), () =>
+        ok([
+          { id: 'rol_admin', key: 'ADMIN', name: 'Admin', isSystem: true, permissions: { ...NO_PERMISSIONS }, userCount: 1 },
+          { id: 'rol_x', key: 'QA_AUDITOR', name: 'QA Auditor', isSystem: false, permissions: { ...NO_PERMISSIONS }, userCount: 0 },
+        ]),
+      ),
+    );
+    renderPage();
+    await screen.findByText('View vehicles / Add & edit vehicles');
+    expect(screen.getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['PERMISSION', 'ADMIN', 'QA Auditor']);
+  });
 });

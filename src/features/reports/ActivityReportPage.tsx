@@ -40,6 +40,7 @@ import { EmptyState, ErrorState, ForbiddenState } from '@/shared/ui/states';
 import { ACTIVITY_GROUP_OPTIONS, NO_TERMINAL_LABEL, groupByTerminal, parseGroupBy, type TerminalGroup } from './activityGroups';
 import { ActionAlert } from './components/ActionAlert';
 import { ScheduleReportModal } from './components/ScheduleReportModal';
+import { ScheduledReportsCard } from './components/ScheduledReportsCard';
 import { SelectMenu } from './components/SelectMenu';
 import {
   ACTIVITY_EXPORT_SCOPE,
@@ -422,6 +423,8 @@ export default function ActivityReportPage() {
         )}
       </Card>
       )}
+
+      <ScheduledReportsCard timezone={timezone} />
 
       <Can perm="reports" level="FULL">
         <ScheduleReportModal

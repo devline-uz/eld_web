@@ -19,7 +19,8 @@ export function AssignLoadModal({ load, onClose }: { load: TripRow; onClose: () 
   const [notify, setNotify] = useState(true);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const listWindow = { q: query || undefined, limit: 25 };
+  // QA fix — an INACTIVE driver cannot take a load; the server filters (`?status=ACTIVE`).
+  const listWindow = { q: query || undefined, limit: 25, status: 'ACTIVE' };
   const driversQuery = useDriversList(listWindow);
   // B-1 roster (bulk) for the rendered rows' HOS clocks — same `q`/`limit` page, joined by id.
   const rowIds = useMemo(() => (driversQuery.data?.items ?? []).map((d) => d.id), [driversQuery.data]);

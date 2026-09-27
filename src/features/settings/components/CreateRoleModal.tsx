@@ -106,6 +106,13 @@ export function CreateRoleModal({
     for (const row of SEGMENT_ROWS) {
       for (const key of row.keys) base[key] = segmentLevels[row.label] ?? 'NONE';
     }
+    // A role built from scratch used to get `dashboard`/`support` = NONE (the grid has no row for
+    // them), so its users landed on `/403` after sign-in and lost the Support page that §4.2 gives
+    // every role. Scratch roles now start with READ on both; templates and edits keep theirs.
+    if (!template && !role) {
+      base.dashboard = 'READ';
+      base.support = 'READ';
+    }
     // B-95 (shipped 2026-09-24) — `dataTransfer` is its own 23rd key; the pack export and the
     // inspector transfer are two independent checkboxes again.
     base.reportsTransfer = canExportFmcsa ? 'FULL' : 'NONE';

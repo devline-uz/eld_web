@@ -25,6 +25,9 @@ const SEGMENT_TYPE: Record<ShapeSegment, 'CIRCLE' | 'POLYGON' | 'ADDRESS'> = {
   Address: 'ADDRESS',
 };
 
+const SHAPE_NEEDS_MAP =
+  'Drawing a circle, rectangle or polygon needs the map, which is not available here. Choose Address to place this geofence by street address.';
+
 export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { toast } = useToast();
   const createGeofence = useCreateGeofence();
@@ -95,6 +98,15 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
   function onSave(event?: BaseSyntheticEvent) {
     return handleSubmit((values) => {
       if (inFlight.current) return;
+      // QA-B — the preview never draws a shape, so a Circle/Rectangle/Polygon has no
+      // `centerLat/centerLon`/`polygon` and `POST /geofences` always answered a 422 whose issue
+      // targets no field ("Check the highlighted fields…" with nothing highlighted). Say why
+      // up front instead of sending a request that cannot succeed.
+      if (values.type !== 'ADDRESS') {
+        setServerError(SHAPE_NEEDS_MAP);
+        return;
+      }
+      setServerError(null);
       inFlight.current = true;
       const payload: GeofencePayload = {
         name: values.name,
@@ -107,6 +119,8 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
         alertOnExit: values.alertOnExit,
         dwellMinutes: values.dwellMinutes,
         afterHoursOnly: values.afterHoursOnly,
+        colour: values.colour,
+        countAsYardMove: values.countAsYardMove,
       };
       createGeofence.mutate(payload, {
         onSuccess: () => {

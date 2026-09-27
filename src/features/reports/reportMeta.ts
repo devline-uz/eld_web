@@ -190,3 +190,25 @@ export function refusalText(error: unknown): string {
   return error instanceof Error && error.message ? error.message : 'Something went wrong.';
 }
 
+/* ------------------------------------------------------------------ report schedules */
+
+/** `Schedule a report` frequency presets — 06:00 on the company clock (WD-043). */
+export const SCHEDULE_FREQUENCIES = {
+  DAILY: { label: 'Every day at 06:00', cron: '0 6 * * *' },
+  WEEKLY: { label: 'Every Monday at 06:00', cron: '0 6 * * 1' },
+  MONTHLY: { label: 'The 1st of every month at 06:00', cron: '0 6 1 * *' },
+} as const;
+
+export type FrequencyKey = keyof typeof SCHEDULE_FREQUENCIES;
+
+/** The preset a cron matches, or `CUSTOM` for a schedule created outside this modal. */
+export function frequencyOf(cron: string): FrequencyKey | 'CUSTOM' {
+  const hit = (Object.keys(SCHEDULE_FREQUENCIES) as FrequencyKey[]).find((key) => SCHEDULE_FREQUENCIES[key].cron === cron);
+  return hit ?? 'CUSTOM';
+}
+
+/** Human label for a schedule's cron (`Scheduled reports` FREQUENCY column). */
+export function frequencyLabel(cron: string): string {
+  const key = frequencyOf(cron);
+  return key === 'CUSTOM' ? `Custom (${cron})` : SCHEDULE_FREQUENCIES[key].label;
+}

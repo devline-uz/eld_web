@@ -27,7 +27,8 @@ import { EditUserModal } from './components/EditUserModal';
 import { UserFiltersDrawer, UserFilterChips } from './components/UserFiltersDrawer';
 import { EMPTY_USER_FILTERS, countActiveUserFilters, matchesUserFilters, parseUserFilters, writeUserFilters } from './lib/filters';
 import { useDeleteUser } from './api';
-import { SETTINGS_TOAST } from './lib/copy';
+import { SETTINGS_TOAST, countLabel } from './lib/copy';
+import { usePageHeader } from '@/app/layouts/Topbar';
 
 type Segment = 'ALL' | 'ADMIN' | 'FLEET_MANAGER' | 'DISPATCHER' | 'VIEWER';
 
@@ -214,15 +215,11 @@ export default function UsersPage() {
 
   const isLoading = usersQuery.isLoading || rolesQuery.isLoading;
 
+  usePageHeader({ title: 'Settings · Users', subtitle: `${countLabel(counts.all, 'back-office user')} · ${countLabel(counts.admin, 'admin')}` });
+
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-page-title text-text">Settings · Users</h1>
-          <p className="text-page-sub text-text-muted">
-            {counts.all} back-office users · {counts.admin} admins
-          </p>
-        </div>
+      <div className="flex items-center justify-end">
         <Can perm="users" level="FULL">
           <Button variant="primary" iconLeft={<UserPlus size={16} strokeWidth={1.75} />} onClick={() => setInviteOpen(true)}>
             Invite user
@@ -412,7 +409,7 @@ export default function UsersPage() {
         </Card>
       )}
 
-      {inviteOpen && <InviteUserModal roles={rolesQuery.rows} onClose={() => setInviteOpen(false)} />}
+      {inviteOpen && <InviteUserModal onClose={() => setInviteOpen(false)} />}
 
       {editTarget && (
         <EditUserModal

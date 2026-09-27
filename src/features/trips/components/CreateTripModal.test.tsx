@@ -31,11 +31,16 @@ const VERIFIED_DRIVER = {
   emailVerified: true,
 };
 
+/** `status` of every `GET /drivers` the modal made (QA fix: pickers list ACTIVE drivers only). */
+const requestedStatuses: (string | null)[] = [];
+
 function renderModal() {
+  requestedStatuses.length = 0;
   server.use(
-    http.get(url(endpoints.drivers.list), () =>
-      ok({ items: [UNVERIFIED_DRIVER, VERIFIED_DRIVER], page: 1, limit: 200, total: 2, totalPages: 1 }),
-    ),
+    http.get(url(endpoints.drivers.list), ({ request }) => {
+      requestedStatuses.push(new URL(request.url).searchParams.get('status'));
+      return ok({ items: [UNVERIFIED_DRIVER, VERIFIED_DRIVER], page: 1, limit: 200, total: 2, totalPages: 1 });
+    }),
     http.get(url(endpoints.vehicles.list), () => ok({ items: [], page: 1, limit: 500, total: 0, totalPages: 1 })),
     http.get(url(endpoints.drivers.hos(':id')), () =>
       ok({ driveRemainingSec: 36000, shiftRemainingSec: 39600, cycleRemainingSec: 180000, breakInSec: 7200, onDutySince: null }),
@@ -77,6 +82,14 @@ function enterWindow(label: 'Pickup' | 'Delivery', value: string) {
 beforeAll(() => server.listen({ onUnhandledRequest: 'bypass' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
+
+describe('CreateTripModal — QA fix: ACTIVE drivers only', () => {
+  it('asks the server for ACTIVE drivers (`?status=ACTIVE`)', async () => {
+    renderModal();
+    await vi.waitFor(() => expect(requestedStatuses.length).toBeGreaterThan(0));
+    expect(requestedStatuses.every((s) => s === 'ACTIVE')).toBe(true);
+  });
+});
 
 describe('CreateTripModal — WB-115 assignment block', () => {
   it('disables `Create trip` once an e-mail-unverified driver is picked', async () => {

@@ -41,7 +41,8 @@ describe('sendLogsSchema', () => {
   it('caps the output file comment at 60 characters and requires one', () => {
     expect(messages({ ...base, outputFileComment: 'X'.repeat(60) })).toEqual([]);
     expect(messages({ ...base, outputFileComment: 'X'.repeat(61) })).toEqual([`outputFileComment: ${M.outputFileComment}`]);
-    expect(messages({ ...base, outputFileComment: '' })).toEqual([`outputFileComment: ${M.outputFileComment}`]);
+    // An empty comment is a missing value, not a length problem (shared/forms/fields.ts).
+    expect(messages({ ...base, outputFileComment: '' })).toEqual([`outputFileComment: ${M.required}`]);
   });
 
   it('requires a driver', () => {

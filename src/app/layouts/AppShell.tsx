@@ -4,7 +4,7 @@ import { Suspense } from 'react';
 import { Outlet, useMatches } from 'react-router-dom';
 import { RouteFallback } from './RouteFallback';
 import { Sidebar } from './Sidebar';
-import { DynamicSubtitleProvider, type RouteHandle } from './Topbar';
+import { PageHeaderProvider, type RouteHandle } from './Topbar';
 import { Topbar } from './Topbar';
 
 /** W-02 Live Fleet is the one screen that runs edge-to-edge, no page padding (web/tz.md §10). */
@@ -25,7 +25,7 @@ export function AppShell() {
       </a>
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col xl:min-h-0">
-        <DynamicSubtitleProvider>
+        <PageHeaderProvider>
           <Topbar />
           <main
             id="main-content"
@@ -45,7 +45,7 @@ export function AppShell() {
               <Outlet />
             </Suspense>
           </main>
-        </DynamicSubtitleProvider>
+        </PageHeaderProvider>
       </div>
     </div>
   );

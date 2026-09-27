@@ -121,6 +121,10 @@ export const reportsHandlers = [
   http.post(url(endpoints.reports.schedules), async ({ request }) =>
     ok({ id: 'sch_1', ...((await request.json()) as object), nextRunAt: '2026-09-14T10:00:00.000Z' }, 201),
   ),
+  http.patch(url(endpoints.reports.schedule(':id')), async ({ request, params }) =>
+    ok({ id: params.id, ...((await request.json()) as object), nextRunAt: '2026-09-14T10:00:00.000Z' }),
+  ),
+  http.delete(url(endpoints.reports.schedule(':id')), () => new HttpResponse(null, { status: 204 })),
   http.post(url(endpoints.reports.generate), () => ok({ reportId: 'rpt_generated', status: 'QUEUED' }, 202)),
   http.get(url(endpoints.reports.ifta), () => ok({ reportId: 'rpt_export_ifta', status: 'QUEUED' }, 202)),
   http.get(url(endpoints.reports.iftaSummary), ({ request }) =>

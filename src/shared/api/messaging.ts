@@ -136,7 +136,7 @@ export function useSendMessage(conversationId: string) {
     mutationFn: (payload: SendMessagePayload) => client.post<MessageRow>(endpoints.conversations.sendMessage(conversationId), payload),
     onSuccess: (message) => {
       upsertMessage(queryClient, conversationId, message);
-      bumpConversation(queryClient, conversationId, message.sentAt);
+      bumpConversation(queryClient, conversationId, message.sentAt, message);
     },
   });
 }
@@ -205,10 +205,21 @@ export function markConversationRead(
 
 /** Patches the conversation-list cache in place (never a full `invalidateQueries`) so the
  * sidebar reorders and its `lastMessageAt` updates without a round trip (web/tz.md §16 rule 3). */
-export function bumpConversation(queryClient: ReturnType<typeof useQueryClient>, conversationId: string, lastMessageAt: string): void {
+export function bumpConversation(
+  queryClient: ReturnType<typeof useQueryClient>,
+  conversationId: string,
+  lastMessageAt: string,
+  /** Without it the row kept its old `lastMessage` (or none) and the sidebar preview read
+   * "Tap to open the conversation" after a send. */
+  lastMessage?: MessageRow,
+): void {
   queryClient.setQueryData<{ items: ConversationRow[] } | undefined>(qk.conversations(), (prev) => {
     if (!prev) return prev;
-    return { items: prev.items.map((c) => (c.id === conversationId ? { ...c, lastMessageAt } : c)) };
+    return {
+      items: prev.items.map((c) =>
+        c.id === conversationId ? { ...c, lastMessageAt, ...(lastMessage && { lastMessage }) } : c,
+      ),
+    };
   });
 }
 

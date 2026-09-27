@@ -18,10 +18,11 @@ import { searchEmptyState } from '@/shared/ui/copy';
 import { useToast } from '@/shared/ui/Toast';
 import { ApiError } from '@/shared/api/errors';
 import { formatRelative } from '@/shared/format/relative';
-import { orDash, orNotAssigned } from '@/shared/format/empty';
+import { orDash } from '@/shared/format/empty';
 import { client } from '@/shared/api/client';
 import { endpoints } from '@/shared/api/endpoints';
 import { useVehiclesPicker } from '@/shared/api/vehicles';
+import { useDriversLookup } from '@/shared/api/lookups';
 import {
   useDevicesList,
   useUnpairDevice,
@@ -35,6 +36,7 @@ import { RegisterDeviceModal } from './components/RegisterDeviceModal';
 import { PairDeviceModal } from './components/PairDeviceModal';
 import { UpdateFirmwareModal } from './components/UpdateFirmwareModal';
 import { SETTINGS_TOAST } from './lib/copy';
+import { usePageHeader } from '@/app/layouts/Topbar';
 
 type Segment = 'ALL' | 'CONNECTED' | 'DISCONNECTED' | 'UNASSIGNED';
 
@@ -48,6 +50,13 @@ const BLE_LABEL: Record<BleState, string> = {
   OUT_OF_RANGE: 'Out of range',
   DISCONNECTED: 'Disconnected',
 };
+
+/** `GET /devices` sends `lastSeenAt`; `lastHeartbeatAt` is only in the Swagger example. A device
+ * that has never connected reads `Never`, not `Not assigned`. */
+function lastSync(device: DeviceRow): string {
+  const seen = device.lastHeartbeatAt ?? device.lastSeenAt ?? null;
+  return seen ? formatRelative(seen) : 'Never';
+}
 
 export default function DevicesPage() {
   const { can } = usePermission();
@@ -89,16 +98,30 @@ export default function DevicesPage() {
     [vehiclesQuery.data],
   );
 
+  const driversQuery = useDriversLookup();
+  const driverNameByVehicleId = useMemo(
+    () =>
+      new Map(
+        (driversQuery.data?.items ?? [])
+          .filter((d) => d.assignedVehicleId)
+          .map((d) => [d.assignedVehicleId as string, `${d.firstName} ${d.lastName}`.trim()]),
+      ),
+    [driversQuery.data],
+  );
+
   const rows = useMemo(() => devicesQuery.data?.items ?? [], [devicesQuery.data]);
 
   const connected = rows.filter((d) => d.bleState === 'CONNECTED').length;
   const disconnected = rows.filter((d) => d.bleState === 'DISCONNECTED').length;
   const outdated = rows.filter((d) => d.firmwareOutdated).length;
+  const unassigned = rows.filter((d) => d.vehicleId === null).length;
   const total = devicesQuery.data?.total ?? rows.length;
 
   const filteredBySegment = useMemo(() => {
     if (segment === 'CONNECTED') return rows.filter((d) => d.bleState === 'CONNECTED');
     if (segment === 'DISCONNECTED') return rows.filter((d) => d.bleState === 'DISCONNECTED');
+    // QA-B — `Unassigned` used to fall through to every row.
+    if (segment === 'UNASSIGNED') return rows.filter((d) => d.vehicleId === null);
     return rows;
   }, [rows, segment]);
 
@@ -140,7 +163,7 @@ export default function DevicesPage() {
       id: 'firmware',
       header: 'FIRMWARE',
       cell: ({ row }) => (
-        <span className={row.original.firmwareOutdated ? 'text-warning' : 'text-text'}>{row.original.firmwareVersion ?? '—'}</span>
+        <span className={row.original.firmwareOutdated ? 'text-warning' : 'text-text'}>{row.original.firmwareVersion ?? row.original.firmware ?? '—'}</span>
       ),
     },
     {
@@ -155,12 +178,17 @@ export default function DevicesPage() {
     {
       id: 'driver',
       header: 'DRIVER',
-      cell: () => <span className="text-text-muted">Unassigned</span>,
+      // QA-B — was hard-coded `Unassigned` for every row; the driver is whoever is assigned to
+      // the paired unit (same client join as the Vehicles table).
+      cell: ({ row }) => {
+        const name = row.original.vehicleId ? driverNameByVehicleId.get(row.original.vehicleId) : undefined;
+        return name ? <span className="text-text">{name}</span> : <span className="text-text-muted">Unassigned</span>;
+      },
     },
     {
       id: 'lastSync',
       header: 'LAST SYNC',
-      cell: ({ row }) => <span className="tabular-nums text-text-secondary">{orNotAssigned(row.original.lastHeartbeatAt ? formatRelative(row.original.lastHeartbeatAt) : null)}</span>,
+      cell: ({ row }) => <span className="tabular-nums text-text-secondary">{lastSync(row.original)}</span>,
     },
     {
       id: 'bleState',
@@ -181,15 +209,11 @@ export default function DevicesPage() {
     },
   ];
 
+  usePageHeader({ title: 'Settings · ELD devices', subtitle: `${total} registered · ${connected} connected · ${disconnected} disconnected` });
+
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-page-title text-text">Settings · ELD devices</h1>
-          <p className="text-page-sub text-text-muted">
-            {total} registered · {connected} connected · {disconnected} disconnected
-          </p>
-        </div>
+      <div className="flex items-center justify-end">
         <Can perm="devices" level="FULL">
           <Button variant="primary" iconLeft={<Plus size={16} strokeWidth={1.75} />} onClick={() => setRegisterOpen(true)}>
             Register device
@@ -210,7 +234,7 @@ export default function DevicesPage() {
               ['ALL', `All ${total}`],
               ['CONNECTED', `Connected ${connected}`],
               ['DISCONNECTED', `Disconnected ${disconnected}`],
-              ['UNASSIGNED', 'Unassigned'],
+              ['UNASSIGNED', `Unassigned ${unassigned}`],
             ] as [Segment, string][]
           ).map(([value, label]) => (
             <button

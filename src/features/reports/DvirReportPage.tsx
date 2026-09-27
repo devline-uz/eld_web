@@ -39,6 +39,7 @@ import { Pagination } from '@/shared/ui/Pagination';
 import { EmptyState, ErrorState, ForbiddenState } from '@/shared/ui/states';
 import { ActionAlert } from './components/ActionAlert';
 import { ScheduleReportModal } from './components/ScheduleReportModal';
+import { ScheduledReportsCard } from './components/ScheduledReportsCard';
 import { SelectMenu } from './components/SelectMenu';
 import {
   CARRIER_TZ_FALLBACK,
@@ -436,6 +437,8 @@ export default function DvirReportPage() {
           </>
         )}
       </Card>
+
+      <ScheduledReportsCard timezone={timezone} />
 
       <Can perm="reports" level="FULL">
         <ScheduleReportModal

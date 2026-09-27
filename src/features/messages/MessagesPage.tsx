@@ -18,6 +18,7 @@ import { useToast } from '@/shared/ui/Toast';
 import { formatRelativeShort } from '@/shared/format/relative';
 import { formatLocal } from '@/shared/format/datetime';
 import { formatHosHours } from '@/shared/format/hos';
+import { hosTone } from '@/shared/ui/ProgressBar';
 import { formatSpeed } from '@/shared/format/numbers';
 import { useDriver, useDriverHos } from '@/shared/api/drivers';
 import { useDriverMap } from '@/shared/api/lookups';
@@ -40,7 +41,29 @@ import { NewConversationModal } from './components/NewConversationModal';
 
 type Segment = 'ALL' | 'UNREAD' | 'GROUPS';
 
-const QUICK_ACTIONS = ['Send route', 'Request DVIR', 'Check-in', 'Break reminder'];
+/**
+ * The four W-16 chips. Each one used to append its own label to the draft ("Check-in Break
+ * reminder"), so the driver received the button caption. A chip now puts a ready-to-edit message
+ * in the composer (replacing the draft); nothing is sent until the dispatcher presses Send.
+ */
+const QUICK_ACTIONS: ReadonlyArray<{ label: string; text: string }> = [
+  {
+    label: 'Send route',
+    text: 'Your route for the current trip is in the app under Trips. Please review the stops before you depart.',
+  },
+  {
+    label: 'Request DVIR',
+    text: 'Please complete and submit your DVIR in the app before you move the unit.',
+  },
+  {
+    label: 'Check-in',
+    text: 'Please check in: reply with your current location and duty status.',
+  },
+  {
+    label: 'Break reminder',
+    text: 'Reminder: take your 30-minute break before you reach 8 hours of driving.',
+  },
+];
 
 function conversationName(conversation: ConversationListItem): string {
   if (conversation.type === 'GROUP') return conversation.title ?? 'Group conversation';
@@ -181,7 +204,7 @@ export default function MessagesPage() {
       const message = payload.message as unknown as MessageRow;
       if (message.conversationId !== selected.id) return;
       upsertMessage(queryClient, selected.id, message);
-      bumpConversation(queryClient, selected.id, message.sentAt);
+      bumpConversation(queryClient, selected.id, message.sentAt, message);
     },
   });
 
@@ -450,12 +473,12 @@ export default function MessagesPage() {
                 <div className="mb-2 flex flex-wrap gap-2">
                   {QUICK_ACTIONS.map((action) => (
                     <button
-                      key={action}
+                      key={action.label}
                       type="button"
-                      onClick={() => setDraft((prev) => (prev ? `${prev} ${action}` : action))}
+                      onClick={() => setDraft(action.text)}
                       className="rounded-full border border-border px-3 py-1 text-caption text-text-secondary hover:bg-bg-subtle"
                     >
-                      {action}
+                      {action.label}
                     </button>
                   ))}
                 </div>
@@ -552,10 +575,21 @@ export default function MessagesPage() {
               <p className="text-caption text-text-muted">HOS data unavailable.</p>
             ) : (
               <dl className="flex flex-col gap-1.5 text-body tabular-nums">
-                <Row label="Drive left"><span className="text-danger">{formatHosHours(driverHos.data.driveRemainingSec)}</span></Row>
-                <Row label="Shift left"><span className="text-warning">{formatHosHours(driverHos.data.shiftRemainingSec)}</span></Row>
-                <Row label="Cycle left">{formatHosHours(driverHos.data.cycleRemainingSec)}</Row>
-                <Row label="Break in"><span className="text-danger">{formatHosHours(driverHos.data.breakLimitSec - driverHos.data.breakInSec)}</span></Row>
+                {/* Colours were hard-coded from the mock (drive always red, shift always amber)
+                    and `Break in` subtracted `breakInSec` — already the time left — from the
+                    8-hour limit, so a rested driver read 00:00 in red. */}
+                <Row label="Drive left">
+                  <HosValue remainingSec={driverHos.data.driveRemainingSec} limitSec={driverHos.data.driveLimitSec} />
+                </Row>
+                <Row label="Shift left">
+                  <HosValue remainingSec={driverHos.data.shiftRemainingSec} limitSec={driverHos.data.shiftLimitSec} />
+                </Row>
+                <Row label="Cycle left">
+                  <HosValue remainingSec={driverHos.data.cycleRemainingSec} limitSec={driverHos.data.cycleLimitSec} />
+                </Row>
+                <Row label="Break in">
+                  <HosValue remainingSec={driverHos.data.breakInSec} limitSec={driverHos.data.breakLimitSec} />
+                </Row>
               </dl>
             )}
           </div>
@@ -577,6 +611,16 @@ export default function MessagesPage() {
 
       {newOpen && <NewConversationModal onClose={() => setNewOpen(false)} onCreated={(id) => setSelectedId(id)} />}
     </div>
+  );
+}
+
+/** A context-panel clock: plain while comfortable, amber/red as it runs low (as drawn in W-16). */
+function HosValue({ remainingSec, limitSec }: { remainingSec: number; limitSec: number }) {
+  const tone = hosTone(remainingSec, limitSec);
+  return (
+    <span className={tone === 'danger' ? 'text-danger' : tone === 'warning' ? 'text-warning' : undefined}>
+      {formatHosHours(remainingSec)}
+    </span>
   );
 }
 

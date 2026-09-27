@@ -36,6 +36,7 @@ import { ActionAlert } from './components/ActionAlert';
 import { RecentlyGeneratedCard } from './components/RecentlyGeneratedCard';
 import { ReportLibraryCard } from './components/ReportLibraryCard';
 import { ScheduleReportModal } from './components/ScheduleReportModal';
+import { ScheduledReportsCard } from './components/ScheduledReportsCard';
 import { SelectMenu } from './components/SelectMenu';
 import {
   ALL_JURISDICTIONS,
@@ -324,6 +325,8 @@ export default function IftaReportPage() {
       </div>
 
       <RecentlyGeneratedCard timezone={timezone} onSchedule={() => setScheduleOpen(true)} onGenerate={generateCsv} />
+
+      <ScheduledReportsCard timezone={timezone} />
 
       <Can perm="reports" level="FULL">
         <ScheduleReportModal

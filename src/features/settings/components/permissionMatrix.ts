@@ -4,6 +4,7 @@
 // roles") and are always written to the same level together — the one place a single control
 // spans two backend keys.
 import type { PermissionKey } from '@/shared/auth/permissions';
+import type { RoleRow } from '@/shared/api/settingsAdmin';
 import { ROLE_COPY } from '../lib/copy';
 
 export interface MatrixRow {
@@ -74,3 +75,34 @@ export const PERMISSION_MATRIX_GROUPS: MatrixGroup[] = [
     ],
   },
 ];
+
+export interface RoleColumn {
+  key: RoleRow['key'];
+  label: string;
+  custom: boolean;
+}
+
+const BUILT_IN_COLUMNS: RoleColumn[] = [
+  { key: 'ADMIN', label: 'ADMIN', custom: false },
+  { key: 'FLEET_MANAGER', label: 'FLEET MANAGER', custom: false },
+  { key: 'DISPATCHER', label: 'DISPATCHER', custom: false },
+  { key: 'VIEWER', label: 'VIEWER', custom: false },
+];
+
+/**
+ * WB-QA-S-02 — the matrix used to draw only the four built-in columns, so a custom role from
+ * `GET /roles` could only be seen or changed through the Edit role modal. Built-ins keep their
+ * drawn order; every other role follows, by name.
+ */
+export function matrixColumns(roles: RoleRow[]): RoleColumn[] {
+  const present = new Set(roles.map((r) => r.key));
+  const builtIn = new Set(BUILT_IN_COLUMNS.map((c) => c.key));
+  // ADMIN always shows (locked, "Admin cannot be edited"). A built-in role missing from
+  // `GET /roles` is not drawn: its cells would read "No access" and ignore every click.
+  const builtInCols = BUILT_IN_COLUMNS.filter((c) => c.key === 'ADMIN' || present.has(c.key));
+  const custom = roles
+    .filter((r) => !builtIn.has(r.key))
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((r) => ({ key: r.key, label: r.name, custom: true }));
+  return [...builtInCols, ...custom];
+}

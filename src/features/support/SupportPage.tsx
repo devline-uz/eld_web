@@ -17,21 +17,26 @@ import { formatRelative } from '@/shared/format/relative';
 import { useTicketsList, type TicketRow, type TicketStatus, type TicketPriority } from '@/shared/api/settingsAdmin';
 import { NewTicketModal } from './components/NewTicketModal';
 import { StartChatModal } from './components/StartChatModal';
+import { usePageHeader } from '@/app/layouts/Topbar';
 
 type Segment = 'ALL' | 'OPEN' | 'IN_PROGRESS' | 'RESOLVED';
 
 const PRIORITY_TONE: Record<TicketPriority, BadgeTone> = { URGENT: 'danger', HIGH: 'warning', NORMAL: 'neutral', LOW: 'neutral' };
 const STATUS_TONE: Record<TicketStatus, BadgeTone> = { OPEN: 'info', IN_PROGRESS: 'warning', RESOLVED: 'success', CLOSED: 'neutral' };
 const STATUS_LABEL: Record<TicketStatus, string> = { OPEN: 'New', IN_PROGRESS: 'In progress', RESOLVED: 'Resolved', CLOSED: 'Closed' };
+// Design: `Urgent` / `High` / `Normal` badges — the raw enum (`HIGH`) was rendered before.
+const PRIORITY_LABEL: Record<TicketPriority, string> = { URGENT: 'Urgent', HIGH: 'High', NORMAL: 'Normal', LOW: 'Low' };
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 export default function SupportPage() {
   const { user } = useAuth();
   const [segment, setSegment] = useState<Segment>('ALL');
   const [search, setSearch] = useState('');
+  const [priority, setPriority] = useState<TicketPriority | ''>('');
   const [ticketOpen, setTicketOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
 
-  const ticketsQuery = useTicketsList({ page: 1, limit: 50, q: search || undefined });
+  const ticketsQuery = useTicketsList({ page: 1, limit: 50, q: search || undefined, priority: priority || undefined });
   const rows = useMemo(() => ticketsQuery.data?.items ?? [], [ticketsQuery.data]);
 
   const counts = useMemo(
@@ -80,7 +85,7 @@ export default function SupportPage() {
   const columns: ColumnDef<TicketRow, unknown>[] = [
     { accessorKey: 'number', header: 'TICKET', cell: ({ row }) => <span className="text-primary">#{row.original.number}</span> },
     { accessorKey: 'subject', header: 'SUBJECT', cell: ({ row }) => <span className="line-clamp-2 text-text">{row.original.subject}</span> },
-    { id: 'priority', header: 'PRIORITY', cell: ({ row }) => <Badge tone={PRIORITY_TONE[row.original.priority]}>{row.original.priority}</Badge> },
+    { id: 'priority', header: 'PRIORITY', cell: ({ row }) => <Badge tone={PRIORITY_TONE[row.original.priority]}>{PRIORITY_LABEL[row.original.priority] ?? row.original.priority}</Badge> },
     {
       id: 'openedBy',
       header: 'OPENED BY',
@@ -95,13 +100,11 @@ export default function SupportPage() {
     { id: 'status', header: 'STATUS', cell: ({ row }) => <Badge tone={STATUS_TONE[row.original.status]}>{STATUS_LABEL[row.original.status]}</Badge> },
   ];
 
+  usePageHeader({ title: 'Settings · Support', subtitle: plural(counts.open, 'open ticket') });
+
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-page-title text-text">Settings · Support</h1>
-          <p className="text-page-sub text-text-muted">{counts.open} open tickets</p>
-        </div>
+      <div className="flex items-center justify-end">
         <Button variant="primary" iconLeft={<Plus size={16} strokeWidth={1.75} />} onClick={() => setTicketOpen(true)}>
           New ticket
         </Button>
@@ -174,22 +177,37 @@ export default function SupportPage() {
             </button>
           ))}
         </div>
-        <div className="flex h-input items-center gap-2 rounded-md border border-border bg-bg-surface px-3">
-          <Search size={16} strokeWidth={1.75} className="text-text-muted" />
-          <input
-            type="search"
-            aria-label="Search ticket"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search ticket…"
-            className="w-56 bg-transparent text-body outline-none"
-          />
+        <div className="flex items-center gap-2">
+          <div className="flex h-input items-center gap-2 rounded-md border border-border bg-bg-surface px-3">
+            <Search size={16} strokeWidth={1.75} className="text-text-muted" />
+            <input
+              type="search"
+              aria-label="Search ticket"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search ticket…"
+              className="w-56 bg-transparent text-body outline-none"
+            />
+          </div>
+          {/* Design: `All priorities` select next to the search (`GET /support/tickets?priority=`). */}
+          <select
+            aria-label="Priority"
+            value={priority}
+            onChange={(e) => setPriority(e.target.value as TicketPriority | '')}
+            className="h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text"
+          >
+            <option value="">All priorities</option>
+            <option value="URGENT">Urgent</option>
+            <option value="HIGH">High</option>
+            <option value="NORMAL">Normal</option>
+            <option value="LOW">Low</option>
+          </select>
         </div>
       </div>
 
       <Card padded={false}>
         <div className="flex items-center justify-between p-card">
-          <SectionHeader title="Your tickets" subtitle={`${rows.length} tickets in total`} />
+          <SectionHeader title="Your tickets" subtitle={`${plural(rows.length, 'ticket')} in total`} />
           <Button
             variant="secondary"
             iconLeft={<Download size={16} strokeWidth={1.75} />}

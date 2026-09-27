@@ -53,7 +53,7 @@ export function UpdateFirmwareModal({
       open
       onClose={onClose}
       title="Update firmware"
-      subtitle={`${device.serial} · currently ${device.firmwareVersion ?? 'unknown'}`}
+      subtitle={`${device.serial} · currently ${device.firmwareVersion ?? device.firmware ?? 'unknown'}`}
       size="sm"
       isDirty={firmware !== ''}
       footer={

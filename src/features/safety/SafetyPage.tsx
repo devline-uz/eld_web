@@ -7,7 +7,7 @@ import type { ColumnDef } from '@tanstack/react-table';
 import { Filter, Search, Upload, ShieldCheck, AlertTriangle, Gauge, Users, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
-import { useDynamicSubtitle } from '@/app/layouts/Topbar';
+import { usePageHeader } from '@/app/layouts/Topbar';
 import { useRoom } from '@/shared/realtime/useRoom';
 import { useQueryClient } from '@tanstack/react-query';
 import { qkRoot } from '@/shared/api/queryKeys';
@@ -298,7 +298,6 @@ function ViewProfileCell({ driverId }: { driverId: string }) {
 }
 
 export default function SafetyPage() {
-  useDynamicSubtitle('Harsh driving, speeding and coaching · last 30 days');
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [coachDriver, setCoachDriver] = useState<ScorecardTableRow | null>(null);
@@ -564,12 +563,10 @@ export default function SafetyPage() {
     </Card>
   );
 
+  usePageHeader({ title: 'Safety', subtitle: 'Harsh driving, speeding and coaching · last 30 days' });
+
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h1 className="text-page-title text-text">Safety</h1>
-        <p className="text-page-sub text-text-muted">Harsh driving, speeding and coaching · last 30 days</p>
-      </div>
 
       <div className="flex items-center justify-between gap-4">
         <SafetyTabs tab={tab} counts={tabCounts} onChange={setTab} />

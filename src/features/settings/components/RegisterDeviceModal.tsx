@@ -58,7 +58,11 @@ export function RegisterDeviceModal({ onClose }: { onClose: () => void }) {
   function finishPolicy(device: DeviceRow, paired: boolean) {
     // `POST /devices` still has no firmware-policy fields (B-88 "still open") — set them with the
     // documented follow-up `PATCH /devices/:id` instead of dropping the toggle state.
-    if (autoFirmware || shareDiagnostics) {
+    // QA-B — `POST /devices` creates the row with the server defaults (`autoFirmware` and
+    // `shareDiagnostics` both true), so skipping the PATCH whenever both toggles were left off
+    // silently registered a device that shares diagnostics with OneBook support. Sync whenever
+    // the created row differs from what the form shows.
+    if (device.autoFirmware !== autoFirmware || device.shareDiagnostics !== shareDiagnostics) {
       updateDevice.mutate(
         { id: device.id, dto: { autoFirmware, shareDiagnostics } },
         {
@@ -93,7 +97,18 @@ export function RegisterDeviceModal({ onClose }: { onClose: () => void }) {
           if (values.vehicleId) {
             pairDevice.mutate(
               { id: device.id, vehicleId: values.vehicleId },
-              { onSettled: () => finishPolicy(device, true) },
+              {
+                onSuccess: () => finishPolicy(device, true),
+                // Registered but not paired — say so instead of claiming the pairing happened.
+                onError: (error) => {
+                  toast({
+                    kind: 'error',
+                    title: `Device ${device.serial} registered but not paired`,
+                    description: error instanceof ApiError ? error.userMessage : undefined,
+                  });
+                  finishPolicy(device, false);
+                },
+              },
             );
             return;
           }

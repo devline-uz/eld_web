@@ -22,20 +22,14 @@ import {
 } from '@/shared/api/settingsAdmin';
 import type { PermissionKey, PermissionLevel, Role } from '@/shared/auth/permissions';
 import { ROLE_PERMISSIONS, isRole } from '@/shared/auth/permissions';
-import { PERMISSION_MATRIX_GROUPS } from './components/permissionMatrix';
+import { PERMISSION_MATRIX_GROUPS, matrixColumns } from './components/permissionMatrix';
 import { CreateRoleModal } from './components/CreateRoleModal';
-import { SETTINGS_TOAST } from './lib/copy';
+import { SETTINGS_TOAST, countLabel } from './lib/copy';
+import { usePageHeader } from '@/app/layouts/Topbar';
 
 type Tab = 'matrix' | 'roles' | 'access-log';
 
 const NEXT_LEVEL: Record<PermissionLevel, PermissionLevel> = { NONE: 'READ', READ: 'FULL', FULL: 'NONE' };
-
-const ROLE_COLUMNS: { key: RoleRow['key']; label: string }[] = [
-  { key: 'ADMIN', label: 'ADMIN' },
-  { key: 'FLEET_MANAGER', label: 'FLEET MANAGER' },
-  { key: 'DISPATCHER', label: 'DISPATCHER' },
-  { key: 'VIEWER', label: 'VIEWER' },
-];
 
 function LevelIcon({ level }: { level: PermissionLevel }) {
   if (level === 'FULL') return <Check size={16} strokeWidth={2} className="mx-auto text-success" />;
@@ -68,6 +62,7 @@ export default function RolesPage() {
 
   const roles = rolesQuery.rows;
   const roleByKey = useMemo(() => Object.fromEntries(roles.map((r) => [r.key, r])), [roles]);
+  const columns = useMemo(() => matrixColumns(roles), [roles]);
   const userCount = roles.reduce((sum, r) => sum + (r.userCount ?? 0), 0);
 
   const auditLogQuery = useAuditLog({ objectType: 'Role', limit: 25 });
@@ -127,6 +122,8 @@ export default function RolesPage() {
     );
   }, [search]);
 
+  usePageHeader({ title: 'Settings · Roles & permissions', subtitle: `${countLabel(roles.length, 'role')} · ${countLabel(userCount, 'user')} assigned` });
+
   if (rolesQuery.isLoading) {
     return (
       <div className="flex flex-col gap-4">
@@ -145,13 +142,7 @@ export default function RolesPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-page-title text-text">Settings · Roles & permissions</h1>
-          <p className="text-page-sub text-text-muted">
-            {roles.length} roles · {userCount} users assigned
-          </p>
-        </div>
+      <div className="flex items-center justify-end">
         <Can perm="roles" level="FULL">
           <Button variant="primary" iconLeft={<Plus size={16} strokeWidth={1.75} />} onClick={() => setCreateOpen(true)}>
             Create role
@@ -219,14 +210,22 @@ export default function RolesPage() {
               Admin cannot be edited
             </span>
           </div>
-          <table className="mt-4 w-full border-collapse text-body">
+          {/* WB-QA-S-02 — custom roles add columns; the table scrolls inside the card and the
+              PERMISSION column stays pinned. */}
+          <div className="mt-4 overflow-x-auto" data-testid="permission-matrix-scroll">
+          <table className="w-full border-collapse text-body">
             <thead className="h-table-head">
               <tr className="border-b border-border">
-                <th className="px-3 text-left text-table-head font-semibold uppercase tracking-wide text-text-muted">
+                <th className="sticky left-0 z-10 min-w-64 bg-bg-surface px-3 text-left text-table-head font-semibold uppercase tracking-wide text-text-muted">
                   PERMISSION
                 </th>
-                {ROLE_COLUMNS.map((c) => (
-                  <th key={c.key} className="w-32 px-3 text-center text-table-head font-semibold uppercase tracking-wide text-text-muted">
+                {columns.map((c) => (
+                  <th
+                    key={c.key}
+                    scope="col"
+                    title={c.custom ? `Custom role · ${c.label}` : undefined}
+                    className="w-32 min-w-32 px-3 text-center text-table-head font-semibold uppercase tracking-wide text-text-muted"
+                  >
                     {c.label}
                   </th>
                 ))}
@@ -236,14 +235,14 @@ export default function RolesPage() {
               {filteredGroups.map((group) => (
                 <Fragment key={group.title}>
                   <tr className="bg-bg-subtle">
-                    <td colSpan={5} className="px-3 py-1.5 text-table-head font-semibold uppercase tracking-wide text-text-muted">
-                      {group.title}
+                    <td colSpan={columns.length + 1} className="px-3 py-1.5 text-table-head font-semibold uppercase tracking-wide text-text-muted">
+                      <span className="sticky left-3">{group.title}</span>
                     </td>
                   </tr>
                   {group.rows.map((row) => (
                     <tr key={row.id} className="h-row border-b border-border">
-                      <td className="px-3 text-text">{row.label}</td>
-                      {ROLE_COLUMNS.map((c) => {
+                      <td className="sticky left-0 z-10 bg-bg-surface px-3 text-text">{row.label}</td>
+                      {columns.map((c) => {
                         const role = roleByKey[c.key];
                         const primaryKey = row.keys[0] as PermissionKey;
                         const level = role?.permissions[primaryKey] ?? 'NONE';
@@ -269,6 +268,7 @@ export default function RolesPage() {
               ))}
             </tbody>
           </table>
+          </div>
           <div className="flex items-center justify-between border-t border-border p-card text-caption text-text-muted">
             <span className="flex items-center gap-4">
               <span className="flex items-center gap-1">
@@ -296,7 +296,7 @@ export default function RolesPage() {
                 <div>
                   <p className="text-card-title font-semibold text-text">{role.name}</p>
                   <p className="text-card-sub text-text-muted">{role.description || '—'}</p>
-                  <p className="mt-2 text-caption text-text-muted">{role.userCount ?? 0} users</p>
+                  <p className="mt-2 text-caption text-text-muted">{countLabel(role.userCount ?? 0, 'user')}</p>
                 </div>
                 {role.isSystem ? (
                   <Badge tone="neutral">System role</Badge>

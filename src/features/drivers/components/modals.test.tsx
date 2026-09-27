@@ -722,7 +722,9 @@ describe('11.7 Import drivers', () => {
     renderWithProviders(<ImportDriversModal onClose={() => {}} />);
 
     const file = new File(
-      ['username,email,cdlState\njdoe,dup@example.com,OH\nasmith,dup@example.com,OH'],
+      [
+        'username,firstName,lastName,cdlNumber,homeTerminalName,email,cdlState\njdoe,Jo,Doe,JD123456,Columbus,dup@example.com,OH\nasmith,Al,Smith,AS123456,Columbus,dup@example.com,OH',
+      ],
       'drivers.csv',
       { type: 'text/csv' },
     );
@@ -738,7 +740,9 @@ describe('11.7 Import drivers', () => {
 
     // Row 2 has no email AND no CDL state: two warnings, one row needing attention. Row 3 is fine.
     const file = new File(
-      ['username,email,cdlState\njdoe,,\nasmith,asmith@example.com,OH'],
+      [
+        'username,firstName,lastName,cdlNumber,homeTerminalName,email,cdlState\njdoe,Jo,Doe,JD123456,Columbus,,\nasmith,Al,Smith,AS123456,Columbus,asmith@example.com,OH',
+      ],
       'drivers.csv',
       { type: 'text/csv' },
     );
@@ -772,5 +776,56 @@ describe('11.7 Import drivers', () => {
 
     expect(await screen.findByText(/File has 501 rows — 500 rows maximum\./)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Import drivers' })).toBeDisabled();
+  });
+
+  it('QA — skips rows the API would refuse, fills the default terminal and sends typed cells', async () => {
+    const user = userEvent.setup();
+    let body: { drivers: Array<Record<string, unknown>> } | null = null;
+    server.use(
+      http.post(url(endpoints.drivers.import), async ({ request }) => {
+        body = (await request.json()) as typeof body;
+        return ok({ imported: 1, updated: 0, failed: [] });
+      }),
+    );
+    renderWithProviders(<ImportDriversModal onClose={() => {}} />);
+
+    const file = new File(
+      [
+        'username,firstName,lastName,cdlNumber,cdlState,homeTerminalName,email,phone,allowYardMove\n' +
+          'hana.w,Hana,Whitfield,HW204817,OH,,hana@example.test,,true\n' +
+          'jalen.b,Jalen,Brooks,JB663920,,Columbus,jalen@example.test,,false\n' +
+          'hana.w,Hana,Again,HW204818,OH,Columbus,hana2@example.test,,false',
+      ],
+      'drivers.csv',
+      { type: 'text/csv' },
+    );
+    await user.upload(document.querySelector('input[type="file"]') as HTMLInputElement, file);
+    expect(
+      await screen.findByText(/Row 2 Missing home terminal — will be skipped/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Row 3 Missing CDL issuing state — will be skipped/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Row 4 Duplicate username "hana.w" — will be skipped/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Import drivers' })).toBeDisabled();
+
+    await user.type(screen.getByLabelText('Default terminal'), 'Columbus, OH');
+    await user.click(screen.getByRole('button', { name: 'Import 1 drivers' }));
+
+    await waitFor(() => expect(body).not.toBeNull());
+    expect(body!.drivers).toEqual([
+      {
+        username: 'hana.w',
+        firstName: 'Hana',
+        lastName: 'Whitfield',
+        cdlNumber: 'HW204817',
+        cdlState: 'OH',
+        homeTerminalName: 'Columbus, OH',
+        email: 'hana@example.test',
+        allowYardMove: true,
+      },
+    ]);
   });
 });

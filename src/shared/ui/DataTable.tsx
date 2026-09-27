@@ -190,7 +190,8 @@ export function DataTable<T>({
                   aria-sort={header.column.getCanSort() ? ariaSort : undefined}
                   className={cn(
                     'px-3 text-table-head font-semibold uppercase tracking-wide text-text-muted',
-                    numeric && 'text-right',
+                    // A bare <th> centres its text (UA default) — every header drifted off its column.
+                    numeric ? 'text-right' : 'text-left',
                   )}
                 >
                   {header.isPlaceholder ? null : header.column.getCanSort() ? (

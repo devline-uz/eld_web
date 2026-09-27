@@ -8,7 +8,7 @@ import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
 import { ApiError } from '@/shared/api/errors';
 import { inviteUserSchema } from '@/shared/forms/schemas';
-import { useInviteUser, type RoleRow } from '@/shared/api/settingsAdmin';
+import { useInviteUser, useRolesList, type RoleRow } from '@/shared/api/settingsAdmin';
 import { Field, inputClass } from './formKit';
 import type { z } from 'zod';
 
@@ -22,7 +22,23 @@ const FORM_FIELDS = new Set<keyof InviteUserFormValues>([
   'roleKey',
 ]);
 
-const INVITABLE_ROLES = ['FLEET_MANAGER', 'DISPATCHER', 'VIEWER'] as const;
+/** Server-side field names that land on a differently named form field. */
+const FIELD_ALIASES: Record<string, keyof InviteUserFormValues> = { roleId: 'roleKey' };
+
+const NO_ROLES_MESSAGE =
+  'No roles are configured. Create a role under Roles & permissions, then invite the user.';
+
+/** Role keys are compared case- and whitespace-insensitively (`' dispatcher '` is `DISPATCHER`). */
+function normalizeKey(role: RoleRow): string {
+  return typeof role.key === 'string' ? role.key.trim().toUpperCase() : '';
+}
+
+/** WB — every role `GET /roles` returns is invitable (`POST /users` takes any role id), custom
+ * roles included; ADMIN is offered too, but last. Otherwise the API order is kept. */
+function sortInvitableRoles(roles: RoleRow[]): RoleRow[] {
+  const isAdmin = (r: RoleRow) => normalizeKey(r) === 'ADMIN';
+  return [...roles.filter((r) => !isAdmin(r)), ...roles.filter(isAdmin)];
+}
 
 /** B-85 (shipped) — `POST /users` `terminalIds`. No Terminal table yet (backend D-090), so the
  * names are typed, one per line (a name such as `Dayton, OH` carries its own comma). Nothing
@@ -38,33 +54,61 @@ function parseTerminalNames(text: string): string[] {
   ];
 }
 
-const ROLE_COPY: Record<(typeof INVITABLE_ROLES)[number], { title: string; description: string }> =
-  {
-    FLEET_MANAGER: {
-      title: 'Fleet manager',
-      description: 'Full access to vehicles, drivers, HOS and maintenance',
-    },
-    DISPATCHER: {
-      title: 'Dispatcher',
-      description: 'Trips, messaging and read-only compliance data',
-    },
-    VIEWER: { title: 'Viewer', description: 'Read-only across the whole account' },
-  };
+/** Fallback copy for the built-in keys only — the API's `name`/`description` always win. */
+const ROLE_COPY: Record<string, { title: string; description: string }> = {
+  ADMIN: {
+    title: 'Admin',
+    description: 'Full access, including users, roles and company settings',
+  },
+  FLEET_MANAGER: {
+    title: 'Fleet manager',
+    description: 'Full access to vehicles, drivers, HOS and maintenance',
+  },
+  DISPATCHER: {
+    title: 'Dispatcher',
+    description: 'Trips, messaging and read-only compliance data',
+  },
+  VIEWER: { title: 'Viewer', description: 'Read-only across the whole account' },
+};
 
-export function InviteUserModal({ roles, onClose }: { roles: RoleRow[]; onClose: () => void }) {
+function roleTitle(role: RoleRow): string {
+  return role.name?.trim() || ROLE_COPY[normalizeKey(role)]?.title || role.key;
+}
+
+function roleDescription(role: RoleRow): string | undefined {
+  return role.description?.trim() || ROLE_COPY[normalizeKey(role)]?.description;
+}
+
+export function InviteUserModal({ onClose }: { onClose: () => void }) {
   const { toast } = useToast();
+  // Same `qk.roles` cache entry as the Users page, so opening the modal does not refetch.
+  const rolesQuery = useRolesList();
+  const roles = rolesQuery.rows;
   const inviteMutation = useInviteUser();
   // WB — the modal used to show nothing at all when the invite was rejected without a mappable
   // field (rule 6: unmapped `details` and plain failures belong in a banner inside the modal).
   const [banner, setBanner] = useState<string | null>(null);
   const submitting = inviteMutation.isPending;
 
-  const dispatcherRole = roles.find((r) => r.key === 'DISPATCHER');
+  const invitableRoles = sortInvitableRoles(roles);
+  const rolesLoading = rolesQuery.isLoading;
+  const rolesFailed = rolesQuery.isError && roles.length === 0;
+  const noRoles = !rolesLoading && !rolesFailed && invitableRoles.length === 0;
+  // Default: DISPATCHER if present, else the first non-ADMIN role, else nothing.
+  const defaultRoleId =
+    (
+      invitableRoles.find((r) => normalizeKey(r) === 'DISPATCHER') ??
+      invitableRoles.find((r) => normalizeKey(r) !== 'ADMIN')
+    )?.id ?? '';
   // Tracked locally rather than with react-hook-form's `watch()` — `watch()` cannot be safely
   // memoized (its subscription changes every render), which opts the whole tree out of React
   // Compiler memoization (same pattern as `CreateGeofenceModal`, web/decisions.md). `setValue`
   // keeps react-hook-form's own copy in sync for validation/submit.
-  const [roleKey, setRoleKey] = useState(dispatcherRole?.id ?? '');
+  // `null` = the user has not picked yet, so the default is derived from whatever
+  // roles have loaded (they may arrive after mount) without ever overriding a real choice, and
+  // the default alone never makes the form dirty.
+  const [pickedRoleId, setPickedRoleId] = useState<string | null>(null);
+  const roleKey = pickedRoleId ?? defaultRoleId;
   const [terminalsText, setTerminalsText] = useState('');
   const terminalIds = parseTerminalNames(terminalsText);
   const [message, setMessage] = useState('');
@@ -75,6 +119,7 @@ export function InviteUserModal({ roles, onClose }: { roles: RoleRow[]; onClose:
     setValue,
     formState: { errors, isDirty },
     setError,
+    clearErrors,
   } = useForm<InviteUserFormValues>({
     resolver: zodResolver(inviteUserSchema),
     mode: 'onBlur',
@@ -82,9 +127,18 @@ export function InviteUserModal({ roles, onClose }: { roles: RoleRow[]; onClose:
       email: '',
       firstName: '',
       lastName: '',
-      roleKey: dispatcherRole?.id ?? '',
+      roleKey: '',
     },
   });
+
+  function submit() {
+    // Sync the derived default into the form without touching dirty state.
+    setValue('roleKey', roleKey);
+    void handleSubmit(onSubmit, () => {
+      // With no role to pick, "required" would be misleading — say why instead.
+      if (noRoles) setError('roleKey', { message: NO_ROLES_MESSAGE });
+    })();
+  }
 
   function onSubmit(values: InviteUserFormValues) {
     // `mutate()` returns immediately, so RHF's `isSubmitting` is false again before the request
@@ -117,7 +171,8 @@ export function InviteUserModal({ roles, onClose }: { roles: RoleRow[]; onClose:
           if (error instanceof ApiError) {
             const unmapped: string[] = [];
             let mapped = 0;
-            for (const [field, msg] of Object.entries(error.fieldErrors)) {
+            for (const [rawField, msg] of Object.entries(error.fieldErrors)) {
+              const field = FIELD_ALIASES[rawField] ?? rawField;
               if (FORM_FIELDS.has(field as keyof InviteUserFormValues)) {
                 setError(field as keyof InviteUserFormValues, { message: msg });
                 mapped += 1;
@@ -156,14 +211,20 @@ export function InviteUserModal({ roles, onClose }: { roles: RoleRow[]; onClose:
             size="lg"
             loading={submitting}
             disabled={submitting}
-            onClick={handleSubmit(onSubmit)}
+            onClick={submit}
           >
             Send invitation
           </Button>
         </>
       }
     >
-      <form className="flex flex-col gap-4" onSubmit={handleSubmit(onSubmit)}>
+      <form
+        className="flex flex-col gap-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          submit();
+        }}
+      >
         {banner && (
           <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-body text-danger">
             {banner}
@@ -205,41 +266,87 @@ export function InviteUserModal({ roles, onClose }: { roles: RoleRow[]; onClose:
           <p className="mb-2 text-label text-text" id="invite-role-label">
             Role <span className="text-danger">*</span>
           </p>
-          <div
-            role="radiogroup"
-            aria-labelledby="invite-role-label"
-            aria-invalid={errors.roleKey ? true : undefined}
-            aria-describedby={errors.roleKey ? 'invite-role-error' : undefined}
-            className="flex flex-col gap-2"
-          >
-            {INVITABLE_ROLES.map((key) => {
-              const role = roles.find((r) => r.key === key);
-              if (!role) return null;
-              const selected = roleKey === role.id;
-              return (
-                <button
+          {rolesLoading ? (
+            <div
+              aria-busy="true"
+              className="flex flex-col gap-2"
+              data-testid="invite-role-skeleton"
+            >
+              <span className="sr-only">Loading roles</span>
+              {[0, 1, 2].map((key) => (
+                <div
                   key={key}
-                  type="button"
-                  role="radio"
-                  aria-checked={selected}
-                  onClick={() => {
-                    setRoleKey(role.id);
-                    setValue('roleKey', role.id, { shouldDirty: true });
-                  }}
-                  className={
-                    'rounded-md border p-3 text-left ' +
-                    (selected
-                      ? 'border-primary bg-primary-soft'
-                      : 'border-border hover:bg-bg-subtle')
-                  }
+                  className="flex flex-col gap-1.5 rounded-md border border-border p-3"
                 >
-                  <p className="text-body-strong text-text">{ROLE_COPY[key].title}</p>
-                  <p className="text-caption text-text-muted">{ROLE_COPY[key].description}</p>
-                </button>
-              );
-            })}
-          </div>
-          {errors.roleKey?.message && (
+                  <div className="h-3 w-1/4 animate-pulse rounded bg-bg-subtle" />
+                  <div className="h-2.5 w-3/5 animate-pulse rounded bg-bg-subtle" />
+                </div>
+              ))}
+            </div>
+          ) : rolesFailed ? (
+            <div
+              role="alert"
+              className="flex items-center justify-between gap-3 rounded-md bg-danger-soft px-3 py-2"
+            >
+              <span className="text-body text-danger">Could not load roles.</span>
+              <Button variant="secondary" size="sm" onClick={() => void rolesQuery.refetch()}>
+                Retry
+              </Button>
+            </div>
+          ) : noRoles ? (
+            <p
+              id="invite-role-error"
+              role={errors.roleKey ? 'alert' : undefined}
+              aria-labelledby="invite-role-label"
+              className={
+                'rounded-md border px-3 py-2 text-body ' +
+                (errors.roleKey
+                  ? 'border-danger bg-danger-soft text-danger'
+                  : 'border-border bg-bg-subtle text-text-muted')
+              }
+            >
+              {NO_ROLES_MESSAGE}
+            </p>
+          ) : (
+            <div
+              role="radiogroup"
+              aria-labelledby="invite-role-label"
+              aria-invalid={errors.roleKey ? true : undefined}
+              aria-describedby={errors.roleKey ? 'invite-role-error' : undefined}
+              className="-mr-1 flex max-h-72 flex-col gap-2 overflow-y-auto pr-1"
+            >
+              {invitableRoles.map((role) => {
+                const description = roleDescription(role);
+                const selected = roleKey === role.id;
+                return (
+                  <button
+                    key={role.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    disabled={submitting}
+                    onClick={() => {
+                      setPickedRoleId(role.id);
+                      setValue('roleKey', role.id, { shouldDirty: true });
+                      clearErrors('roleKey');
+                    }}
+                    className={
+                      'shrink-0 rounded-md border p-3 text-left ' +
+                      (selected
+                        ? 'border-primary bg-primary-soft'
+                        : 'border-border hover:bg-bg-subtle')
+                    }
+                  >
+                    <p className="break-words text-body-strong text-text">{roleTitle(role)}</p>
+                    {description && (
+                      <p className="break-words text-caption text-text-muted">{description}</p>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          {errors.roleKey?.message && !noRoles && (
             <span
               id="invite-role-error"
               role="alert"

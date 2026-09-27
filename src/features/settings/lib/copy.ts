@@ -170,3 +170,8 @@ export const AUDIT_SEARCH_COPY = {
     `Action, date and search filters apply to the ${n} entries loaded so far — use Load more to include older entries.`,
   rangeCovered: (n: number) => `Searched every entry in the selected date range (${n} loaded).`,
 } as const;
+
+/** `1 user` / `3 users` — header subtitles and role cards used to print "1 users", "1 admins". */
+export function countLabel(n: number, singular: string, plural = `${singular}s`): string {
+  return `${n} ${n === 1 ? singular : plural}`;
+}

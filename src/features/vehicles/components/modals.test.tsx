@@ -241,6 +241,27 @@ describe('11.4 Assign driver', () => {
     expect(notify).toBeChecked();
   });
 
+  it('QA fix — lists ACTIVE drivers only (`?status=ACTIVE`)', async () => {
+    const statuses: (string | null)[] = [];
+    server.use(
+      http.get(url(endpoints.drivers.list), ({ request }) => {
+        const status = new URL(request.url).searchParams.get('status');
+        statuses.push(status);
+        const all = [
+          { id: 'drv_1', firstName: 'John', lastName: 'Smith', status: 'ACTIVE', assignedVehicleId: null, homeTerminalName: 'Columbus, OH' },
+          { id: 'drv_2', firstName: 'Old', lastName: 'Timer', status: 'INACTIVE', assignedVehicleId: null, homeTerminalName: 'Columbus, OH' },
+        ];
+        const items = status ? all.filter((d) => d.status === status) : all;
+        return ok({ items, page: 1, limit: 25, total: items.length, totalPages: 1 });
+      }),
+    );
+    renderWithProviders(<AssignDriverModal vehicle={VEHICLE} onClose={() => {}} />);
+    expect(await screen.findByText('John Smith')).toBeInTheDocument();
+    expect(screen.queryByText('Old Timer')).not.toBeInTheDocument();
+    expect(statuses).toEqual(expect.arrayContaining(['ACTIVE']));
+    expect(statuses.every((s) => s === 'ACTIVE')).toBe(true);
+  });
+
   it('assigns the selected driver', async () => {
     server.use(
       http.get(url(endpoints.drivers.list), () =>
@@ -366,7 +387,7 @@ describe('11.6 Import vehicles', () => {
     await user.upload(input, file);
 
     expect(await screen.findByText('units.csv')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Import 1 units' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Import 1 unit' })).toBeInTheDocument();
   });
 
   it('WB-106 — parses quoted fields with embedded commas and strips a leading BOM', async () => {
@@ -382,7 +403,7 @@ describe('11.6 Import vehicles', () => {
     await user.upload(input, file);
 
     expect(await screen.findByText('units.csv')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Import 1 units' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Import 1 unit' })).toBeInTheDocument();
   });
 
   it('WB-108 — rejects a file over the advertised 2,000-row maximum', async () => {

@@ -44,6 +44,7 @@ import { RequestLogEditModal } from './components/RequestLogEditModal';
 import { CertifyLogsModal } from './components/CertifyLogsModal';
 import { UnassignedDrivingModal } from './components/UnassignedDrivingModal';
 import { certificationNote, rodsDayStart, unassignedInDay, validDayKey, zoneLabel } from './grid';
+import { usePageHeader } from '@/app/layouts/Topbar';
 
 const DAY_MS = 86_400_000;
 
@@ -201,6 +202,10 @@ export default function HosLogsPage() {
   const unassignedSegments = unassignedInDay(unassignedQuery.data?.items ?? [], dayStartMs, dayLengthSec);
 
   // WB-073 — the same full-page forbidden state as every other screen, not an error.
+  const headerSubtitle = driver
+    ? `${driverName} · ${unitNumber} · Home terminal: ${driver.homeTerminalName} (${zone})`
+    : 'Select a driver to view their log';
+  usePageHeader({ title: 'Hours of Service · Driver log', subtitle: headerSubtitle });
   if (!can('hos')) {
     return <ForbiddenState screenName="HOS Logs" />;
   }
@@ -209,13 +214,11 @@ export default function HosLogsPage() {
     // Stage 3 — `Export PDF` used to `window.print()` the whole app (sidebar, topbar, toolbar).
     // The page root is now the print region; its controls carry `data-print-hide`.
     <div ref={printRef} className="flex flex-col gap-card-gap p-page">
-      <header>
-        <h1 className="text-page-title text-text">Hours of Service · Driver log</h1>
-        <p className="text-page-sub text-text-muted">
-          {driver
-            ? `${driverName} · ${unitNumber} · Home terminal: ${driver.homeTerminalName} (${zone})`
-            : 'Select a driver to view their log'}
-        </p>
+      {/* The on-screen title lives in the top bar (outside the print region); the printout
+          still needs it, so it is repeated here for print only (display:none on screen). */}
+      <header className="hidden print:block">
+        <p className="text-page-title text-text">Hours of Service · Driver log</p>
+        <p className="text-page-sub text-text-muted">{headerSubtitle}</p>
       </header>
 
       {/* control row */}

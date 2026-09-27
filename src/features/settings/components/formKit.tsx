@@ -1,7 +1,7 @@
 // owner: web-settings-admin — small local form primitives shared across the Settings/Support
 // modals so every field looks identical (§14.1). Not `shared/ui` because it is one feature's
 // house style for a label + input pair, not a reusable design-system component.
-import type { ReactNode } from 'react';
+import { cloneElement, isValidElement, useId, type ReactElement, type ReactNode } from 'react';
 
 export function Field({
   label,
@@ -16,15 +16,34 @@ export function Field({
   hint?: string;
   children: ReactNode;
 }) {
+  const id = useId();
+  const hintId = `${id}-hint`;
+  const errorId = `${id}-error`;
+  const describedBy = error ? errorId : hint ? hintId : undefined;
+  // §11 forms — the control itself carries `aria-invalid` + `aria-describedby`, so the red
+  // border (`aria-invalid:border-danger`) and the screen-reader message both follow the error.
+  // An explicit prop on the child always wins.
+  let control: ReactNode = children;
+  if (isValidElement(children)) {
+    const child = children as ReactElement<Record<string, unknown>>;
+    control = cloneElement(child, {
+      'aria-invalid': child.props['aria-invalid'] ?? (error ? true : undefined),
+      'aria-describedby': child.props['aria-describedby'] ?? describedBy,
+    });
+  }
   return (
     <label className="flex flex-col gap-1">
       <span className="text-label text-text">
         {label} {required && <span className="text-danger">*</span>}
       </span>
-      {children}
-      {hint && !error && <span className="text-caption text-text-muted">{hint}</span>}
+      {control}
+      {hint && !error && (
+        <span id={hintId} className="text-caption text-text-muted">
+          {hint}
+        </span>
+      )}
       {error && (
-        <span role="alert" className="text-caption text-danger">
+        <span id={errorId} role="alert" className="text-caption text-danger">
           {error}
         </span>
       )}

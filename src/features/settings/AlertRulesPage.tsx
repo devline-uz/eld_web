@@ -17,7 +17,9 @@ import { ApiError } from '@/shared/api/errors';
 import { useAlertRulesList, useUpdateAlertRule, useDeleteAlertRule, useTestAlertRule, useCarrier, type AlertRuleRow, type AlertSeverity } from '@/shared/api/settingsAdmin';
 import { useNotificationChannels, useUpdateNotificationChannels } from '@/shared/api/notifications';
 import { NewAlertRuleModal } from './components/NewAlertRuleModal';
-import { SETTINGS_TOAST } from './lib/copy';
+import { SETTINGS_TOAST, countLabel } from './lib/copy';
+import { describeCondition } from './lib/alertConditions';
+import { usePageHeader } from '@/app/layouts/Topbar';
 
 type Segment = 'ALL' | 'ACTIVE' | 'MUTED';
 
@@ -47,6 +49,7 @@ export default function AlertRulesPage() {
 
   const [segment, setSegment] = useState<Segment>('ALL');
   const [search, setSearch] = useState('');
+  const [severity, setSeverity] = useState<AlertSeverity | 'ALL'>('ALL');
   const [createOpen, setCreateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<{ rule: AlertRuleRow; mode: 'edit' | 'duplicate' } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AlertRuleRow | null>(null);
@@ -60,9 +63,10 @@ export default function AlertRulesPage() {
     let out = rows;
     if (segment === 'ACTIVE') out = out.filter((r) => !isMuted(r));
     if (segment === 'MUTED') out = out.filter((r) => isMuted(r));
+    if (severity !== 'ALL') out = out.filter((r) => r.severity === severity);
     if (search.trim()) out = out.filter((r) => r.name.toLowerCase().includes(search.trim().toLowerCase()));
     return out;
-  }, [rows, segment, search]);
+  }, [rows, segment, severity, search]);
 
   function toggleEnabled(rule: AlertRuleRow) {
     updateRule.mutate(
@@ -71,15 +75,11 @@ export default function AlertRulesPage() {
     );
   }
 
+  usePageHeader({ title: 'Settings · Alert rules', subtitle: `${countLabel(rows.length, 'rule')} · ${active} active` });
+
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-page-title text-text">Settings · Alert rules</h1>
-          <p className="text-page-sub text-text-muted">
-            {rows.length} rules · {active} active
-          </p>
-        </div>
+      <div className="flex items-center justify-end">
         <Can perm="alertRules" level="FULL">
           <Button variant="primary" iconLeft={<Plus size={16} strokeWidth={1.75} />} onClick={() => setCreateOpen(true)}>
             New rule
@@ -117,7 +117,7 @@ export default function AlertRulesPage() {
               }
               className={`relative h-6 w-10 shrink-0 rounded-full disabled:cursor-not-allowed disabled:opacity-60 ${channelsQuery.data?.email.enabled ?? true ? 'bg-primary' : 'bg-border'}`}
             >
-              <span className={`absolute top-0.5 size-5 rounded-full bg-bg-surface transition-transform ${channelsQuery.data?.email.enabled ?? true ? 'translate-x-4' : 'translate-x-0.5'}`} />
+              <span className={`absolute left-0.5 top-0.5 size-5 rounded-full bg-bg-surface transition-transform ${channelsQuery.data?.email.enabled ?? true ? 'translate-x-4' : 'translate-x-0'}`} />
             </button>
           </div>
           <div className="flex items-center justify-between rounded-md border border-border p-3" title="SMS is not available">
@@ -152,7 +152,7 @@ export default function AlertRulesPage() {
               }
               className={`relative h-6 w-10 shrink-0 rounded-full disabled:cursor-not-allowed disabled:opacity-60 ${channelsQuery.data?.webhook.enabled ? 'bg-primary' : 'bg-border'}`}
             >
-              <span className={`absolute top-0.5 size-5 rounded-full bg-bg-surface transition-transform ${channelsQuery.data?.webhook.enabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
+              <span className={`absolute left-0.5 top-0.5 size-5 rounded-full bg-bg-surface transition-transform ${channelsQuery.data?.webhook.enabled ? 'translate-x-4' : 'translate-x-0'}`} />
             </button>
           </div>
         </div>
@@ -178,16 +178,30 @@ export default function AlertRulesPage() {
             </button>
           ))}
         </div>
-        <div className="flex h-input items-center gap-2 rounded-md border border-border bg-bg-surface px-3">
-          <Search size={16} strokeWidth={1.75} className="text-text-muted" />
-          <input
-            type="search"
-            aria-label="Search rule"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search rule…"
-            className="w-56 bg-transparent text-body outline-none"
-          />
+        <div className="flex items-center gap-2">
+          <div className="flex h-input items-center gap-2 rounded-md border border-border bg-bg-surface px-3">
+            <Search size={16} strokeWidth={1.75} className="text-text-muted" />
+            <input
+              type="search"
+              aria-label="Search rule"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search rule…"
+              className="w-56 bg-transparent text-body outline-none"
+            />
+          </div>
+          {/* Design: an `All severities` select to the right of the search. */}
+          <select
+            aria-label="Severity"
+            value={severity}
+            onChange={(e) => setSeverity(e.target.value as AlertSeverity | 'ALL')}
+            className="h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text"
+          >
+            <option value="ALL">All severities</option>
+            <option value="CRITICAL">Critical</option>
+            <option value="WARNING">Warning</option>
+            <option value="INFO">Info</option>
+          </select>
         </div>
       </div>
 
@@ -214,7 +228,7 @@ export default function AlertRulesPage() {
                     {rule.channels.includes('IN_APP') && <Badge tone="neutral">In-app</Badge>}
                     {rule.channels.includes('EMAIL') && <Badge tone="neutral">Email</Badge>}
                   </p>
-                  <p className="text-caption text-text-muted">{rule.conditions.map((c) => c.event).join(', ')}</p>
+                  <p className="text-caption text-text-muted">{rule.conditions.map(describeCondition).join(', ')}</p>
                 </div>
                 <div className="shrink-0 text-right">
                   <p className="text-caption text-text-secondary">{(rule.recipients.roles ?? []).join(', ') || '—'}</p>

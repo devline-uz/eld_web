@@ -200,6 +200,39 @@ export function useCreateReportSchedule() {
   });
 }
 
+/** `GET /reports/schedules` — the backend answers `{ items }` (no paging; a carrier has a handful). */
+export function useReportSchedules() {
+  return useQuery({
+    queryKey: qk.reportSchedules(),
+    queryFn: ({ signal }) =>
+      client.get<{ items: ReportScheduleRow[] }>(endpoints.reports.schedules, { signal }).then((r) => r.items),
+    ...typedCachePolicy<ReportScheduleRow[]>('slowList'),
+  });
+}
+
+export interface UpdateScheduleInput {
+  id: string;
+  patch: Partial<CreateScheduleInput>;
+}
+
+/** `PATCH /reports/schedules/:id` — edit, or pause/resume via `{ enabled }`. */
+export function useUpdateReportSchedule() {
+  const queryClient = useQueryClient();
+  return useMutation<ReportScheduleRow, ApiError, UpdateScheduleInput>({
+    mutationFn: ({ id, patch }) => client.patch<ReportScheduleRow>(endpoints.reports.schedule(id), patch),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.reportSchedules() }),
+  });
+}
+
+/** `DELETE /reports/schedules/:id` — reports it already generated are kept. */
+export function useDeleteReportSchedule() {
+  const queryClient = useQueryClient();
+  return useMutation<void, ApiError, string>({
+    mutationFn: (id) => client.delete<void>(endpoints.reports.schedule(id)),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.reportSchedules() }),
+  });
+}
+
 /* ------------------------------------------------------------------ IFTA summary (B-46) */
 
 // `GET /reports/ifta/summary?quarter=YYYY-Qn` — shape per web/backend-gaps.md B-46. Miles and

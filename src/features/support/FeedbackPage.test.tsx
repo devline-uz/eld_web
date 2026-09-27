@@ -68,11 +68,33 @@ describe('FeedbackPage — W-25', () => {
     expect(screen.getByRole('button', { name: 'Submit feedback' })).toBeInTheDocument();
   });
 
+  it('QA — an untouched form is not sent, and Send another starts from a blank form', async () => {
+    const user = userEvent.setup();
+    let posts = 0;
+    server.use(
+      http.post(url(endpoints.support.feedback), () => {
+        posts += 1;
+        return ok({ id: 'fbk_1' }, 201);
+      }),
+    );
+    renderPage();
+    await user.click(screen.getByRole('button', { name: 'Submit feedback' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Answer at least one question or add a comment.');
+    expect(posts).toBe(0);
+
+    await user.click(screen.getByRole('button', { name: 'Neutral' }));
+    await user.click(screen.getByRole('button', { name: 'Submit feedback' }));
+    await user.click(await screen.findByRole('button', { name: 'Send another' }));
+    expect(posts).toBe(1);
+    expect(screen.getByRole('button', { name: 'Neutral' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
   it('shows the forbidden banner inline on a 403 rather than replacing the page', async () => {
     const user = userEvent.setup();
     server.use(http.post(url(endpoints.support.feedback), () => fail(403, 'FORBIDDEN', 'You do not have access to this.')));
 
     renderPage();
+    await user.click(screen.getByRole('button', { name: 'Easy' }));
     await user.click(screen.getByRole('button', { name: 'Submit feedback' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('You do not have access to this.');
     expect(screen.getByRole('button', { name: 'Submit feedback' })).toBeInTheDocument();
@@ -92,6 +114,7 @@ describe('FeedbackPage — W-25', () => {
     const submit = screen.getByRole('button', { name: 'Submit feedback' });
     expect(submit).toBeEnabled();
     expect(screen.queryByText(SUPPORT_REASON.feedbackForbidden)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Fast' }));
     await user.click(submit);
     await waitFor(() => expect(submitted).not.toBeNull());
   });

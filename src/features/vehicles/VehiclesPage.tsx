@@ -10,7 +10,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
 import { useIsOffline, OFFLINE_TOOLTIP } from '@/shared/realtime/RealtimeProvider';
-import { useDynamicSubtitle } from '@/app/layouts/Topbar';
+import { usePageHeader } from '@/app/layouts/Topbar';
 import { useLiveFleet } from '@/shared/api/liveFleet';
 import { useVehiclesList, useVehicleCounts, useBulkVehicleStatus, joinVehicles, totalVehicleMiles, type VehicleTableRow } from '@/shared/api/vehicles';
 import { useVehiclesLookup } from '@/shared/api/lookups';
@@ -73,7 +73,6 @@ export default function VehiclesPage() {
   const page = positiveIntParam(params.get('page'), 1);
   const limit = positiveIntParam(params.get('limit'), 10);
 
-  useDynamicSubtitle(null);
 
   function setParam(key: string, value: string | null) {
     const next = new URLSearchParams(params);
@@ -327,15 +326,11 @@ export default function VehiclesPage() {
 
   const isLoading = allVehicles.isLoading;
 
+  usePageHeader({ title: 'Vehicles', subtitle: `${counts.all} units · ${counts.active} active · ${counts.inactive} inactive` });
+
   return (
     <div className="flex flex-col gap-4 xl:max-h-content-h">
-      <div className="flex items-center justify-between xl:shrink-0">
-        <div>
-          <h1 className="text-page-title text-text">Vehicles</h1>
-          <p className="text-page-sub text-text-muted">
-            {counts.all} units · {counts.active} active · {counts.inactive} inactive
-          </p>
-        </div>
+      <div className="flex items-center justify-end xl:shrink-0">
         <div className="flex items-center gap-2">
           <div className="flex h-input items-center gap-2 rounded-md border border-border bg-bg-surface px-3">
             <Search size={16} strokeWidth={1.75} className="text-text-muted" />
@@ -360,19 +355,18 @@ export default function VehiclesPage() {
           >
             Filters{activeFilterCount > 0 ? ` · ${activeFilterCount}` : ''}
           </Button>
-          {/* Export pulls a file down (`Download`), Import pushes one up (`Upload`) — the two
-              icons used to be the wrong way round. */}
+          {/* Export sends units out (`Upload`), Import brings them in (`Download`) — per the design. */}
           <Button
             variant="secondary"
             className="w-btn-wide"
-            iconLeft={<Download size={16} strokeWidth={1.75} />}
+            iconLeft={<Upload size={16} strokeWidth={1.75} />}
             onClick={handleExport}
             loading={exporting}
           >
             Export Units
           </Button>
           <Can perm="vehicles" level="FULL">
-            <Button variant="secondary" className="w-btn-wide" iconLeft={<Upload size={16} strokeWidth={1.75} />} onClick={() => setImportOpen(true)}>
+            <Button variant="secondary" className="w-btn-wide" iconLeft={<Download size={16} strokeWidth={1.75} />} onClick={() => setImportOpen(true)}>
               Import Units
             </Button>
             <Button

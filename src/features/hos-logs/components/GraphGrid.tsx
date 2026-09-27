@@ -115,9 +115,11 @@ export function GraphGrid({
       {/* left column: OFF / SB / D / ON with their sub-labels */}
       <div aria-hidden className="w-hos-labels shrink-0" style={{ paddingTop: GRID.axisHeight }}>
         {ROW_ORDER.map((row) => (
-          <div key={row} className="h-hos-grid-row leading-none">
-            <div className="text-badge font-semibold text-text">{ROW_LABELS[row].code}</div>
-            <div className="text-[0.625rem] leading-4 text-text-muted">{ROW_LABELS[row].caption}</div>
+          // 12 + 12 fits the 26px row; `text-badge` (16px line) + `leading-4` overflowed into the
+          // next row, so "Off duty" overlapped "SB".
+          <div key={row} className="flex h-hos-grid-row flex-col justify-center overflow-hidden">
+            <div className="text-badge/3 font-semibold text-text">{ROW_LABELS[row].code}</div>
+            <div className="text-[0.625rem] leading-3 text-text-muted">{ROW_LABELS[row].caption}</div>
           </div>
         ))}
       </div>

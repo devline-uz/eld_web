@@ -15,7 +15,7 @@ import type { NotificationsPage } from '@/shared/api/notifications';
 import { qk } from '@/shared/api/queryKeys';
 import type { Role } from '@/shared/auth/permissions';
 import { ToastProvider } from '@/shared/ui/Toast';
-import { DynamicSubtitleProvider, OVERLAY_PRELOAD_DELAY_MS, Topbar, useDynamicSubtitle } from './Topbar';
+import { OVERLAY_PRELOAD_DELAY_MS, PageHeaderProvider, Topbar, useDynamicSubtitle, usePageHeader } from './Topbar';
 
 const state = vi.hoisted(() => ({
   role: 'ADMIN' as Role,
@@ -390,10 +390,10 @@ describe('Topbar title and subtitle', () => {
       <QueryClientProvider client={queryClient}>
         <ToastProvider>
           <MemoryRouter>
-            <DynamicSubtitleProvider>
+            <PageHeaderProvider>
               <Topbar />
               <LiveSubtitle value="Universal Logistics Inc. · Today" />
-            </DynamicSubtitleProvider>
+            </PageHeaderProvider>
           </MemoryRouter>
         </ToastProvider>
       </QueryClientProvider>,
@@ -401,6 +401,33 @@ describe('Topbar title and subtitle', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'OneBook ELD' })).toBeInTheDocument();
     expect(await screen.findByText('Universal Logistics Inc. · Today')).toBeInTheDocument();
     expect(screen.queryByText('Fleet manager')).not.toBeInTheDocument();
+    expect(document.title).toBe('OneBook ELD');
+    view.unmount();
+  });
+
+  it('shows a screen-pushed title as the only h1 and mirrors it in document.title', async () => {
+    state.matches = [];
+    function Screen() {
+      usePageHeader({ title: 'Settings · Users', subtitle: '12 back-office users · 3 admins' });
+      return <p>content</p>;
+    }
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = render(
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <MemoryRouter>
+            <PageHeaderProvider>
+              <Topbar />
+              <Screen />
+            </PageHeaderProvider>
+          </MemoryRouter>
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByRole('heading', { level: 1, name: 'Settings · Users' })).toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { level: 1 })).toHaveLength(1);
+    expect(screen.getByText('12 back-office users · 3 admins')).toBeInTheDocument();
+    expect(document.title).toBe('Settings · Users · OneBook ELD');
     view.unmount();
   });
 });

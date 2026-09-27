@@ -14,6 +14,7 @@ import { useCreateVehicle, useUpdateVehicle, type VehicleRow } from '@/shared/ap
 import { ApiError } from '@/shared/api/errors';
 import { conflictField } from '@/shared/api/conflicts';
 import { VEHICLE_CONFLICT_RULES, findCachedVehicleConflicts } from '../lib/vehicleConflicts';
+import { fuelLabel } from '../lib/activity';
 
 const FUEL_TYPES = ['DIESEL', 'GASOLINE', 'CNG', 'LNG', 'ELECTRIC'] as const;
 
@@ -129,7 +130,14 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
         if (isEdit) {
           toast({ kind: 'success', title: `Unit ${values.unitNumber} updated` });
         } else {
-          toast({ kind: 'success', ...TOAST_COPY.unitCreated(values.unitNumber, values.deviceId || 'device') });
+          // QA-B — without an ELD serial nothing is paired and no driver is notified, so the
+          // §13.3 pairing sentence is only shown when a serial was actually sent.
+          const created = TOAST_COPY.unitCreated(values.unitNumber, values.deviceId ?? '');
+          toast(
+            values.deviceId
+              ? { kind: 'success', ...created }
+              : { kind: 'success', title: created.title },
+          );
         }
         onClose();
       },
@@ -165,7 +173,7 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
       open
       onClose={onClose}
       title={isEdit ? `Edit unit ${vehicle?.unitNumber}` : 'Add vehicle'}
-      subtitle="Register a unit and pair it with an ELD device"
+      subtitle={isEdit ? 'Update the unit details' : 'Register a unit and pair it with an ELD device'}
       size="lg"
       isDirty={isDirty}
       footer={
@@ -207,7 +215,7 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
             <select value={fuelType} onChange={(e) => setFuelType(e.target.value)} disabled={submitting} className={inputClass}>
               {FUEL_TYPES.map((f) => (
                 <option key={f} value={f}>
-                  {f.charAt(0) + f.slice(1).toLowerCase()}
+                  {fuelLabel(f)}
                 </option>
               ))}
             </select>
@@ -217,10 +225,10 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
           <input {...register('vin')} placeholder="17-character VIN" disabled={submitting} className={inputClass} />
         </Field>
         <div className="grid grid-cols-3 gap-4">
-          <Field label="License plate">
+          <Field label="License plate" error={errors.licensePlate?.message}>
             <input {...register('licensePlate')} disabled={submitting} className={inputClass} />
           </Field>
-          <Field label="Issuing state">
+          <Field label="Issuing state" error={errors.licenseState?.message}>
             <input
               {...register('licenseState', {
                 // An untouched optional input defaults to '' — zod's `.optional()` only skips

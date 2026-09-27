@@ -2,8 +2,14 @@
 // The design wins over the backend permission matrix: Dispatcher has NO `DVIR & Maintenance`
 // and NO `Safety` item even though the backend grants READ, and a direct URL there renders /403.
 import {
+  Bell,
+  Building2,
+  CircleHelp,
   Clock,
+  Cpu,
   FileText,
+  KeyRound,
+  Link2,
   LayoutGrid,
   MapPin,
   MessageSquare,
@@ -96,25 +102,28 @@ export interface SubNavItem {
   perm?: PermissionKey;
   /** Deliberate design omissions that outrank the backend matrix (§4.2/§12.1). */
   hiddenForRoles?: Role[];
+  /** Sub-nav leading icon, as drawn in `Settings — *.jpg` (WB-QA-S-03). */
+  icon?: LucideIcon;
 }
 
 /** §4.6 — order matters: `/settings` redirects to the first permitted entry. */
 export const SETTINGS_NAV: SubNavItem[] = [
-  { label: 'Company profile', to: '/settings/company', perm: 'carrierSettings' },
-  { label: 'Users', to: '/settings/users', perm: 'users' },
-  { label: 'Roles & permissions', to: '/settings/roles', perm: 'roles' },
+  { label: 'Company profile', to: '/settings/company', icon: Building2, perm: 'carrierSettings' },
+  { label: 'Users', to: '/settings/users', icon: Users, perm: 'users' },
+  { label: 'Roles & permissions', to: '/settings/roles', icon: KeyRound, perm: 'roles' },
   {
     label: 'ELD devices',
     to: '/settings/devices',
+    icon: Cpu,
     perm: 'devices',
     // web/roles and screens/dispatcher/ has no "Settings — ELD devices" screenshot even
     // though the backend grants `devices: READ` to DISPATCHER — the design wins (web/bugs.md).
     hiddenForRoles: ['DISPATCHER'],
   },
-  { label: 'Alert rules', to: '/settings/alerts', perm: 'alertRules' },
-  { label: 'Integrations', to: '/settings/integrations', perm: 'integrations' },
-  { label: 'Audit log', to: '/settings/audit', perm: 'auditLog' },
-  { label: 'Support', to: '/settings/support', perm: 'support' },
+  { label: 'Alert rules', to: '/settings/alerts', icon: Bell, perm: 'alertRules' },
+  { label: 'Integrations', to: '/settings/integrations', icon: Link2, perm: 'integrations' },
+  { label: 'Audit log', to: '/settings/audit', icon: Clock, perm: 'auditLog' },
+  { label: 'Support', to: '/settings/support', icon: CircleHelp, perm: 'support' },
 ];
 
 /** §4.6 — one long page with scroll anchors, not four pages. */
