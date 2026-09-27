@@ -122,7 +122,8 @@ export const city = () =>
   requiredString(M.city).max(LIMITS.cityMax, M.city).regex(PLACE_NAME_RE, M.city);
 
 /** Company name / street address — free text, capped at `LIMITS.companyTextMax`. */
-export const companyText = () => requiredString().max(LIMITS.companyTextMax, M.companyTextMax);
+export const companyText = (requiredMessage: string = M.required) =>
+  requiredString(requiredMessage).max(LIMITS.companyTextMax, M.companyTextMax);
 
 /**
  * W-22 Custom webhook — `config.url`. The backend (`WebhooksService.readUrl`) only needs a

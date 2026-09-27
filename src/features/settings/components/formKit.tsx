@@ -33,7 +33,7 @@ export function Field({
 }
 
 export const inputClass =
-  'h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text disabled:bg-bg-subtle';
+  'h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text disabled:bg-bg-subtle aria-invalid:border-danger';
 
 export function ToggleRow({
   title,
