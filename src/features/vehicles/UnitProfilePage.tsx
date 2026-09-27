@@ -1,6 +1,6 @@
 // owner: web-vehicles-drivers — W-04 Unit profile (web/tz.md §10 W-04).
 // Design: web/roles and screens/admin panel/Unit profile — telemetry, details, activity log.jpg
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { liveFleetHref } from '@/shared/lib/liveFleetHref';
 import { useQueryClient } from '@tanstack/react-query';
@@ -8,7 +8,7 @@ import { ChevronRight, MoreHorizontal, Pencil, Truck, UserPlus, Wrench } from 'l
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
-import { useDynamicSubtitle } from '@/app/layouts/Topbar';
+import { usePageHeader } from '@/app/layouts/Topbar';
 import { useRoom } from '@/shared/realtime/useRoom';
 import {
   useVehicle,
@@ -34,6 +34,7 @@ import { AddVehicleModal } from './components/AddVehicleModal';
 import { AssignDriverModal } from './components/AssignDriverModal';
 import { CalibrateOdometerModal } from './components/CalibrateOdometerModal';
 import { DeleteUnitModal } from './components/DeleteUnitModal';
+import { activityDetails, activityLabel, activitySource, fuelLabel } from './lib/activity';
 
 const TABS = ['overview', 'diagnostics', 'trips', 'dvir', 'documents', 'activity'] as const;
 type Tab = (typeof TABS)[number];
@@ -81,7 +82,26 @@ export default function UnitProfilePage() {
   const coDriverQuery = useCoDriverPairings({ vehicleId: id, active: true, limit: 1 }, Boolean(id));
   const driversLookupQuery = useDriversLookup(Boolean(coDriverQuery.data?.items.length));
 
-  useDynamicSubtitle(vehicleQuery.data ? `Vehicles › Unit ${vehicleQuery.data.unitNumber}` : null);
+  // Design: the top bar carries `Unit …` and the `Vehicles › …` breadcrumb (the only breadcrumb
+  // on the page); the unit card below repeats the unit number as its own heading.
+  const headerVehicle = vehicleQuery.data;
+  const breadcrumb = useMemo(
+    () =>
+      headerVehicle ? (
+        <nav aria-label="Breadcrumb" className="flex items-center gap-1">
+          <Link to="/vehicles" className="hover:text-text">
+            Vehicles
+          </Link>
+          <ChevronRight size={12} strokeWidth={1.75} aria-hidden="true" />
+          <span className="truncate">
+            Unit {headerVehicle.unitNumber} ·{' '}
+            {[headerVehicle.make, headerVehicle.model, headerVehicle.year].filter(Boolean).join(' ')}
+          </span>
+        </nav>
+      ) : null,
+    [headerVehicle],
+  );
+  usePageHeader({ title: headerVehicle ? `Unit ${headerVehicle.unitNumber}` : null, subtitle: breadcrumb });
 
   useRoom(id ? `vehicle:${id}` : null, {
     // `vehicleTelemetry` nests under `['vehicles', id, ...]`, so invalidating the vehicle root covers it.
@@ -121,16 +141,6 @@ export default function UnitProfilePage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-1 text-caption text-text-muted">
-        <Link to="/vehicles" className="hover:text-text">
-          Vehicles
-        </Link>
-        <ChevronRight size={12} strokeWidth={1.75} />
-        <span>
-          Unit {vehicle.unitNumber} · {[vehicle.make, vehicle.model, vehicle.year].filter(Boolean).join(' ')}
-        </span>
-      </div>
-
       <Card>
         <div className="flex items-start justify-between gap-4">
           <div className="flex gap-4">
@@ -139,14 +149,14 @@ export default function UnitProfilePage() {
             </span>
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <h1 className="text-page-title text-text">Unit {vehicle.unitNumber}</h1>
+                <h2 className="text-page-title text-text">Unit {vehicle.unitNumber}</h2>
                 {vehicle.status === 'OUT_OF_SERVICE' && <Badge tone="danger" dot>Out of service</Badge>}
                 {device?.bleState === 'CONNECTED' && <Badge tone="info" dot>BLE connected</Badge>}
                 {activeDtcCount > 0 && <Badge tone="warning" dot>{activeDtcCount} active DTCs</Badge>}
               </div>
               <p className="mt-1 text-body text-text-muted">
                 {[vehicle.make, vehicle.model, vehicle.year].filter(Boolean).join(' ')} · VIN {vehicle.vin}
-                {vehicle.licensePlate ? ` · Plate ${vehicle.plateState ?? ''} ${vehicle.licensePlate}` : ''} · {vehicle.fuelType}
+                {vehicle.licensePlate ? ` · Plate ${vehicle.plateState ?? ''} ${vehicle.licensePlate}` : ''} · {fuelLabel(vehicle.fuelType)}
               </p>
             </div>
           </div>
@@ -309,10 +319,10 @@ export default function UnitProfilePage() {
                     {activitiesQuery.data?.items.map((a) => (
                       <tr key={a.id} className="border-t border-border">
                         <td className="p-3 tabular-nums">{formatLocal(a.occurredAt, 'dateTime')}</td>
-                        <td className="p-3">{a.activity}</td>
+                        <td className="p-3">{activityLabel(a.activity)}</td>
                         <td className="p-3">{a.driverName ?? '—'}</td>
-                        <td className={`p-3 ${a.source.startsWith('ELD') ? 'text-text-muted' : 'text-text'}`}>{a.source}</td>
-                        <td className="p-3 text-text-secondary">{a.details}</td>
+                        <td className={`p-3 ${a.source.startsWith('ELD') ? 'text-text-muted' : 'text-text'}`}>{activitySource(a.source)}</td>
+                        <td className="p-3 text-text-secondary">{activityDetails(a.details)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -341,7 +351,7 @@ export default function UnitProfilePage() {
               <DetailRow label="Year" value={vehicle.year ?? '—'} />
               <DetailRow label="License plate" value={vehicle.licensePlate ?? '—'} />
               <DetailRow label="Issuing state" value={vehicle.plateState ?? '—'} />
-              <DetailRow label="Fuel type" value={vehicle.fuelType} />
+              <DetailRow label="Fuel type" value={fuelLabel(vehicle.fuelType)} />
               <DetailRow label="Sleeper berth" value={vehicle.sleeperBerth ? 'Available' : 'Not available'} />
               <DetailRow label="Primary driver" value={driver ? `${driver.firstName} ${driver.lastName}` : 'Unassigned'} />
               {/* ⛔ GAP B-7 — no /co-driver-pairings endpoint; always "—" until it lands. */}
@@ -435,9 +445,9 @@ export default function UnitProfilePage() {
               {activitiesQuery.data?.items.map((a) => (
                 <li key={a.id} className="flex flex-col gap-0.5 p-3">
                   <span className="tabular-nums text-caption text-text-muted">{formatLocal(a.occurredAt, 'dateTime')}</span>
-                  <span className="text-body text-text">{a.activity}</span>
+                  <span className="text-body text-text">{activityLabel(a.activity)}</span>
                   <span className="text-caption text-text-muted">
-                    {a.driverName ?? '—'} · {a.source} · {a.details}
+                    {a.driverName ?? '—'} · {activitySource(a.source)} · {activityDetails(a.details)}
                   </span>
                 </li>
               ))}

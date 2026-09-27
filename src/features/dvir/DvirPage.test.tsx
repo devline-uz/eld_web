@@ -12,6 +12,7 @@ import { endpoints } from '@/shared/api/endpoints';
 import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/client';
 import { ToastProvider } from '@/shared/ui/Toast';
 import DvirPage from './DvirPage';
+import { PageHeaderProvider, PageHeading } from '@/app/layouts/Topbar';
 
 let mockCan = (_key: string, _level?: 'READ' | 'FULL') => true;
 vi.mock('@/shared/auth/usePermission', () => ({ usePermission: () => ({ can: (k: string, l?: 'READ' | 'FULL') => mockCan(k, l) }) }));
@@ -26,7 +27,10 @@ function renderPage(route = '/dvir') {
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
         <MemoryRouter initialEntries={[route]}>
-          <DvirPage />
+          <PageHeaderProvider>
+            <PageHeading />
+            <DvirPage />
+          </PageHeaderProvider>
         </MemoryRouter>
       </ToastProvider>
     </QueryClientProvider>,
@@ -49,7 +53,7 @@ beforeEach(() => {
 describe('DvirPage', () => {
   it('renders the header and KPI row', async () => {
     renderPage();
-    expect(await screen.findByText('DVIR & Maintenance')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'DVIR & Maintenance' })).toBeInTheDocument();
     expect((await screen.findAllByText('Open defects')).length).toBeGreaterThan(0);
     expect(await screen.findByText('Overdue services')).toBeInTheDocument();
     expect(await screen.findByText('DVIRs today')).toBeInTheDocument();
@@ -90,7 +94,7 @@ describe('DvirPage', () => {
     });
     try {
       renderPage();
-      await screen.findByText('DVIR & Maintenance');
+      await screen.findByRole('heading', { level: 1, name: 'DVIR & Maintenance' });
       expect(screen.getByRole('button', { name: /^Filters/ })).toBeEnabled();
 
       // The fixture DVIRs fall outside the 48 h window, so the DVIRs tab has nothing to export
@@ -127,7 +131,7 @@ describe('DvirPage', () => {
     }) as unknown as typeof URL.createObjectURL;
     try {
       renderPage();
-      await screen.findByText('DVIR & Maintenance');
+      await screen.findByRole('heading', { level: 1, name: 'DVIR & Maintenance' });
       await user.click(screen.getByRole('button', { name: /^Open defects/ }));
       await vi.waitFor(() => expect(screen.getByRole('button', { name: 'Export' })).toBeEnabled());
       await user.click(screen.getByRole('button', { name: 'Export' }));
@@ -141,7 +145,7 @@ describe('DvirPage', () => {
   it('search has a clear button and Esc, and the one term follows every tab (stage 3)', async () => {
     const user = userEvent.setup();
     renderPage();
-    await screen.findByText('DVIR & Maintenance');
+    await screen.findByRole('heading', { level: 1, name: 'DVIR & Maintenance' });
     const search = screen.getByRole('textbox', { name: 'Search unit, defect' });
     expect(screen.queryByRole('button', { name: 'Clear search' })).not.toBeInTheDocument();
 
@@ -169,7 +173,7 @@ describe('DvirPage', () => {
   it('removes the create/new work-order controls without maintenance FULL', async () => {
     mockCan = (key, level) => !(key === 'maintenance' && level === 'FULL');
     renderPage();
-    await screen.findByText('DVIR & Maintenance');
+    await screen.findByRole('heading', { level: 1, name: 'DVIR & Maintenance' });
     expect(screen.queryByRole('button', { name: 'New work order' })).not.toBeInTheDocument();
   });
 

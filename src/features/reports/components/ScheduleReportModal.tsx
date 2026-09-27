@@ -4,6 +4,10 @@
 // rather than inventing wording (web/decisions.md WD-043). Q-2: delivery is email only; the DTO has
 // no SMS channel at all.
 //
+// QA fix (web/bugs.md): the modal doubles as the `Edit` overlay of the `Scheduled reports` card —
+// pass `schedule` and it prefills from the row and `PATCH`es instead of posting. Success toasts come
+// from `TOAST_COPY.reportSchedule*` (supersedes WD-043's silent close).
+//
 // B-48 (shipped): `Period` sends `params.window` — the scheduler resolves it to a concrete period on
 // every run, in the schedule's (carrier) zone — or pins the page's own range when `This selection`
 // is chosen. `Format` offers exactly `REPORT_TYPE_FORMATS[type]` (PDF for IFTA / Activity / DVIR).
@@ -15,22 +19,21 @@ import { z } from 'zod';
 import {
   REPORT_TYPE_FORMATS,
   useCreateReportSchedule,
+  useUpdateReportSchedule,
   type GeneratableReportType,
   type ReportFormat,
+  type ReportScheduleRow,
   type ReportWindow,
 } from '@/shared/api/reports';
 import { email } from '@/shared/forms/fields';
 import { VALIDATION_MESSAGES as M } from '@/shared/forms/messages';
 import { Button } from '@/shared/ui/Button';
+import { TOAST_COPY } from '@/shared/ui/copy';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
-import { REPORT_LABEL, periodOf, refusalText } from '../reportMeta';
+import { useToast } from '@/shared/ui/Toast';
+import { REPORT_LABEL, SCHEDULE_FREQUENCIES, frequencyLabel, frequencyOf, periodOf, refusalText } from '../reportMeta';
 import { ActionAlert } from './ActionAlert';
 
-const SCHEDULE_FREQUENCIES = {
-  DAILY: { label: 'Every day at 06:00', cron: '0 6 * * *' },
-  WEEKLY: { label: 'Every Monday at 06:00', cron: '0 6 * * 1' },
-  MONTHLY: { label: 'The 1st of every month at 06:00', cron: '0 6 1 * *' },
-} as const;
 
 const WINDOW_LABEL: Record<ReportWindow, string> = {
   PREVIOUS_WEEK: 'Previous week (Mon – Sun)',
@@ -45,7 +48,7 @@ const windowsFor = (type: GeneratableReportType): ReportWindow[] =>
 const FIXED_PERIOD_KEYS = ['from', 'to', 'quarter'];
 
 const scheduleSchema = z.object({
-  frequency: z.enum(['DAILY', 'WEEKLY', 'MONTHLY']),
+  frequency: z.enum(['DAILY', 'WEEKLY', 'MONTHLY', 'CUSTOM']),
   period: z.enum(['FIXED', 'PREVIOUS_WEEK', 'PREVIOUS_MONTH', 'PREVIOUS_QUARTER']),
   format: z.enum(['CSV', 'PDF', 'XLSX']),
   recipients: z
@@ -66,24 +69,42 @@ export interface ScheduleReportModalProps {
   params: Record<string, unknown>;
   /** Carrier zone — the cron runs on the company clock (§8.3). */
   timezone: string;
+  /** Edit mode — prefill from this row and `PATCH` it; `reportType`/`params`/`timezone` are the row's. */
+  schedule?: ReportScheduleRow;
 }
 
-export function ScheduleReportModal({ open, onClose, reportType, params, timezone }: ScheduleReportModalProps) {
+function defaultsFor(reportType: GeneratableReportType, schedule?: ReportScheduleRow): ScheduleValues {
+  if (!schedule) {
+    return {
+      frequency: 'WEEKLY',
+      // A repeating schedule wants a repeating period; `This selection` stays one click away.
+      period: windowsFor(reportType)[0] ?? 'FIXED',
+      format: REPORT_TYPE_FORMATS[reportType][0] ?? 'CSV',
+      recipients: '',
+    };
+  }
+  const window = schedule.params.window as ReportWindow | undefined;
+  return {
+    frequency: frequencyOf(schedule.cron),
+    period: window && windowsFor(reportType).includes(window) ? window : 'FIXED',
+    format: schedule.format,
+    recipients: schedule.recipients.join(', '),
+  };
+}
+
+export function ScheduleReportModal({ open, onClose, reportType, params, timezone, schedule }: ScheduleReportModalProps) {
   const create = useCreateReportSchedule();
+  const update = useUpdateReportSchedule();
+  const mutation = schedule ? update : create;
+  const { toast } = useToast();
   const form = useForm<ScheduleValues>({
     resolver: zodResolver(scheduleSchema),
     mode: 'onBlur',
     reValidateMode: 'onChange',
-    defaultValues: {
-      frequency: 'WEEKLY',
-      // A repeating schedule wants a repeating period; `This selection` stays one click away.
-      period: windowsFor(reportType)[0],
-      format: REPORT_TYPE_FORMATS[reportType][0],
-      recipients: '',
-    },
+    defaultValues: defaultsFor(reportType, schedule),
   });
   const { register, handleSubmit, formState, reset } = form;
-  const busy = formState.isSubmitting || create.isPending;
+  const busy = formState.isSubmitting || mutation.isPending;
   // WB-146 — `isSubmitting`/`isPending` only turn true on the next render, so two clicks in the
   // same tick both reach the handler. The ref makes the submit non-reentrant.
   const inFlight = useRef(false);
@@ -91,33 +112,36 @@ export function ScheduleReportModal({ open, onClose, reportType, params, timezon
   const close = () => {
     reset();
     create.reset();
+    update.reset();
     onClose();
   };
 
   const submitForm = handleSubmit(async (values) => {
-    await create
-      .mutateAsync({
-        reportType,
-        format: values.format as ReportFormat,
-        params:
-          values.period === 'FIXED'
-            ? params
-            : {
-                ...Object.fromEntries(Object.entries(params).filter(([key]) => !FIXED_PERIOD_KEYS.includes(key))),
-                window: values.period,
-              },
-        cron: SCHEDULE_FREQUENCIES[values.frequency].cron,
-        timezone,
-        recipients: values.recipients.split(',').map((s) => s.trim()).filter(Boolean),
-        enabled: true,
-      })
-      .then(close)
-      .catch(() => undefined);
+    const body = {
+      reportType,
+      format: values.format as ReportFormat,
+      params:
+        values.period === 'FIXED'
+          ? params
+          : {
+              ...Object.fromEntries(Object.entries(params).filter(([key]) => !FIXED_PERIOD_KEYS.includes(key))),
+              window: values.period,
+            },
+      cron: values.frequency === 'CUSTOM' ? (schedule?.cron ?? SCHEDULE_FREQUENCIES.WEEKLY.cron) : SCHEDULE_FREQUENCIES[values.frequency].cron,
+      timezone,
+      recipients: values.recipients.split(',').map((s) => s.trim()).filter(Boolean),
+    };
+    const name = REPORT_LABEL[reportType];
+    // Edit never touches `enabled` — pausing/resuming is the row's own action.
+    const request = schedule
+      ? update.mutateAsync({ id: schedule.id, patch: body }).then(() => toast({ kind: 'success', ...TOAST_COPY.reportScheduleUpdated(name) }))
+      : create.mutateAsync({ ...body, enabled: true }).then(() => toast({ kind: 'success', ...TOAST_COPY.reportScheduleCreated(name) }));
+    await request.then(close).catch(() => undefined);
   });
 
   /** The non-reentrant entry point — the ref is only ever touched from an event handler. */
   const submit = (event?: BaseSyntheticEvent) => {
-    if (inFlight.current || create.isPending) return;
+    if (inFlight.current || mutation.isPending) return;
     inFlight.current = true;
     void submitForm(event).finally(() => {
       inFlight.current = false;
@@ -129,22 +153,22 @@ export function ScheduleReportModal({ open, onClose, reportType, params, timezon
     <Modal
       open={open}
       onClose={close}
-      title="Schedule a report"
+      title={schedule ? 'Edit scheduled report' : 'Schedule a report'}
       subtitle={`${REPORT_LABEL[reportType]} · delivered by email`}
       size="sm"
-      isDirty={formState.isDirty && !create.isSuccess}
+      isDirty={formState.isDirty && !mutation.isSuccess}
       footer={
         <>
           {/* WB-145 — 11.30 Discard changes on Cancel, handled by the Modal itself. */}
           <ModalCancelButton disabled={busy} />
           <Button variant="primary" size="lg" loading={busy} disabled={busy} onClick={() => void submit()}>
-            Schedule
+            {schedule ? 'Save changes' : 'Schedule'}
           </Button>
         </>
       }
     >
       <form onSubmit={(e) => void submit(e)} className="flex flex-col gap-4" noValidate>
-        <ActionAlert message={create.isError ? refusalText(create.error) : null} />
+        <ActionAlert message={mutation.isError ? refusalText(mutation.error) : null} />
         <label className="flex flex-col gap-1.5 text-body-strong text-text">
           <span>
             Frequency <span className="text-danger">*</span>
@@ -159,6 +183,9 @@ export function ScheduleReportModal({ open, onClose, reportType, params, timezon
                 {value.label}
               </option>
             ))}
+            {schedule && frequencyOf(schedule.cron) === 'CUSTOM' && (
+              <option value="CUSTOM">{frequencyLabel(schedule.cron)}</option>
+            )}
           </select>
         </label>
         <label className="flex flex-col gap-1.5 text-body-strong text-text">

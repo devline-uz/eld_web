@@ -17,7 +17,8 @@ export function AssignDriverModal({ vehicle, onClose }: { vehicle: VehicleRow; o
   const [notify, setNotify] = useState(true);
   const outOfService = vehicle.status === 'OUT_OF_SERVICE';
 
-  const driversQuery = useDriversList({ q: query || undefined, limit: 25 });
+  // QA fix — only ACTIVE drivers can be assigned; the server filters (`?status=ACTIVE`).
+  const driversQuery = useDriversList({ q: query || undefined, limit: 25, status: 'ACTIVE' });
   const mutation = useAssignDriver(vehicle.id);
 
   return (

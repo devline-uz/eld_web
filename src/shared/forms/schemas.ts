@@ -12,7 +12,7 @@ export const vehicleSchema = z.object({
   model: f.requiredString(),
   year: f.vehicleYear(),
   licensePlate: z.string().trim().max(20).optional(),
-  licenseState: z.string().trim().length(2).optional(),
+  licenseState: z.string().trim().length(2, 'Use the 2-letter state or province code.').optional(),
   odometer: f.odometer().optional(),
   deviceId: z.string().trim().optional(),
 });

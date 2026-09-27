@@ -193,10 +193,17 @@ export const RECENT_DVIR_WINDOW = 200;
 /** Rounded to the nearest 5 minutes so the query key — and therefore the request — stays stable
  * between renders instead of refetching on every tick; the 48 h window still slides forward at
  * least every 5 minutes. */
-export function recentDvirsFrom(): string {
+export function recentDvirsCutoffMs(): number {
   const bucketMs = 5 * 60 * 1000;
   const now = Math.floor(Date.now() / bucketMs) * bucketMs;
-  return new Date(now - 48 * 60 * 60 * 1000).toISOString();
+  return now - 48 * 60 * 60 * 1000;
+}
+/** QA-B — `DvirListQueryDto.from` is `z.string().date()` (`YYYY-MM-DD`, read as UTC midnight);
+ * the full ISO timestamp sent before was answered `422 VALIDATION_FAILED`, so the whole DVIRs
+ * tab rendered its error state. The server gets the UTC day of the cutoff (a superset) and
+ * `useRecentDvirs` trims the rows to the exact 48 h. */
+export function recentDvirsFrom(): string {
+  return new Date(recentDvirsCutoffMs()).toISOString().slice(0, 10);
 }
 export const recentDvirsQuery = (from: string = recentDvirsFrom()) =>
   dvirsPageQuery({ page: 1, limit: RECENT_DVIR_WINDOW, from });
@@ -241,7 +248,11 @@ export function useRecentDvirs() {
   const { map: vehicles, query: vehiclesQuery } = useVehicleMap();
 
   const rows = useMemo(
-    (): DvirTableRow[] => joinDvirs(dvirQuery.data?.items ?? [], drivers, vehicles, defectsQuery.data?.items ?? []),
+    (): DvirTableRow[] => {
+      const cutoff = recentDvirsCutoffMs();
+      const recent = (dvirQuery.data?.items ?? []).filter((d) => new Date(d.submittedAt).getTime() >= cutoff);
+      return joinDvirs(recent, drivers, vehicles, defectsQuery.data?.items ?? []);
+    },
     [dvirQuery.data, defectsQuery.data, drivers, vehicles],
   );
 
@@ -472,6 +483,15 @@ export interface CreateWorkOrderPayload {
   blockDispatchAssignment?: boolean;
 }
 
+/** `Keep the unit out of service` (QA fix) — the backend flips `Vehicle.status` in the same
+ * transaction as a work-order create / edit / close / cancel, so every view of unit status (Vehicles,
+ * the W-09 `Vehicles out of service` KPI, Dashboard, Live Fleet) is refetched. */
+function invalidateUnitStatus(queryClient: ReturnType<typeof useQueryClient>) {
+  void queryClient.invalidateQueries({ queryKey: qkRoot.vehicles });
+  void queryClient.invalidateQueries({ queryKey: qk.dashboardSummary });
+  void queryClient.invalidateQueries({ queryKey: qk.liveFleet() });
+}
+
 export function useCreateWorkOrder() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -479,7 +499,7 @@ export function useCreateWorkOrder() {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qkRoot.workOrders });
       void queryClient.invalidateQueries({ queryKey: qkRoot.defects });
-      void queryClient.invalidateQueries({ queryKey: qkRoot.vehicles });
+      invalidateUnitStatus(queryClient);
     },
   });
 }
@@ -490,6 +510,7 @@ export function useCloseWorkOrder(id: string) {
     mutationFn: () => client.post<WorkOrderRow>(endpoints.workOrders.close(id)),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qkRoot.workOrders });
+      invalidateUnitStatus(queryClient);
     },
   });
 }
@@ -500,6 +521,7 @@ export function useCancelWorkOrder(id: string) {
     mutationFn: () => client.post<WorkOrderRow>(endpoints.workOrders.cancel(id)),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qkRoot.workOrders });
+      invalidateUnitStatus(queryClient);
     },
   });
 }
@@ -533,6 +555,7 @@ export function useUpdateWorkOrder(id: string) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qkRoot.workOrders });
       void queryClient.invalidateQueries({ queryKey: qk.workOrder(id) });
+      invalidateUnitStatus(queryClient);
     },
   });
 }

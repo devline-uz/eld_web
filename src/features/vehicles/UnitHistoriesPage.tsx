@@ -261,7 +261,7 @@ export default function UnitHistoriesPage() {
             <KpiCard
               icon={Route}
               label="Distance travelled"
-              value={`${formatDistance(historiesQuery.data.distanceMi)} mi`}
+              value={formatDistance(historiesQuery.data.distanceMi)}
               hint={`${historiesQuery.data.driveSegments} drive segments`}
             />
             <KpiCard
@@ -281,14 +281,14 @@ export default function UnitHistoriesPage() {
               iconTone="warning"
               label="Idle time"
               value={formatDuration(historiesQuery.data.idleTimeSec)}
-              chip={{ text: `${formatFuelWasted(historiesQuery.data.idleFuelWastedGal)} wasted`, tone: 'warning' }}
+              chip={{ text: formatFuelWasted(historiesQuery.data.idleFuelWastedGal), tone: 'warning' }}
             />
           </div>
 
           <Card>
             <SectionHeader
               title="Route replay"
-              subtitle={`${formatLocal(historiesQuery.data.firstMovementAt, 'monthDay')} · ${formatLocal(historiesQuery.data.firstMovementAt, 'time')} → ${formatLocal(historiesQuery.data.lastMovementAt, 'time')} · ${formatDistance(historiesQuery.data.distanceMi)} mi`}
+              subtitle={`${formatLocal(historiesQuery.data.firstMovementAt, 'monthDay')} · ${formatLocal(historiesQuery.data.firstMovementAt, 'time')} → ${formatLocal(historiesQuery.data.lastMovementAt, 'time')} · ${formatDistance(historiesQuery.data.distanceMi)}`}
               action={
                 <div className="flex items-center gap-2">
                   <div className="flex h-8 overflow-hidden rounded-md border border-border">
@@ -425,6 +425,14 @@ export default function UnitHistoriesPage() {
                   </tr>
                 </thead>
                 <tbody>
+                  {/* The table used to render headers over nothing on a day without movement. */}
+                  {filteredSegments.length === 0 && (
+                    <tr className="border-t border-border">
+                      <td colSpan={8} className="p-6 text-center text-body text-text-muted">
+                        No movement segments for this day.
+                      </td>
+                    </tr>
+                  )}
                   {filteredSegments.map((s) => (
                     <tr
                       key={`${s.marker}-${s.startAt}`}
@@ -442,8 +450,8 @@ export default function UnitHistoriesPage() {
                       <td className="p-3 tabular-nums">{formatLocal(s.endAt, 'time')}</td>
                       <td className="p-3 tabular-nums">{formatDuration(s.durationSec)}</td>
                       <td className="p-3 text-text-secondary">{s.location}</td>
-                      <td className="p-3 text-right tabular-nums">{s.distanceMi != null ? `${formatDistance(s.distanceMi)} mi` : '—'}</td>
-                      <td className="p-3 text-right tabular-nums">{formatDistance(s.odometerMi)} mi</td>
+                      <td className="p-3 text-right tabular-nums">{s.distanceMi != null ? formatDistance(s.distanceMi) : '—'}</td>
+                      <td className="p-3 text-right tabular-nums">{formatDistance(s.odometerMi)}</td>
                       <td className="p-3">{s.driverName}</td>
                     </tr>
                   ))}

@@ -214,4 +214,23 @@ export const TOAST_COPY = {
     title: `${name} deleted`,
     description: 'Historical service records stay in place for audits.',
   }),
+  /** W-12…W-14 `Scheduled reports` card — not in §13.3's table; named like the W-09 schedule toasts. */
+  reportScheduleCreated: (name: string): ToastCopy => ({
+    title: `${name} scheduled`,
+    description: 'It is delivered by email on every run.',
+  }),
+  reportScheduleUpdated: (name: string): ToastCopy => ({
+    title: `${name} schedule updated`,
+  }),
+  reportSchedulePaused: (name: string): ToastCopy => ({
+    title: `${name} schedule paused`,
+    description: 'No reports are sent until it is resumed.',
+  }),
+  reportScheduleResumed: (name: string): ToastCopy => ({
+    title: `${name} schedule resumed`,
+  }),
+  reportScheduleDeleted: (name: string): ToastCopy => ({
+    title: `${name} schedule deleted`,
+    description: 'Reports it already generated stay in Recently generated.',
+  }),
 } as const;
