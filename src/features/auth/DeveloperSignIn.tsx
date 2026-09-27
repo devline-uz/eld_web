@@ -8,15 +8,6 @@ import { ChevronDown, ChevronRight, Eye, EyeOff } from 'lucide-react';
 import { Button } from '@/shared/ui/Button';
 import { VALIDATION_MESSAGES } from '@/shared/forms/messages';
 
-/** §6.7 — the four canonical demo accounts, one per role. */
-const DEMO_ACCOUNTS = [
-  { label: 'admin', email: 'sarah.chen@universal-logistics.example' },
-  { label: 'fleet manager', email: 'mike.torres@universal-logistics.example' },
-  { label: 'dispatcher', email: 'carlos.ramirez@universal-logistics.example' },
-  { label: 'viewer', email: 'diane.foster@universal-logistics.example' },
-] as const;
-const DEMO_PASSWORD = 'Onebook2026';
-
 export function DeveloperSignIn({
   onSubmit,
   busy,
@@ -160,26 +151,6 @@ export function DeveloperSignIn({
           <Button type="submit" variant="secondary" size="lg" className="w-full" loading={busy}>
             Sign in
           </Button>
-
-          <p className="text-caption text-text-muted">
-            Demo accounts:{' '}
-            {DEMO_ACCOUNTS.map((account, index) => (
-              <span key={account.email}>
-                {index > 0 ? ' · ' : null}
-                <button
-                  type="button"
-                  className="text-primary underline-offset-2 hover:underline"
-                  onClick={() => {
-                    setEmail(account.email);
-                    setPassword(DEMO_PASSWORD);
-                    setErrors({});
-                  }}
-                >
-                  {account.label}
-                </button>
-              </span>
-            ))}
-          </p>
         </form>
       ) : null}
     </div>

@@ -20,15 +20,10 @@ Vite reads `.env.local`, not `.env.example`, so the copy step is required.
 (email + password) on the sign-in page. With any other value only Google sign-in is shown,
 as in production.
 
-Demo accounts (one per role, all on `@universal-logistics.example`): `sarah.chen` (admin),
-`mike.torres` (fleet manager), `carlos.ramirez` (dispatcher), `diane.foster` (viewer).
-The Developer sign-in block lists them and fills in the demo password for you.
-
 ## Run
 
 | Command | What it does |
 | --- | --- |
-| `npm run dev:mock` | Dev server on http://localhost:5173 with no backend: the API is mocked by MSW and the socket is faked. |
 | `npm run dev` | Dev server on http://localhost:5173 against the real backend at `VITE_API_BASE_URL` (default `http://localhost:3002/api`). |
 | `npm run build` | Typecheck, production build, bundle-budget check. |
 | `npm run preview` | Serve the production build on http://localhost:4173. |

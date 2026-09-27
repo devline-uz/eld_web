@@ -102,13 +102,10 @@ describe('FeedbackPage — W-25', () => {
     expect(screen.queryByText(SUPPORT_REASON.feedbackForbidden)).not.toBeInTheDocument();
   });
 
-  it('switches to the driver feedback and feature request tabs', async () => {
-    const user = userEvent.setup();
+  it('shows only the survey — no invented satisfaction scores or driver quotes', () => {
     renderPage();
-    await user.click(screen.getByRole('button', { name: /driver feedback/i }));
-    expect(screen.getByText('John Smith')).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: /feature requests/i }));
-    expect(screen.getByText(/collected in the mobile app/i)).toBeInTheDocument();
+    expect(screen.queryByText('Fleet satisfaction')).not.toBeInTheDocument();
+    expect(screen.queryByText('Recent driver feedback')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /driver feedback/i })).not.toBeInTheDocument();
   });
 });

@@ -125,9 +125,8 @@ export interface TrackedReportJob {
 /**
  * WB-166 — `Generate report` / `Download PDF` used to give no on-screen confirmation at all:
  * `generate.isPending` cleared the moment the `POST` resolved and the only completion signal was
- * the `report.ready` socket event, which never arrives in mock (`src/mocks/dev/fakeSocket.ts`) and
- * can be missed on a reconnect in production (§7 has no resume/seq). This follows the queued job
- * with the named `reportStatus` policy (3 s, stops at READY/FAILED) and announces it exactly like
+ * the `report.ready` socket event, which never arrives without a live socket and can be missed on
+ * a reconnect in production (§7 has no resume/seq). This follows the queued job with the named `reportStatus` policy (3 s, stops at READY/FAILED) and announces it exactly like
  * the FMCSA pack does, so the toast fires whichever signal lands first — `useAnnounceReport`
  * de-duplicates per report id.
  */
