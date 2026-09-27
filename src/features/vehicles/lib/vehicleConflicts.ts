@@ -27,6 +27,8 @@ export const vinKey = (value: string | null | undefined): string => String(value
  * early warning only. The server stays the authority, and a miss here still ends in its 409.
  * `current` is the unit being edited: it is excluded, and a value it already holds is not
  * re-checked. That way a unit that shares a number with legacy data can still be saved unchanged.
+ * A soft-deleted unit (`deletedAt` set — `GET /vehicles` may still return it, B-101) no longer holds
+ * its unit number or VIN, so it never blocks a new unit from reusing them.
  */
 export function findCachedVehicleConflicts(
   queryClient: QueryClient,
@@ -37,7 +39,7 @@ export function findCachedVehicleConflicts(
   for (const [, data] of queryClient.getQueriesData<{ items?: unknown }>({ queryKey: qkRoot.vehicles })) {
     if (!data || !Array.isArray(data.items)) continue; // skips the `qk.vehicle(id)` detail entries
     for (const row of data.items as VehicleRow[]) {
-      if (row?.id && row.id !== current?.id) others.set(row.id, row);
+      if (row?.id && row.id !== current?.id && row.deletedAt == null) others.set(row.id, row);
     }
   }
 
