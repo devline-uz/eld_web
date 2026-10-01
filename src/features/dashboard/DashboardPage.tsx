@@ -36,7 +36,12 @@ import type { DashboardViolation } from '@/shared/api/dashboardSummary';
 import { ResolveViolationModal } from '@/shared/violations/ResolveViolationModal';
 import { messagesHref } from '@/shared/lib/messagesHref';
 
-const DutyDonut = lazy(() => import('./components/DutyDonut'));
+// WB-257 — a ~2 KB hand-written SVG now (was Recharts, 97 KB gzip), so it ships in this chunk.
+import DutyDonut from './components/DutyDonut';
+import { LazyOnVisible } from '@/shared/ui/LazyOnVisible';
+
+/** Same box as `DashboardMapPreview`'s wrapper, so the swap from placeholder to map never shifts. */
+const MAP_PLACEHOLDER = <div className="h-map-preview animate-pulse rounded-md bg-bg-subtle xl:mt-1 xl:h-map-preview-xl" />;
 
 
 const MENU_ITEM_CLASS = 'cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle';
@@ -246,7 +251,7 @@ export default function DashboardPage() {
           </div>
           <div className="p-card pt-4">
             {summary.isLoading ? (
-              <div className="h-map-preview animate-pulse rounded-md bg-bg-subtle" />
+              MAP_PLACEHOLDER
             ) : summary.isError ? (
               <ErrorState
                 title="Could not load the fleet"
@@ -255,9 +260,13 @@ export default function DashboardPage() {
             ) : units.length === 0 ? (
               <EmptyState title={EMPTY_STATE_COPY.liveFleet.title} description={EMPTY_STATE_COPY.liveFleet.description} />
             ) : (
-              <Suspense fallback={<div className="h-map-preview animate-pulse rounded-md bg-bg-subtle" />}>
-                <LazyDashboardMap units={units.filter(hasPosition)} />
-              </Suspense>
+              // WB-257 — MapLibre (the lazy map chunk) is only requested once the card nears the
+              // viewport; the placeholder holds the map's exact box until then (no CLS).
+              <LazyOnVisible placeholder={MAP_PLACEHOLDER}>
+                <Suspense fallback={MAP_PLACEHOLDER}>
+                  <LazyDashboardMap units={units.filter(hasPosition)} />
+                </Suspense>
+              </LazyOnVisible>
             )}
           </div>
         </Card>
@@ -273,9 +282,7 @@ export default function DashboardPage() {
             ) : summary.isError ? (
               <ErrorState title="Could not load duty status" onRetry={() => void summary.refetch()} />
             ) : (
-              <Suspense fallback={<div className="h-40 animate-pulse rounded-md bg-bg-subtle" />}>
-                <DutyDonut units={units} onSegmentClick={(status) => navigate(`/drivers?status=${status}`)} />
-              </Suspense>
+              <DutyDonut units={units} onSegmentClick={(status) => navigate(`/drivers?status=${status}`)} />
             )}
           </div>
         </Card>

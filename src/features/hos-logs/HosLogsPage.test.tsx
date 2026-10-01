@@ -35,6 +35,14 @@ vi.mock('@/shared/auth/AuthProvider', () => ({
   useAuth: () => ({ user: { fullName: 'Sarah Chen' } }),
 }));
 vi.mock('@/shared/realtime/useRoom', () => ({ useRoom: () => ({ joined: true }) }));
+// B-39 — the 11.11 Location field is a geocoded combobox when a map key is configured. Pin it on
+// (whatever the local .env says) with a geocoder that finds nothing, so a typed name stays name-only
+// and no request leaves the test. The picked-place path is covered by RequestLogEditModal.test.tsx.
+vi.mock('@/shared/map/geocode', () => ({
+  geocodingEnabled: true,
+  PLACE_QUERY_MIN: 3,
+  usePlaceSearch: () => ({ data: [], isError: false }),
+}));
 
 const driver = {
   id: DRIVER_ID,
@@ -833,7 +841,7 @@ describe('overlay controls actually drive the payload', () => {
     expect(within(dialog).getByRole('button', { name: /OFF duty/ })).toHaveAttribute('aria-pressed', 'true');
     await userEvent.type(within(dialog).getByPlaceholderText('15:30:00'), '15:30:00');
     // B-39 — the location is editable now, but an untouched one is never sent.
-    expect(within(dialog).getByRole('textbox', { name: /Location/ })).not.toHaveAttribute('readonly');
+    expect(within(dialog).getByRole('combobox', { name: /Location/ })).not.toHaveAttribute('readonly');
     const odometer = within(dialog).getByRole('textbox', { name: /Odometer/ });
     const engineHours = within(dialog).getByRole('textbox', { name: /Engine hours/ });
     await userEvent.clear(odometer);
@@ -1280,7 +1288,7 @@ describe('W-08 · stage-2 dead controls', () => {
     await userEvent.clear(start);
     await userEvent.type(start, '20:00:00');
     await userEvent.click(within(dialog).getByRole('button', { name: 'Yard move' }));
-    const location = within(dialog).getByRole('textbox', { name: /Location/ });
+    const location = within(dialog).getByRole('combobox', { name: /Location/ });
     await userEvent.clear(location);
     await userEvent.type(location, 'Florence, KY yard');
     const notify = within(dialog).getByLabelText('Notify the driver immediately');
@@ -1299,5 +1307,6 @@ describe('W-08 · stage-2 dead controls', () => {
       notifyDriver: false,
       reason: 'Yard move at terminal.',
     });
+    expect(sent!.location).not.toHaveProperty('lat');
   });
 });

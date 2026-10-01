@@ -202,6 +202,13 @@ function validUnits(units: MapUnitFeature[]): MapUnitFeature[] {
   return units.filter((u) => isValidCoord(u.lat, u.lon));
 }
 
+/** Everything `toFeatureCollection` reads from a unit, as one string — two `units` arrays with the
+ * same signature draw the same markers, so the source is not re-uploaded (WB-256). Headings the
+ * tracker derives from movement only change when a position does, which this already covers. */
+function unitsSignature(units: MapUnitFeature[]): string {
+  return units.map((u) => `${u.id}|${u.lat}|${u.lon}|${u.dutyStatus}|${u.headingDeg ?? ''}`).join(';');
+}
+
 /** `headings` is the tracker's resolved heading per unit id (reported `headingDeg`, else derived
  * from movement, else last known). With neither, the chevron stays in its neutral north-up pose
  * (`heading: 0`, `hasHeading: false`) — same shape for every unit, per WD-076. */
@@ -427,6 +434,8 @@ export default function FleetMap({
   // Fit the camera to the fleet once real data arrives, but never again on every 30s poll —
   // that would yank the map out from under a dispatcher who has since panned/zoomed by hand.
   const hasFitToDataRef = useRef(false);
+  // Signature of the markers last pushed into the `fleet-units` source (null = none yet).
+  const lastUnitsSignatureRef = useRef<string | null>(null);
   const unitsRef = useRef(units);
   useEffect(() => {
     unitsRef.current = units;
@@ -511,6 +520,7 @@ export default function FleetMap({
       mapRef.current = null;
       setReady(false);
       hasFitToDataRef.current = false;
+      lastUnitsSignatureRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- map is created once; data updates run through the source below
   }, []);
@@ -531,7 +541,13 @@ export default function FleetMap({
     const map = mapRef.current;
     if (!map || !ready) return;
     const source = map.getSource(SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
-    source?.setData(toFeatureCollection(units, overlayRef.current.headings));
+    // A parent re-render (a keystroke, a 30 s poll returning the same positions) hands a new array
+    // with the same markers — skip the GeoJSON rebuild + worker upload then (WB-256).
+    const signature = unitsSignature(units);
+    if (source && signature !== lastUnitsSignatureRef.current) {
+      source.setData(toFeatureCollection(units, overlayRef.current.headings));
+      lastUnitsSignatureRef.current = signature;
+    }
     // First data arrives after `load` (e.g. the initial fetch was still pending) — fit once, then
     // leave the camera alone for subsequent polls so a dispatcher's own pan/zoom is not undone.
     if (!hasFitToDataRef.current && validUnits(units).length > 0) {
@@ -565,12 +581,16 @@ export default function FleetMap({
     map.setFilter(FLASH_LAYER, ['==', ['get', 'id'], flashUnitId ?? '__none__']);
   }, [flashUnitId, ready]);
 
+  // Keyed on the selected unit's coordinates, not on `units` — a new array with the unit where it
+  // was must not restart the camera animation (WB-256).
+  const selectedUnit = selectedId ? units.find((u) => u.id === selectedId) : undefined;
+  const selectedLon = selectedUnit?.lon;
+  const selectedLat = selectedUnit?.lat;
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !ready || !selectedId) return;
-    const unit = units.find((u) => u.id === selectedId);
-    if (unit) map.easeTo({ center: [unit.lon, unit.lat], duration: 300 });
-  }, [selectedId, ready, units]);
+    if (!map || !ready || selectedLon === undefined || selectedLat === undefined) return;
+    map.easeTo({ center: [selectedLon, selectedLat], duration: 300 });
+  }, [selectedId, ready, selectedLon, selectedLat]);
 
   if (!HAS_STYLE || loadError) {
     return <MapUnavailable className={className} />;

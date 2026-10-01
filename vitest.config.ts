@@ -11,6 +11,11 @@ export default defineConfig({
     environment: './tests/setup/jsdom-native-abort.ts',
     globals: true,
     setupFiles: ['./tests/setup/vitest.setup.ts'],
+    // Tests run without a map style, whatever the developer's git-ignored `.env` holds: jsdom has
+    // no WebGL2, so a real `VITE_MAP_STYLE_URL` makes every FleetMap mount throw maplibre's
+    // GPUInitializationError (unhandled errors from dashboard/logsRangeFanOut, and FleetMap.test's
+    // fallback assertion). FleetMap.withStyle.test.tsx opts in with `vi.stubEnv` + a mocked maplibre.
+    env: { VITE_MAP_STYLE_URL: '' },
     include: [
       'src/**/*.{test,spec}.{ts,tsx}',
       'tests/{rbac,fixtures}/**/*.{test,spec}.{ts,tsx}',

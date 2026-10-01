@@ -9,14 +9,9 @@ import { typedCachePolicy } from './queryPolicy';
 import type { GeofencesListResponse } from './types';
 import type { GeofenceGeometrySource } from '@/shared/map/overlays';
 
-/** Map colour picked in overlay 11.1 — backend Prisma enum `GeofenceColour`. */
-export type GeofenceColour = 'BLUE' | 'GREEN' | 'AMBER' | 'RED' | 'VIOLET';
-
 /** The documented list row plus the optional geometry fields the map reads when present — the
- * backend's OpenAPI example has no coordinates, so none of them are guaranteed. `colour` and
- * `countAsYardMove` are always on the row (DB defaults `BLUE` / `false`). */
-export type GeofenceRow = GeofencesListResponse['items'][number] &
-  GeofenceGeometrySource & { colour?: GeofenceColour; countAsYardMove?: boolean };
+ * backend's OpenAPI example has no coordinates, so none of them are guaranteed. */
+export type GeofenceRow = GeofencesListResponse['items'][number] & GeofenceGeometrySource;
 
 export interface GeofencesResponse {
   items: GeofenceRow[];
@@ -56,10 +51,6 @@ export interface GeofencePayload {
   dwellMinutes?: number | null;
   /** B-15 — only alert outside 06:00–20:00 local (backend D-098). */
   afterHoursOnly?: boolean;
-  /** Overlay 11.1 map colour — server default `BLUE`. */
-  colour?: GeofenceColour;
-  /** Overlay 11.1 footer — time inside counts as on-duty yard move. Server default `false`. */
-  countAsYardMove?: boolean;
   enabled?: boolean;
 }
 

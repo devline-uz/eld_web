@@ -6,7 +6,7 @@ import {
   formatRelativeShort,
   formatTimeWithAge,
 } from './relative';
-import { useNowTick, useRelativeTime } from './useRelativeTime';
+import { nowTickStats, useNowTick, useRelativeTime } from './useRelativeTime';
 
 const NOW = Date.parse('2026-09-12T15:00:00.000Z');
 const ago = (ms: number) => new Date(NOW - ms).toISOString();
@@ -87,5 +87,41 @@ describe('useRelativeTime — recomputed every 30 s', () => {
     const { unmount } = renderHook(() => useNowTick());
     unmount();
     expect(clear).toHaveBeenCalled();
+  });
+
+  it('WB-254: N subscribers share one interval, started by the first and stopped by the last', () => {
+    const set = vi.spyOn(globalThis, 'setInterval');
+    const clear = vi.spyOn(globalThis, 'clearInterval');
+    const at = new Date(NOW - 60_000).toISOString();
+    const hooks = Array.from({ length: 50 }, () => renderHook(() => useRelativeTime(at, 'short')));
+
+    expect(set).toHaveBeenCalledTimes(1);
+    expect(nowTickStats()).toEqual({ intervals: 1, subscribers: 50 });
+    expect(hooks[0]!.result.current).toBe('1 min');
+
+    act(() => {
+      vi.advanceTimersByTime(RELATIVE_TICK_MS * 2);
+    });
+    for (const hook of hooks) expect(hook.result.current).toBe('2 min');
+
+    hooks.slice(1).forEach((hook) => hook.unmount());
+    expect(clear).not.toHaveBeenCalled();
+    expect(nowTickStats()).toEqual({ intervals: 1, subscribers: 1 });
+
+    hooks[0]!.unmount();
+    expect(clear).toHaveBeenCalledTimes(1);
+    expect(nowTickStats()).toEqual({ intervals: 0, subscribers: 0 });
+    set.mockRestore();
+    clear.mockRestore();
+  });
+
+  it('a subscriber mounted after an idle period reads the current time, not the last tick', () => {
+    const first = renderHook(() => useNowTick());
+    first.unmount();
+    act(() => {
+      vi.advanceTimersByTime(RELATIVE_TICK_MS * 3);
+    });
+    const later = renderHook(() => useNowTick());
+    expect(later.result.current).toBe(NOW + RELATIVE_TICK_MS * 3);
   });
 });

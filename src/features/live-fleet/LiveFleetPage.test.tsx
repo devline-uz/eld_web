@@ -2,7 +2,7 @@
 // requirement of its own) and the exact `No units are reporting` empty state.
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -11,10 +11,19 @@ import { ok, url } from '@/mocks/envelope';
 import { endpoints } from '@/shared/api/endpoints';
 import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/client';
 import { ToastProvider } from '@/shared/ui/Toast';
+import { qk } from '@/shared/api/queryKeys';
+import type { LiveFleetResponse } from '@/shared/api/liveFleet';
 import LiveFleetPage from './LiveFleetPage';
 
 vi.mock('@/shared/auth/usePermission', () => ({ usePermission: () => ({ can: () => true }) }));
-vi.mock('@/shared/realtime/useRoom', () => ({ useRoom: () => ({ joined: false }) }));
+// Records each room's handlers so a test can play a socket frame into the page.
+const roomHandlers = vi.hoisted(() => new Map<string, Record<string, (payload: unknown) => void>>());
+vi.mock('@/shared/realtime/useRoom', () => ({
+  useRoom: (room: string | null, handlers: Record<string, (payload: unknown) => void> = {}) => {
+    if (room) roomHandlers.set(room, handlers);
+    return { joined: false };
+  },
+}));
 // The real map needs WebGL + `VITE_MAP_STYLE_URL` (FleetMap.withStyle.test.tsx covers it). Here
 // a probe renders the props the page hands the map, so the layer chips have something observable.
 vi.mock('@/shared/map/FleetMap', () => ({
@@ -38,8 +47,7 @@ function LocationProbe() {
   return <output data-testid="location">{`${location.pathname}${location.search}`}</output>;
 }
 
-function renderPage(initialEntry = '/live-fleet') {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function renderPage(initialEntry = '/live-fleet', queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   return render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
@@ -326,5 +334,97 @@ describe('W-02 Live Fleet — stage 3', () => {
     renderPage('/live-fleet?unit=veh_1');
     await user.click(await screen.findByRole('button', { name: 'View logs' }, { timeout: 8000 }));
     expect(screen.getByTestId('location')).toHaveTextContent('/hos-logs?driverId=drv_1');
+  });
+});
+
+// WB-257 / WB-258 — stress-test regressions: telemetry storms, 1 000-unit fleets.
+describe('W-02 Live Fleet — performance', () => {
+  const row = (i: number) => ({
+    vehicleId: `veh_${i}`,
+    unitNumber: `#${1000 + i}`,
+    driverId: null,
+    driverName: null,
+    driverPhone: null,
+    dutyStatus: 'DRIVING',
+    speedMph: 50,
+    headingDeg: null,
+    odometerMi: null,
+    lat: 39.96,
+    lon: -82.99,
+    locationLabel: 'Columbus, OH',
+    lastSeenAt: new Date().toISOString(),
+    driveRemainingSec: null,
+    shiftEndsAt: null,
+    eldSerial: null,
+    bleState: 'CONNECTED',
+  });
+
+  it('telemetry.point is throttled: a mappable frame is patched with setQueryData, an unmappable burst refetches once', async () => {
+    let fleetRequests = 0;
+    server.use(
+      http.get(url(endpoints.live.fleet), () => {
+        fleetRequests += 1;
+        return ok({ items: [row(1), row(2)], generatedAt: new Date().toISOString() });
+      }),
+    );
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    renderPage('/live-fleet?unit=veh_1', queryClient);
+    await screen.findByRole('heading', { name: 'Unit #1001' }, { timeout: 8000 });
+    const requestsBefore = fleetRequests;
+    const telemetry = roomHandlers.get('vehicle:veh_1')!['telemetry.point']!;
+
+    // A frame with a fix patches only that unit, in place — no invalidate, no refetch.
+    act(() => telemetry({ vehicleId: 'veh_1', count: 1, latitude: 41.5, longitude: -84, speedMph: 63 }));
+    const cached = queryClient.getQueryData<LiveFleetResponse>(qk.liveFleet());
+    expect(cached?.items.find((u) => u.vehicleId === 'veh_1')).toMatchObject({ lat: 41.5, speedMph: 63 });
+    expect(invalidate).not.toHaveBeenCalled();
+
+    // Today's `{ vehicleId, count }` frames: 50 in a burst → one leading invalidate + one trailing.
+    act(() => {
+      for (let i = 0; i < 50; i += 1) telemetry({ vehicleId: 'veh_1', count: 1 });
+    });
+    expect(invalidate).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(invalidate).toHaveBeenCalledTimes(2), { timeout: 2000 });
+    await vi.waitFor(() => expect(fleetRequests).toBeGreaterThan(requestsBefore), { timeout: 4000 });
+    expect(fleetRequests - requestsBefore).toBeLessThanOrEqual(2);
+  });
+
+  it('windows the unit list above 500 rows and keeps list semantics', async () => {
+    server.use(
+      http.get(url(endpoints.live.fleet), () =>
+        ok({ items: Array.from({ length: 600 }, (_, i) => row(i)), generatedAt: new Date().toISOString() }),
+      ),
+    );
+    // jsdom lays nothing out — give the scroll container a real viewport so a window is computed.
+    const height = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(600);
+    const width = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(320);
+    renderPage();
+    expect(await screen.findByRole('button', { name: /All 600/ }, { timeout: 8000 })).toBeInTheDocument();
+    const list = await screen.findByRole('list', { name: 'Fleet units' });
+    const items = within(list).getAllByRole('listitem');
+    expect(items.length).toBeLessThan(600);
+    expect(items[0]).toHaveAttribute('aria-setsize', '600');
+    expect(items[0]).toHaveAttribute('aria-posinset', '1');
+    height.mockRestore();
+    width.mockRestore();
+  });
+
+  it('ArrowDown / End move focus through the rows', async () => {
+    server.use(
+      http.get(url(endpoints.live.fleet), () => ok({ items: [row(1), row(2), row(3)], generatedAt: new Date().toISOString() })),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    const first = await screen.findByRole('button', { name: /Unit #1001/ }, { timeout: 8000 });
+    first.focus();
+    await user.keyboard('{ArrowDown}');
+    expect(screen.getByRole('button', { name: /Unit #1002/ })).toHaveFocus();
+    await user.keyboard('{End}');
+    expect(screen.getByRole('button', { name: /Unit #1003/ })).toHaveFocus();
+    await user.keyboard('{ArrowUp}');
+    expect(screen.getByRole('button', { name: /Unit #1002/ })).toHaveFocus();
+    await user.keyboard('{Home}');
+    expect(screen.getByRole('button', { name: /Unit #1001/ })).toHaveFocus();
   });
 });

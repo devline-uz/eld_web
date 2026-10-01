@@ -442,7 +442,7 @@ export default function TripsPage() {
         </Card>
       ) : (
         <div className="grid grid-cols-[1fr_348px] gap-card-gap xl:min-h-0 xl:grid-rows-[minmax(0,1fr)]">
-          <Card padded={false} className="xl:flex xl:min-h-0 xl:flex-col">
+          <Card padded={false} className="flex flex-col xl:min-h-0">
             {trips.isLoading ? (
               <LoadingState className="p-4" />
             ) : trips.isError ? (
@@ -464,8 +464,11 @@ export default function TripsPage() {
             ) : (
               <>
                 {/* Desktop only (xl:): the trips list scrolls inside the card so the page
-                    itself never grows past the viewport — same pattern as Vehicles. */}
-                <div className="xl:min-h-0 xl:overflow-y-auto">
+                    itself never grows past the viewport — same pattern as Vehicles.
+                    flex-1 lets the table area absorb the card's spare height (the grid row is
+                    stretched by the right-rail detail card), keeping Pagination pinned to the
+                    card bottom when there are only a few rows. */}
+                <div className="flex-1 xl:min-h-0 xl:overflow-y-auto">
                   <DataTable
                     data={filteredRows}
                     columns={segment === 'SCHEDULED' ? scheduledColumns : columns}

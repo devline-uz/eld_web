@@ -133,4 +133,32 @@ describe('useRoom', () => {
     expect(socket.emit).not.toHaveBeenCalled();
     expect(socket.off).toHaveBeenCalled();
   });
+
+  it('WB-255: attaches a listener only for the events it handles, and none for a handler-less room', async () => {
+    const socket = fakeSocket();
+    vi.spyOn(RealtimeProviderModule, 'useRealtime').mockReturnValue({
+      getSocket: () => socket as never,
+      connected: true,
+      isOffline: false,
+    });
+    function Bare() {
+      useRoom('violations');
+      return null;
+    }
+
+    const { rerender, unmount } = render(<Probe room="fleet" onEvent={vi.fn()} />);
+    await waitFor(() => expect(screen.getByTestId('joined')).toHaveTextContent('true'));
+    expect(socket.on.mock.calls.map(([event]) => event)).toEqual(['trip.status_changed']);
+
+    // A new `handlers` literal on every render re-attaches nothing and never re-subscribes.
+    rerender(<Probe room="fleet" onEvent={vi.fn()} />);
+    expect(socket.on).toHaveBeenCalledTimes(1);
+    expect(socket.emit.mock.calls.filter(([event]) => event === 'subscribe')).toHaveLength(1);
+    unmount();
+
+    socket.on.mockClear();
+    render(<Bare />);
+    expect(socket.emit).toHaveBeenCalledWith('subscribe', 'violations', expect.any(Function));
+    expect(socket.on).not.toHaveBeenCalled();
+  });
 });

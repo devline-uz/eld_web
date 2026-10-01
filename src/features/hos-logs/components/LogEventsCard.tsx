@@ -19,6 +19,8 @@ import { useToast } from '@/shared/ui/Toast';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
 import { EMPTY, formatEngineHours, formatOdometer } from '@/shared/format';
+import { formatNumber } from '@/shared/format/numbers';
+import { EVENT_WINDOW, eventWindowSize } from '../eventWindow';
 import { RECORD_ORIGIN, RECORD_STATUS, type LogEventView } from '@/shared/api/hosLogs';
 import { LogRecordModal } from './LogRecordModal';
 
@@ -78,8 +80,22 @@ export function LogEventsCard({
   const [recordEvent, setRecordEvent] = useState<LogEventView | null>(null);
 
   const visible = useMemo(
-    () => (showAllRecords ? events : events.filter((event) => event.recordStatus === RECORD_STATUS.active)),
+    () =>
+      showAllRecords
+        ? events
+        : events.filter((event) => event.recordStatus === RECORD_STATUS.active),
     [events, showAllRecords],
+  );
+  const [requestedRows, setRequestedRows] = useState(EVENT_WINDOW);
+  const highlightIndex = useMemo(
+    () => (highlightedEventId ? visible.findIndex((event) => event.id === highlightedEventId) : -1),
+    [visible, highlightedEventId],
+  );
+  const shownCount = eventWindowSize(visible.length, requestedRows, highlightIndex);
+  const windowed = shownCount < visible.length;
+  const shown = useMemo(
+    () => (windowed ? visible.slice(0, shownCount) : visible),
+    [visible, windowed, shownCount],
   );
 
   useEffect(() => {
@@ -93,6 +109,8 @@ export function LogEventsCard({
       {
         id: 'time',
         header: 'TIME',
+        // Sorting a partial window would misorder the day; rows arrive in chronological order.
+        enableSorting: !windowed,
         accessorFn: (row) => row.eventDateTime,
         cell: ({ row }) => (
           <span className="tabular font-semibold">
@@ -115,7 +133,8 @@ export function LogEventsCard({
         id: 'location',
         header: 'LOCATION',
         enableSorting: false,
-        cell: ({ row }) => row.original.locationName ?? <span className="text-text-muted">{EMPTY.dash}</span>,
+        cell: ({ row }) =>
+          row.original.locationName ?? <span className="text-text-muted">{EMPTY.dash}</span>,
       },
       {
         id: 'odometer',
@@ -135,16 +154,22 @@ export function LogEventsCard({
         // B-38 (shipped) — Appendix A total engine hours; `—` only when the record has none.
         cell: ({ row }) => formatEngineHours(row.original.totalEngineHours ?? null),
       },
-      { id: 'origin', header: 'ORIGIN', enableSorting: false, cell: ({ row }) => originCell(row.original) },
+      {
+        id: 'origin',
+        header: 'ORIGIN',
+        enableSorting: false,
+        cell: ({ row }) => originCell(row.original),
+      },
       {
         id: 'notes',
         header: 'NOTES',
         enableSorting: false,
         cell: ({ row }) =>
-          row.original.annotation ?? row.original.comment ?? <span className="text-text-muted">{EMPTY.dash}</span>,
+          row.original.annotation ??
+          row.original.comment ?? <span className="text-text-muted">{EMPTY.dash}</span>,
       },
     ],
-    [timezone],
+    [timezone, windowed],
   );
 
   return (
@@ -179,44 +204,65 @@ export function LogEventsCard({
             onRetry={onRetry}
           />
         ) : (
-          <DataTable<LogEventView>
-            data={visible}
-            columns={columns}
-            getRowId={(row) => row.id}
-            caption="Log events for this RODS day"
-            rowClassName={(row) =>
-              cn(
-                row.recordStatus === RECORD_STATUS.superseded && 'line-through text-text-muted opacity-70',
-                row.recordStatus === RECORD_STATUS.rejected && 'line-through text-text-muted opacity-70',
-                row.recordStatus === RECORD_STATUS.proposed && 'bg-info-soft',
-                row.id === highlightedEventId && 'bg-primary-soft',
-              )
-            }
-            rowActions={
-              can('hosEdit', 'FULL')
-                ? (row) => (
-                    <RowMenu
-                      onRequestEdit={() => onRequestEdit(row)}
-                      onCopyId={() => {
-                        void navigator.clipboard?.writeText(row.id);
-                        toast({ kind: 'success', title: 'Event ID copied' });
-                      }}
-                      onViewRecord={() => setRecordEvent(row)}
-                    />
-                  )
-                : undefined
-            }
-            emptyState={
-              <EmptyState
-                title={EMPTY_STATE_COPY.hosLogsDay.title}
-                description={EMPTY_STATE_COPY.hosLogsDay.description}
-              />
-            }
-          />
+          <>
+            <DataTable<LogEventView>
+              data={shown}
+              columns={columns}
+              getRowId={(row) => row.id}
+              caption="Log events for this RODS day"
+              rowClassName={(row) =>
+                cn(
+                  row.recordStatus === RECORD_STATUS.superseded &&
+                    'line-through text-text-muted opacity-70',
+                  row.recordStatus === RECORD_STATUS.rejected &&
+                    'line-through text-text-muted opacity-70',
+                  row.recordStatus === RECORD_STATUS.proposed && 'bg-info-soft',
+                  row.id === highlightedEventId && 'bg-primary-soft',
+                )
+              }
+              rowActions={
+                can('hosEdit', 'FULL')
+                  ? (row) => (
+                      <RowMenu
+                        onRequestEdit={() => onRequestEdit(row)}
+                        onCopyId={() => {
+                          void navigator.clipboard?.writeText(row.id);
+                          toast({ kind: 'success', title: 'Event ID copied' });
+                        }}
+                        onViewRecord={() => setRecordEvent(row)}
+                      />
+                    )
+                  : undefined
+              }
+              emptyState={
+                <EmptyState
+                  title={EMPTY_STATE_COPY.hosLogsDay.title}
+                  description={EMPTY_STATE_COPY.hosLogsDay.description}
+                />
+              }
+            />
+            {windowed && (
+              <div className="flex items-center justify-center gap-3 border-t border-border pt-3">
+                <span role="status" className="text-caption tabular-nums text-text-muted">
+                  {`Showing ${formatNumber(shownCount)} of ${formatNumber(visible.length)} events`}
+                </span>
+                <Button
+                  variant="secondary"
+                  onClick={() => setRequestedRows(shownCount + EVENT_WINDOW)}
+                >
+                  Show more events
+                </Button>
+              </div>
+            )}
+          </>
         )}
       </div>
       {recordEvent && (
-        <LogRecordModal event={recordEvent} timezone={timezone} onClose={() => setRecordEvent(null)} />
+        <LogRecordModal
+          event={recordEvent}
+          timezone={timezone}
+          onClose={() => setRecordEvent(null)}
+        />
       )}
     </Card>
   );

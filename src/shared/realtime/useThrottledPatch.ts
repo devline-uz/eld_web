@@ -36,3 +36,27 @@ export function useThrottledPatch<TData, TPayload>(
 
   return throttled;
 }
+
+/**
+ * The fallback when a high-frequency frame cannot be mapped onto cached data: at most one
+ * `invalidateQueries(queryKey)` per `ms` window (default 200), and `cancelRefetch: false` so a
+ * burst never aborts the in-flight refetch and starts a new one — one request, not a storm.
+ */
+export function useThrottledInvalidate(queryKey: QueryKey, ms = 200): () => void {
+  const queryClient = useQueryClient();
+  const keySignature = JSON.stringify(queryKey);
+
+  const throttled = useMemo(
+    () =>
+      throttle<QueryKey>((key) => {
+        void queryClient.invalidateQueries({ queryKey: key }, { cancelRefetch: false });
+      }, ms),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keySignature is queryKey's content equality (see useThrottledPatch)
+    [keySignature, ms, queryClient],
+  );
+
+  useEffect(() => () => throttled.cancel(), [throttled]);
+
+  // `throttle` treats an `undefined` argument as "nothing pending", so the key itself is the arg.
+  return useMemo(() => () => throttled(JSON.parse(keySignature) as QueryKey), [throttled, keySignature]);
+}

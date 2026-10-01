@@ -1,31 +1,23 @@
 // owner: web-dashboard-fleet — W-01 `Duty status · now` donut (web/tz.md §10 W-01).
-// Recharts, lazy-loaded alongside the rest of the Dashboard's own chunk (§16.3 rule 2).
-import { Cell, Pie, PieChart, Tooltip } from 'recharts';
+// WB-257 — a hand-written SVG ring: Recharts (97 KB gzip) was loaded for this one chart. Four
+// stroked circles, each drawing its share of the ring with `stroke-dasharray`; colours are the
+// duty-status palette tokens (web-design-tokens: Driving success · On-duty danger · Sleeper
+// violet · Off-duty neutral). The legend buttons below stay the keyboard/AT path.
 import type { DutyStatus } from '@/shared/ui/Badge';
 import { DutyBadge } from '@/shared/ui/Badge';
 import type { LiveFleetUnit } from '@/shared/api/liveFleet';
 import { formatPercent } from '@/shared/format/numbers';
 import { allocatePercents } from '../lib/allocatePercents';
 import { dutyLegendLabel } from '../lib/dutyLegendLabel';
+import { CIRCUMFERENCE, DONUT_RADIUS, DONUT_SIZE, DONUT_THICKNESS, donutArcs } from '../lib/donutArcs';
 
 const SEGMENTS: DutyStatus[] = ['DRIVING', 'ON_DUTY', 'SLEEPER', 'OFF_DUTY'];
 
-function token(name: string, fallback: string): string {
-  if (typeof window === 'undefined') return fallback;
-  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  return value || fallback;
-}
-
-const SEGMENT_TOKEN: Record<DutyStatus, string> = {
-  DRIVING: '--color-success',
-  ON_DUTY: '--color-danger',
-  SLEEPER: '--color-violet',
-  OFF_DUTY: '--color-neutral',
-  YARD_MOVE: '--color-danger',
-  PERSONAL_CONVEYANCE: '--color-neutral',
-  ELD_OFFLINE: '--color-danger',
-  IDLE: '--color-warning',
-  INACTIVE: '--color-neutral',
+const SEGMENT_COLOR: Partial<Record<DutyStatus, string>> = {
+  DRIVING: 'var(--color-success)',
+  ON_DUTY: 'var(--color-danger)',
+  SLEEPER: 'var(--color-violet)',
+  OFF_DUTY: 'var(--color-neutral)',
 };
 
 export default function DutyDonut({
@@ -52,28 +44,43 @@ export default function DutyDonut({
     return <p className="py-8 text-center text-body text-text-muted">No drivers reporting</p>;
   }
 
+  const labels = counted.map((s, index) => dutyLegendLabel(s.status, s.count, percents[index] ?? 0));
+
   return (
     // Desktop-only +50px so this card keeps pace with the `Live fleet` map preview beside it
     // (both grow by the same 50px at `xl:`); mobile and tablet stay exactly as they were.
     <div className="flex flex-col items-center gap-4 xl:pb-duty-donut-xl-pad">
       <div className="relative">
-        <PieChart width={180} height={180}>
-          <Pie
-            data={counted}
-            dataKey="count"
-            nameKey="status"
-            innerRadius={58}
-            outerRadius={78}
-            paddingAngle={1}
-            onClick={(entry) => onSegmentClick?.((entry as { status: DutyStatus }).status)}
-            cursor={onSegmentClick ? 'pointer' : undefined}
-          >
-            {counted.map((s) => (
-              <Cell key={s.status} fill={token(SEGMENT_TOKEN[s.status], 'gray')} />
+        <svg
+          role="img"
+          aria-label={`Duty status now: ${labels.join('; ')}`}
+          width={DONUT_SIZE}
+          height={DONUT_SIZE}
+          viewBox={`0 0 ${DONUT_SIZE} ${DONUT_SIZE}`}
+          className="block"
+        >
+          <g transform={`rotate(-90 ${DONUT_SIZE / 2} ${DONUT_SIZE / 2})`}>
+            {donutArcs(counted).map((arc) => (
+              <circle
+                key={arc.status}
+                cx={DONUT_SIZE / 2}
+                cy={DONUT_SIZE / 2}
+                r={DONUT_RADIUS}
+                fill="none"
+                stroke={SEGMENT_COLOR[arc.status]}
+                strokeWidth={DONUT_THICKNESS}
+                strokeDasharray={`${arc.length} ${CIRCUMFERENCE - arc.length}`}
+                strokeDashoffset={-arc.offset}
+                onClick={onSegmentClick ? () => onSegmentClick(arc.status) : undefined}
+                className={onSegmentClick ? 'cursor-pointer' : undefined}
+                data-testid="duty-donut-segment"
+                data-status={arc.status}
+              >
+                <title>{labels[SEGMENTS.indexOf(arc.status)]}</title>
+              </circle>
             ))}
-          </Pie>
-          <Tooltip formatter={(value: number, _name, entry) => [value, (entry.payload as { status: DutyStatus }).status]} />
-        </PieChart>
+          </g>
+        </svg>
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
           <span className="tabular-nums text-kpi font-semibold text-text">{onDuty}</span>
           <span className="text-caption text-text-muted">on duty</span>
@@ -87,7 +94,7 @@ export default function DutyDonut({
             onClick={() => onSegmentClick?.(s.status)}
             // Stage 3 — the visible pieces (badge, count, percent) otherwise run together as one
             // unseparated accessible name; give the row a real sentence instead.
-            aria-label={dutyLegendLabel(s.status, s.count, percents[index] ?? 0)}
+            aria-label={labels[index]}
             className="flex items-center justify-between text-body"
           >
             <DutyBadge status={s.status} />

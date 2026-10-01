@@ -196,7 +196,8 @@ describe('W-08 · 24-hour graph grid', () => {
     } as DOMRect);
 
     await userEvent.pointer({ target: plot, coords: { clientX: 480, clientY: 60 } });
-    expect(screen.getByTestId('hos-hover-indicator')).toBeInTheDocument();
+    // WB-255 — the lookup runs on the next animation frame, not synchronously in mousemove.
+    expect(await screen.findByTestId('hos-hover-indicator')).toBeInTheDocument();
     expect(screen.getByTestId('hos-tooltip').textContent).toContain('1.04 mi W of Harrisburg, OH');
 
     await userEvent.click(plot);

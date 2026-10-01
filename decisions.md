@@ -1377,3 +1377,27 @@ ends the fetch much sooner.
 **Options.** (a) `colour String @default("BLUE")`; (b) a Prisma enum `GeofenceColour`.
 **Choice.** (b), `BLUE|GREEN|AMBER|RED|VIOLET`, matching `geofenceSchema.colour` and `GeofenceType`'s style. The web maps each value to a design token in `FleetMap.tsx`; hex values stay out of the API.
 **Why.** The map can only resolve these five to tokens, so an enum rejects anything else at the DTO (422) instead of storing a colour no screen can draw. A new colour means a migration plus a token, on purpose.
+
+## WD-097 — Long tables: `useVirtualRows` + spacer rows inside a real `<table>`, above 500 rows (2026-09-30, perf pass)
+**Problem.** §16 says to virtualise above 500 rows, but §A11y requires a real `<table>` with `<th scope>`, and absolute-positioned virtual rows break table layout.
+**Options.** (a) A div grid with ARIA table roles. (b) A real `<table>` whose off-screen rows are replaced by one top and one bottom spacer `<tr>`.
+**Choice.** (b), as the shared `useVirtualRows` / `SpacerRow` in `shared/ui/virtualRows.tsx`. It is enabled only when the count is above 500, and it sets `aria-rowcount` / `aria-rowindex`. Used by the audit log (WB-255). Live fleet's list reuses the same helper with `aria-setsize` / `aria-posinset` (WB-262).
+**Why.** Column widths, sticky headers and screen-reader table navigation keep working. Short lists render exactly as before.
+
+## WD-098 — HOS events: a stepped window, not virtualization (2026-09-30, perf pass)
+**Problem.** `LogEventsCard` renders through the shared `DataTable`, which has no virtual mode.
+**Options.** (a) Add a virtual mode to `DataTable` now. (b) Fork the table for this card. (c) Window the rows before they reach `DataTable`: 250 at a time plus `Show more events`, above 500 events.
+**Choice.** (c), via `hos-logs/eventWindow.ts`.
+**Why.** There is no second `DataTable`, and no shared-component rewrite in a perf pass. Sort, selection and print keep working. **Follow-up:** add a virtual mode to `DataTable` and move this card onto it.
+
+## WD-099 — Dashboard: SVG duty donut; the map mounts when it becomes visible (2026-09-30, perf pass)
+**Problem.** Recharts (~120 KB budget) was loaded for one donut, and MapLibre loaded on first paint although the preview sits below the fold.
+**Options.** Keep them and lazy-load the chunk / hand-draw the donut and defer the map.
+**Choice.** `DutyDonut` is plain SVG arcs (`dashboard/lib/donutArcs.ts`). The map preview is wrapped in `LazyOnVisible`.
+**Why.** A donut is a few `<path>`s, so a chart library is not worth its chunk. Deferring the map keeps the cold dashboard under §16's budget. The recharts chunk is gone from the build.
+
+## WD-100 — `telemetry.point`: throttled invalidate until the frame carries a position (2026-09-30, perf pass)
+**Problem.** §16 prefers `setQueryData` patches, but the backend frame is `{ vehicleId, count }`, with nothing to patch.
+**Options.** (a) Invalidate the fleet query on every frame (the old behaviour). (b) Patch only, and ignore position-less frames. (c) Patch when a position is present, and otherwise run a throttled invalidate.
+**Choice.** (c). `useThrottledPatch` handles frames with a position. `useThrottledInvalidate` handles the rest, at most once per 200 ms with `cancelRefetch: false`.
+**Why.** It is correct today and cheap under bursts. It becomes a pure patch the day the backend adds lat/lon, with no web change needed.

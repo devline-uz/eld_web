@@ -2783,3 +2783,54 @@ Approach: WD-079. Gap ids: B-84…B-91 (`backend-gaps.md`, "Stage 2 — Settings
 ## WB-253 · Create a geofence (11.1): `Colour` and `Count time inside as on-duty yard move` were never saved — ✅ fixed 2026-09-27
 **Found:** the modal drew both controls and kept them in the form, but `GeofencePayload`, the `onSave` payload, the backend DTOs and the `Geofence` table had no such fields, so every geofence was stored without them and the map always drew the default blue. **Severity:** medium (user input silently dropped).
 **Fix:** backend — Prisma enum `GeofenceColour` (`BLUE|GREEN|AMBER|RED|VIOLET`) + `Geofence.colour @default(BLUE)` and `Geofence.countAsYardMove @default(false)`, additive migration `20260927120000_geofence_colour_and_yard_move`; both fields on `CreateGeofenceDto` (defaulted) / `UpdateGeofenceDto` (optional) and in every geofence response. Web — `GeofenceColour` type, both fields on `GeofencePayload` / `GeofenceRow`, sent from `CreateGeofenceModal.tsx`. The map already colours fences from `colour` (`FleetMap.tsx` `geofenceColourExpression`). No edit flow exists (`useUpdateGeofence` has no caller), so nothing to prefill. Tests: `CreateGeofenceModal.test.tsx` (defaults on the wire + picked colour/yard move), backend `geofences.service.spec.ts` (5 new).
+
+## WB-254 · Tests: Radix DropdownMenu snapped shut in Vitest (jsdom 30 fake window blur); maplibre "WebGL2 required" noise — ✅ fixed 2026-09-30
+- **Found:** full `npx vitest run` showed 64 failed tests and 2 unhandled errors. jsdom 30 dispatches a synthetic `blur` on `window` when focus moves, and Radix `DropdownMenu` treats that as "focus left the page" and closes before the item click lands. The 2 errors were maplibre throwing `WebGL2 is required` whenever a real `VITE_MAP_STYLE_URL` from the local `.env` reached a `FleetMap` mount in jsdom. **Severity:** high (the test gate was red and did not reflect the code).
+- **Fix:** `tests/setup/vitest.setup.ts` suppresses the fake window blur. `vitest.config.ts` sets `test.env.VITE_MAP_STYLE_URL = ''`, so the map takes its no-style path in tests. The last 2 failures (HosLogsPage 11.11, `textbox "Location"`) were stale queries: with a map key the Location field is the B-39 geocoded combobox. `HosLogsPage.test.tsx` now mocks `@/shared/map/geocode` (enabled, no results), as `RequestLogEditModal.test.tsx` does, and queries `combobox`. The name-only payload assertion is kept, and a no-`lat` check was added.
+- **Result:** 155 files, 1973 passed, 1 skipped, 0 failed, 0 errors.
+
+## WB-255 · Audit log rendered every row — ✅ fixed 2026-09-30
+- **Found:** perf review. `AuditLogPage` put every loaded row into the DOM. **Severity:** medium (§16: virtualise above 500 rows).
+- **Fix:** a new shared `useVirtualRows` + `SpacerRow` in `shared/ui/virtualRows.tsx` (TanStack Virtual). It windows only above 500 rows and keeps the real `<table>` with `aria-rowcount` / `aria-rowindex`. Tests are in `AuditLogPage.test.tsx`.
+
+## WB-256 · HOS 24-hour grid: linear find + `Date.parse` on every mousemove, and the whole grid re-rendered — ✅ fixed 2026-09-30
+- **Found:** perf review of `GraphGrid.tsx`. Each hover scanned every segment and re-parsed its timestamps, then re-rendered the plot. **Severity:** medium (§16 grid < 50 ms).
+- **Fix:** `segmentLookupOf` / `findSegmentAt` in `grid.ts` pre-parse once and binary-search. The plot is split into a memoised `StaticPlot` and a rAF-batched `HoverPlot`. Tests are in `grid.test.ts` and `GraphGrid.test.tsx`.
+
+## WB-257 · HOS events card rendered every event — ✅ fixed 2026-09-30
+- **Found:** perf review of `LogEventsCard.tsx`. **Severity:** medium.
+- **Fix:** above 500 events the card shows a stepped window (`eventWindow.ts`): 250 rows at a time plus `Show more events`. A grid click on an event outside the window still reveals and highlights it. Tests are in `LogEventsCard.test.tsx`. See WD-098.
+
+## WB-258 · Dashboard loaded MapLibre eagerly and Recharts for a single donut — ✅ fixed 2026-09-30
+- **Found:** bundle review. The dashboard pulled the maplibre chunk on first paint and the whole recharts chunk for one donut. **Severity:** medium (§16 dashboard cold < 2.5 s).
+- **Fix:** the map preview mounts through the new `shared/ui/LazyOnVisible.tsx` (IntersectionObserver). `DutyDonut.tsx` is hand-made SVG, with the arc maths in `dashboard/lib/donutArcs.ts`. The recharts chunk is gone from the build. Tests are in `DutyDonut.test.tsx` and `DashboardPage.test.tsx`.
+
+## WB-259 · `useNowTick` created one interval per row — ✅ fixed 2026-09-30
+- **Found:** perf review of `shared/format/useRelativeTime.ts`. Every relative-time cell started its own `setInterval`. **Severity:** low.
+- **Fix:** one module-level ticker that starts with the first subscriber and stops with the last, read via `useSyncExternalStore`. Tests are in `relative.test.ts`.
+
+## WB-260 · `useRoom` attached every event listener regardless of room — ✅ fixed 2026-09-30
+- **Found:** review of `shared/realtime/useRoom.ts`. Every socket event got a listener in every room that was joined. **Severity:** low.
+- **Fix:** only events that have a handler are attached. Subscribing and unsubscribing to the room is a separate effect, so a handler change no longer re-joins. Tests are in `useRoom.test.tsx`.
+
+## WB-261 · Live fleet map re-uploaded all markers and re-ran `easeTo` on every render — ✅ fixed 2026-09-30
+- **Found:** perf review of `FleetMap.tsx` / `LiveFleetPage.tsx`. **Severity:** medium (§16: 69 markers < 1.5 s).
+- **Fix:** `mapUnits` is memoized. `unitsSignature()` skips `setData` when nothing drawn changed. `easeTo` is keyed on the selected unit's coordinates. Tests are in `FleetMap.withStyle.test.tsx`.
+
+## WB-262 · Live fleet re-rendered the whole page every second and every row on every keystroke — ✅ fixed 2026-09-30
+- **Found:** perf review of `LiveFleetPage.tsx`. **Severity:** medium.
+- **Fix:** the per-second "refreshed" label is its own `RefreshedSubtitle`. `UnitListRow` is `memo` with a stable `onSelect`. The list windows above 500 rows with `useVirtualRows` (WB-255). Tests are in `UnitListRow.test.tsx` and `LiveFleetPage.test.tsx`.
+
+## WB-263 · Each `telemetry.point` frame refetched the whole fleet — ✅ fixed 2026-09-30
+- **Found:** review of the live fleet realtime path. **Severity:** medium (§16 WS→UI < 200 ms, `setQueryData` patches).
+- **Fix:** `live-fleet/lib/telemetryPatch.ts`. A frame with a position is patched into the cache via `useThrottledPatch`. Otherwise it falls back to `useThrottledInvalidate`, which runs at most once per 200 ms with `cancelRefetch: false`. The backend frame today is `{ vehicleId, count }`, with no position, so the fallback is the live path. Tests are in `telemetryPatch.test.ts` and `useThrottledPatch.test.tsx`. See WD-100.
+- **Follow-up (not done), found during this perf pass (2026-09-30):**
+  - `HosLogsPage` listens for `eld.events_ingested` on `driver:{id}`, but the backend emits it to `vehicle:{id}`, so the frame never arrives. The page relies on polling.
+  - `DashboardPage` listens for `safety.event_created` on `violations`, but the backend emits nothing to that room.
+  - `FILTER_WINDOW = 1000` in `shared/api/lookups.ts` silently truncates filtered views for fleets larger than 1000. This needs server-side filters.
+  - The maplibre budget has 4 KB of headroom (421.0 / 425.0 KB gzip).
+  - `recharts` is no longer imported but is still in `package.json` dependencies. Remove it, then drop its budget line.
+
+## WB-264 · Trips pagination floated up under the last row instead of sitting at the card bottom — ✅ fixed 2026-09-30
+- **Found:** manual review of `/trips` with few rows. **Severity:** low (layout).
+- **Fix:** the right-rail detail card stretches the shared grid row, so the Trips card is taller than its content. `TripsPage.tsx` now makes the card `flex flex-col` at every width and gives the table wrapper `flex-1`, so the table area absorbs the spare height and `Pagination` sits at the bottom. Shared `DataTable`/`Pagination` are unchanged; no other page is affected.
