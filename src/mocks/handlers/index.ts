@@ -15,6 +15,7 @@ import { settingsAdminHandlers } from './settingsAdminGaps';
 import { hosWriteHandlers } from './hosWrites';
 import { safetyDataHandlers } from './safetyData';
 import { phase13Handlers } from './phase13';
+import { vehicleGroupHandlers } from './vehicleGroups';
 
 // `vehiclesDriversGapHandlers` registers static paths (`/drivers/roster`) that must be matched
 // BEFORE `fleetHandlers`' `/drivers/:id` — MSW is first-match-wins and `:id` happily captures the
@@ -34,6 +35,8 @@ export const handlers = [
   // Backend Phase 13 (2026-09-24) — static `/vehicles/bulk-status`, `/dvir/compliance`,
   // `/integrations/catalog` must beat the `:id` / `:provider` handlers below (WB-016).
   ...phase13Handlers,
+  // Backend D-107 (2026-09-25) — `/vehicle-groups`.
+  ...vehicleGroupHandlers,
   // `/drivers/roster` is a STATIC path and must beat `fleetWriteHandlers`' `/drivers/:id`, which
   // otherwise captures the literal segment "roster" (WB-016).
   ...vehiclesDriversGapHandlers,
@@ -54,6 +57,7 @@ export const handlers = [
   ...fleetHandlers,
 ];
 export {
+  vehicleGroupHandlers,
   authHandlers,
   dashboardHandlers,
   fleetHandlers,

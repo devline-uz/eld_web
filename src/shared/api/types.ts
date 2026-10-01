@@ -1,5 +1,5 @@
 // GENERATED FILE — do not edit by hand.
-// Source: backend/docs/openapi.json (183 paths, 233 typed operations).
+// Source: backend/docs/openapi.json (187 paths, 240 typed operations).
 // Regenerate: npm run gen:types   (scripts/generate-api-types.mjs)
 //
 // The backend documents payloads as OpenAPI examples, so these shapes are inferred structurally.
@@ -863,6 +863,76 @@ export type TrailersImportResponse = {
   imported: number;
   updated: number;
   failed: unknown[];
+};
+
+/** GET /api/vehicle-groups */
+export type VehicleGroupsListResponse = {
+  items: Array<{
+    id: string;
+    name: string;
+    description: string;
+    color: string;
+    vehicleCount: number;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+};
+
+/** POST /api/vehicle-groups */
+export type VehicleGroupsCreateResponse = {
+  id: string;
+  name: string;
+  description: string;
+  color: string;
+  vehicleCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** GET /api/vehicle-groups/{id} */
+export type VehicleGroupsGetResponse = {
+  id: string;
+  name: string;
+  description: string;
+  color: string;
+  vehicleCount: number;
+  createdAt: string;
+  updatedAt: string;
+  vehicles: Array<{
+    id: string;
+    unitNumber: string;
+    vin: string;
+    make: string;
+    model: string;
+    status: string;
+  }>;
+};
+
+/** PATCH /api/vehicle-groups/{id} */
+export type VehicleGroupsUpdateResponse = {
+  id: string;
+  name: string;
+  description: string;
+  color: string;
+  vehicleCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** DELETE /api/vehicle-groups/{id} */
+export type VehicleGroupsRemoveResponse = {
+  success: boolean;
+};
+
+/** PUT /api/vehicle-groups/{id}/vehicles */
+export type VehicleGroupsSetMembersResponse = {
+  id: string;
+  name: string;
+  description: string;
+  color: string;
+  vehicleCount: number;
+  createdAt: string;
+  updatedAt: string;
 };
 
 /** GET /api/alert-rules */
@@ -2347,6 +2417,15 @@ export type ReportsIftaResponse = {
   status: string;
 };
 
+/** GET /api/reports/ifta/jurisdictions */
+export type ReportsIftaJurisdictionsResponse = {
+  items: Array<{
+    code: string;
+    name: string;
+    country: string;
+  }>;
+};
+
 /** GET /api/reports/ifta/summary */
 export type ReportsIftaSummaryResponse = {
   quarter: string;
@@ -2512,6 +2591,12 @@ export interface ApiOperations {
   'PATCH /api/trailers/{id}': TrailersUpdateResponse;
   'DELETE /api/trailers/{id}': TrailersRemoveResponse;
   'POST /api/trailers/import': TrailersImportResponse;
+  'GET /api/vehicle-groups': VehicleGroupsListResponse;
+  'POST /api/vehicle-groups': VehicleGroupsCreateResponse;
+  'GET /api/vehicle-groups/{id}': VehicleGroupsGetResponse;
+  'PATCH /api/vehicle-groups/{id}': VehicleGroupsUpdateResponse;
+  'DELETE /api/vehicle-groups/{id}': VehicleGroupsRemoveResponse;
+  'PUT /api/vehicle-groups/{id}/vehicles': VehicleGroupsSetMembersResponse;
   'GET /api/alert-rules': AlertRulesListResponse;
   'POST /api/alert-rules': AlertRulesCreateResponse;
   'GET /api/alert-rules/{id}': AlertRulesGetResponse;
@@ -2656,6 +2741,7 @@ export interface ApiOperations {
   'POST /api/reports/schedules': ReportsCreateScheduleResponse;
   'PATCH /api/reports/schedules/{id}': ReportsUpdateScheduleResponse;
   'GET /api/reports/ifta': ReportsIftaResponse;
+  'GET /api/reports/ifta/jurisdictions': ReportsIftaJurisdictionsResponse;
   'GET /api/reports/ifta/summary': ReportsIftaSummaryResponse;
   'GET /api/reports/activity': ReportsActivityResponse;
   'GET /api/reports/activity/summary': ReportsActivitySummaryResponse;

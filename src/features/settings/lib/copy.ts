@@ -110,8 +110,6 @@ export const SETTINGS_REASON = {
   diagnosticsOptInTooltip: 'The register-device API has no diagnostics field',
   /** B-89 — no marketplace/catalogue endpoint or URL. */
   marketplace: 'The integration marketplace is not available yet.',
-  /** Catalogue entries with no provider on `PUT /integrations/:provider`. */
-  providerUnavailable: 'Not yet available — this provider has no connector yet.',
 } as const;
 
 /**
@@ -125,8 +123,6 @@ export const INTEGRATION_STATUS = {
   /** WB-251 — a webhook row connected before the fix, with no endpoint URL: nothing is delivered. */
   webhookNoEndpoint: 'Connected · no endpoint set',
   notConnected: 'Not connected',
-  /** Catalogue entries with no provider on `PUT /integrations/:provider` — the reason the Connect button is disabled. */
-  noConnector: SETTINGS_REASON.providerUnavailable,
 } as const;
 
 /** WB-251 — the Custom webhook modal (connect / configure). */
