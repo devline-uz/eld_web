@@ -1,5 +1,5 @@
-// 11.11 Request a log edit — the geocoded Location field (B-39). The geocoder is mocked; the
-// no-key fallback (read-only, never sent) is covered by HosLogsPage.test.tsx.
+// 11.11 Request a log edit — the geocoded Location field (B-39). The geocoder is mocked;
+// HosLogsPage.test.tsx covers the page-level payload with a geocoder that finds nothing.
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
