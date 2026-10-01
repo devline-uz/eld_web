@@ -1,8 +1,8 @@
 // web/tz.md §10 W-01 — KPI row, Live fleet card, Duty status donut, HOS violations table, and the
 // per-card error state for the still-missing `GET /violations` (gap B-6).
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { http } from 'msw';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -244,7 +244,10 @@ describe('W-01 Fleet Dashboard', () => {
 
     // the segment donut and the "Open map view" link both render with live data present.
     expect(screen.getByText('Open map view')).toBeInTheDocument();
-    expect(await screen.findByText('Map preview unavailable', {}, { timeout: 8000 })).toBeInTheDocument();
+    // WB-257 — jsdom has no IntersectionObserver, so the map chunk (MapLibre) is never requested;
+    // the same-size placeholder holds the slot. `mounts the map once the card scrolls into view`
+    // below covers the visible path.
+    expect(screen.queryByText('Map preview unavailable')).not.toBeInTheDocument();
     expect(await screen.findByText('on duty', {}, { timeout: 8000 })).toBeInTheDocument();
     await user.click(screen.getAllByText('Driving')[0]!);
     await user.click(screen.getByText('View all ›'));
@@ -253,6 +256,52 @@ describe('W-01 Fleet Dashboard', () => {
     // the second row has no driverId — its menu carries the extra "Assign to driver" item.
     await user.click(rowMenus[1]!);
     expect(await screen.findByText('Assign to driver', {}, { timeout: 8000 })).toBeInTheDocument();
+  });
+
+  // WB-257 — the MapLibre chunk is requested only once the Live fleet card nears the viewport.
+  it('mounts the map preview only once the card scrolls into view', async () => {
+    const observers: { cb: IntersectionObserverCallback; observed: Element[] }[] = [];
+    vi.stubGlobal(
+      'IntersectionObserver',
+      class {
+        observed: Element[] = [];
+        constructor(cb: IntersectionObserverCallback) {
+          observers.push({ cb, observed: this.observed });
+        }
+        observe(el: Element) {
+          this.observed.push(el);
+        }
+        disconnect() {}
+        unobserve() {}
+        takeRecords() {
+          return [];
+        }
+      },
+    );
+    onTestFinished(() => {
+      vi.unstubAllGlobals();
+    });
+    server.use(
+      http.get(url(endpoints.dashboard.summary), () =>
+        ok(buildSummary({ liveFleet: { items: [{ vehicleId: 'v1', unitNumber: '#101', dutyStatus: 'DRIVING', lat: 40, lon: -83 }] } })),
+      ),
+      violationsPage([]),
+    );
+    renderPage();
+    expect(await screen.findByText('on duty', {}, { timeout: 8000 })).toBeInTheDocument();
+    expect(screen.queryByText('Map preview unavailable')).not.toBeInTheDocument();
+    const observer = await waitFor(() => {
+      const found = observers.find((o) => o.observed.length > 0);
+      expect(found).toBeDefined();
+      return found!;
+    });
+    act(() => {
+      observer.cb(
+        [{ isIntersecting: true, target: observer.observed[0]! } as unknown as IntersectionObserverEntry],
+        {} as IntersectionObserver,
+      );
+    });
+    expect(await screen.findByText('Map preview unavailable', {}, { timeout: 8000 })).toBeInTheDocument();
   });
 
   describe('HOS violations & alerts · row menu', () => {

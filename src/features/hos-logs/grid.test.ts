@@ -2,6 +2,8 @@
 // FMCSA inspector reads off the screen, so every one of them is pinned.
 import { describe, expect, it } from 'vitest';
 import {
+  findSegmentAt,
+  segmentLookupOf,
   COLUMN_LABELS,
   DRIVING_LIMIT_SEC,
   GRID,
@@ -372,5 +374,56 @@ describe('unassignedInDay (WB-057 / WB-058)', () => {
     const lastHour = seg(iso(start + 24.5 * 3_600_000), iso(start + 24.75 * 3_600_000));
     expect(unassignedInDay([lastHour], start, 90_000)).toEqual([lastHour]);
     expect(unassignedInDay([lastHour], start, 86_400)).toEqual([]);
+  });
+});
+
+// WB-255 — the mousemove lookup: parsed once, binary search, same answer as the old linear find.
+describe('segment hover lookup (findSegmentAt)', () => {
+  const T = (hhmm: string) => `2026-09-10T${hhmm}:00.000Z`;
+  const segs = [
+    { startAt: T('00:00'), endAt: T('06:00') },
+    { startAt: T('06:00'), endAt: T('06:30') },
+    { startAt: T('06:30'), endAt: T('17:00') },
+    { startAt: T('17:00'), endAt: T('23:59') },
+  ];
+  const lookup = segmentLookupOf(segs);
+  const at = (hhmm: string) => findSegmentAt(lookup, Date.parse(T(hhmm)));
+  const linear = (t: number) => segs.findIndex((s) => Date.parse(s.startAt) <= t && Date.parse(s.endAt) >= t);
+
+  it('finds the covering segment inside a segment', () => {
+    expect(at('03:00')).toBe(0);
+    expect(at('06:15')).toBe(1);
+    expect(at('12:00')).toBe(2);
+    expect(at('20:00')).toBe(3);
+  });
+
+  it('on a shared boundary the earlier segment wins, like the linear find', () => {
+    expect(at('06:00')).toBe(0);
+    expect(at('06:30')).toBe(1);
+    expect(at('17:00')).toBe(2);
+  });
+
+  it('first start and last end are inclusive; outside the timeline is -1', () => {
+    expect(at('00:00')).toBe(0);
+    expect(at('23:59')).toBe(3);
+    expect(findSegmentAt(lookup, Date.parse(T('23:59')) + 1)).toBe(-1);
+    expect(findSegmentAt(lookup, Date.parse(T('00:00')) - 1)).toBe(-1);
+    expect(findSegmentAt(segmentLookupOf([]), Date.parse(T('12:00')))).toBe(-1);
+  });
+
+  it('returns original indexes for unsorted input and -1 inside a gap', () => {
+    const unsorted = [segs[2]!, segs[0]!, { startAt: T('07:00'), endAt: T('08:00') }];
+    const gap = segmentLookupOf([segs[0]!, { startAt: T('07:00'), endAt: T('08:00') }]);
+    expect(findSegmentAt(segmentLookupOf(unsorted), Date.parse(T('01:00')))).toBe(1);
+    expect(findSegmentAt(gap, Date.parse(T('06:30')))).toBe(-1);
+    expect(findSegmentAt(gap, Date.parse(T('07:00')))).toBe(1);
+  });
+
+  it('matches the linear find at every minute of the day', () => {
+    const start = Date.parse(T('00:00'));
+    for (let m = -2; m <= 24 * 60 + 2; m += 1) {
+      const t = start + m * 60_000;
+      expect(findSegmentAt(lookup, t)).toBe(linear(t));
+    }
   });
 });

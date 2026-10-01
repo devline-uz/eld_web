@@ -1,8 +1,8 @@
 // web/tz.md W-23 — cursor pagination (both `Load more` steps), the verbatim empty copy, the
 // in-card error, the row-click drawer, and the `auditLog`-gated CSV export.
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { http } from 'msw';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
@@ -314,5 +314,35 @@ describe('AuditLogPage — stage-2', () => {
     await user.selectOptions(screen.getByLabelText('Filter by action'), 'DELETE');
     expect(await screen.findByText('Searched every entry in the selected date range (2 loaded).')).toBeInTheDocument();
     expect(cursors).toEqual([null, 'c2']);
+  });
+
+  // WB-254 — above 500 matching rows only a window is in the DOM; the table still reports the
+  // full row count and each rendered row its 1-based position (header is row 1).
+  it('virtualises the table above 500 rows and keeps Load more', async () => {
+    // jsdom lays nothing out — give the scroll container a real viewport height.
+    const height = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(600);
+    onTestFinished(() => height.mockRestore());
+    const many = Array.from({ length: 1200 }, (_, i) => entry(`e${i}`, 'UPDATE', `Role · R${i}`));
+    server.use(http.get(url(endpoints.auditLog.list), () => ok({ items: many, nextCursor: 'more' })));
+    renderPage();
+    expect(await screen.findByText('Role · R0', {}, { timeout: 8000 })).toBeInTheDocument();
+    const table = screen.getByRole('table');
+    expect(table).toHaveAttribute('aria-rowcount', '1201');
+    const bodyRows = within(table).getAllByRole('row').filter((r) => r.hasAttribute('data-index'));
+    expect(bodyRows.length).toBeGreaterThan(0);
+    expect(bodyRows.length).toBeLessThan(100);
+    expect(bodyRows[0]).toHaveAttribute('aria-rowindex', '2');
+    expect(screen.queryByText('Role · R1199')).not.toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'TIMESTAMP' })).toHaveClass('sticky');
+    expect(screen.getByRole('button', { name: 'Load more' })).toBeInTheDocument();
+  });
+
+  it('renders every row, without row indexes, at or below 500 rows', async () => {
+    const few = Array.from({ length: 30 }, (_, i) => entry(`f${i}`, 'UPDATE', `Role · F${i}`));
+    server.use(http.get(url(endpoints.auditLog.list), () => ok({ items: few, nextCursor: null })));
+    renderPage();
+    expect(await screen.findByText('Role · F29', {}, { timeout: 8000 })).toBeInTheDocument();
+    expect(screen.getByRole('table')).not.toHaveAttribute('aria-rowcount');
+    expect(within(screen.getByRole('table')).getAllByRole('row')).toHaveLength(31);
   });
 });

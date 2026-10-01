@@ -1,7 +1,8 @@
 // owner: web-settings-admin — W-23 Settings · Audit log (web/tz.md §10 W-23).
 // Design: web/roles and screens/admin panel/Settings — immutable audit trail.jpg
 // Server cursor-paginated (web/backend-gaps.md — `GET /audit-log` answers `{ items, nextCursor }`,
-// not an offset envelope); virtualised only above 500 rows in a single loaded window; timestamps
+// not an offset envelope); rows are windowed with @tanstack/react-virtual above 500 matching rows
+// (`useVirtualRows`, WB-254 — 5,000 rows rendered ~95k DOM nodes before); timestamps
 // render in the carrier's own timezone (§8.3).
 import { useMemo, useState } from 'react';
 import { endOfDay, startOfDay } from 'date-fns';
@@ -24,12 +25,17 @@ import { typedCachePolicy } from '@/shared/api/queryPolicy';
 import { useCarrier, useUsersList, type AuditEntry } from '@/shared/api/settingsAdmin';
 import { DateRangePicker, resolvePreset, type DateRange, type DateRangePreset } from '@/shared/ui/DateRangePicker';
 import { FilterDrawer, FilterGroup, FilterCheckbox } from '@/shared/ui/FilterDrawer';
+import { SpacerRow, STICKY_HEAD_CLASS, useVirtualRows, VIRTUAL_SCROLL_CLASS } from '@/shared/ui/virtualRows';
+import { cn } from '@/shared/ui/cn';
 import { AUDIT_SEARCH_COPY } from './lib/copy';
 import { usePageHeader } from '@/app/layouts/Topbar';
 
 const ACTION_TONE: Record<string, BadgeTone> = { CREATE: 'success', UPDATE: 'info', DELETE: 'danger', VIEW: 'neutral' };
 const ACTION_LABEL: Record<string, string> = { CREATE: 'Created', UPDATE: 'Updated', DELETE: 'Deleted', VIEW: 'Viewed' };
 const ACTION_OPTIONS = ['CREATE', 'UPDATE', 'DELETE', 'VIEW'] as const;
+const AUDIT_COLUMNS = ['TIMESTAMP', 'USER', 'ACTION', 'OBJECT', 'DETAILS', 'IP ADDRESS'] as const;
+/** `h-row` (48) — the actor cell's name + e-mail stack can make a row taller; rows are measured. */
+const AUDIT_ROW_ESTIMATE = 54;
 
 /** `UPDATE_SCOPES` → `Update scopes` — the server writes ~40 verbs beyond the four above. */
 function actionLabel(action: string): string {
@@ -214,6 +220,8 @@ export default function AuditLogPage() {
     [items, search, action, rangeStartMs, rangeEndMs],
   );
 
+  const virtual = useVirtualRows({ count: filtered.length, estimateRowHeight: AUDIT_ROW_ESTIMATE });
+
   const objectTypeOptions = useMemo(
     () => Array.from(new Set([...KNOWN_OBJECT_TYPES, ...items.map((e) => e.objectType)])).sort(),
     [items],
@@ -362,45 +370,65 @@ export default function AuditLogPage() {
           <EmptyState {...EMPTY_STATE_COPY.auditLog} actions={[{ label: 'Reset filters', onClick: clearAllFilters }]} />
         ) : (
           <>
-            <table className="w-full border-collapse text-body">
-              <thead className="h-table-head">
-                <tr className="border-b border-border">
-                  {['TIMESTAMP', 'USER', 'ACTION', 'OBJECT', 'DETAILS', 'IP ADDRESS'].map((h) => (
-                    <th key={h} className="px-3 text-left text-table-head font-semibold uppercase tracking-wide text-text-muted">
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((entry) => (
-                  <tr
-                    key={entry.id}
-                    tabIndex={0}
-                    onClick={() => setSelected(entry)}
-                    onKeyDown={(e) => e.key === 'Enter' && setSelected(entry)}
-                    className="h-row cursor-pointer border-b border-border last:border-b-0 hover:bg-bg-subtle"
-                  >
-                    <td className="px-3 tabular-nums text-text">{formatCarrier(entry.createdAt, timezone, 'dateTimeSeconds')}</td>
-                    <td className="px-3">
-                      <span className="flex items-center gap-2">
-                        <Avatar name={entry.actorName ?? entry.actorType} size="sm" />
-                        <span className="flex flex-col">
-                          <span className="text-text">{entry.actorName ?? entry.actorType}</span>
-                          {entry.actorEmail && <span className="text-caption text-text-muted">{entry.actorEmail}</span>}
-                        </span>
-                      </span>
-                    </td>
-                    <td className="px-3">
-                      <Badge tone={ACTION_TONE[entry.action] ?? 'neutral'}>{actionLabel(entry.action)}</Badge>
-                    </td>
-                    <td className="px-3 text-text">{objectOf(entry)}</td>
-                    <td className="max-w-64 truncate px-3 text-caption text-text-muted">{detailOf(entry) ?? '—'}</td>
-                    <td className="px-3 text-right tabular-nums text-text-secondary">{ipOf(entry) ?? '—'}</td>
+            <div ref={virtual.scrollRef} className={virtual.enabled ? VIRTUAL_SCROLL_CLASS : undefined}>
+              <table
+                className="w-full border-collapse text-body"
+                aria-rowcount={virtual.enabled ? filtered.length + 1 : undefined}
+              >
+                <thead className="h-table-head">
+                  <tr className="border-b border-border" aria-rowindex={virtual.enabled ? 1 : undefined}>
+                    {AUDIT_COLUMNS.map((h) => (
+                      <th
+                        key={h}
+                        scope="col"
+                        className={cn(
+                          'px-3 text-left text-table-head font-semibold uppercase tracking-wide text-text-muted',
+                          virtual.enabled && STICKY_HEAD_CLASS,
+                        )}
+                      >
+                        {h}
+                      </th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  <SpacerRow height={virtual.padTop} colSpan={AUDIT_COLUMNS.length} />
+                  {virtual.rows.map(({ index }) => {
+                    const entry = filtered[index]!;
+                    return (
+                      <tr
+                        key={entry.id}
+                        ref={virtual.measureRow}
+                        data-index={index}
+                        aria-rowindex={virtual.enabled ? index + 2 : undefined}
+                        tabIndex={0}
+                        onClick={() => setSelected(entry)}
+                        onKeyDown={(e) => e.key === 'Enter' && setSelected(entry)}
+                        className="h-row cursor-pointer border-b border-border last:border-b-0 hover:bg-bg-subtle"
+                      >
+                        <td className="px-3 tabular-nums text-text">{formatCarrier(entry.createdAt, timezone, 'dateTimeSeconds')}</td>
+                        <td className="px-3">
+                          <span className="flex items-center gap-2">
+                            <Avatar name={entry.actorName ?? entry.actorType} size="sm" />
+                            <span className="flex flex-col">
+                              <span className="text-text">{entry.actorName ?? entry.actorType}</span>
+                              {entry.actorEmail && <span className="text-caption text-text-muted">{entry.actorEmail}</span>}
+                            </span>
+                          </span>
+                        </td>
+                        <td className="px-3">
+                          <Badge tone={ACTION_TONE[entry.action] ?? 'neutral'}>{actionLabel(entry.action)}</Badge>
+                        </td>
+                        <td className="px-3 text-text">{objectOf(entry)}</td>
+                        <td className="max-w-64 truncate px-3 text-caption text-text-muted">{detailOf(entry) ?? '—'}</td>
+                        <td className="px-3 text-right tabular-nums text-text-secondary">{ipOf(entry) ?? '—'}</td>
+                      </tr>
+                    );
+                  })}
+                  <SpacerRow height={virtual.padBottom} colSpan={AUDIT_COLUMNS.length} />
+                </tbody>
+              </table>
+            </div>
           </>
         )}
         {/* Also under the empty state: when a filter matches nothing in the searched entries,

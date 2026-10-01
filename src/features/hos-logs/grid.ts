@@ -223,6 +223,58 @@ export function plotSegments(
   });
 }
 
+/**
+ * WB-255 — hover lookup table for the grid: segment start/end instants parsed ONCE per model,
+ * sorted by start, so a mousemove is a binary search instead of a `find` with two `Date.parse`
+ * per segment. `order[k]` is the index into the original `segments` array.
+ */
+export interface SegmentLookup {
+  starts: Float64Array;
+  ends: Float64Array;
+  order: Int32Array;
+}
+
+export function segmentLookupOf(segments: readonly Pick<PlottedSegment, 'startAt' | 'endAt'>[]): SegmentLookup {
+  const rawStarts = segments.map((s) => Date.parse(s.startAt));
+  const rawEnds = segments.map((s) => Date.parse(s.endAt));
+  // Stable by original index on equal starts, so the earlier segment wins exactly like `find`.
+  const order = segments.map((_, i) => i).sort((a, b) => rawStarts[a]! - rawStarts[b]! || a - b);
+  return {
+    starts: Float64Array.from(order, (i) => rawStarts[i]!),
+    ends: Float64Array.from(order, (i) => rawEnds[i]!),
+    order: Int32Array.from(order),
+  };
+}
+
+/**
+ * Index (into the original segments) of the segment covering `instant` (ms), or -1. Bounds are
+ * inclusive on both ends; on a shared boundary (`end` of one === `start` of the next) the EARLIER
+ * segment wins — the same answer the previous linear `find(start <= t && end >= t)` gave for the
+ * server's contiguous, non-overlapping RODS timeline.
+ */
+export function findSegmentAt(lookup: SegmentLookup, instant: number): number {
+  const { starts, ends, order } = lookup;
+  // largest k with starts[k] <= instant
+  let lo = 0;
+  let hi = starts.length - 1;
+  let k = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >>> 1;
+    if (starts[mid]! <= instant) {
+      k = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  if (k < 0) return -1;
+  // Walk back over segments that start at the very same instant, then prefer the previous one
+  // when the instant sits exactly on its end.
+  while (k > 0 && starts[k - 1] === starts[k]) k -= 1;
+  if (k > 0 && ends[k - 1]! >= instant) return order[k - 1]!;
+  return ends[k]! >= instant ? order[k]! : -1;
+}
+
 export interface Connector {
   key: string;
   at: number;

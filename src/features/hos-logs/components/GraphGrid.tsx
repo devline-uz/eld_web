@@ -10,7 +10,7 @@
 // 2.5 px at any width. The 25 hour rules, the 5 row rules and all 288 quarter-hour ticks are
 // three `<path>` elements rather than ~320 `<line>`s: that is what keeps the render under 50 ms.
 // The hour labels live in HTML above the SVG, because a non-uniform scale would squash text.
-import { useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '@/shared/ui/cn';
 import type { HosViolation, RodsDaySummary, RodsGraphSegment, UnidentifiedSegment } from '@/shared/api/hosLogs';
 import {
@@ -21,6 +21,7 @@ import {
   ROW_LABELS,
   ROW_ORDER,
   connectorsOf,
+  findSegmentAt,
   gridSpokenSummary,
   hourRulesPath,
   pct,
@@ -34,9 +35,12 @@ import {
   rowTop,
   rodsClock,
   rowTotals,
+  segmentLookupOf,
   segmentTooltip,
   ux,
+  type Connector,
   type PlottedSegment,
+  type SegmentLookup,
 } from '../grid';
 
 const HOUR_RULES = hourRulesPath();
@@ -59,12 +63,6 @@ export interface GraphGridProps {
   onSelectSegment?: (startAt: string) => void;
 }
 
-interface HoverState {
-  x: number;
-  fraction: number;
-  segment: PlottedSegment;
-}
-
 export function GraphGrid({
   summary,
   graph,
@@ -76,9 +74,6 @@ export function GraphGrid({
   locationAt,
   onSelectSegment,
 }: GraphGridProps) {
-  const plotRef = useRef<HTMLDivElement | null>(null);
-  const [hover, setHover] = useState<HoverState | null>(null);
-
   const model = useMemo(() => {
     const dayStartMs = rodsDayStart(summary.date, timezone);
     const segments = plotSegments(graph, dayStartMs, summary.dayLengthSec);
@@ -89,23 +84,12 @@ export function GraphGrid({
       violations: plotViolations(violations, dayStartMs, summary.dayLengthSec),
       unassigned: plotUnassigned(unassigned, dayStartMs, summary.dayLengthSec),
       totals: rowTotals(summary),
+      // WB-255 — parsed once per data change, not once per segment per mousemove.
+      lookup: segmentLookupOf(segments),
     };
   }, [summary, graph, violations, unassigned, timezone]);
 
   const spoken = gridSpokenSummary(model.totals, dateLabel, zone);
-
-  function onMove(event: React.MouseEvent<HTMLDivElement>) {
-    const box = plotRef.current?.getBoundingClientRect();
-    if (!box || box.width === 0) return;
-    const x = event.clientX - box.left;
-    const fraction = Math.min(1, Math.max(0, x / box.width));
-    const instant = model.dayStartMs + fraction * summary.dayLengthSec * 1000;
-    const segment = model.segments.find(
-      (candidate) =>
-        Date.parse(candidate.startAt) <= instant && Date.parse(candidate.endAt) >= instant,
-    );
-    setHover(segment ? { x, fraction, segment } : null);
-  }
 
   return (
     <div>
@@ -138,185 +122,22 @@ export function GraphGrid({
           ))}
         </div>
 
-        <div
-          ref={plotRef}
-          className="relative"
-          onMouseMove={onMove}
-          onMouseLeave={() => setHover(null)}
-          onClick={() => hover && onSelectSegment?.(hover.segment.startAt)}
+        <HoverPlot
+          segments={model.segments}
+          lookup={model.lookup}
+          dayStartMs={model.dayStartMs}
+          dayLengthSec={summary.dayLengthSec}
+          timezone={timezone}
+          locationAt={locationAt}
+          onSelectSegment={onSelectSegment}
         >
-          <svg
-            aria-hidden
-            width="100%"
-            height={PLOT_HEIGHT}
-            viewBox={`0 0 ${PLOT_UNITS} ${PLOT_HEIGHT}`}
-            preserveAspectRatio="none"
-            className="block"
-          >
-            <defs>
-              <pattern
-                id="hos-unassigned-hatch"
-                width="3"
-                height="6"
-                patternUnits="userSpaceOnUse"
-                patternTransform="rotate(20)"
-              >
-                <rect width="3" height="6" fill="var(--color-bg-subtle)" />
-                <line
-                  x1="0"
-                  y1="0"
-                  x2="0"
-                  y2="6"
-                  stroke="var(--color-text-muted)"
-                  strokeWidth="1"
-                  vectorEffect="non-scaling-stroke"
-                />
-              </pattern>
-            </defs>
-
-            {/* D row background — --success-soft at 40% */}
-            <rect
-              x="0"
-              y={rowTop('D')}
-              width={PLOT_UNITS}
-              height={GRID.rowHeight}
-              fill="var(--color-success-soft)"
-              opacity="0.4"
-              data-testid="hos-driving-band"
-            />
-
-            {/* unassigned driving — grey hatched blocks */}
-            {model.unassigned.map((block) => (
-              <rect
-                key={block.id}
-                x={ux(block.from)}
-                y="0"
-                width={Math.max(ux(block.to - block.from), 0.15)}
-                height={PLOT_HEIGHT}
-                fill="url(#hos-unassigned-hatch)"
-                opacity="0.7"
-                data-testid="hos-unassigned-block"
-              />
-            ))}
-
-            {/* violation band, under the dashed marker */}
-            {model.violations.map((violation) => (
-              <rect
-                key={`band-${violation.id}`}
-                x={ux(violation.from)}
-                y="0"
-                width={Math.max(ux(violation.to - violation.from), 0.2)}
-                height={PLOT_HEIGHT}
-                fill={violation.open ? 'var(--color-danger-soft)' : 'var(--color-neutral-soft)'}
-                data-status={violation.open ? 'open' : 'resolved'}
-                data-testid="hos-violation-band"
-              />
-            ))}
-
-            {/* 15-minute ticks (4 px), hour rules and row rules — one path each */}
-            <path
-              d={QUARTER_TICKS}
-              stroke="var(--color-border)"
-              strokeWidth="1"
-              vectorEffect="non-scaling-stroke"
-              fill="none"
-              data-testid="hos-quarter-ticks"
-            />
-            <path
-              d={HOUR_RULES}
-              stroke="var(--color-border)"
-              strokeWidth="1"
-              vectorEffect="non-scaling-stroke"
-              fill="none"
-              data-testid="hos-hour-rules"
-            />
-            <path
-              d={ROW_RULES}
-              stroke="var(--color-border)"
-              strokeWidth="1"
-              vectorEffect="non-scaling-stroke"
-              fill="none"
-              data-testid="hos-row-rules"
-            />
-
-            {/* status line — 2.5 px in the duty colour, dashed for PC / YM */}
-            {model.segments.map((segment) => (
-              <line
-                key={segment.key}
-                x1={ux(segment.from)}
-                x2={ux(segment.to)}
-                y1={rowCenter(segment.row)}
-                y2={rowCenter(segment.row)}
-                stroke={segment.color}
-                strokeWidth={GRID.statusStrokeWidth}
-                strokeDasharray={segment.dashed ? '4 2' : undefined}
-                vectorEffect="non-scaling-stroke"
-                data-testid="hos-segment"
-                data-row={segment.row}
-                data-special={segment.special}
-              />
-            ))}
-
-            {/* vertical connector at every duty change */}
-            {model.connectors.map((connector) => (
-              <line
-                key={connector.key}
-                x1={ux(connector.at)}
-                x2={ux(connector.at)}
-                y1={rowCenter(connector.fromRow)}
-                y2={rowCenter(connector.toRow)}
-                stroke={connector.color}
-                strokeWidth={GRID.statusStrokeWidth}
-                vectorEffect="non-scaling-stroke"
-                data-testid="hos-connector"
-              />
-            ))}
-
-            {/* violations — red dashed vertical line */}
-            {model.violations.map((violation) => (
-              <line
-                key={`mark-${violation.id}`}
-                x1={ux(violation.at)}
-                x2={ux(violation.at)}
-                y1="0"
-                y2={PLOT_HEIGHT}
-                stroke={violation.open ? 'var(--color-danger)' : 'var(--color-text-muted)'}
-                strokeWidth="1.5"
-                strokeDasharray="3 2"
-                vectorEffect="non-scaling-stroke"
-                data-status={violation.open ? 'open' : 'resolved'}
-                data-testid="hos-violation-mark"
-              >
-                <title>{violation.title}</title>
-              </line>
-            ))}
-
-            {/* hover indicator */}
-            {hover && (
-              <line
-                x1={ux(hover.fraction)}
-                x2={ux(hover.fraction)}
-                y1="0"
-                y2={PLOT_HEIGHT}
-                stroke="var(--color-text-secondary)"
-                strokeWidth="1"
-                vectorEffect="non-scaling-stroke"
-                data-testid="hos-hover-indicator"
-              />
-            )}
-          </svg>
-
-          {hover && (
-            <div
-              role="tooltip"
-              data-testid="hos-tooltip"
-              className="pointer-events-none absolute z-10 -translate-x-1/2 whitespace-nowrap rounded-md bg-bg-inverse px-2 py-1 text-caption text-text-inverse shadow-pop"
-              style={{ left: hover.x, top: PLOT_HEIGHT }}
-            >
-              {segmentTooltip(hover.segment, timezone, locationAt?.(hover.segment.startAt) ?? null)}
-            </div>
-          )}
-        </div>
+          <StaticPlot
+            segments={model.segments}
+            connectors={model.connectors}
+            violations={model.violations}
+            unassigned={model.unassigned}
+          />
+        </HoverPlot>
       </div>
 
       {/* TOTAL column */}
@@ -373,6 +194,296 @@ export function GraphGrid({
           </tr>
         </tfoot>
       </table>
+    </div>
+  );
+}
+
+type PlottedViolation = ReturnType<typeof plotViolations>[number];
+type PlottedUnassigned = ReturnType<typeof plotUnassigned>[number];
+
+/**
+ * WB-255 — everything drawn in the plot that does NOT depend on the pointer. Memoised: hover
+ * state lives in `HoverPlot`, and its props here are the stable arrays of the memoised model, so
+ * moving the mouse never re-renders the ~300 SVG elements below.
+ */
+const StaticPlot = memo(function StaticPlot({
+  segments,
+  connectors,
+  violations,
+  unassigned,
+}: {
+  segments: PlottedSegment[];
+  connectors: Connector[];
+  violations: PlottedViolation[];
+  unassigned: PlottedUnassigned[];
+}) {
+  return (
+    <svg
+      aria-hidden
+      width="100%"
+      height={PLOT_HEIGHT}
+      viewBox={`0 0 ${PLOT_UNITS} ${PLOT_HEIGHT}`}
+      preserveAspectRatio="none"
+      className="block"
+    >
+      <defs>
+        <pattern
+          id="hos-unassigned-hatch"
+          width="3"
+          height="6"
+          patternUnits="userSpaceOnUse"
+          patternTransform="rotate(20)"
+        >
+          <rect width="3" height="6" fill="var(--color-bg-subtle)" />
+          <line
+            x1="0"
+            y1="0"
+            x2="0"
+            y2="6"
+            stroke="var(--color-text-muted)"
+            strokeWidth="1"
+            vectorEffect="non-scaling-stroke"
+          />
+        </pattern>
+      </defs>
+
+      {/* D row background — --success-soft at 40% */}
+      <rect
+        x="0"
+        y={rowTop('D')}
+        width={PLOT_UNITS}
+        height={GRID.rowHeight}
+        fill="var(--color-success-soft)"
+        opacity="0.4"
+        data-testid="hos-driving-band"
+      />
+
+      {/* unassigned driving — grey hatched blocks */}
+      {unassigned.map((block) => (
+        <rect
+          key={block.id}
+          x={ux(block.from)}
+          y="0"
+          width={Math.max(ux(block.to - block.from), 0.15)}
+          height={PLOT_HEIGHT}
+          fill="url(#hos-unassigned-hatch)"
+          opacity="0.7"
+          data-testid="hos-unassigned-block"
+        />
+      ))}
+
+      {/* violation band, under the dashed marker */}
+      {violations.map((violation) => (
+        <rect
+          key={`band-${violation.id}`}
+          x={ux(violation.from)}
+          y="0"
+          width={Math.max(ux(violation.to - violation.from), 0.2)}
+          height={PLOT_HEIGHT}
+          fill={violation.open ? 'var(--color-danger-soft)' : 'var(--color-neutral-soft)'}
+          data-status={violation.open ? 'open' : 'resolved'}
+          data-testid="hos-violation-band"
+        />
+      ))}
+
+      {/* 15-minute ticks (4 px), hour rules and row rules — one path each */}
+      <path
+        d={QUARTER_TICKS}
+        stroke="var(--color-border)"
+        strokeWidth="1"
+        vectorEffect="non-scaling-stroke"
+        fill="none"
+        data-testid="hos-quarter-ticks"
+      />
+      <path
+        d={HOUR_RULES}
+        stroke="var(--color-border)"
+        strokeWidth="1"
+        vectorEffect="non-scaling-stroke"
+        fill="none"
+        data-testid="hos-hour-rules"
+      />
+      <path
+        d={ROW_RULES}
+        stroke="var(--color-border)"
+        strokeWidth="1"
+        vectorEffect="non-scaling-stroke"
+        fill="none"
+        data-testid="hos-row-rules"
+      />
+
+      {/* status line — 2.5 px in the duty colour, dashed for PC / YM */}
+      {segments.map((segment) => (
+        <line
+          key={segment.key}
+          x1={ux(segment.from)}
+          x2={ux(segment.to)}
+          y1={rowCenter(segment.row)}
+          y2={rowCenter(segment.row)}
+          stroke={segment.color}
+          strokeWidth={GRID.statusStrokeWidth}
+          strokeDasharray={segment.dashed ? '4 2' : undefined}
+          vectorEffect="non-scaling-stroke"
+          data-testid="hos-segment"
+          data-row={segment.row}
+          data-special={segment.special}
+        />
+      ))}
+
+      {/* vertical connector at every duty change */}
+      {connectors.map((connector) => (
+        <line
+          key={connector.key}
+          x1={ux(connector.at)}
+          x2={ux(connector.at)}
+          y1={rowCenter(connector.fromRow)}
+          y2={rowCenter(connector.toRow)}
+          stroke={connector.color}
+          strokeWidth={GRID.statusStrokeWidth}
+          vectorEffect="non-scaling-stroke"
+          data-testid="hos-connector"
+        />
+      ))}
+
+      {/* violations — red dashed vertical line */}
+      {violations.map((violation) => (
+        <line
+          key={`mark-${violation.id}`}
+          x1={ux(violation.at)}
+          x2={ux(violation.at)}
+          y1="0"
+          y2={PLOT_HEIGHT}
+          stroke={violation.open ? 'var(--color-danger)' : 'var(--color-text-muted)'}
+          strokeWidth="1.5"
+          strokeDasharray="3 2"
+          vectorEffect="non-scaling-stroke"
+          data-status={violation.open ? 'open' : 'resolved'}
+          data-testid="hos-violation-mark"
+        >
+          <title>{violation.title}</title>
+        </line>
+      ))}
+    </svg>
+  );
+});
+
+interface HoverPlotProps {
+  segments: PlottedSegment[];
+  lookup: SegmentLookup;
+  dayStartMs: number;
+  dayLengthSec: number;
+  timezone: string;
+  locationAt?: (startAt: string) => string | null;
+  onSelectSegment?: (startAt: string) => void;
+  children: React.ReactNode;
+}
+
+/**
+ * WB-255 — the pointer layer over the static plot. Mousemoves are coalesced to one lookup per
+ * animation frame; React state holds only the hovered segment INDEX, so it changes (and this
+ * small component re-renders) only when the pointer crosses into another segment. Within a
+ * segment the indicator and tooltip follow the pointer by writing `style.left` directly.
+ */
+function HoverPlot({
+  segments,
+  lookup,
+  dayStartMs,
+  dayLengthSec,
+  timezone,
+  locationAt,
+  onSelectSegment,
+  children,
+}: HoverPlotProps) {
+  const plotRef = useRef<HTMLDivElement | null>(null);
+  const indicatorRef = useRef<HTMLDivElement | null>(null);
+  const tooltipRef = useRef<HTMLDivElement | null>(null);
+  const frameRef = useRef<number | null>(null);
+  const pendingX = useRef<number | null>(null);
+  const lastX = useRef(0);
+  const [hoverIndex, setHoverIndex] = useState(-1);
+
+  const indexAt = useCallback(
+    (clientX: number): { index: number; x: number } | null => {
+      const box = plotRef.current?.getBoundingClientRect();
+      if (!box || box.width === 0) return null;
+      const x = clientX - box.left;
+      const fraction = Math.min(1, Math.max(0, x / box.width));
+      return { index: findSegmentAt(lookup, dayStartMs + fraction * dayLengthSec * 1000), x };
+    },
+    [lookup, dayStartMs, dayLengthSec],
+  );
+
+  const place = useCallback(() => {
+    const left = `${lastX.current}px`;
+    if (indicatorRef.current) indicatorRef.current.style.left = left;
+    if (tooltipRef.current) tooltipRef.current.style.left = left;
+  }, []);
+
+  const flush = useCallback(() => {
+    frameRef.current = null;
+    const clientX = pendingX.current;
+    pendingX.current = null;
+    if (clientX === null) return;
+    const hit = indexAt(clientX);
+    if (!hit) return;
+    lastX.current = hit.x;
+    // Bail-out: same index ⇒ React skips the re-render; only the position moves.
+    setHoverIndex(hit.index);
+    place();
+  }, [indexAt, place]);
+
+  function onMove(event: React.MouseEvent<HTMLDivElement>) {
+    pendingX.current = event.clientX;
+    if (frameRef.current === null) frameRef.current = requestAnimationFrame(flush);
+  }
+
+  const cancelFrame = useCallback(() => {
+    if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+    frameRef.current = null;
+    pendingX.current = null;
+  }, []);
+
+  function onLeave() {
+    cancelFrame();
+    setHoverIndex(-1);
+  }
+
+  function onClick(event: React.MouseEvent<HTMLDivElement>) {
+    // Resolved from the click itself, so a click never lands on a stale (pre-frame) hover.
+    const hit = indexAt(event.clientX);
+    const segment = hit && hit.index >= 0 ? segments[hit.index] : undefined;
+    if (segment) onSelectSegment?.(segment.startAt);
+  }
+
+  useEffect(() => cancelFrame, [cancelFrame]);
+  // A newly mounted indicator/tooltip picks up the pointer position before paint.
+  useLayoutEffect(place, [hoverIndex, place]);
+
+  const segment = hoverIndex >= 0 ? segments[hoverIndex] : undefined;
+
+  return (
+    <div ref={plotRef} className="relative" onMouseMove={onMove} onMouseLeave={onLeave} onClick={onClick}>
+      {children}
+      {segment && (
+        <>
+          <div
+            ref={indicatorRef}
+            aria-hidden
+            data-testid="hos-hover-indicator"
+            className="pointer-events-none absolute top-0 w-px bg-text-secondary"
+            style={{ height: PLOT_HEIGHT }}
+          />
+          <div
+            ref={tooltipRef}
+            role="tooltip"
+            data-testid="hos-tooltip"
+            className="pointer-events-none absolute z-10 -translate-x-1/2 whitespace-nowrap rounded-md bg-bg-inverse px-2 py-1 text-caption text-text-inverse shadow-pop"
+            style={{ top: PLOT_HEIGHT }}
+          >
+            {segmentTooltip(segment, timezone, locationAt?.(segment.startAt) ?? null)}
+          </div>
+        </>
+      )}
     </div>
   );
 }
