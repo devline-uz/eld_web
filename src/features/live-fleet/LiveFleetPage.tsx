@@ -1,11 +1,22 @@
 // owner: web-dashboard-fleet — W-02 Live Fleet (web/tz.md §10 W-02).
 // Design: web/roles and screens/admin panel/Real-time GPS map, vehicle list, unit detail card.jpg
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  lazy,
+  memo,
+  Suspense,
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+} from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { MessageSquare, Plus, Search, X } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { qk } from '@/shared/api/queryKeys';
-import { useLiveFleet, hasPosition, type LiveFleetUnit } from '@/shared/api/liveFleet';
+import { useLiveFleet, hasPosition, type LiveFleetResponse, type LiveFleetUnit } from '@/shared/api/liveFleet';
 import { useGeofences } from '@/shared/api/geofences';
 import { useActiveTripRows } from '@/shared/api/trips';
 import {
@@ -19,6 +30,8 @@ import { usePermission } from '@/shared/auth/usePermission';
 import { Can } from '@/shared/auth/Can';
 import { useDynamicSubtitle } from '@/app/layouts/Topbar';
 import { useRoom } from '@/shared/realtime/useRoom';
+import { useThrottledInvalidate, useThrottledPatch } from '@/shared/realtime/useThrottledPatch';
+import { useVirtualRows } from '@/shared/ui/virtualRows';
 // Direct file imports, not the `@/shared/ui` barrel (web/decisions.md WD-021).
 import { Button } from '@/shared/ui/Button';
 import { DutyBadge } from '@/shared/ui/Badge';
@@ -30,6 +43,13 @@ import { useCountdown, useCountdownFromSeconds, formatCountdown } from '@/shared
 import { CreateGeofenceModal } from './components/CreateGeofenceModal';
 import { messagesHref } from '@/shared/lib/messagesHref';
 import { VIEW_LOGS_NO_DRIVER } from './lib/copy';
+import {
+  applyUnitPatches,
+  fleetHasUnit,
+  telemetryUnitPatch,
+  type TelemetryPointPayload,
+  type UnitPatch,
+} from './lib/telemetryPatch';
 
 const FleetMap = lazy(() => import('@/shared/map/FleetMap'));
 
@@ -39,6 +59,10 @@ const TRAFFIC_UNCONFIGURED_TITLE =
   'Traffic is not configured for this environment (set VITE_TRAFFIC_TILES_URL to a traffic tile URL).';
 
 type Segment = 'ALL' | 'DRIVING' | 'IDLE';
+
+/** Estimated height of one unit row (three text lines + `py-3`), refined by measurement once the
+ * list is windowed (above `VIRTUALIZE_ABOVE` rows, §16.2). */
+const UNIT_ROW_ESTIMATE = 76;
 
 function refreshedLabel(dataUpdatedAt: number): string | null {
   if (!dataUpdatedAt) return null;
@@ -62,49 +86,147 @@ function useRefreshedAgo(dataUpdatedAt: number): string | null {
   return label;
 }
 
-function UnitListRow({
+/** The top-bar subtitle. The 1 s tick lives here, so only this text re-renders every second — not
+ * the whole Live Fleet page, list and map (WB-257). */
+export function RefreshedSubtitle({ dataUpdatedAt }: { dataUpdatedAt: number }) {
+  const label = useRefreshedAgo(dataUpdatedAt);
+  return <>{`Real-time GPS · ${label ?? 'refreshing…'}`}</>;
+}
+
+/** Memoized: a keystroke, a segment click or a selection change re-renders only the rows whose
+ * `unit` object or `selected` flag changed (`onSelect` is one stable callback for every row). */
+export const UnitListRow = memo(function UnitListRow({
   unit,
   selected,
   onSelect,
 }: {
   unit: LiveFleetUnit;
   selected: boolean;
-  onSelect: () => void;
+  onSelect: (vehicleId: string) => void;
 }) {
   const lastSeen = useRelativeTime(unit.lastSeenAt, 'short');
   const offline = unit.dutyStatus === 'ELD_OFFLINE';
-  const ref = useRef<HTMLButtonElement>(null);
-  // A unit selected from elsewhere (map click, `?unit=` deep link) scrolls into view in the list.
-  useEffect(() => {
-    if (selected) ref.current?.scrollIntoView?.({ block: 'nearest' });
-  }, [selected]);
   return (
-    <li>
-      <button
-        ref={ref}
-        type="button"
-        aria-current={selected || undefined}
-        onClick={onSelect}
-        className={`flex w-full flex-col gap-0.5 border-l-2 px-4 py-3 text-left ${
-          selected ? 'border-l-primary bg-primary-soft' : 'border-l-transparent hover:bg-bg-subtle'
-        }`}
-      >
-        <span className="flex items-center justify-between">
-          <span className="flex items-center gap-2">
-            <span className="text-body-strong text-text">Unit {unit.unitNumber}</span>
-            <DutyBadge status={unit.dutyStatus} />
-          </span>
-          <span className="tabular-nums text-body-strong text-text">
-            {offline ? '—' : formatSpeed(unit.speedMph)}
-          </span>
+    <button
+      type="button"
+      data-unit-id={unit.vehicleId}
+      aria-current={selected || undefined}
+      onClick={() => onSelect(unit.vehicleId)}
+      className={`flex w-full flex-col gap-0.5 border-l-2 px-4 py-3 text-left ${
+        selected ? 'border-l-primary bg-primary-soft' : 'border-l-transparent hover:bg-bg-subtle'
+      }`}
+    >
+      <span className="flex items-center justify-between">
+        <span className="flex items-center gap-2">
+          <span className="text-body-strong text-text">Unit {unit.unitNumber}</span>
+          <DutyBadge status={unit.dutyStatus} />
         </span>
-        <span className="flex items-center justify-between text-body text-text-secondary">
-          <span>{unit.driverName ?? 'Unassigned'}</span>
-          <span className="tabular-nums text-caption text-text-muted">{lastSeen}</span>
+        <span className="tabular-nums text-body-strong text-text">
+          {offline ? '—' : formatSpeed(unit.speedMph)}
         </span>
-        <span className="truncate text-caption text-text-muted">{unit.locationLabel ?? '—'}</span>
-      </button>
-    </li>
+      </span>
+      <span className="flex items-center justify-between text-body text-text-secondary">
+        <span>{unit.driverName ?? 'Unassigned'}</span>
+        <span className="tabular-nums text-caption text-text-muted">{lastSeen}</span>
+      </span>
+      <span className="truncate text-caption text-text-muted">{unit.locationLabel ?? '—'}</span>
+    </button>
+  );
+});
+
+/** The keyboard-operable left column (§10 W-02, the map's keyboard equivalent). Above
+ * `VIRTUALIZE_ABOVE` units only a window of rows is in the DOM (WB-257); every rendered `<li>`
+ * then carries `aria-setsize`/`aria-posinset`, so assistive tech still hears "812 of 1000".
+ * Tab walks the rows (focusing a row scrolls it, which renders the next ones); ArrowUp/Down,
+ * Home/End move focus across the whole list, windowed or not. */
+function UnitList({
+  units,
+  selectedId,
+  onSelect,
+}: {
+  units: LiveFleetUnit[];
+  selectedId: string | null;
+  onSelect: (vehicleId: string) => void;
+}) {
+  const { enabled, scrollRef, rows, padTop, padBottom, measureRow } = useVirtualRows({
+    count: units.length,
+    estimateRowHeight: UNIT_ROW_ESTIMATE,
+  });
+
+  /** Brings row `index` into view — directly when rendered, else by jumping the scroll container
+   * to its estimated offset so the window renders it, then fine-tuning on the next frame. */
+  const revealRow = useCallback(
+    (index: number, focus: boolean) => {
+      const container = scrollRef.current;
+      const id = units[index]?.vehicleId;
+      if (!container || !id) return;
+      const find = () =>
+        Array.from(container.querySelectorAll<HTMLButtonElement>('[data-unit-id]')).find((el) => el.dataset.unitId === id) ??
+        null;
+      const land = (el: HTMLButtonElement | null) => {
+        if (!el) return;
+        el.scrollIntoView?.({ block: 'nearest' });
+        if (focus) el.focus();
+      };
+      const row = find();
+      if (row || !enabled) {
+        land(row);
+        return;
+      }
+      container.scrollTop = Math.max(0, index * UNIT_ROW_ESTIMATE - container.clientHeight / 2);
+      requestAnimationFrame(() => land(find()));
+    },
+    [enabled, scrollRef, units],
+  );
+
+  // A unit selected from elsewhere (map click, `?unit=` deep link) scrolls into view in the list.
+  // Keyed on the selection (and on the list first having rows), never on every data refresh.
+  const revealSelected = useEffectEvent(() => {
+    const index = units.findIndex((u) => u.vehicleId === selectedId);
+    if (index >= 0) revealRow(index, false);
+  });
+  const hasRows = units.length > 0;
+  useEffect(() => {
+    if (selectedId && hasRows) revealSelected();
+  }, [selectedId, hasRows]);
+
+  function onKeyDown(event: KeyboardEvent<HTMLUListElement>) {
+    const current = (event.target as HTMLElement).closest<HTMLElement>('[data-unit-id]')?.dataset.unitId;
+    const from = units.findIndex((u) => u.vehicleId === current);
+    if (from < 0) return;
+    const last = units.length - 1;
+    const to =
+      event.key === 'ArrowDown' ? Math.min(last, from + 1)
+      : event.key === 'ArrowUp' ? Math.max(0, from - 1)
+      : event.key === 'Home' ? 0
+      : event.key === 'End' ? last
+      : null;
+    if (to === null) return;
+    event.preventDefault();
+    revealRow(to, true);
+  }
+
+  return (
+    <div ref={scrollRef} className="h-full overflow-y-auto">
+      <ul role="list" aria-label="Fleet units" onKeyDown={onKeyDown}>
+        {padTop > 0 && <li aria-hidden="true" style={{ height: padTop }} />}
+        {rows.map(({ index }) => {
+          const unit = units[index]!;
+          return (
+            <li
+              key={unit.vehicleId}
+              data-index={index}
+              ref={measureRow}
+              aria-setsize={enabled ? units.length : undefined}
+              aria-posinset={enabled ? index + 1 : undefined}
+            >
+              <UnitListRow unit={unit} selected={unit.vehicleId === selectedId} onSelect={onSelect} />
+            </li>
+          );
+        })}
+        {padBottom > 0 && <li aria-hidden="true" style={{ height: padBottom }} />}
+      </ul>
+    </div>
   );
 }
 
@@ -223,12 +345,35 @@ export default function LiveFleetPage() {
       setTimeout(() => setFlashId((current) => (current === payload.vehicleId ? null : current)), 2000);
     },
   });
-  useRoom(selectedId ? `vehicle:${selectedId}` : null, {
-    'telemetry.point': () => void queryClient.invalidateQueries({ queryKey: qk.liveFleet() }),
-  });
+  // §7.2 — `telemetry.point` is throttled to 200 ms and patched into the cached fleet, one unit at
+  // a time; a frame that cannot be mapped (today's `{ vehicleId, count }` has no fix) costs one
+  // throttled invalidate instead of a full-fleet refetch per frame (WB-258).
+  const pendingPatchesRef = useRef(new Map<string, UnitPatch>());
+  const applyPending = useCallback((current: LiveFleetResponse | undefined, pending: Map<string, UnitPatch>) => {
+    const next = applyUnitPatches(current, pending);
+    pending.clear();
+    return next;
+  }, []);
+  const patchFleet = useThrottledPatch<LiveFleetResponse | undefined, Map<string, UnitPatch>>(qk.liveFleet(), applyPending);
+  const invalidateFleet = useThrottledInvalidate(qk.liveFleet());
+  const onTelemetry = (payload: TelemetryPointPayload) => {
+    const patch = telemetryUnitPatch(payload);
+    if (!patch || !fleetHasUnit(queryClient.getQueryData<LiveFleetResponse>(qk.liveFleet()), payload.vehicleId)) {
+      invalidateFleet();
+      return;
+    }
+    const pending = pendingPatchesRef.current;
+    pending.set(payload.vehicleId, { ...pending.get(payload.vehicleId), ...patch });
+    patchFleet(pending);
+  };
+  useRoom(selectedId ? `vehicle:${selectedId}` : null, { 'telemetry.point': onTelemetry });
 
-  const refreshedLabel = useRefreshedAgo(fleet.dataUpdatedAt);
-  useDynamicSubtitle(fleet.isError ? null : `Real-time GPS · ${refreshedLabel ?? 'refreshing…'}`);
+  // The subtitle node changes only with the data; its own 1 s tick re-renders just the text.
+  const subtitle = useMemo(
+    () => (fleet.isError ? null : <RefreshedSubtitle dataUpdatedAt={fleet.dataUpdatedAt} />),
+    [fleet.isError, fleet.dataUpdatedAt],
+  );
+  useDynamicSubtitle(subtitle);
 
   const units = useMemo(() => fleet.data?.items ?? [], [fleet.data]);
 
@@ -256,9 +401,29 @@ export default function LiveFleetPage() {
     });
   }, [units, query, segment]);
 
+  // Memoized so FleetMap gets the same array until the filtered units change (WB-256).
+  const mapUnits = useMemo(
+    () =>
+      filtered.filter(hasPosition).map((u) => ({
+        id: u.vehicleId,
+        lat: u.lat,
+        lon: u.lon,
+        dutyStatus: u.dutyStatus,
+        headingDeg: u.headingDeg,
+      })),
+    [filtered],
+  );
+  // One callback for every row, so `memo(UnitListRow)` can skip unchanged rows.
+  const selectUnit = useCallback((vehicleId: string) => setSelectedId(vehicleId), []);
+
   const selected = units.find((u) => u.vehicleId === selectedId) ?? null;
-  const drivingCount = units.filter((u) => u.dutyStatus === 'DRIVING').length;
-  const idleCount = units.filter((u) => u.dutyStatus === 'IDLE').length;
+  const { drivingCount, idleCount } = useMemo(
+    () => ({
+      drivingCount: units.filter((u) => u.dutyStatus === 'DRIVING').length,
+      idleCount: units.filter((u) => u.dutyStatus === 'IDLE').length,
+    }),
+    [units],
+  );
 
   function toggleLayer(layer: Layer) {
     setActiveLayers((prev) => {
@@ -312,7 +477,7 @@ export default function LiveFleetPage() {
             ))}
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto">
+        <div className="min-h-0 flex-1 overflow-y-auto">
           {fleet.isLoading ? (
             <div className="flex flex-col gap-3 p-4">
               {Array.from({ length: 6 }, (_, i) => (
@@ -331,16 +496,7 @@ export default function LiveFleetPage() {
               />
             </div>
           ) : (
-            <ul role="list" aria-label="Fleet units">
-              {filtered.map((unit) => (
-                <UnitListRow
-                  key={unit.vehicleId}
-                  unit={unit}
-                  selected={unit.vehicleId === selectedId}
-                  onSelect={() => setSelectedId(unit.vehicleId)}
-                />
-              ))}
-            </ul>
+            <UnitList units={filtered} selectedId={selectedId} onSelect={selectUnit} />
           )}
         </div>
       </div>
@@ -388,13 +544,7 @@ export default function LiveFleetPage() {
         ) : (
           <Suspense fallback={<div className="h-full w-full animate-pulse bg-bg-subtle" />}>
             <FleetMap
-              units={filtered.filter(hasPosition).map((u) => ({
-                id: u.vehicleId,
-                lat: u.lat!,
-                lon: u.lon!,
-                dutyStatus: u.dutyStatus,
-                headingDeg: u.headingDeg,
-              }))}
+              units={mapUnits}
               selectedId={selectedId}
               onSelectUnit={setSelectedId}
               flashUnitId={flashId}

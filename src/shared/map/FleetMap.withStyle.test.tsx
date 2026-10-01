@@ -201,6 +201,26 @@ describe('FleetMap — GeoJSON source + symbol layer (style configured)', () => 
     expect(FakeMap.instances.length).toBe(1); // still the same map instance
   });
 
+  it('WB-256: a new units array with the same markers neither re-uploads the source nor re-eases the camera', () => {
+    const { rerender } = render(<FleetMap units={UNITS} selectedId="v2" />);
+    const map = FakeMap.instances[0]!;
+    act(() => map.fire('load'));
+    const setData = map.sources.get('fleet-units')!.setData;
+    const uploads = setData.mock.calls.length;
+    const eases = map.easeTo.mock.calls.length;
+
+    // What a parent re-render (a search keystroke, an unchanged 30 s poll) hands the map.
+    rerender(<FleetMap units={UNITS.map((u) => ({ ...u }))} selectedId="v2" />);
+    rerender(<FleetMap units={UNITS.map((u) => ({ ...u }))} selectedId="v2" />);
+    expect(setData).toHaveBeenCalledTimes(uploads);
+    expect(map.easeTo).toHaveBeenCalledTimes(eases);
+
+    // A real move still patches the source and follows the selected unit.
+    rerender(<FleetMap units={[UNITS[0]!, { ...UNITS[1]!, lat: 40.2 }]} selectedId="v2" />);
+    expect(setData).toHaveBeenCalledTimes(uploads + 1);
+    expect(map.easeTo).toHaveBeenLastCalledWith(expect.objectContaining({ center: [-83.1, 40.2] }));
+  });
+
   it('flashes the unit after a geofence.transition and clears the filter when it ends', () => {
     const { rerender } = render(<FleetMap units={UNITS} flashUnitId={null} />);
     const map = FakeMap.instances[0]!;

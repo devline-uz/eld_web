@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { act, render } from '@testing-library/react';
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
-import { useThrottledPatch } from './useThrottledPatch';
+import { useThrottledInvalidate, useThrottledPatch } from './useThrottledPatch';
 
 const KEY = ['vehicles', 'v1', 'telemetry'] as const;
 
@@ -55,6 +55,43 @@ describe('useThrottledPatch', () => {
       vi.advanceTimersByTime(200);
     });
     expect(queryClient.getQueryData(KEY)).toBe(3);
+
+    vi.useRealTimers();
+  });
+
+  it('useThrottledInvalidate: a burst costs one invalidate per window and never cancels the in-flight refetch', () => {
+    vi.useFakeTimers();
+    const queryClient = new QueryClient();
+    const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries').mockResolvedValue(undefined);
+    let invalidate: () => void = () => undefined;
+    function InvalidateProbe({ onReady }: { onReady: (fn: () => void) => void }) {
+      onReady(useThrottledInvalidate(KEY));
+      return null;
+    }
+
+    const { unmount } = render(
+      <QueryClientProvider client={queryClient}>
+        <InvalidateProbe onReady={(fn) => (invalidate = fn)} />
+      </QueryClientProvider>,
+    );
+
+    for (let i = 0; i < 20; i += 1) invalidate();
+    expect(invalidateSpy).toHaveBeenCalledTimes(1);
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: [...KEY] }, { cancelRefetch: false });
+
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(invalidateSpy).toHaveBeenCalledTimes(2);
+
+    // Still inside the new window: queued as a trailing call, which unmount drops.
+    invalidate();
+    invalidate();
+    unmount();
+    act(() => {
+      vi.advanceTimersByTime(400);
+    });
+    expect(invalidateSpy).toHaveBeenCalledTimes(2);
 
     vi.useRealTimers();
   });

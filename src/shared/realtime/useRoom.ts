@@ -37,37 +37,47 @@ export function useRoom(room: RoomName | null, handlers: RoomHandlers = {}): Use
   const [subscribed, setJoined] = useState(false);
   const identity = room !== null && isIdentityRoom(room);
   const joined = identity ? connected : subscribed;
+  // Only the events this caller handles get a socket listener (WB-255) — a `{}` room (HOS Logs'
+  // `violations`, Driver profile) attaches none, instead of all nine per mounted room. A string,
+  // so a fresh `handlers` literal each render does not re-attach anything.
+  const eventsKey = REALTIME_EVENTS.filter((event) => typeof handlers[event] === 'function').join(',');
 
   const dispatch = useEffectEvent((event: RealtimeEventName, payload: unknown) => {
     handlers[event]?.(payload as never);
   });
 
+  // Room membership — independent of which events are listened to, so a handler set that changes
+  // never costs an unsubscribe/subscribe round trip.
   useEffect(() => {
     const socket = getSocket();
-    if (!socket || !connected || !room) return;
+    if (!socket || !connected || !room || isIdentityRoom(room)) return;
 
     let cancelled = false;
-    const identityRoom = isIdentityRoom(room);
-    if (!identityRoom) {
-      socket.emit('subscribe', room, (ack: { ok: boolean } | undefined) => {
-        if (!cancelled) setJoined(Boolean(ack?.ok));
-      });
-    }
+    socket.emit('subscribe', room, (ack: { ok: boolean } | undefined) => {
+      if (!cancelled) setJoined(Boolean(ack?.ok));
+    });
 
-    const listeners = REALTIME_EVENTS.map((event) => {
+    return () => {
+      cancelled = true;
+      socket.emit('unsubscribe', room);
+      setJoined(false);
+    };
+  }, [getSocket, connected, room]);
+
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket || !connected || !room || !eventsKey) return;
+
+    const listeners = (eventsKey.split(',') as RealtimeEventName[]).map((event) => {
       const listener = (payload: unknown) => dispatch(event, payload);
       socket.on(event, listener);
       return [event, listener] as const;
     });
 
     return () => {
-      cancelled = true;
       for (const [event, listener] of listeners) socket.off(event, listener);
-      if (identityRoom) return;
-      socket.emit('unsubscribe', room);
-      setJoined(false);
     };
-  }, [getSocket, connected, room]);
+  }, [getSocket, connected, room, eventsKey]);
 
   return { joined };
 }
