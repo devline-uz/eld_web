@@ -369,3 +369,6 @@ table.
 
 ### Still open after Phase 13 (`web-hos-logs`, 2026-09-24)
 - **B-35 follow-up — W-08 grid caption `Recorded by ELD PT30_A86E`.** `GET /logs/:driverId` and `GET /logs/:driverId/events` (`toEventView()`) return no `deviceId` / ELD serial although `EldEvent.deviceId` exists. Needed: `events[].deviceId` + `eldSerial` (or `summary.devices: [{ id, serial }]` for the day). Until then the caption stays `Recorded by ELD Not assigned · all times Eastern` (WD-089 — the unit's current device is not used, it can misattribute a past day).
+
+### W-23 Audit log pagination (WB-271, 2026-10-02)
+- **B-102 — `GET /audit-log` has no `total` and no `page`/offset.** `AuditRepository.list()` is BigInt-cursor only (`{ items, nextCursor }`, `limit ≤ 200`). The web pages client-side over a bounded 1,000-entry window (WD-102). For true server-side pagination like Vehicles: `page`/`limit` + `total`/`totalPages` (or a `total` beside the cursor), and the B-64 params (`action`, `createdAtFrom`/`createdAtTo`, `q`) so a server page can honour every filter.

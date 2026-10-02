@@ -1401,3 +1401,15 @@ ends the fetch much sooner.
 **Options.** (a) Invalidate the fleet query on every frame (the old behaviour). (b) Patch only, and ignore position-less frames. (c) Patch when a position is present, and otherwise run a throttled invalidate.
 **Choice.** (c). `useThrottledPatch` handles frames with a position. `useThrottledInvalidate` handles the rest, at most once per 200 ms with `cancelRefetch: false`.
 **Why.** It is correct today and cheap under bursts. It becomes a pure patch the day the backend adds lat/lon, with no web change needed.
+
+## WD-101 — Geofence picker zoom: own +/- buttons, not MapLibre `NavigationControl` (2026-10-01)
+**Problem.** Restoring the 11.1 map picker (WB-265) with `Marker` + `NavigationControl` measured 426.1 KB gzip for the maplibre chunk, over the 425 KB cap (WD-077).
+**Options.** (a) Raise the cap to 430 KB, as the reverted 09-28 work did. (b) Drop zoom buttons and rely on wheel / pinch / double-click. (c) Drop `NavigationControl` and render two small React buttons that call `map.zoomIn()` / `map.zoomOut()`.
+**Choice.** (c). `Marker` stays (draggable points are the core of the picker).
+**Why.** Same UX, the cap is untouched: maplibre 424.7 KB (the buttons cost 0.3 KB in the `GeofencePickerMap` route chunk instead). Headroom is now only 0.3 KB, so the next maplibre-side addition must either trade something out or reopen the cap with a measurement.
+
+## WD-102 — Audit log: client-side pages over a bounded cursor window; no row virtualisation there (2026-10-02)
+**Problem.** The user wants the shared `Pagination` on the audit log (WB-271). `GET /audit-log` is cursor-only — no `total`, no offset — and `action`, the date range and search are client-side filters (B-64). WD-097 / WB-255 virtualised this table above 500 rows.
+**Options.** (a) One server cursor page per table page (cursor stack, Prev/Next): no total for the shared pager, and a 25-row server page filtered locally could show 3 rows or none. (b) Client-side pages over a bounded window of cursor chunks, as DVIR does over its window (WB-268).
+**Choice.** (b): chunks of 200 up to 1,000 entries (stopping at the start of the date range), extended only by an explicit `Load older entries`. Page size ≤ 100, so this page drops `useVirtualRows`. This supersedes WD-097's "used by the audit log" only; WD-097 still holds for Live Fleet, and `shared/ui/virtualRows.tsx` stays.
+**Why.** Filters stay consistent across pages, the pager shows a real `x–y of N` for the loaded window, and the fetch is always bounded. A server-side page (option a) needs a `total` and server params for action/date/search (backend gap B-102).
