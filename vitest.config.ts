@@ -15,7 +15,8 @@ export default defineConfig({
     // no WebGL2, so a real `VITE_MAP_STYLE_URL` makes every FleetMap mount throw maplibre's
     // GPUInitializationError (unhandled errors from dashboard/logsRangeFanOut, and FleetMap.test's
     // fallback assertion). FleetMap.withStyle.test.tsx opts in with `vi.stubEnv` + a mocked maplibre.
-    env: { VITE_MAP_STYLE_URL: '' },
+    // VITE_TRAFFIC_TILES_URL is blanked for the same reason (no traffic layer in unit tests).
+    env: { VITE_MAP_STYLE_URL: '', VITE_TRAFFIC_TILES_URL: '' },
     include: [
       'src/**/*.{test,spec}.{ts,tsx}',
       'tests/{rbac,fixtures}/**/*.{test,spec}.{ts,tsx}',
