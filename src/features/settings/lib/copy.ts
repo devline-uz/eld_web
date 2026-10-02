@@ -162,12 +162,10 @@ export const ROLE_COPY = {
  */
 export const AUDIT_SEARCH_COPY = {
   searching: (n: number) => `Searching older entries… ${n} entries searched so far.`,
-  capReached: (n: number) =>
-    `Searched the ${n} most recent entries (the automatic search limit) — action, date and search filters do not cover older entries yet. Use Load more to include them.`,
-  stopped: (n: number) =>
-    `Search stopped after ${n} entries — action, date and search filters do not cover older entries. Use Load more to include them.`,
-  partial: (n: number) =>
-    `Action, date and search filters apply to the ${n} entries loaded so far — use Load more to include older entries.`,
+  // WB-270 — the table pages over a bounded window of the most recent entries (B-64).
+  windowLimit: (n: number) =>
+    `Showing the ${n} most recent entries — older entries in the selected date range are not loaded yet.`,
+  stopped: (n: number) => `Search stopped after ${n} entries — older entries in the selected date range are not loaded.`,
   rangeCovered: (n: number) => `Searched every entry in the selected date range (${n} loaded).`,
 } as const;
 
