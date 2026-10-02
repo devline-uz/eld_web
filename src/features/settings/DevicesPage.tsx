@@ -2,7 +2,7 @@
 // Design: web/roles and screens/admin panel/Settings — ELD devices, firmware, heartbeats.jpg
 import { useMemo, useState } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
-import { Plus, Search, Download, Wifi, WifiOff, RefreshCw } from 'lucide-react';
+import { Plus, Search, Upload, Wifi, WifiOff, RefreshCw } from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
@@ -262,7 +262,7 @@ export default function DevicesPage() {
           </div>
           <Button
             variant="secondary"
-            iconLeft={<Download size={16} strokeWidth={1.75} />}
+            iconLeft={<Upload size={16} strokeWidth={1.75} />}
             loading={exporting}
             disabled={exporting}
             onClick={() => void handleExport()}

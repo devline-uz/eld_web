@@ -53,7 +53,9 @@ describe('11.1 Create a geofence', () => {
     const user = userEvent.setup();
     const { onClose } = renderModal();
 
+    await user.click(screen.getByRole('button', { name: 'Address' }));
     await user.type(screen.getByPlaceholderText('Columbus terminal'), 'Columbus terminal');
+    await user.type(screen.getByPlaceholderText('4517 Washington Ave., Columbus, OH 43004'), '123 Main St, Columbus, OH');
     await user.type(screen.getByPlaceholderText('0.8'), '0.5');
     await user.click(screen.getByLabelText('Dwell longer than'));
     await user.click(screen.getByLabelText('After-hours entry'));
@@ -82,6 +84,30 @@ describe('11.1 Create a geofence', () => {
     await user.click(screen.getByRole('button', { name: 'Save geofence' }));
 
     await vi.waitFor(() => expect(posted).toMatchObject({ type: 'ADDRESS', address: '123 Main St, Columbus, OH' }));
+    // Untouched colour / yard-move controls still reach the wire with their defaults.
+    expect(posted).toMatchObject({ colour: 'BLUE', countAsYardMove: false });
+  });
+
+  it('sends the picked colour and the count-as-yard-move checkbox', async () => {
+    let posted: Record<string, unknown> | null = null;
+    server.use(
+      http.post(url(endpoints.geofences.create), async ({ request }) => {
+        posted = (await request.json()) as Record<string, unknown>;
+        return ok({ id: 'geo_1' });
+      }),
+    );
+    const user = userEvent.setup();
+    renderModal();
+
+    await user.click(screen.getByRole('button', { name: 'Address' }));
+    await user.type(screen.getByPlaceholderText('Columbus terminal'), 'Yard A');
+    await user.selectOptions(screen.getByLabelText('Colour'), 'GREEN');
+    await user.type(screen.getByPlaceholderText('4517 Washington Ave., Columbus, OH 43004'), '123 Main St, Columbus, OH');
+    await user.type(screen.getByPlaceholderText('0.8'), '0.5');
+    await user.click(screen.getByLabelText('Count time inside as on-duty yard move'));
+    await user.click(screen.getByRole('button', { name: 'Save geofence' }));
+
+    await vi.waitFor(() => expect(posted).toMatchObject({ name: 'Yard A', colour: 'GREEN', countAsYardMove: true }));
   });
 
   it('surfaces GEOCODER_NOT_CONFIGURED in the in-modal banner', async () => {
@@ -171,9 +197,12 @@ describe('11.1 Create a geofence — shape segments and double-submit', () => {
     expect(segment('Circle')).toHaveAttribute('aria-pressed', 'true');
     expect(segment('Polygon')).toHaveAttribute('aria-pressed', 'false');
 
+    // QA-B — the preview cannot draw, so a drawn shape has no coordinates: the modal explains
+    // that instead of sending a POST the server can only refuse.
     await user.type(screen.getByPlaceholderText('Columbus terminal'), 'Yard A');
     await user.click(screen.getByRole('button', { name: 'Save geofence' }));
-    await vi.waitFor(() => expect(posted).toMatchObject({ type: 'CIRCLE' }));
+    expect(await screen.findByText(/needs the map, which is not available here/)).toBeInTheDocument();
+    expect(posted).toBeNull();
   });
 
   it('sends one POST while the request is in flight, however many times Save is clicked', async () => {
@@ -190,7 +219,10 @@ describe('11.1 Create a geofence — shape segments and double-submit', () => {
     );
     const user = userEvent.setup();
     renderModal();
+    await user.click(screen.getByRole('button', { name: 'Address' }));
     await user.type(screen.getByPlaceholderText('Columbus terminal'), 'Yard A');
+    await user.type(screen.getByPlaceholderText('4517 Washington Ave., Columbus, OH 43004'), '123 Main St, Columbus, OH');
+    await user.type(screen.getByPlaceholderText('0.8'), '0.5');
     const save = screen.getByRole('button', { name: 'Save geofence' });
     await user.click(save);
     await vi.waitFor(() => expect(save).toBeDisabled());

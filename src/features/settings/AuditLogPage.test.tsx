@@ -1,10 +1,11 @@
-// web/tz.md W-23 — cursor pagination (both `Load more` steps), the verbatim empty copy, the
-// in-card error, the row-click drawer, and the `auditLog`-gated CSV export.
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+// web/tz.md W-23 — the cursor window walk, client-side pagination (WB-270), the verbatim empty
+// copy, the in-card error, the row-click drawer, and the `auditLog`-gated CSV export.
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http } from 'msw';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MemoryRouter } from 'react-router-dom';
 import { server } from '@/mocks/server';
 import { ok, fail, url } from '@/mocks/envelope';
 import { endpoints } from '@/shared/api/endpoints';
@@ -21,15 +22,21 @@ vi.mock('@/shared/auth/Can', () => ({
     (perm === 'auditLog' ? auditLogPerm : true) ? children : null,
 }));
 
-function renderPage() {
+function tree(route: string) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  return (
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
-        <AuditLogPage />
+        <MemoryRouter initialEntries={[route]}>
+          <AuditLogPage />
+        </MemoryRouter>
       </ToastProvider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+}
+
+function renderPage(route = '/settings/audit-log') {
+  return render(tree(route));
 }
 
 function entry(id: string, action: string, objectLabel: string) {
@@ -84,11 +91,14 @@ describe('AuditLogPage — W-23', () => {
     expect(await screen.findByText('No events match these filters')).toBeInTheDocument();
   });
 
-  it('paginates forward across two cursors and opens the before/after drawer', async () => {
+  it('walks the cursor chunks automatically (no Load more) and opens the before/after drawer', async () => {
     const user = userEvent.setup();
+    const requests: URLSearchParams[] = [];
     server.use(
       http.get(url(endpoints.auditLog.list), ({ request }) => {
-        const cursor = new URL(request.url).searchParams.get('cursor');
+        const search = new URL(request.url).searchParams;
+        requests.push(search);
+        const cursor = search.get('cursor');
         if (!cursor) return ok({ items: [entry('1', 'UPDATE', 'Role · Dispatcher')], nextCursor: 'cursor-2' });
         if (cursor === 'cursor-2') return ok({ items: [entry('2', 'CREATE', 'Role · Auditor')], nextCursor: 'cursor-3' });
         return ok({ items: [entry('3', 'DELETE', 'Role · Old role')], nextCursor: null });
@@ -96,17 +106,14 @@ describe('AuditLogPage — W-23', () => {
     );
 
     renderPage();
-    expect(await screen.findByText('Role · Dispatcher')).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Load more' }));
-    expect(await screen.findByText('Role · Auditor')).toBeInTheDocument();
-    // Forward accumulation keeps the earlier page visible.
-    expect(screen.getByText('Role · Dispatcher')).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Load more' }));
     expect(await screen.findByText('Role · Old role')).toBeInTheDocument();
-    // The server signalled a terminal page (`nextCursor: null`) — no further `Load more`.
+    expect(screen.getByText('Role · Dispatcher')).toBeInTheDocument();
+    expect(screen.getByText('Role · Auditor')).toBeInTheDocument();
+    expect(requests.map((r) => r.get('cursor'))).toEqual([null, 'cursor-2', 'cursor-3']);
+    // Each chunk asks for the server's own ceiling, never an unbounded page.
+    expect(requests.every((r) => r.get('limit') === '200')).toBe(true);
     expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
+    expect(await screen.findByText(/1–3 of 3 entries/)).toBeInTheDocument();
 
     await user.click(screen.getByText('Role · Dispatcher'));
     expect(await screen.findByText('Trace ID: trace-1')).toBeInTheDocument();
@@ -141,17 +148,17 @@ describe('AuditLogPage — W-23', () => {
     await waitFor(() => expect(createObjectURL).toHaveBeenCalled());
   });
 
-  it('WB-111 — CSV export honours the active action filter and forwards the server-side params', async () => {
+  it('WB-111 / WB-270 — CSV export honours the action filter and covers the page shown, without a new request', async () => {
     const user = userEvent.setup();
-    const exportRequests: URLSearchParams[] = [];
+    let calls = 0;
+    const rows = [
+      entry('1', 'UPDATE', 'Role · Dispatcher'),
+      ...Array.from({ length: 12 }, (_, i) => entry(`c${i}`, 'CREATE', `User · U${i}`)),
+    ];
     server.use(
-      http.get(url(endpoints.auditLog.list), ({ request }) => {
-        const search = new URL(request.url).searchParams;
-        if (search.get('limit') === '200') exportRequests.push(search);
-        return ok({
-          items: [entry('1', 'UPDATE', 'Role · Dispatcher'), entry('2', 'CREATE', 'User · Anna Weiss')],
-          nextCursor: null,
-        });
+      http.get(url(endpoints.auditLog.list), () => {
+        calls += 1;
+        return ok({ items: rows, nextCursor: null });
       }),
     );
     let capturedBlob: Blob | null = null;
@@ -166,13 +173,17 @@ describe('AuditLogPage — W-23', () => {
 
     await user.selectOptions(screen.getByLabelText('Filter by action'), 'CREATE');
     expect(screen.queryByText('Role · Dispatcher')).not.toBeInTheDocument();
-    expect(screen.getByText('User · Anna Weiss')).toBeInTheDocument();
+    expect(await screen.findByText(/1–10 of 12 entries/)).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /export csv/i }));
-    await waitFor(() => expect(exportRequests.length).toBe(1));
+    await waitFor(() => expect(capturedBlob).not.toBeNull());
+    expect(calls).toBe(1);
 
     const text = await capturedBlob!.text();
-    expect(text).toContain('User · Anna Weiss');
+    expect(text).toContain('User · U0');
+    expect(text).toContain('User · U9');
+    // Page 2 and the filtered-out row are not on the page shown.
+    expect(text).not.toContain('User · U10');
     expect(text).not.toContain('Role · Dispatcher');
   });
 
@@ -182,13 +193,7 @@ describe('AuditLogPage — W-23', () => {
     expect(await screen.findByRole('button', { name: /export csv/i })).toBeInTheDocument();
 
     auditLogPerm = false;
-    rerender(
-      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-        <ToastProvider>
-          <AuditLogPage />
-        </ToastProvider>
-      </QueryClientProvider>,
-    );
+    rerender(tree('/settings/audit-log'));
     await waitFor(() => expect(screen.queryByRole('button', { name: /export csv/i })).not.toBeInTheDocument());
   });
 });
@@ -204,52 +209,32 @@ describe('AuditLogPage — stage-2', () => {
     expect(screen.getByRole('searchbox', { name: 'Search action, object or user' })).toBeInTheDocument();
   });
 
-  it('says the local filters only cover the loaded entries while older pages exist (B-64)', async () => {
-    server.use(
-      http.get(url(endpoints.auditLog.list), () =>
-        ok({ items: [entry('a1', 'UPDATE', 'Dispatcher role')], nextCursor: 'a1' }),
-      ),
-    );
-    renderPage();
-    expect(await screen.findByText(/apply to the 1 entries loaded so far/)).toBeInTheDocument();
-  });
-
-  it('drops the hint once every page is loaded', async () => {
+  it('drops the hint once every entry is loaded', async () => {
     server.use(
       http.get(url(endpoints.auditLog.list), () => ok({ items: [entry('a1', 'UPDATE', 'Dispatcher role')], nextCursor: null })),
     );
     renderPage();
     await screen.findByText('Dispatcher role');
-    expect(screen.queryByText(/entries loaded so far/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/not loaded/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Load older entries' })).not.toBeInTheDocument();
   });
 
-  // B-64 web side — while a local filter is active, older pages are fetched automatically.
-  it('fetches older pages automatically while searching, without Load more', async () => {
-    const user = userEvent.setup();
-    const cursors: (string | null)[] = [];
+  it('never loops on a repeated cursor', async () => {
+    let calls = 0;
     server.use(
       http.get(url(endpoints.auditLog.list), ({ request }) => {
-        const cursor = new URL(request.url).searchParams.get('cursor');
-        cursors.push(cursor);
-        if (!cursor) return ok({ items: [entry('1', 'UPDATE', 'Role · Dispatcher')], nextCursor: 'c2' });
-        if (cursor === 'c2') return ok({ items: [entry('2', 'CREATE', 'Role · Auditor')], nextCursor: 'c3' });
-        return ok({ items: [entry('3', 'DELETE', 'User · Anna Weiss')], nextCursor: null });
+        calls += 1;
+        const id = new URL(request.url).searchParams.get('cursor') ? 'a2' : 'a1';
+        return ok({ items: [entry(id, 'UPDATE', 'Dispatcher role')], nextCursor: 'a1' });
       }),
     );
     renderPage();
-    await screen.findByText('Role · Dispatcher');
-    expect(cursors).toEqual([null]);
-    await user.type(screen.getByPlaceholderText('Search action, object or user…'), 'anna');
-    expect(await screen.findByText('User · Anna Weiss')).toBeInTheDocument();
-    expect(cursors).toEqual([null, 'c2', 'c3']);
-    expect(screen.queryByText(/entries loaded so far/)).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
-    // Clearing the search keeps the pages already fetched.
-    await user.clear(screen.getByPlaceholderText('Search action, object or user…'));
-    expect(screen.getByText('Role · Auditor')).toBeInTheDocument();
+    await screen.findAllByText('Dispatcher role');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(calls).toBe(2);
   });
 
-  it('stops at the automatic-search cap and says older entries are not covered', async () => {
+  it('stops at the window limit, says so, and Load older entries extends the window', async () => {
     const user = userEvent.setup();
     let calls = 0;
     server.use(
@@ -261,17 +246,17 @@ describe('AuditLogPage — stage-2', () => {
       }),
     );
     renderPage();
-    await screen.findByText('Entry 0');
-    await user.selectOptions(screen.getByLabelText('Filter by action'), 'DELETE');
     expect(
-      await screen.findByText(/Searched the 20 most recent entries \(the automatic search limit\)/, {}, { timeout: 15000 }),
+      await screen.findByText(/Showing the 5 most recent entries — older entries in the selected date range are not loaded yet/),
     ).toBeInTheDocument();
-    // 1000 entries / 50 per page = 20 pages, never more.
-    expect(calls).toBe(20);
-    expect(screen.getByRole('button', { name: 'Load more' })).toBeInTheDocument();
-  }, 20000);
+    // 1000 entries / 200 per request = 5 requests, never more.
+    expect(calls).toBe(5);
+    await user.click(screen.getByRole('button', { name: 'Load older entries' }));
+    expect(await screen.findByText(/Showing the 10 most recent entries/)).toBeInTheDocument();
+    expect(calls).toBe(10);
+  });
 
-  it('shows a live count with Stop, and Stop ends the automatic search', async () => {
+  it('shows a live count with Stop, and Stop ends the walk', async () => {
     const user = userEvent.setup();
     let release: () => void = () => {};
     const gate = new Promise<void>((r) => (release = r));
@@ -286,8 +271,6 @@ describe('AuditLogPage — stage-2', () => {
       }),
     );
     renderPage();
-    await screen.findByText('Role · Dispatcher');
-    await user.type(screen.getByPlaceholderText('Search action, object or user…'), 'zzz');
     expect(await screen.findByText('Searching older entries… 1 entries searched so far.')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Stop' }));
     expect(await screen.findByText(/Search stopped after 1 entries/)).toBeInTheDocument();
@@ -297,7 +280,7 @@ describe('AuditLogPage — stage-2', () => {
     expect(calls).toBe(2);
   });
 
-  it('stops fetching once the loaded pages reach past the start of the date range', async () => {
+  it('stops fetching once the loaded chunks reach past the start of the date range', async () => {
     const user = userEvent.setup();
     const old = { ...entry('2', 'DELETE', 'Role · Ancient'), createdAt: new Date(Date.now() - 60 * 86_400_000).toISOString() };
     const cursors: (string | null)[] = [];
@@ -315,34 +298,81 @@ describe('AuditLogPage — stage-2', () => {
     expect(await screen.findByText('Searched every entry in the selected date range (2 loaded).')).toBeInTheDocument();
     expect(cursors).toEqual([null, 'c2']);
   });
+});
 
-  // WB-254 — above 500 matching rows only a window is in the DOM; the table still reports the
-  // full row count and each rendered row its 1-based position (header is row 1).
-  it('virtualises the table above 500 rows and keeps Load more', async () => {
-    // jsdom lays nothing out — give the scroll container a real viewport height.
-    const height = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(600);
-    onTestFinished(() => height.mockRestore());
-    const many = Array.from({ length: 1200 }, (_, i) => entry(`e${i}`, 'UPDATE', `Role · R${i}`));
-    server.use(http.get(url(endpoints.auditLog.list), () => ok({ items: many, nextCursor: 'more' })));
+// WB-270 — `Export CSV` uses the app's export icon (Lucide `Upload`), like DVIR/Vehicles.
+describe('WB-270 export icon', () => {
+  it('Export CSV renders the Upload icon, not Download', async () => {
+    server.use(http.get(url(endpoints.auditLog.list), () => ok({ items: [], nextCursor: null })));
     renderPage();
-    expect(await screen.findByText('Role · R0', {}, { timeout: 8000 })).toBeInTheDocument();
-    const table = screen.getByRole('table');
-    expect(table).toHaveAttribute('aria-rowcount', '1201');
-    const bodyRows = within(table).getAllByRole('row').filter((r) => r.hasAttribute('data-index'));
-    expect(bodyRows.length).toBeGreaterThan(0);
-    expect(bodyRows.length).toBeLessThan(100);
-    expect(bodyRows[0]).toHaveAttribute('aria-rowindex', '2');
-    expect(screen.queryByText('Role · R1199')).not.toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'TIMESTAMP' })).toHaveClass('sticky');
-    expect(screen.getByRole('button', { name: 'Load more' })).toBeInTheDocument();
+    const button = await screen.findByRole('button', { name: /export csv/i });
+    expect(button.querySelector('svg.lucide-upload')).not.toBeNull();
+    expect(button.querySelector('svg.lucide-download')).toBeNull();
+  });
+});
+
+// WB-270 — the shared Pagination (10/25/50/100, `?page=&limit=`) replaces `Load more` and the
+// >500-row virtualisation (WD-102): a page never renders more than 100 rows.
+describe('WB-270 audit log pagination', () => {
+  const rows = Array.from({ length: 23 }, (_, i) =>
+    i < 3 ? entry(`d${i}`, 'DELETE', `Role · D${i}`) : entry(`u${i}`, 'UPDATE', `Role · R${i}`),
+  );
+  beforeEach(() => {
+    server.use(http.get(url(endpoints.auditLog.list), () => ok({ items: rows, nextCursor: null })));
+  });
+  const pager = async (summary: RegExp) => (await screen.findByText(summary)).closest('.border-t') as HTMLElement;
+  const bodyRows = () => within(screen.getByRole('table')).getAllByRole('row').length - 1;
+
+  it('shows 10 rows per page and moves between pages', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    const bar = await pager(/1–10 of 23 entries/);
+    expect(bodyRows()).toBe(10);
+    expect(screen.queryByRole('button', { name: 'Load more' })).not.toBeInTheDocument();
+
+    await user.click(within(bar).getByRole('button', { name: '3' }));
+    await pager(/21–23 of 23 entries/);
+    expect(bodyRows()).toBe(3);
+    expect(screen.getByText('Role · R22')).toBeInTheDocument();
+
+    await user.click(within(bar).getByRole('button', { name: 'Previous page' }));
+    await pager(/11–20 of 23 entries/);
   });
 
-  it('renders every row, without row indexes, at or below 500 rows', async () => {
-    const few = Array.from({ length: 30 }, (_, i) => entry(`f${i}`, 'UPDATE', `Role · F${i}`));
-    server.use(http.get(url(endpoints.auditLog.list), () => ok({ items: few, nextCursor: null })));
-    renderPage();
-    expect(await screen.findByText('Role · F29', {}, { timeout: 8000 })).toBeInTheDocument();
+  it('a new page size re-pages from page 1', async () => {
+    const user = userEvent.setup();
+    renderPage('/settings/audit-log?page=2');
+    const bar = await pager(/11–20 of 23 entries/);
+    await user.selectOptions(within(bar).getByLabelText('Rows per page:'), '25');
+    await pager(/1–23 of 23 entries/);
+    expect(bodyRows()).toBe(23);
+  });
+
+  it('a filter or search change resets to page 1', async () => {
+    const user = userEvent.setup();
+    renderPage('/settings/audit-log?page=2');
+    await pager(/11–20 of 23 entries/);
+    await user.selectOptions(screen.getByLabelText('Filter by action'), 'UPDATE');
+    await pager(/1–10 of 20 entries/);
+
+    await user.click(within(await pager(/1–10 of 20 entries/)).getByRole('button', { name: '2' }));
+    await pager(/11–20 of 20 entries/);
+    await user.type(screen.getByPlaceholderText('Search action, object or user…'), 'role');
+    await pager(/1–10 of 20 entries/);
+  });
+
+  it('a page past the end snaps back to the last page', async () => {
+    renderPage('/settings/audit-log?page=9');
+    await pager(/21–23 of 23 entries/);
+    expect(bodyRows()).toBe(3);
+  });
+
+  it('caps a hand-written page size at 100 rows and renders no virtual-row attributes', async () => {
+    const many = Array.from({ length: 150 }, (_, i) => entry(`m${i}`, 'UPDATE', `Role · M${i}`));
+    server.use(http.get(url(endpoints.auditLog.list), () => ok({ items: many, nextCursor: null })));
+    renderPage('/settings/audit-log?limit=500');
+    await pager(/1–100 of 150 entries/);
+    expect(bodyRows()).toBe(100);
     expect(screen.getByRole('table')).not.toHaveAttribute('aria-rowcount');
-    expect(within(screen.getByRole('table')).getAllByRole('row')).toHaveLength(31);
   });
 });

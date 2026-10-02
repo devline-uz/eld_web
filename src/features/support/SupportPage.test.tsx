@@ -374,3 +374,15 @@ describe('SupportPage — stage-2', () => {
     expect(screen.queryByText('Could not load the fleet')).not.toBeInTheDocument();
   });
 });
+
+// WB-272 — `Export` uses the app's export icon (Lucide `Upload`), like DVIR/Audit log.
+describe('WB-272 export icon', () => {
+  it('Export renders the Upload icon, not Download', async () => {
+    server.use(http.get(url(endpoints.support.tickets), () => ok({ items: [TICKET], page: 1, limit: 50, total: 1, totalPages: 1 })));
+    renderPage();
+    await screen.findByText(TICKET.subject);
+    const button = screen.getByRole('button', { name: /^export$/i });
+    expect(button.querySelector('svg.lucide-upload')).not.toBeNull();
+    expect(button.querySelector('svg.lucide-download')).toBeNull();
+  });
+});

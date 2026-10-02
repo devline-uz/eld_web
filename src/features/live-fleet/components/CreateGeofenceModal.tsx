@@ -1,6 +1,6 @@
 // owner: web-dashboard-fleet — overlay 11.1 · Create a geofence (web/tz.md §11.1).
 // `liveFleet` FULL only; the trigger button is absent from the DOM otherwise (§12.2).
-import { useRef, useState, type BaseSyntheticEvent } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type BaseSyntheticEvent } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import { MapPin } from 'lucide-react';
@@ -13,6 +13,12 @@ import { TOAST_COPY } from '@/shared/ui/copy';
 import { useCreateGeofence, type GeofencePayload } from '@/shared/api/geofences';
 import { geofenceSchema, type GeofenceFormValues } from '@/shared/forms/schemas';
 import { ApiError } from '@/shared/api/errors';
+import { reverseGeocode } from '@/shared/map/geocode';
+import { rectangleCorners, type LatLon } from '@/shared/map/overlays';
+import type { GeofenceDrawMode, GeofenceMapFailure } from '@/shared/map/GeofencePickerMap';
+
+// Lazy, like FleetMap on the fleet screens — `maplibre-gl` + its CSS only load once the modal opens.
+const GeofencePickerMap = lazy(() => import('@/shared/map/GeofencePickerMap'));
 
 const SHAPE_SEGMENTS = ['Circle', 'Rectangle', 'Polygon', 'Address'] as const;
 type ShapeSegment = (typeof SHAPE_SEGMENTS)[number];
@@ -24,6 +30,38 @@ const SEGMENT_TYPE: Record<ShapeSegment, 'CIRCLE' | 'POLYGON' | 'ADDRESS'> = {
   Polygon: 'POLYGON',
   Address: 'ADDRESS',
 };
+
+/** How a click on the map builds each segment's shape. */
+const SEGMENT_MODE: Record<ShapeSegment, GeofenceDrawMode> = {
+  Circle: 'point',
+  Rectangle: 'rectangle',
+  Polygon: 'polygon',
+  Address: 'point',
+};
+
+const MAP_HINT: Record<ShapeSegment, string> = {
+  Circle: 'Click the map to place the centre, then drag the pin to adjust. Set the radius below.',
+  Rectangle: 'Click two opposite corners on the map. Drag a corner to adjust; a third click starts over.',
+  Polygon: 'Click the map to add each corner (at least 3). Drag a corner to adjust.',
+  Address: 'Type the address below, or click the map to fill it in from the picked point.',
+};
+
+const SHAPE_NEEDS_POINTS: Record<Exclude<ShapeSegment, 'Address'>, string> = {
+  Circle: 'Click the map to place the centre of the circle.',
+  Rectangle: 'Click two opposite corners of the rectangle on the map.',
+  Polygon: 'Click at least three corners of the polygon on the map.',
+};
+
+/** Why the map is missing — each case needs a different fix, so the fallback names it. */
+const MAP_FAILURE_COPY: Record<GeofenceMapFailure, string> = {
+  'no-style': 'Map is not configured (VITE_MAP_STYLE_URL is empty).',
+  'no-webgl': 'Map cannot be shown: this browser has WebGL turned off.',
+  'style-failed':
+    'Map failed to load — check the map API key and that this site’s address is an allowed origin for it.',
+};
+
+const SHAPE_NEEDS_MAP =
+  'Drawing a circle, rectangle or polygon needs the map, which is not available here. Choose Address to place this geofence by street address.';
 
 export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { toast } = useToast();
@@ -42,6 +80,18 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
   const [dwellEnabled, setDwellEnabled] = useState(false);
   const [dwellMinutesValue, setDwellMinutesValue] = useState(45);
   const [afterHoursOnly, setAfterHoursOnly] = useState(false);
+  /** Points placed on the map for the current segment (see `SEGMENT_MODE`). */
+  const [points, setPoints] = useState<LatLon[]>([]);
+  /** Mirrors of `radiusMi` / `colour` for the map preview — same no-`watch()` rule as above. */
+  const [radiusPreview, setRadiusPreview] = useState<number | undefined>(undefined);
+  const [colourPreview, setColourPreview] = useState('BLUE');
+  /** No style configured, no WebGL, or the style failed to load — Address still works. */
+  const [mapFailure, setMapFailure] = useState<GeofenceMapFailure | null>(
+    import.meta.env.VITE_MAP_STYLE_URL ? null : 'no-style',
+  );
+  const mapAvailable = mapFailure === null;
+  const geocodeAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => geocodeAbort.current?.abort(), []);
   /** Anything the server refused that could not be mapped onto a field (§6.1 rule 6). */
   const [serverError, setServerError] = useState<string | null>(null);
 
@@ -65,6 +115,33 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
       countAsYardMove: false,
     },
   });
+
+  function onPointsChange(next: LatLon[]) {
+    setPoints(next);
+    setServerError(null);
+    const centre = SEGMENT_MODE[segment] === 'point' ? next[0] : undefined;
+    if (!centre) return;
+    // Fill the Address field from the picked point (shown for every shape, sent for Address).
+    geocodeAbort.current?.abort();
+    const controller = new AbortController();
+    geocodeAbort.current = controller;
+    reverseGeocode(centre.lat, centre.lon, controller.signal)
+      .then((address) => {
+        if (address && !controller.signal.aborted) {
+          setValue('address', address, { shouldDirty: true, shouldValidate: true });
+        }
+      })
+      .catch(() => undefined);
+  }
+
+  function onSegmentChange(seg: ShapeSegment) {
+    // A centre carries over between Circle and Address; a corner set never fits another shape.
+    const keep = SEGMENT_MODE[seg] === 'point' && SEGMENT_MODE[segment] === 'point';
+    if (!keep) setPoints([]);
+    setSegment(seg);
+    setServerError(null);
+    setValue('type', SEGMENT_TYPE[seg], { shouldDirty: true });
+  }
 
   // WB — a 422 used to be swallowed whole: the toast was suppressed for it but `details` was
   // never fed into `setError`, so an invalid geofence failed in complete silence. Mapped fields
@@ -95,10 +172,38 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
   function onSave(event?: BaseSyntheticEvent) {
     return handleSubmit((values) => {
       if (inFlight.current) return;
+      // QA-B — the preview never draws a shape, so a Circle/Rectangle/Polygon has no
+      // `centerLat/centerLon`/`polygon` and `POST /geofences` always answered a 422 whose issue
+      // targets no field ("Check the highlighted fields…" with nothing highlighted). Say why
+      // up front instead of sending a request that cannot succeed.
+      let geometry: Pick<GeofencePayload, 'centerLat' | 'centerLon' | 'polygon'> = {};
+      if (segment !== 'Address') {
+        if (!mapAvailable) {
+          setServerError(SHAPE_NEEDS_MAP);
+          return;
+        }
+        const centre = points[0];
+        if (segment === 'Circle' && centre) {
+          if (values.radiusMi == null) {
+            setError('radiusMi', { message: 'Enter a radius for the circle.' });
+            return;
+          }
+          geometry = { centerLat: centre.lat, centerLon: centre.lon };
+        } else if (segment === 'Rectangle' && points.length >= 2) {
+          geometry = { polygon: rectangleCorners(points[0]!, points[1]!) };
+        } else if (segment === 'Polygon' && points.length >= 3) {
+          geometry = { polygon: points };
+        } else {
+          setServerError(SHAPE_NEEDS_POINTS[segment]);
+          return;
+        }
+      }
+      setServerError(null);
       inFlight.current = true;
       const payload: GeofencePayload = {
         name: values.name,
         type: values.type,
+        ...geometry,
         category: values.category,
         // `address` only carries meaning for the ADDRESS shape — the server geocodes it.
         address: values.type === 'ADDRESS' ? values.address : undefined,
@@ -107,6 +212,8 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
         alertOnExit: values.alertOnExit,
         dwellMinutes: values.dwellMinutes,
         afterHoursOnly: values.afterHoursOnly,
+        colour: values.colour,
+        countAsYardMove: values.countAsYardMove,
       };
       createGeofence.mutate(payload, {
         onSuccess: () => {
@@ -128,7 +235,7 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
       title="Create a geofence"
       subtitle="Trigger arrival, departure and dwell-time events"
       size="lg"
-      isDirty={isDirty}
+      isDirty={isDirty || points.length > 0}
       footer={
         <>
           <FilterCheckbox
@@ -190,7 +297,7 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
           <label className="flex flex-col gap-1">
             <span className="text-label text-text">Colour</span>
             <select
-              {...register('colour')}
+              {...register('colour', { onChange: (event) => setColourPreview(String(event.target.value)) })}
               disabled={isPending}
               className="h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text"
             >
@@ -217,10 +324,7 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
                   type="button"
                   aria-pressed={active}
                   disabled={isPending}
-                  onClick={() => {
-                    setSegment(seg);
-                    setValue('type', SEGMENT_TYPE[seg], { shouldDirty: true });
-                  }}
+                  onClick={() => onSegmentChange(seg)}
                   className={
                     active
                       ? 'bg-bg-inverse px-3 text-body-strong text-text-inverse'
@@ -232,14 +336,50 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
               );
             })}
           </div>
-          <div className="flex h-geofence-preview items-center justify-center rounded-md border border-dashed border-border bg-bg-subtle text-center">
-            <div className="flex flex-col items-center gap-1 text-text-muted">
-              <MapPin size={20} strokeWidth={1.75} aria-hidden="true" />
-              <p className="text-card-sub">
-                Map preview unavailable in this environment — drag corners here once tiles are configured.
-              </p>
+          {mapAvailable ? (
+            <>
+              <div className="relative h-geofence-preview overflow-hidden rounded-md border border-border">
+                <Suspense fallback={<div className="h-full w-full animate-pulse bg-bg-subtle" />}>
+                  <GeofencePickerMap
+                    mode={SEGMENT_MODE[segment]}
+                    points={points}
+                    onPointsChange={onPointsChange}
+                    colour={colourPreview}
+                    radiusMi={segment === 'Circle' || segment === 'Address' ? radiusPreview : undefined}
+                    disabled={isPending}
+                    onUnavailable={setMapFailure}
+                  />
+                </Suspense>
+              </div>
+              <div className="flex items-center gap-2 text-caption text-text-muted">
+                <MapPin size={14} strokeWidth={1.75} aria-hidden="true" />
+                <span className="flex-1">
+                  {MAP_HINT[segment]}
+                  {points[0] && SEGMENT_MODE[segment] === 'point' && (
+                    <> · {points[0].lat.toFixed(5)}, {points[0].lon.toFixed(5)}</>
+                  )}
+                </span>
+                {points.length > 0 && (
+                  <button
+                    type="button"
+                    disabled={isPending}
+                    onClick={() => setPoints(segment === 'Polygon' ? points.slice(0, -1) : [])}
+                    className="text-caption text-primary hover:underline"
+                  >
+                    {segment === 'Polygon' ? 'Undo last point' : 'Clear'}
+                  </button>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="flex h-geofence-preview items-center justify-center rounded-md border border-dashed border-border bg-bg-subtle text-center">
+              <div className="flex flex-col items-center gap-1 text-text-muted">
+                <MapPin size={20} strokeWidth={1.75} aria-hidden="true" />
+                <p className="text-card-sub">{MAP_FAILURE_COPY[mapFailure ?? 'no-style']}</p>
+                <p className="text-caption">Choose Address to place this geofence by street address.</p>
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         <div className="grid grid-cols-3 gap-4">
@@ -271,6 +411,10 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
                   // `valueAsNumber` turns an empty field into `NaN`, which fails `z.number()`
                   // even though the field is optional (WB-012) — coerce blank to `undefined`.
                   setValueAs: (v: string) => (v === '' ? undefined : Number(v)),
+                  onChange: (event) => {
+                    const n = Number(event.target.value);
+                    setRadiusPreview(event.target.value !== '' && n > 0 ? n : undefined);
+                  },
                 })}
                 placeholder="0.8"
                 disabled={isPending}

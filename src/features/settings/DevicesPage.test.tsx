@@ -367,3 +367,15 @@ describe('DevicesPage — stage-2 row actions', () => {
     await waitFor(() => expect(body).toEqual({ firmware: 'L113' }));
   });
 });
+
+// WB-273 — `Export` uses the app's export icon (Lucide `Upload`), like Support/DVIR/Audit log.
+describe('WB-273 export icon', () => {
+  it('Export renders the Upload icon, not Download', async () => {
+    server.use(http.get(url(endpoints.devices.list), () => ok({ items: [DEVICE], page: 1, limit: 25, total: 1, totalPages: 1 })));
+    renderPage();
+    await screen.findByText('PT30_A86E');
+    const button = screen.getByRole('button', { name: /^export$/i });
+    expect(button.querySelector('svg.lucide-upload')).not.toBeNull();
+    expect(button.querySelector('svg.lucide-download')).toBeNull();
+  });
+});

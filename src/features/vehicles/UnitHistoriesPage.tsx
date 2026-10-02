@@ -7,7 +7,7 @@
 // single day's coarse marker path) and animates a dot along it at 1x/2x/4x with a scrub slider.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, ChevronRight as Crumb, Download, Pause, Play, Route, Clock, Timer, Fuel } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronRight as Crumb, Pause, Play, Route, Clock, Timer, Fuel, Upload } from 'lucide-react';
 import { useVehicle, useVehicleHistories, type RouteSegment } from '@/shared/api/vehicles';
 import { Badge } from '@/shared/ui/Badge';
 import { Button } from '@/shared/ui/Button';
@@ -242,7 +242,7 @@ export default function UnitHistoriesPage() {
               active segment filter included. */}
           <Button
             variant="secondary"
-            iconLeft={<Download size={16} strokeWidth={1.75} />}
+            iconLeft={<Upload size={16} strokeWidth={1.75} />}
             disabled={filteredSegments.length === 0}
             onClick={exportSegments}
           >

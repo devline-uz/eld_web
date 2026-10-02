@@ -3,7 +3,7 @@
 // Design: web/roles and screens/admin panel/Settings — support channels and tickets.jpg
 import { useMemo, useState } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
-import { Plus, Search, MessageSquare, Mail, Phone, Download } from 'lucide-react';
+import { Plus, Search, MessageSquare, Mail, Phone, Upload } from 'lucide-react';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { Button } from '@/shared/ui/Button';
 import { Badge, type BadgeTone } from '@/shared/ui/Badge';
@@ -210,7 +210,7 @@ export default function SupportPage() {
           <SectionHeader title="Your tickets" subtitle={`${plural(rows.length, 'ticket')} in total`} />
           <Button
             variant="secondary"
-            iconLeft={<Download size={16} strokeWidth={1.75} />}
+            iconLeft={<Upload size={16} strokeWidth={1.75} />}
             disabled={filtered.length === 0}
             title={filtered.length === 0 ? 'There are no tickets to export' : undefined}
             onClick={handleExport}

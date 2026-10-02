@@ -225,3 +225,15 @@ describe('W-05 Unit histories — states', () => {
     expect(await screen.findByRole('button', { name: 'Pause' })).toBeInTheDocument();
   });
 });
+
+// WB-273 — `Export` uses the app's export icon (Lucide `Upload`), like Support/DVIR/Audit log.
+describe('WB-273 export icon', () => {
+  it('Export renders the Upload icon, not Download', async () => {
+    server.use(http.get(url(endpoints.vehicles.histories('veh_1')), () => ok(emptyHistories())));
+    renderPage();
+    await screen.findByText(/0 segments today/);
+    const button = screen.getByRole('button', { name: 'Export' });
+    expect(button.querySelector('svg.lucide-upload')).not.toBeNull();
+    expect(button.querySelector('svg.lucide-download')).toBeNull();
+  });
+});

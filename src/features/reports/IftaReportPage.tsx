@@ -10,7 +10,7 @@
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { ColumnDef } from '@tanstack/react-table';
-import { Download, FileText, Fuel, Route, TrendingUp, Upload } from 'lucide-react';
+import { FileText, Fuel, Route, TrendingUp, Upload } from 'lucide-react';
 import { useDynamicSubtitle } from '@/app/layouts/Topbar';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { Can } from '@/shared/auth/Can';
@@ -273,7 +273,7 @@ export default function IftaReportPage() {
               action={
                 <Button
                   variant="secondary"
-                  iconLeft={<Download size={16} strokeWidth={1.75} />}
+                  iconLeft={<Upload size={16} strokeWidth={1.75} />}
                   loading={exportPdf.isPending}
                   disabled={exportPdf.isPending}
                   aria-describedby={exportScopeId}

@@ -221,3 +221,23 @@ export function tripsToGeoJSON(
 }
 
 export const EMPTY_COLLECTION: FeatureCollection = { type: 'FeatureCollection', features: [] };
+
+// ---------------------------------------------------------------------------------------------
+// 11.1 Create a geofence — drawn shapes
+// ---------------------------------------------------------------------------------------------
+
+export interface LatLon {
+  lat: number;
+  lon: number;
+}
+
+/** The four corners of the axis-aligned rectangle spanned by two opposite corners — the ring the
+ * 11.1 map previews and the `polygon` the modal posts, so the two never disagree. */
+export function rectangleCorners(a: LatLon, b: LatLon): LatLon[] {
+  return [
+    { lat: a.lat, lon: a.lon },
+    { lat: a.lat, lon: b.lon },
+    { lat: b.lat, lon: b.lon },
+    { lat: b.lat, lon: a.lon },
+  ];
+}

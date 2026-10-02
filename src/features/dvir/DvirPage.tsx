@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { ColumnDef } from '@tanstack/react-table';
-import { Filter, Plus, Search, Download, Wrench, AlertTriangle, ClipboardList, ShieldOff, X } from 'lucide-react';
+import { Filter, Plus, Search, Upload, Wrench, AlertTriangle, ClipboardList, ShieldOff, X } from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
@@ -86,6 +86,13 @@ const DVIR_TYPE_LABEL: Record<string, string> = {
   INTERMEDIATE: 'Intermediate',
 };
 
+/** Same guard as Vehicles/Drivers: `?page=abc`, `?page=0` or `?limit=-3` fall back to the
+ * default instead of rendering a `NaN–NaN of 12` footer. */
+function positiveIntParam(raw: string | null, fallback: number): number {
+  const value = Number(raw);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
 function DvirStatusBadge({ row }: { row: DvirTableRow }) {
   if (row.vehicleCondition === 'SATISFACTORY') return <Badge tone="success">No defects</Badge>;
   if (row.repairStatus === 'REPAIRED') return <Badge tone="info">Defects fixed</Badge>;
@@ -106,6 +113,25 @@ export default function DvirPage() {
   const filters = useMemo(() => parseDvirFilters(params), [params]);
   function applyFilters(next: typeof filters) {
     setParams(writeDvirFilters(params, next), { replace: true });
+  }
+
+  // WB-268 — the Recent DVIRs table pages like Vehicles/Drivers: `?page=&limit=` in the URL,
+  // default 10 rows (the old fixed slice). A filter change already drops `page`
+  // (`writeDvirFilters`); a new page size or search term does the same, so each lands on page 1.
+  const dvirsPage = positiveIntParam(params.get('page'), 1);
+  const dvirsLimit = positiveIntParam(params.get('limit'), 10);
+  function setDvirsPaging(key: 'page' | 'limit', value: number) {
+    const next = new URLSearchParams(params);
+    next.set(key, String(value));
+    if (key === 'limit' || value === 1) next.delete('page');
+    setParams(next, { replace: true });
+  }
+  function changeSearch(value: string) {
+    setSearch(value);
+    if (!params.has('page')) return;
+    const next = new URLSearchParams(params);
+    next.delete('page');
+    setParams(next, { replace: true });
   }
 
 
@@ -223,7 +249,22 @@ export default function DvirPage() {
         .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime()),
     [recentDvirsWindow, filters],
   );
-  const recentDvirs = useMemo(() => recentDvirsFiltered.slice(0, 10), [recentDvirsFiltered]);
+  // WB-268 — client-side paging over the filtered 48 h window. `GET /dvir` pages on the server, but
+  // search, type and severity have no server param (B-66), so a server page could not be
+  // filtered consistently; the window is bounded (`RECENT_DVIR_WINDOW`).
+  const dvirsTotalPages = Math.max(1, Math.ceil(recentDvirsFiltered.length / dvirsLimit));
+  const shownDvirsPage = Math.min(dvirsPage, dvirsTotalPages);
+  const recentDvirs = useMemo(
+    () => recentDvirsFiltered.slice((shownDvirsPage - 1) * dvirsLimit, shownDvirsPage * dvirsLimit),
+    [recentDvirsFiltered, shownDvirsPage, dvirsLimit],
+  );
+  // A `page` past the end (a bookmark, the back button, rows aged out of the 48 h) snaps back to
+  // the last page that exists, as on Vehicles/Drivers.
+  useEffect(() => {
+    if (dvirs.isLoading || dvirsPage <= dvirsTotalPages) return;
+    setDvirsPaging('page', dvirsTotalPages);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dvirsPage, dvirsTotalPages, dvirs.isLoading]);
   // `+` when the loaded window is full and every row in it is inside the 48 h the table shows:
   // there may be more submissions the window never reached (B-66).
   const recentDvirsCountLabel =
@@ -291,10 +332,10 @@ export default function DvirPage() {
             <Search size={16} strokeWidth={1.75} className="text-text-muted" />
             <input
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => changeSearch(e.target.value)}
               // Stage 3 — one term, debounced once, feeds every tab; Esc and × clear it everywhere.
               onKeyDown={(e) => {
-                if (e.key === 'Escape' && search) setSearch('');
+                if (e.key === 'Escape' && search) changeSearch('');
               }}
               aria-label="Search unit, defect"
               placeholder="Search unit, defect…"
@@ -304,7 +345,7 @@ export default function DvirPage() {
               <button
                 type="button"
                 aria-label="Clear search"
-                onClick={() => setSearch('')}
+                onClick={() => changeSearch('')}
                 className="flex size-6 items-center justify-center rounded-md text-text-muted hover:bg-bg-subtle hover:text-text"
               >
                 <X size={14} strokeWidth={1.75} aria-hidden="true" />
@@ -328,7 +369,7 @@ export default function DvirPage() {
           </Button>
           <Button
             variant="secondary"
-            iconLeft={<Download size={16} strokeWidth={1.75} />}
+            iconLeft={<Upload size={16} strokeWidth={1.75} />}
             disabled={exportable[tab].count === 0}
             title={exportable[tab].count === 0 ? 'Nothing to export on this tab.' : undefined}
             onClick={handleExport}
@@ -418,7 +459,7 @@ export default function DvirPage() {
 
       {tab === 'dvirs' && (
         <div className="grid grid-cols-[1fr_348px] gap-card-gap">
-          <Card padded={false}>
+          <Card padded={false} className="flex flex-col">
             <div className="p-card pb-0">
               <SectionHeader title="Recent DVIRs" subtitle="Last 48 hours" />
               {unknownSeverityExcluded > 0 && (
@@ -428,19 +469,21 @@ export default function DvirPage() {
                 </p>
               )}
             </div>
-            <div className="p-card">
+            {/* flex-1 lets the table area absorb the spare height of the grid row (stretched by the
+                Upcoming maintenance card), so Pagination sits at the card bottom — as Trips (WB-264). */}
+            <div className="flex-1 p-card">
               {dvirs.isLoading ? (
                 <LoadingState />
               ) : dvirs.isError ? (
                 <ErrorState onRetry={() => dvirs.refetch()} />
-              ) : recentDvirs.length === 0 ? (
+              ) : recentDvirsFiltered.length === 0 ? (
                 search || countActiveDvirFilters(filters) > 0 ? (
                   <EmptyState
                     {...searchEmptyState(search || 'these filters')}
                     actions={[
                       {
                         label: search ? 'Clear search' : 'Clear filters',
-                        onClick: () => (search ? setSearch('') : applyFilters(EMPTY_DVIR_FILTERS)),
+                        onClick: () => (search ? changeSearch('') : applyFilters(EMPTY_DVIR_FILTERS)),
                       },
                     ]}
                   />
@@ -506,6 +549,17 @@ export default function DvirPage() {
                 />
               )}
             </div>
+            {!dvirs.isLoading && !dvirs.isError && recentDvirsFiltered.length > 0 && (
+              <Pagination
+                page={shownDvirsPage}
+                limit={dvirsLimit}
+                total={recentDvirsFiltered.length}
+                totalPages={dvirsTotalPages}
+                itemLabel="DVIRs"
+                onPageChange={(p) => setDvirsPaging('page', p)}
+                onLimitChange={(l) => setDvirsPaging('limit', l)}
+              />
+            )}
           </Card>
 
           <Card padded={false}>
