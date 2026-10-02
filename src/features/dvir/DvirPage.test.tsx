@@ -2,7 +2,7 @@
 // `+ New work order` control from the real fixture data.
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -621,5 +621,106 @@ describe('DvirPage', () => {
       await waitFor(() => expect(body).toBeTruthy());
       expect((body as { repairStatus: string }).repairStatus).toBe('DEFERRED');
     });
+  });
+});
+
+// WB-268 — the Recent DVIRs table had a fixed 10-row slice and no pager. It now pages
+// client-side over the filtered 48 h window with the shared Pagination, `?page=&limit=` in the URL.
+describe('WB-268 Recent DVIRs pagination', () => {
+  const dvirRows = Array.from({ length: 23 }, (_, i) => ({
+    id: `dvir_p${i}`,
+    driverId: 'drv_none',
+    vehicleId: 'veh_none',
+    trailerId: null,
+    type: i < 15 ? 'PRE_TRIP' : 'POST_TRIP',
+    submittedAt: new Date(Date.now() - (i + 1) * 60_000).toISOString(),
+    odometerMi: 1000 + i,
+    latitude: null,
+    longitude: null,
+    locationName: null,
+    vehicleCondition: 'SATISFACTORY',
+    driverSignatureUrl: 'sig.png',
+    notes: null,
+    mechanicName: null,
+    mechanicSignedAt: null,
+    mechanicNote: null,
+    repairStatus: 'NOT_REQUIRED',
+    nextDriverReviewedAt: null,
+    createdAt: new Date(Date.now() - (i + 1) * 60_000).toISOString(),
+  }));
+
+  beforeEach(() => {
+    server.use(
+      http.get(url(endpoints.dvir.list), () =>
+        ok({ items: dvirRows, page: 1, limit: 200, total: dvirRows.length, totalPages: 1 }),
+      ),
+    );
+  });
+
+  /** The DVIRs tab also shows the Open defects pager — scope to the Recent DVIRs one. */
+  async function dvirPager(summary: RegExp) {
+    const text = await screen.findByText(summary);
+    return text.closest('.border-t') as HTMLElement;
+  }
+  const dvirTableRows = () =>
+    within(screen.getByRole('table', { name: 'Recent DVIRs' })).getAllByRole('row').length - 1;
+
+  it('shows 10 rows per page with the shared pager and moves between pages', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    const pager = await dvirPager(/1–10 of 23 DVIRs/);
+    expect(dvirTableRows()).toBe(10);
+
+    await user.click(within(pager).getByRole('button', { name: '3' }));
+    await dvirPager(/21–23 of 23 DVIRs/);
+    expect(dvirTableRows()).toBe(3);
+  });
+
+  it('a new page size re-pages from page 1', async () => {
+    const user = userEvent.setup();
+    renderPage('/dvir?page=2');
+    const pager = await dvirPager(/11–20 of 23 DVIRs/);
+
+    await user.selectOptions(within(pager).getByLabelText('Rows per page:'), '25');
+    await dvirPager(/1–23 of 23 DVIRs/);
+    expect(dvirTableRows()).toBe(23);
+  });
+
+  it('changing a filter resets to page 1', async () => {
+    const user = userEvent.setup();
+    renderPage('/dvir?fType=PRE_TRIP&page=2');
+    await dvirPager(/11–15 of 15 DVIRs/);
+    expect(dvirTableRows()).toBe(5);
+
+    await user.click(screen.getByRole('button', { name: 'Clear all' }));
+    await dvirPager(/1–10 of 23 DVIRs/);
+    expect(dvirTableRows()).toBe(10);
+  });
+
+  it('a search term resets to page 1', async () => {
+    const user = userEvent.setup();
+    renderPage('/dvir?page=3');
+    await dvirPager(/21–23 of 23 DVIRs/);
+
+    await user.type(screen.getByPlaceholderText('Search unit, defect…'), 'x');
+    await user.clear(screen.getByPlaceholderText('Search unit, defect…'));
+    await dvirPager(/1–10 of 23 DVIRs/);
+  });
+
+  it('a page past the end snaps back to the last page', async () => {
+    renderPage('/dvir?page=9');
+    await dvirPager(/21–23 of 23 DVIRs/);
+    expect(dvirTableRows()).toBe(3);
+  });
+});
+
+// WB-269 — every export control on W-09 uses the app's export icon (Lucide `Upload`, arrow out
+// of the tray), never `Download`.
+describe('WB-269 export icon', () => {
+  it('header Export renders the Upload icon', async () => {
+    renderPage();
+    const button = await screen.findByRole('button', { name: 'Export' });
+    expect(button.querySelector('svg.lucide-upload')).not.toBeNull();
+    expect(button.querySelector('svg.lucide-download')).toBeNull();
   });
 });

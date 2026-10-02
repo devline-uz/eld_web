@@ -1,7 +1,7 @@
 // owner: web-dvir-safety — 11.15 DVIR detail (web/tz.md §11.15). `dvir` READ; footer's
 // `Create work order` needs `maintenance` FULL, mechanic sign-off needs `dvir` FULL.
 import { useEffect, useState } from 'react';
-import { EyeOff } from 'lucide-react';
+import { EyeOff, Upload } from 'lucide-react';
 import { Drawer } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { SeverityBadge } from '@/shared/ui/Badge';
@@ -196,6 +196,7 @@ export function DvirDrawer({
             {/* B-75 (shipped 2026-09-24) — `GET /dvir/:id/pdf`. Fetched at click time, never cached. */}
             <Button
               variant="secondary"
+              iconLeft={<Upload size={16} strokeWidth={1.75} />}
               disabled={!dvir}
               loading={pdfLoading}
               onClick={() => {
