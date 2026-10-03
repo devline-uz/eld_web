@@ -8,6 +8,8 @@ import { cn } from './cn';
 // a long list grows past the viewport). WAI-ARIA "select-only combobox" pattern: the trigger is
 // role=combobox, the menu role=listbox with aria-activedescendant; ↑/↓/Home/End move, Enter/Space
 // pick, Esc/Tab close, typing jumps to the first option starting with the typed text.
+// `searchable` adds a filter box above the list (long lists such as countries): typing narrows
+// the options by label or value, ↑/↓/Enter work from the box.
 
 export interface SelectOption {
   value: string;
@@ -26,6 +28,10 @@ export interface SelectProps {
   'aria-label'?: string;
   /** Trigger classes — pass the form's input class so the field matches its neighbours. */
   className?: string;
+  /** Show a filter box above the list. */
+  searchable?: boolean;
+  /** Accessible name / placeholder of the filter box. */
+  searchLabel?: string;
 }
 
 /** Menu height cap (Tailwind `max-h-72` = 18rem ≈ 288px, same as the Driver/Unit picker list). */
@@ -43,25 +49,34 @@ export function Select({
   id,
   'aria-label': ariaLabel,
   className,
+  searchable = false,
+  searchLabel = 'Search',
 }: SelectProps) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const searchRef = useRef<HTMLInputElement>(null);
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLUListElement>(null);
   const typeahead = useRef({ text: '', at: 0 });
   const baseId = useId();
   const listId = `${baseId}-listbox`;
   const optionId = (index: number) => `${baseId}-opt-${index}`;
-  const selectedIndex = options.findIndex((o) => o.value === value);
-  const selected = selectedIndex >= 0 ? options[selectedIndex] : undefined;
+  const selected = options.find((o) => o.value === value);
+  const needle = searchable ? query.trim().toLowerCase() : '';
+  const visible = needle
+    ? options.filter((o) => o.label.toLowerCase().includes(needle) || o.value.toLowerCase() === needle)
+    : options;
 
-  function openMenu(index = selectedIndex >= 0 ? selectedIndex : 0) {
+  function openMenu() {
     if (disabled || options.length === 0) return;
-    setActive(Math.max(0, Math.min(index, options.length - 1)));
+    setQuery('');
+    const index = options.findIndex((o) => o.value === value);
+    setActive(Math.max(0, index));
     setOpen(true);
   }
 
   function pick(index: number) {
-    const option = options[index];
+    const option = visible[index];
     if (option) onChange(option.value);
     setOpen(false);
   }
@@ -81,7 +96,7 @@ export function Select({
     state.text = now - state.at > TYPEAHEAD_RESET_MS ? key : state.text + key;
     state.at = now;
     const query = state.text.toLowerCase();
-    const index = options.findIndex((o) => o.label.toLowerCase().startsWith(query));
+    const index = visible.findIndex((o) => o.label.toLowerCase().startsWith(query));
     if (index >= 0) setActive(index);
   }
 
@@ -93,8 +108,8 @@ export function Select({
     }
   }
 
-  function onListKeyDown(event: KeyboardEvent<HTMLUListElement>) {
-    const last = options.length - 1;
+  function onListKeyDown(event: KeyboardEvent<HTMLElement>) {
+    const last = visible.length - 1;
     switch (event.key) {
       case 'ArrowDown':
         event.preventDefault();
@@ -112,8 +127,12 @@ export function Select({
         event.preventDefault();
         setActive(last);
         return;
-      case 'Enter':
       case ' ':
+        if (event.currentTarget === searchRef.current) return;
+        event.preventDefault();
+        pick(active);
+        return;
+      case 'Enter':
         event.preventDefault();
         pick(active);
         return;
@@ -121,6 +140,7 @@ export function Select({
         setOpen(false);
         return;
       default:
+        if (event.currentTarget === searchRef.current) return;
         if (event.key.length === 1 && !event.metaKey && !event.ctrlKey && !event.altKey) {
           jumpByTyping(event.key);
         }
@@ -160,21 +180,45 @@ export function Select({
           sideOffset={4}
           onOpenAutoFocus={(event) => {
             event.preventDefault();
-            listRef.current?.focus();
+            (searchable ? searchRef.current : listRef.current)?.focus();
           }}
           className="z-50 min-w-[var(--radix-popover-trigger-width)] rounded-md border border-border bg-bg-surface p-1 shadow-pop"
         >
+          {searchable && (
+            <input
+              ref={searchRef}
+              type="search"
+              value={query}
+              placeholder={searchLabel}
+              aria-label={searchLabel}
+              aria-controls={listId}
+              aria-autocomplete="list"
+              aria-activedescendant={visible.length ? optionId(active) : undefined}
+              autoComplete="off"
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setActive(0);
+              }}
+              onKeyDown={onListKeyDown}
+              className="mb-1 h-input w-full rounded-sm border border-border bg-bg-surface px-3 text-body text-text"
+            />
+          )}
           <ul
             ref={listRef}
             id={listId}
             role="listbox"
             tabIndex={-1}
             aria-label={ariaLabel}
-            aria-activedescendant={options.length ? optionId(active) : undefined}
+            aria-activedescendant={visible.length ? optionId(active) : undefined}
             onKeyDown={onListKeyDown}
             className={cn('flex flex-col', SELECT_MENU_CLASS)}
           >
-            {options.map((option, index) => (
+            {visible.length === 0 && (
+              <li role="presentation" className="px-3 py-1.5 text-body text-text-muted">
+                No matches
+              </li>
+            )}
+            {visible.map((option, index) => (
               <li
                 key={option.value}
                 id={optionId(index)}
