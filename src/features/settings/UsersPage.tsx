@@ -137,7 +137,10 @@ export default function UsersPage() {
 
   function handleResendInvite(user: UserRow) {
     resendInvite.mutate(user.id, {
-      onSuccess: () => toast({ kind: 'success', ...SETTINGS_TOAST.invitationResent(user.email) }),
+      onSuccess: ({ emailDelivered }) =>
+        emailDelivered
+          ? toast({ kind: 'success', ...SETTINGS_TOAST.invitationResent(user.email) })
+          : toast({ kind: 'warning', ...SETTINGS_TOAST.invitationNotEmailed(user.email) }),
       onError: (error) => toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }),
     });
   }
@@ -151,6 +154,11 @@ export default function UsersPage() {
     const results = await Promise.allSettled(pending.map((user) => resendInvite.mutateAsync(user.id)));
     setResendingAll(false);
     const failed = results.filter((r) => r.status === 'rejected').length;
+    const notEmailed = results.filter((r) => r.status === 'fulfilled' && !r.value.emailDelivered).length;
+    if (failed === 0 && notEmailed > 0) {
+      toast({ kind: 'warning', ...SETTINGS_TOAST.invitationsNotEmailed(notEmailed, pending.length) });
+      return;
+    }
     if (failed === 0) {
       toast({ kind: 'success', ...SETTINGS_TOAST.invitationsResent(pending.length) });
       return;

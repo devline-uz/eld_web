@@ -233,7 +233,7 @@ describe('UsersPage — W-18', () => {
     server.use(
       http.post(url(endpoints.users.resendInvite('usr_3')), () => {
         resent = true;
-        return ok({ user: { id: 'usr_3', status: 'INVITED' }, inviteToken: 'tok', expiresAt: new Date().toISOString() });
+        return ok({ emailDelivered: true });
       }),
     );
 
@@ -243,6 +243,34 @@ describe('UsersPage — W-18', () => {
     await user.click(screen.getByRole('button', { name: 'Resend' }));
 
     await waitFor(() => expect(resent).toBe(true));
+    expect(await screen.findByText('Invitation resent')).toBeInTheDocument();
+  });
+
+  it('warns instead of claiming success when the resent invitation could not be emailed', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(url(endpoints.users.list), () =>
+        ok([
+          {
+            id: 'usr_3',
+            email: 'invited@example.com',
+            firstName: 'Dana',
+            lastName: 'Ford',
+            status: 'INVITED',
+            role: { key: 'DISPATCHER', name: 'Dispatcher' },
+            invitedAt: new Date().toISOString(),
+          },
+        ]),
+      ),
+      http.post(url(endpoints.users.resendInvite('usr_3')), () => ok({ emailDelivered: false })),
+    );
+
+    renderPage();
+    expect(await screen.findByText('Pending invitations')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Resend' }));
+
+    expect(await screen.findByText('User invited — email not sent')).toBeInTheDocument();
+    expect(screen.queryByText('Invitation resent')).not.toBeInTheDocument();
   });
 
   it('WB-042 — Filters button opens the drawer and role/status filters narrow the table with a filter-aware empty state', async () => {
@@ -530,7 +558,7 @@ describe('UsersPage — stage-2 row actions', () => {
       http.get(url(endpoints.users.list), () => ok([invited('usr_3', 'a@example.com'), invited('usr_4', 'b@example.com')])),
       http.post(url(endpoints.users.resendInvite(':id')), ({ params }) => {
         resent.push(String(params.id));
-        return ok({ user: ANNA, inviteToken: 'x', expiresAt: new Date().toISOString() });
+        return ok({ emailDelivered: true });
       }),
     );
     renderPage();
@@ -549,7 +577,7 @@ describe('UsersPage — stage-2 row actions', () => {
       http.post(url(endpoints.users.resendInvite(':id')), ({ params }) =>
         String(params.id) === 'usr_4'
           ? fail(500, 'INTERNAL_ERROR', 'Boom')
-          : ok({ user: ANNA, inviteToken: 'x', expiresAt: new Date().toISOString() }),
+          : ok({ emailDelivered: true }),
       ),
     );
     renderPage();

@@ -87,7 +87,7 @@ describe('InviteUserModal — 11.18', () => {
     server.use(
       http.post(url(endpoints.users.create), async ({ request }) => {
         body = await request.json();
-        return ok({ user: { id: 'usr_9', status: 'INVITED' }, inviteToken: 'tok' }, 201);
+        return ok({ user: { id: 'usr_9', status: 'INVITED' }, emailDelivered: true }, 201);
       }),
     );
 
@@ -110,6 +110,28 @@ describe('InviteUserModal — 11.18', () => {
       roleId: 'rol_fm',
     });
     expect(await screen.findByText('Invitation sent')).toBeInTheDocument();
+  });
+
+  it('says the email was not sent when the server could not deliver it', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post(url(endpoints.users.create), () =>
+        ok({ user: { id: 'usr_9', status: 'INVITED' }, emailDelivered: false }, 201),
+      ),
+    );
+
+    renderModal();
+
+    await rolesReady();
+    await user.type(screen.getByPlaceholderText('Anna Weiss'), 'Anna Weiss');
+    await user.type(
+      screen.getByPlaceholderText('anna.weiss@example.com'),
+      'anna.weiss@example.com',
+    );
+    await user.click(screen.getByRole('button', { name: 'Send invitation' }));
+
+    expect(await screen.findByText('User invited — email not sent')).toBeInTheDocument();
+    expect(screen.queryByText('Invitation sent')).not.toBeInTheDocument();
   });
 
   it('maps a 409 conflict onto the email field', async () => {
@@ -238,7 +260,7 @@ describe('InviteUserModal — role error, double submit and dirty close', () => 
       http.post(url(endpoints.users.create), async ({ request }) => {
         posts.push(await request.json());
         await gate;
-        return ok({ user: { id: 'usr_9', status: 'INVITED' }, inviteToken: 'tok' }, 201);
+        return ok({ user: { id: 'usr_9', status: 'INVITED' }, emailDelivered: true }, 201);
       }),
     );
 
@@ -291,7 +313,7 @@ describe('InviteUserModal — Terminal access and Message (B-85, shipped)', () =
     server.use(
       http.post(url(endpoints.users.create), async ({ request }) => {
         body = await request.json();
-        return ok({ user: { id: 'usr_1' }, inviteToken: 'tok' }, 201);
+        return ok({ user: { id: 'usr_1' }, emailDelivered: true }, 201);
       }),
     );
     renderModal();
@@ -405,7 +427,7 @@ describe('InviteUserModal — role picker states', () => {
     server.use(
       http.post(url(endpoints.users.create), async ({ request }) => {
         body = await request.json();
-        return ok({ user: { id: 'usr_9', status: 'INVITED' }, inviteToken: 'tok' }, 201);
+        return ok({ user: { id: 'usr_9', status: 'INVITED' }, emailDelivered: true }, 201);
       }),
     );
     renderModal(vi.fn(), DEV_ROLES);
@@ -472,7 +494,7 @@ describe('InviteUserModal — role picker states', () => {
     server.use(
       http.post(url(endpoints.users.create), async ({ request }) => {
         body = await request.json();
-        return ok({ user: { id: 'usr_9', status: 'INVITED' }, inviteToken: 'tok' }, 201);
+        return ok({ user: { id: 'usr_9', status: 'INVITED' }, emailDelivered: true }, 201);
       }),
     );
     renderModal();

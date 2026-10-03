@@ -141,7 +141,7 @@ export const settingsAdminHandlers = [
     };
     USERS.push(user);
     role.userCount = (role.userCount ?? 0) + 1;
-    return ok({ user, inviteToken: 'eyJ...' }, 201);
+    return ok({ user, emailDelivered: true }, 201);
   }),
   http.patch(url(endpoints.users.update(':id')), async ({ params, request }) => {
     const user = USERS.find((u) => u.id === String(params.id));
@@ -179,10 +179,10 @@ export const settingsAdminHandlers = [
   http.post(url(endpoints.users.resendInvite(':id')), ({ params }) => {
     const user = USERS.find((u) => u.id === String(params.id));
     if (!user) return NOT_FOUND('User');
-    const expiresAt = new Date(Date.now() + 7 * 86_400_000).toISOString();
+    if (user.status !== 'INVITED') return fail(409, 'CONFLICT', 'User is not in INVITED status.');
     user.invitedAt = new Date().toISOString();
-    user.expiresAt = expiresAt;
-    return ok({ user, inviteToken: 'eyJ...', expiresAt });
+    user.expiresAt = new Date(Date.now() + 7 * 86_400_000).toISOString();
+    return ok({ emailDelivered: true });
   }),
 
   /* ---------------------------------------------------------------- alert rules — W-21 */

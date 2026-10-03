@@ -10,13 +10,13 @@ const firebaseSignOut = vi.fn();
 const initializeApp = vi.fn(() => ({ name: 'test-app' }));
 const getApps = vi.fn(() => [] as unknown[]);
 
-vi.mock('firebase/app', () => ({
+vi.mock('@firebase/app', () => ({
   initializeApp,
   getApps,
   getApp: () => ({ name: 'test-app' }),
 }));
 
-vi.mock('firebase/auth', () => ({
+vi.mock('@firebase/auth', () => ({
   getAuth: () => ({}),
   GoogleAuthProvider: class {
     setCustomParameters = vi.fn();
