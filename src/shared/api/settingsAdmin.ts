@@ -88,11 +88,16 @@ export interface UpdateUserPayload {
 
 export type UpdateUserResult = UserRow & { emailVerification?: { pendingEmail: string; verifyToken?: string } };
 
+/** `emailDelivered: false` = the user exists but the invite email did not go out (no SMTP on
+ * the server, or the send failed) — the screen must say so rather than claim it was sent. */
+export type InviteUserResult = { user: UserRow; emailDelivered: boolean };
+export type ResendInviteResult = { emailDelivered: boolean };
+
 export function useInviteUser() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (dto: InviteUserPayload) =>
-      client.post<{ user: UserRow; inviteToken: string }>(endpoints.users.create, dto),
+      client.post<InviteUserResult>(endpoints.users.create, dto),
     onSuccess: () => qc.invalidateQueries({ queryKey: qkRoot.users }),
   });
 }
@@ -109,7 +114,7 @@ export function useUpdateUser() {
 export function useResendInvite() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) => client.post<{ user: UserRow; inviteToken: string; expiresAt: string }>(endpoints.users.resendInvite(id)),
+    mutationFn: (id: string) => client.post<ResendInviteResult>(endpoints.users.resendInvite(id)),
     onSuccess: () => qc.invalidateQueries({ queryKey: qkRoot.users }),
   });
 }

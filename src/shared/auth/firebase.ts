@@ -45,8 +45,8 @@ export function googleErrorMessage(code: string): string {
 
 async function getFirebaseAuth() {
   const [{ initializeApp, getApps, getApp }, authModule] = await Promise.all([
-    import('firebase/app'),
-    import('firebase/auth'),
+    import('@firebase/app'),
+    import('@firebase/auth'),
   ]);
   const app = getApps().length ? getApp() : initializeApp(FIREBASE_CONFIG);
   return { auth: authModule.getAuth(app), authModule };

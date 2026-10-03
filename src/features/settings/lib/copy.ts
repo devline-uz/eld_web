@@ -24,6 +24,15 @@ export const SETTINGS_TOAST = {
     title: 'Invitation resent',
     description: `A new invite was sent to ${email}.`,
   }),
+  /** The user record exists, but the server could not email the invitation. */
+  invitationNotEmailed: (email: string): ToastCopy => ({
+    title: 'User invited — email not sent',
+    description: `Ask ${email} to sign in with Google at ${window.location.origin}/sign-in.`,
+  }),
+  invitationsNotEmailed: (notSent: number, total: number): ToastCopy => ({
+    title: `${notSent} of ${total} ${plural(total, 'invitation')} could not be emailed`,
+    description: `Ask those users to sign in with Google at ${window.location.origin}/sign-in.`,
+  }),
   invitationsResent: (count: number): ToastCopy => ({
     title: `${count} ${plural(count, 'invitation')} resent`,
   }),

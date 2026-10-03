@@ -9,6 +9,7 @@ import { useToast } from '@/shared/ui/Toast';
 import { ApiError } from '@/shared/api/errors';
 import { inviteUserSchema } from '@/shared/forms/schemas';
 import { useInviteUser, useRolesList, type RoleRow } from '@/shared/api/settingsAdmin';
+import { SETTINGS_TOAST } from '../lib/copy';
 import { Field, inputClass } from './formKit';
 import type { z } from 'zod';
 
@@ -155,12 +156,16 @@ export function InviteUserModal({ onClose }: { onClose: () => void }) {
         message: message.trim() || undefined,
       },
       {
-        onSuccess: () => {
-          toast({
-            kind: 'success',
-            title: 'Invitation sent',
-            description: `An invitation was sent to ${values.email}.`,
-          });
+        onSuccess: ({ emailDelivered }) => {
+          if (emailDelivered) {
+            toast({
+              kind: 'success',
+              title: 'Invitation sent',
+              description: `An invitation was sent to ${values.email}.`,
+            });
+          } else {
+            toast({ kind: 'warning', ...SETTINGS_TOAST.invitationNotEmailed(values.email) });
+          }
           onClose();
         },
         onError: (error) => {
