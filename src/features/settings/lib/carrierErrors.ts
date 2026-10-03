@@ -15,8 +15,9 @@ export const CARRIER_FIELD_LABELS = {
   complianceEmail: 'Compliance email',
   addressLine1: 'Street address',
   city: 'City',
-  state: 'State',
-  zip: 'ZIP',
+  state: 'State / Province / Region',
+  zip: 'Postal code',
+  country: 'Country',
   hosRuleset: 'HOS ruleset',
   cycleRestart: 'Cycle restart',
   timezone: 'Home terminal time zone',
@@ -72,6 +73,9 @@ const ALIASES: Record<string, CarrierFieldKey> = {
   zipcode: 'zip',
   postalcode: 'zip',
   postcode: 'zip',
+  countrycode: 'country',
+  province: 'state',
+  region: 'state',
 };
 
 const normalise = (key: string) => key.toLowerCase().replace(/[^a-z0-9]/g, '');

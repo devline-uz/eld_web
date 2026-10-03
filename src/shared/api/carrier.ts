@@ -31,6 +31,8 @@ export interface CarrierRow {
   city?: string | null;
   state?: string | null;
   zip?: string | null;
+  /** ISO 3166-1 alpha-2. Not stored by the backend yet (backend-gaps.md B-103) — `undefined` today. */
+  country?: string | null;
   phone?: string | null;
   complianceEmail?: string | null;
   eldIdentifier?: string | null;
