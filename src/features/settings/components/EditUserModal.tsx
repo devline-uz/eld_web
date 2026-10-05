@@ -3,6 +3,8 @@
 // and `homeTerminalName`. Changing `email` does not switch it immediately: the response carries
 // `emailVerification.pendingEmail` and the address only changes once the link is confirmed
 // (backend D-101) — the modal shows that as a notice rather than claiming an instant change.
+import { useAuth } from '@/shared/auth/AuthProvider';
+import { isPrivilegedRole, isSuperAdmin } from '@/shared/auth/permissions';
 import { useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
@@ -48,6 +50,10 @@ export function EditUserModal({
   const updateUser = useUpdateUser();
   const [banner, setBanner] = useState<string | null>(null);
   const currentRoleId = user.role.id ?? roles.find((r) => r.key === user.role.key)?.id ?? '';
+  const { user: me } = useAuth();
+  const superAdmin = isSuperAdmin(me);
+  // Non-super-admins never pick ADMIN / SUPER_ADMIN (the user's current role stays listed so the select is valid).
+  const pickableRoles = superAdmin ? roles : roles.filter((r) => r.id === currentRoleId || !isPrivilegedRole(r.key));
   const [roleId, setRoleId] = useState(currentRoleId);
 
   const {
@@ -218,7 +224,7 @@ export function EditUserModal({
             disabled={submitting}
             className={inputClass}
           >
-            {roles.map((r) => (
+            {pickableRoles.map((r) => (
               <option key={r.id} value={r.id}>
                 {r.name}
               </option>

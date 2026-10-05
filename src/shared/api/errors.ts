@@ -2,6 +2,7 @@
 // One-to-one with backend/src/common/errors/codes.ts (append-only registry).
 // An unknown code falls back to `Something went wrong. Reference: <traceId>`.
 import type { ApiErrorBody } from './types';
+import { SUPER_ADMIN_ONLY_REASON } from '@/shared/auth/permissions';
 
 /** The error a screen ever sees: the envelope, plus the HTTP status and a resolved message. */
 export class ApiError extends Error {
@@ -23,6 +24,8 @@ export class ApiError extends Error {
 
   /** §14.3 copy for this code, or the trace-id fallback. */
   get userMessage(): string {
+    // Server-authored copy that is already user-facing (super-admin guard).
+    if (this.status === 403 && this.message === SUPER_ADMIN_ONLY_REASON) return this.message;
     return errorMessage(this.code, this.traceId);
   }
 

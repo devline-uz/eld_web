@@ -38,6 +38,9 @@ export type PermissionMap = Record<PermissionKey, PermissionLevel>;
 
 export type Role = 'ADMIN' | 'FLEET_MANAGER' | 'DISPATCHER' | 'VIEWER';
 
+/** The four demo roles plus the `SUPER_ADMIN` system role (all permissions FULL, never in the 4-role fixtures). */
+export type AnyRole = Role | 'SUPER_ADMIN';
+
 export const NO_PERMISSIONS: PermissionMap = Object.fromEntries(
   PERMISSION_KEYS.map((key) => [key, 'NONE']),
 ) as PermissionMap;
@@ -140,7 +143,8 @@ export const ROLE_PERMISSIONS: Record<Role, PermissionMap> = {
 };
 
 /** Labels for the topbar chip (§4.4) and the Roles & permissions screen. ADMIN has no chip. */
-export const ROLE_LABEL: Record<Role, string> = {
+export const ROLE_LABEL: Record<AnyRole, string> = {
+  SUPER_ADMIN: 'Super Admin',
   ADMIN: 'Admin',
   FLEET_MANAGER: 'Fleet manager',
   DISPATCHER: 'Dispatcher',
@@ -151,6 +155,25 @@ export function isRole(value: unknown): value is Role {
   return (
     value === 'ADMIN' || value === 'FLEET_MANAGER' || value === 'DISPATCHER' || value === 'VIEWER'
   );
+}
+
+/** Server refusal text (403 FORBIDDEN) when a non-super-admin touches an administrator. */
+export const SUPER_ADMIN_ONLY_REASON = 'Only a Super Admin can manage administrators.';
+
+/** "Privileged roles" = ADMIN and SUPER_ADMIN. Keys are compared case/whitespace-insensitively. */
+export function isPrivilegedRole(key: unknown): boolean {
+  if (typeof key !== 'string') return false;
+  const k = key.trim().toUpperCase();
+  return k === 'ADMIN' || k === 'SUPER_ADMIN';
+}
+
+/** The runtime role comes from `/auth/me` (AuthUser.role). */
+export function isSuperAdmin(me: { roleKey?: unknown } | null | undefined): boolean {
+  return me?.roleKey === 'SUPER_ADMIN';
+}
+
+export function isAnyRole(value: unknown): value is AnyRole {
+  return value === 'SUPER_ADMIN' || isRole(value);
 }
 
 export function isPermissionKey(value: unknown): value is PermissionKey {

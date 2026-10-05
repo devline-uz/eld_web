@@ -171,3 +171,21 @@ describe('B-95 dataTransfer — the 23rd key, split from reportsTransfer', () =>
     expect(ROLE_PERMISSIONS.VIEWER.dataTransfer).toBe('NONE');
   });
 });
+
+import { isPrivilegedRole, isSuperAdmin, isAnyRole, ROLE_LABEL as LABELS } from './permissions';
+
+describe('super admin helpers', () => {
+  it('classifies privileged roles', () => {
+    expect(isPrivilegedRole('ADMIN')).toBe(true);
+    expect(isPrivilegedRole(' super_admin ')).toBe(true);
+    expect(isPrivilegedRole('VIEWER')).toBe(false);
+    expect(isPrivilegedRole(undefined)).toBe(false);
+  });
+  it('detects the super admin from roleKey', () => {
+    expect(isSuperAdmin({ roleKey: 'SUPER_ADMIN' })).toBe(true);
+    expect(isSuperAdmin({ roleKey: 'ADMIN' })).toBe(false);
+    expect(isSuperAdmin(null)).toBe(false);
+    expect(isAnyRole('SUPER_ADMIN')).toBe(true);
+    expect(LABELS.SUPER_ADMIN).toBe('Super Admin');
+  });
+});

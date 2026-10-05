@@ -13,6 +13,12 @@ import { ToastProvider } from '@/shared/ui/Toast';
 import { NO_PERMISSIONS } from '@/shared/auth/permissions';
 import RolesPage from './RolesPage';
 
+// Current-user role for the super-admin guard (`roleKey` is what `/auth/me` returned).
+const authState = vi.hoisted(() => ({ roleKey: 'ADMIN' }));
+vi.mock('@/shared/auth/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: 'current_caller_id', email: 'caller@example.com', roleKey: authState.roleKey } }),
+}));
+
 vi.mock('@/shared/auth/usePermission', () => ({ usePermission: () => ({ can: () => true }) }));
 
 function renderPage() {
@@ -69,11 +75,41 @@ describe('RolesPage — W-19 permission matrix', () => {
     expect(adminHeader).toBeInTheDocument();
 
     // Every button in the ADMIN column carries the disabled attribute.
-    const adminButtons = screen.getAllByTitle('Admin cannot be edited');
+    const adminButtons = screen.getAllByTitle('Only a Super Admin can manage administrators.');
     expect(adminButtons.length).toBeGreaterThan(0);
     for (const button of adminButtons) {
       expect(button).toBeDisabled();
     }
+  });
+
+  it('lets a Super Admin edit the ADMIN column, but SUPER_ADMIN stays read-only for everyone', async () => {
+    authState.roleKey = 'SUPER_ADMIN';
+    server.use(
+      http.get(url(endpoints.roles.list), () =>
+        ok([
+          { id: 'rol_sa', key: 'SUPER_ADMIN', name: 'Super Admin', isSystem: true, permissions: { ...NO_PERMISSIONS, vehicles: 'FULL' }, userCount: 1 },
+          { id: 'rol_admin', key: 'ADMIN', name: 'Admin', isSystem: true, permissions: { ...NO_PERMISSIONS, vehicles: 'FULL' }, userCount: 3 },
+        ]),
+      ),
+    );
+    renderPage();
+    expect(await screen.findByText('Super Admin cannot be edited')).toBeInTheDocument();
+    const cell = (col: string) => screen.getAllByRole('button', { name: new RegExp(`— ${col}: `) })[0]!;
+    await screen.findByText('SUPER ADMIN');
+    expect(cell('SUPER ADMIN')).toBeDisabled();
+    expect(cell('ADMIN')).toBeEnabled();
+    authState.roleKey = 'ADMIN';
+  });
+
+  it('keeps SUPER_ADMIN read-only for a plain admin too', async () => {
+    server.use(
+      http.get(url(endpoints.roles.list), () =>
+        ok([{ id: 'rol_sa', key: 'SUPER_ADMIN', name: 'Super Admin', isSystem: true, permissions: { ...NO_PERMISSIONS, vehicles: 'FULL' }, userCount: 1 }]),
+      ),
+    );
+    renderPage();
+    await screen.findByText('SUPER ADMIN');
+    for (const b of screen.getAllByRole('button', { name: /— SUPER ADMIN: / })) expect(b).toBeDisabled();
   });
 
   it('filters the matrix by search text', async () => {

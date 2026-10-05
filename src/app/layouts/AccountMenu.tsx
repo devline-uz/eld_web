@@ -19,13 +19,14 @@ import {
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/shared/auth/AuthProvider';
-import { ROLE_LABEL, type Role } from '@/shared/auth/permissions';
+import { ROLE_LABEL, type AnyRole } from '@/shared/auth/permissions';
 import { Avatar } from '@/shared/ui/Avatar';
 import { AccountTriggerButton } from './TopbarTriggers';
 import { Badge, type BadgeTone } from '@/shared/ui/Badge';
 import { cn } from '@/shared/ui/cn';
 
-const ROLE_TONE: Record<Role, BadgeTone> = {
+const ROLE_TONE: Record<AnyRole, BadgeTone> = {
+  SUPER_ADMIN: 'violet',
   ADMIN: 'violet',
   FLEET_MANAGER: 'info',
   DISPATCHER: 'success',
@@ -90,8 +91,8 @@ export default function AccountMenu({ open, onOpenChange, onOpenShortcuts }: Acc
           </div>
           {user ? (
             <div className="flex items-center gap-2 border-y border-border px-3 py-2">
-              <Badge tone={ROLE_TONE[user.role]} dot>
-                {ROLE_LABEL[user.role]}
+              <Badge tone={ROLE_TONE[user.roleKey]} dot>
+                {ROLE_LABEL[user.roleKey]}
               </Badge>
               <span className="text-caption text-text-muted">All terminals</span>
             </div>

@@ -19,8 +19,9 @@ vi.mock('@/shared/auth/usePermission', () => ({
 }));
 // WB-113 — the signed-in caller's id, used only by the self-disable/last-admin guard. Distinct
 // from every row id used below unless a test names it explicitly.
+const authState = vi.hoisted(() => ({ roleKey: 'SUPER_ADMIN' }));
 vi.mock('@/shared/auth/AuthProvider', () => ({
-  useAuth: () => ({ user: { id: 'current_caller_id', email: 'sarah.chen@example.com' } }),
+  useAuth: () => ({ user: { id: 'current_caller_id', email: 'sarah.chen@example.com', roleKey: authState.roleKey } }),
 }));
 
 function renderPage() {
@@ -41,6 +42,7 @@ afterEach(() => {
   server.resetHandlers();
   resetAuthBridge();
   canFull = true;
+  authState.roleKey = 'SUPER_ADMIN';
 });
 afterAll(() => server.close());
 
@@ -585,5 +587,46 @@ describe('UsersPage — stage-2 row actions', () => {
 
     await user.click(screen.getByRole('button', { name: 'Resend all' }));
     expect(await screen.findByText('1 of 2 invitations could not be resent')).toBeInTheDocument();
+  });
+
+  describe('super-admin guard', () => {
+    const REASON = 'Only a Super Admin can manage administrators.';
+    const rowsFor = () =>
+      server.use(
+        http.get(url(endpoints.users.list), () =>
+          ok([
+            { ...ANNA, id: 'usr_a', email: 'root@example.com', firstName: 'Root', lastName: 'Admin', role: { id: 'rol_sa', key: 'SUPER_ADMIN', name: 'Super Admin' } },
+            { ...ANNA, id: 'usr_b', email: 'adm@example.com', firstName: 'Ada', lastName: 'Min', role: { id: 'rol_admin', key: 'ADMIN', name: 'Admin' } },
+          ]),
+        ),
+      );
+
+    it('renders the Super Admin role label', async () => {
+      rowsFor();
+      renderPage();
+      expect(await screen.findByText('Super Admin')).toBeInTheDocument();
+    });
+
+    it('a plain admin gets only a disabled reason on privileged rows', async () => {
+      authState.roleKey = 'ADMIN';
+      const user = userEvent.setup();
+      rowsFor();
+      renderPage();
+      await screen.findByText('Root Admin');
+      await user.click(screen.getAllByRole('button', { name: /actions|more|row/i })[0]!);
+      expect(await screen.findByText(REASON)).toBeInTheDocument();
+      expect(screen.queryByText('Edit user')).not.toBeInTheDocument();
+      expect(screen.queryByText('Change role')).not.toBeInTheDocument();
+    });
+
+    it('a Super Admin sees the normal row actions on privileged rows', async () => {
+      const user = userEvent.setup();
+      rowsFor();
+      renderPage();
+      await screen.findByText('Root Admin');
+      await user.click(screen.getAllByRole('button', { name: /actions|more|row/i })[0]!);
+      expect(await screen.findByText('Edit user')).toBeInTheDocument();
+      expect(screen.queryByText(REASON)).not.toBeInTheDocument();
+    });
   });
 });

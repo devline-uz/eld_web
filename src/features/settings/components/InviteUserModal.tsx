@@ -1,5 +1,7 @@
 // owner: web-settings-admin — 11.18 Invite a user (web/tz.md §11.18). `users` FULL.
 // Q-1: no password field — the invite lands by email and resolves through Google sign-in.
+import { useAuth } from '@/shared/auth/AuthProvider';
+import { isPrivilegedRole, isSuperAdmin } from '@/shared/auth/permissions';
 import { useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
@@ -37,7 +39,7 @@ function normalizeKey(role: RoleRow): string {
 /** WB — every role `GET /roles` returns is invitable (`POST /users` takes any role id), custom
  * roles included; ADMIN is offered too, but last. Otherwise the API order is kept. */
 function sortInvitableRoles(roles: RoleRow[]): RoleRow[] {
-  const isAdmin = (r: RoleRow) => normalizeKey(r) === 'ADMIN';
+  const isAdmin = (r: RoleRow) => isPrivilegedRole(normalizeKey(r));
   return [...roles.filter((r) => !isAdmin(r)), ...roles.filter(isAdmin)];
 }
 
@@ -91,7 +93,9 @@ export function InviteUserModal({ onClose }: { onClose: () => void }) {
   const [banner, setBanner] = useState<string | null>(null);
   const submitting = inviteMutation.isPending;
 
-  const invitableRoles = sortInvitableRoles(roles);
+  // Only a Super Admin may invite ADMIN / SUPER_ADMIN users; others never see those roles.
+  const { user: me } = useAuth();
+  const invitableRoles = sortInvitableRoles(isSuperAdmin(me) ? roles : roles.filter((r) => !isPrivilegedRole(normalizeKey(r))));
   const rolesLoading = rolesQuery.isLoading;
   const rolesFailed = rolesQuery.isError && roles.length === 0;
   const noRoles = !rolesLoading && !rolesFailed && invitableRoles.length === 0;
@@ -99,7 +103,7 @@ export function InviteUserModal({ onClose }: { onClose: () => void }) {
   const defaultRoleId =
     (
       invitableRoles.find((r) => normalizeKey(r) === 'DISPATCHER') ??
-      invitableRoles.find((r) => normalizeKey(r) !== 'ADMIN')
+      invitableRoles.find((r) => !isPrivilegedRole(normalizeKey(r)))
     )?.id ?? '';
   // Tracked locally rather than with react-hook-form's `watch()` — `watch()` cannot be safely
   // memoized (its subscription changes every render), which opts the whole tree out of React

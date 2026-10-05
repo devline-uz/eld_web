@@ -83,6 +83,7 @@ export interface RoleColumn {
 }
 
 const BUILT_IN_COLUMNS: RoleColumn[] = [
+  { key: 'SUPER_ADMIN', label: 'SUPER ADMIN', custom: false },
   { key: 'ADMIN', label: 'ADMIN', custom: false },
   { key: 'FLEET_MANAGER', label: 'FLEET MANAGER', custom: false },
   { key: 'DISPATCHER', label: 'DISPATCHER', custom: false },

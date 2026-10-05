@@ -4,6 +4,7 @@ import { Fragment, useMemo, useState } from 'react';
 import { Plus, RefreshCw, Check, Eye, Minus, Search } from 'lucide-react';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
+import { useAuth } from '@/shared/auth/AuthProvider';
 import { Button } from '@/shared/ui/Button';
 import { Badge } from '@/shared/ui/Badge';
 import { Card, SectionHeader } from '@/shared/ui/Card';
@@ -21,10 +22,10 @@ import {
   type RoleRow,
 } from '@/shared/api/settingsAdmin';
 import type { PermissionKey, PermissionLevel, Role } from '@/shared/auth/permissions';
-import { ROLE_PERMISSIONS, isRole } from '@/shared/auth/permissions';
+import { ROLE_PERMISSIONS, isRole, isSuperAdmin } from '@/shared/auth/permissions';
 import { PERMISSION_MATRIX_GROUPS, matrixColumns } from './components/permissionMatrix';
 import { CreateRoleModal } from './components/CreateRoleModal';
-import { SETTINGS_TOAST, countLabel } from './lib/copy';
+import { SETTINGS_REASON, SETTINGS_TOAST, countLabel } from './lib/copy';
 import { usePageHeader } from '@/app/layouts/Topbar';
 
 type Tab = 'matrix' | 'roles' | 'access-log';
@@ -46,6 +47,11 @@ const LEVEL_NAME: Record<PermissionLevel, string> = {
 export default function RolesPage() {
   const { can } = usePermission();
   const canFull = can('roles', 'FULL');
+  const { user: me } = useAuth();
+  const superAdmin = isSuperAdmin(me);
+  /** SUPER_ADMIN is read-only for everyone; ADMIN only a Super Admin may edit. */
+  const lockReason = (key: string): string | undefined =>
+    key === 'SUPER_ADMIN' ? 'Super Admin cannot be edited' : key === 'ADMIN' && !superAdmin ? SETTINGS_REASON.superAdminOnly : undefined;
   const { toast } = useToast();
   const rolesQuery = useRolesList();
   const carrierQuery = useCarrier();
@@ -74,7 +80,7 @@ export default function RolesPage() {
     // marks all four seeded roles `isSystem: true`, so gating on that flag here would have also
     // silently no-opped clicks on the FLEET_MANAGER/DISPATCHER/VIEWER columns the design and the
     // `isAdminCol` disabled-state below both treat as editable (web/bugs.md WB-033).
-    if (!role || role.key === 'ADMIN' || !firstKey) return;
+    if (!role || lockReason(role.key) || !firstKey) return;
     const current = role.permissions[firstKey] ?? 'NONE';
     const next = NEXT_LEVEL[current];
     const permissions = { ...role.permissions };
@@ -95,7 +101,7 @@ export default function RolesPage() {
    */
   async function resetToDefaults() {
     if (resetting) return;
-    const targets = roles.filter((r) => r.key !== 'ADMIN' && isRole(r.key));
+    const targets = roles.filter((r) => r.key !== 'ADMIN' && r.key !== 'SUPER_ADMIN' && isRole(r.key));
     if (targets.length === 0) {
       setConfirmReset(false);
       return;
@@ -207,7 +213,7 @@ export default function RolesPage() {
           <div className="flex items-center justify-between p-card pb-0">
             <SectionHeader title="Permission matrix" subtitle="Changes apply immediately to every user with that role" />
             <span className="h-6 shrink-0 rounded-md bg-bg-subtle px-2 text-caption leading-6 text-text-muted">
-              Admin cannot be edited
+              {superAdmin ? 'Super Admin cannot be edited' : 'Admin cannot be edited'}
             </span>
           </div>
           {/* WB-QA-S-02 — custom roles add columns; the table scrolls inside the card and the
@@ -246,13 +252,13 @@ export default function RolesPage() {
                         const role = roleByKey[c.key];
                         const primaryKey = row.keys[0] as PermissionKey;
                         const level = role?.permissions[primaryKey] ?? 'NONE';
-                        const isAdminCol = c.key === 'ADMIN';
+                        const lock = lockReason(c.key);
                         return (
                           <td key={c.key} className="px-3 text-center">
                             <button
                               type="button"
-                              disabled={isAdminCol || !canFull}
-                              title={isAdminCol ? 'Admin cannot be edited' : undefined}
+                              disabled={Boolean(lock) || !canFull}
+                              title={c.key === 'ADMIN' && superAdmin ? undefined : lock}
                               aria-label={`${row.label} — ${c.label}: ${LEVEL_NAME[level]}`}
                               onClick={() => cycleCell(c.key, row.keys)}
                               className="mx-auto flex size-7 items-center justify-center rounded-md hover:bg-bg-subtle disabled:cursor-not-allowed"

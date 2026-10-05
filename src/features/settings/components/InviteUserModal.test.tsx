@@ -11,6 +11,12 @@ import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/cli
 import { ToastProvider } from '@/shared/ui/Toast';
 import { InviteUserModal } from './InviteUserModal';
 
+// Current-user role for the super-admin guard (`roleKey` is what `/auth/me` returned).
+const authState = vi.hoisted(() => ({ roleKey: 'SUPER_ADMIN' }));
+vi.mock('@/shared/auth/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: 'current_caller_id', email: 'caller@example.com', roleKey: authState.roleKey } }),
+}));
+
 const ROLES = [
   { id: 'rol_admin', key: 'ADMIN', name: 'Admin', isSystem: true, permissions: {}, userCount: 3 },
   {
@@ -61,6 +67,7 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'bypass' }));
 afterEach(() => {
   server.resetHandlers();
   resetAuthBridge();
+  authState.roleKey = 'SUPER_ADMIN';
 });
 afterAll(() => server.close());
 
@@ -555,5 +562,24 @@ describe('InviteUserModal — role picker states', () => {
     const error = await screen.findByText('This role cannot be invited.');
     expect(error).toHaveAttribute('id', 'invite-role-error');
     expect(screen.getByRole('radiogroup')).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('hides ADMIN and SUPER_ADMIN from a plain admin; a Super Admin sees both', async () => {
+    const withSuper = [
+      { id: 'rol_sa', key: 'SUPER_ADMIN', name: 'Super Admin', isSystem: true, permissions: {}, userCount: 1 },
+      ...(ROLES as unknown as unknown[]),
+    ];
+    authState.roleKey = 'ADMIN';
+    const first = renderModal(vi.fn(), withSuper);
+    await rolesReady();
+    expect(screen.queryByRole('radio', { name: /Super Admin/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: /^Admin/ })).not.toBeInTheDocument();
+    first.unmount();
+
+    authState.roleKey = 'SUPER_ADMIN';
+    renderModal(vi.fn(), withSuper);
+    await rolesReady();
+    expect(screen.getByRole('radio', { name: /Super Admin/ })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /^Admin/ })).toBeInTheDocument();
   });
 });

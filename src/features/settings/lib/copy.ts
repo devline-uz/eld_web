@@ -8,6 +8,7 @@
 // Every `B-NN` below is a backend gap recorded in web/backend-gaps.md ("Stage 2 — Settings/Support",
 // B-84…B-89); WD-080 records how these ids replaced the earlier invented ones.
 import type { ToastCopy } from '@/shared/ui/copy';
+import { SUPER_ADMIN_ONLY_REASON } from '@/shared/auth/permissions';
 
 const plural = (count: number, singular: string): string => `${singular}${count === 1 ? '' : 's'}`;
 
@@ -98,6 +99,8 @@ export const SETTINGS_TOAST = {
 
 /** Reasons shown next to controls this feature deliberately disables (never a dead control). */
 export const SETTINGS_REASON = {
+  /** Only a SUPER_ADMIN may manage ADMIN / SUPER_ADMIN users and the ADMIN role. */
+  superAdminOnly: SUPER_ADMIN_ONLY_REASON,
   /** B-85 — `POST /users` has no terminal-scope field. */
   inviteTerminal: 'Not available yet — the invite API has no terminal field. New users see every terminal.',
   /** B-85 — `POST /users` has no personal-message field. */
