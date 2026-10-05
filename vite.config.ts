@@ -46,6 +46,8 @@ export default defineConfig({
           if (pkg.startsWith('@sentry/') || pkg.startsWith('@sentry-internal/')) return undefined;
           // Lazy — phone metadata (11.8 Add driver's international phone field only).
           if (pkg.startsWith('libphonenumber-js/')) return 'vendor-phone';
+          // Lazy — W-17 Company profile's tax-ID and postal-code metadata (WD-103).
+          if (pkg.startsWith('stdnum/') || pkg.startsWith('postcode-validator/')) return 'vendor-intl-forms';
           // Lazy — recharts and every transitive dep it alone pulls in.
           if (
             /^(recharts|victory-vendor|d3-|lodash|decimal\.js-light|react-smooth|fast-equals|eventemitter3)/.test(

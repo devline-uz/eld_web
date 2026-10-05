@@ -70,6 +70,11 @@ describe('ApiError', () => {
     expect(error.isForbidden).toBe(false);
   });
 
+  it('surfaces the server text for the Super Admin guard 403', () => {
+    const text = 'Only a Super Admin can manage administrators.';
+    expect(toUserMessage(new ApiError(403, { code: 'FORBIDDEN', message: text }))).toBe(text);
+  });
+
   it('resolves the message for any thrown value', () => {
     expect(toUserMessage(new ApiError(403, { code: 'FORBIDDEN' }))).toBe(
       'You do not have access to this.',

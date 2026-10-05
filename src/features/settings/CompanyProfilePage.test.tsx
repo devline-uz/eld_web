@@ -190,7 +190,7 @@ describe('CompanyProfilePage — W-17', () => {
     expect(await typeInto('1234567', 'abc12x3')).toHaveValue('123');
     expect(await typeInto('MC-892014', 'mc55z1')).toHaveValue('MC-551');
     expect(await typeInto('88-4192055', 'ab123456789')).toHaveValue('12-3456789');
-    expect(await typeInto('+1 614 555 0104', '+1 six 614')).toHaveValue('+1  614');
+    expect(await typeInto('+1 614 555 0104', '+1 six 614')).toHaveValue('+1 614');
     expect(await typeInto('compliance@universal-logistics.example', 'ops @acme.com')).toHaveValue('ops@acme.com');
     expect(await typeInto('Columbus', 'Dayton 45')).toHaveValue('Dayton ');
     expect(await typeInto('43004', '4321a51234')).toHaveValue('43215-1234');
@@ -486,9 +486,9 @@ describe('CompanyProfilePage — State dropdown', () => {
   });
 
   it('keeps showing a stored state that is not in the list', async () => {
-    const { listbox, trigger } = await openStateMenu({ state: 'ON' });
-    expect(trigger).toHaveTextContent('ON');
-    expect(within(listbox).getByRole('option', { name: 'ON' })).toHaveAttribute('aria-selected', 'true');
+    const { listbox, trigger } = await openStateMenu({ state: 'ZZ' });
+    expect(trigger).toHaveTextContent('ZZ');
+    expect(within(listbox).getByRole('option', { name: 'ZZ' })).toHaveAttribute('aria-selected', 'true');
   });
 
   it('an out-of-list state is flagged under the field on save', async () => {
@@ -503,5 +503,152 @@ describe('CompanyProfilePage — State dropdown', () => {
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
     await waitFor(() => expect(screen.getByRole('button', { name: 'Save changes' })).toBeInTheDocument());
     expect(within(fieldOf('State')).queryByRole('alert')).toBeNull();
+  });
+});
+
+/* ------------------------------------------------------------------ Country */
+
+describe('CompanyProfilePage — Country', () => {
+  async function pickCountry(user: ReturnType<typeof userEvent.setup>, search: string, name: RegExp) {
+    await user.click(screen.getByRole('combobox', { name: /^Country/ }));
+    await user.type(screen.getByRole('searchbox', { name: 'Search countries' }), search);
+    await user.click(screen.getByRole('option', { name }));
+  }
+
+  it('opens in the country the stored data implies, with that country’s labels', async () => {
+    server.use(http.get(url(endpoints.carrier.root), () => ok(CARRIER)));
+    renderPage();
+    await screen.findByDisplayValue(CARRIER.name);
+    expect(screen.getByRole('combobox', { name: /^Country/ })).toHaveTextContent('United States (+1)');
+    expect(fieldOf('State')).toBeInTheDocument();
+    expect(fieldOf('ZIP')).toBeInTheDocument();
+    expect(fieldOf('EIN / Tax ID')).toBeInTheDocument();
+  });
+
+  it('the country list is searchable', async () => {
+    const user = userEvent.setup();
+    server.use(http.get(url(endpoints.carrier.root), () => ok(CARRIER)));
+    renderPage();
+    await screen.findByDisplayValue(CARRIER.name);
+    await user.click(screen.getByRole('combobox', { name: /^Country/ }));
+    await user.type(screen.getByRole('searchbox', { name: 'Search countries' }), 'uzbek');
+    const options = within(screen.getByRole('listbox')).getAllByRole('option');
+    expect(options).toHaveLength(1);
+    expect(options[0]).toHaveTextContent('Uzbekistan (+998)');
+  });
+
+  it('switching to Uzbekistan swaps labels and rules, keeps what was typed, and flags what no longer fits', async () => {
+    const user = userEvent.setup();
+    server.use(http.get(url(endpoints.carrier.root), () => ok(CARRIER)));
+    renderPage();
+    await screen.findByDisplayValue(CARRIER.name);
+    await pickCountry(user, 'uzb', /Uzbekistan/);
+
+    expect(screen.getByRole('combobox', { name: /^Country/ })).toHaveTextContent('Uzbekistan (+998)');
+    // Labels follow the country.
+    expect(fieldOf('Region')).toBeInTheDocument();
+    expect(fieldOf('Postal code')).toBeInTheDocument();
+    expect(fieldOf('Tax ID / Business ID')).toBeInTheDocument();
+    expect(screen.queryByText(/^ZIP/, { selector: 'span.text-label' })).toBeNull();
+    // Nothing typed was thrown away…
+    expect(screen.getByDisplayValue('43004')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('+1 614 555 0104')).toBeInTheDocument();
+    // …but what no longer fits says so.
+    expectFieldError('Region', 'Select a region from the list.');
+    expectFieldError('Postal code', 'Enter a valid postal code, e.g. 100000.');
+    expectFieldError('Main phone', 'Please enter a valid phone number for the selected country.');
+    // The phone placeholder is an Uzbek number now.
+    expect(within(fieldOf('Main phone')).getByRole('textbox')).toHaveAttribute('placeholder', expect.stringMatching(/^\+998 /));
+  });
+
+  it('an Uzbek number gets its + by itself, is formatted, validated and saved as E.164 with the country', async () => {
+    const user = userEvent.setup();
+    let body: Record<string, unknown> | undefined;
+    server.use(http.get(url(endpoints.carrier.root), () => ok(CARRIER)));
+    server.use(
+      http.patch(url(endpoints.carrier.root), async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>;
+        return ok(CARRIER);
+      }),
+    );
+    renderPage();
+    await screen.findByDisplayValue(CARRIER.name);
+    await pickCountry(user, 'uzb', /Uzbekistan/);
+
+    const phone = within(fieldOf('Main phone')).getByRole('textbox');
+    await user.clear(phone);
+    await user.type(phone, '998901234567');
+    expect(phone).toHaveValue('+998 90 123 45 67');
+    await user.tab();
+    expect(phone).toHaveValue('+998 90 123 45 67');
+    expect(within(fieldOf('Main phone')).queryByRole('alert')).toBeNull();
+
+    await user.click(screen.getByRole('combobox', { name: /^Region/ }));
+    await user.click(screen.getByRole('option', { name: 'Toshkent (city)' }));
+    const postal = within(fieldOf('Postal code')).getByRole('textbox');
+    await user.clear(postal);
+    await user.type(postal, '100000');
+    const city = screen.getByDisplayValue('Columbus');
+    await user.clear(city);
+    await user.type(city, 'Toshkent');
+    const name = screen.getByDisplayValue(CARRIER.name);
+    await user.clear(name);
+    await user.type(name, '  O‘zbekiston Logistics ');
+
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(body).toBeDefined());
+    expect(body).toMatchObject({
+      country: 'UZ',
+      phone: '+998901234567',
+      state: 'TK',
+      zip: '100000',
+      city: 'Toshkent',
+      name: 'O‘zbekiston Logistics',
+    });
+  });
+
+  it('a UK profile takes a free-text county and a UK postcode', async () => {
+    const user = userEvent.setup();
+    let body: Record<string, unknown> | undefined;
+    server.use(
+      http.get(url(endpoints.carrier.root), () =>
+        ok({ ...CARRIER, phone: '+44 20 7946 0958', state: 'Greater London', zip: 'sw1a1aa', ein: 'SC123456' }),
+      ),
+    );
+    server.use(
+      http.patch(url(endpoints.carrier.root), async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>;
+        return ok(CARRIER);
+      }),
+    );
+    renderPage();
+    await screen.findByDisplayValue(CARRIER.name);
+    expect(screen.getByRole('combobox', { name: /^Country/ })).toHaveTextContent('United Kingdom (+44)');
+    expect(within(fieldOf('Region/County')).getByRole('textbox')).toHaveValue('Greater London');
+
+    await user.type(screen.getByDisplayValue(CARRIER.name), ' Ltd');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(body).toBeDefined());
+    expect(body).toMatchObject({ country: 'GB', phone: '+442079460958', zip: 'SW1A 1AA', state: 'Greater London', ein: 'SC123456' });
+  });
+
+  it('an empty phone is flagged as required on save', async () => {
+    await saveWith({ phone: '' });
+    await waitFor(() => expectFieldError('Main phone', 'Phone number is required.'));
+  });
+
+  it('a field error appears only after the field is left, and clears as soon as the value is valid', async () => {
+    const user = userEvent.setup();
+    server.use(http.get(url(endpoints.carrier.root), () => ok(CARRIER)));
+    renderPage();
+    await screen.findByDisplayValue(CARRIER.name);
+    const zip = screen.getByDisplayValue('43004');
+    await user.clear(zip);
+    await user.type(zip, '432');
+    expect(within(fieldOf('ZIP')).queryByRole('alert')).toBeNull();
+    await user.tab();
+    expectFieldError('ZIP', 'Enter a 5-digit ZIP or ZIP+4 (43215-1234).');
+    await user.type(zip, '15');
+    expect(within(fieldOf('ZIP')).queryByRole('alert')).toBeNull();
   });
 });

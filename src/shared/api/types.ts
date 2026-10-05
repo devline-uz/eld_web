@@ -245,7 +245,7 @@ export type UsersCreateResponse = {
     id: string;
     status: string;
   };
-  inviteToken: string;
+  emailDelivered: boolean;
 };
 
 /** GET /api/users/{id} */
@@ -280,13 +280,7 @@ export type UsersRemoveResponse = {
 
 /** POST /api/users/{id}/resend-invite */
 export type UsersResendInviteResponse = {
-  user: {
-    id: string;
-    email: string;
-    status: string;
-  };
-  inviteToken: string;
-  expiresAt: string;
+  emailDelivered: boolean;
 };
 
 /** GET /api/me/profile */

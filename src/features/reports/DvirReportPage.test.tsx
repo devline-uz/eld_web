@@ -256,3 +256,14 @@ describe('W-14 Reports · DVIR report', () => {
     expect(screen.getByRole('button', { name: '1' })).toHaveAttribute('aria-current', 'page');
   });
 });
+
+// WB-273 — `Download PDF` is an export: Lucide `Upload`, like `Export CSV` beside it.
+describe('WB-273 export icon', () => {
+  it('Download PDF renders the Upload icon, not Download', async () => {
+    renderPage(<DvirReportPage />, ROUTE);
+    await screen.findByRole('row', { name: /#110/ });
+    const button = screen.getByRole('button', { name: 'Download PDF' });
+    expect(button.querySelector('svg.lucide-upload')).not.toBeNull();
+    expect(button.querySelector('svg.lucide-download')).toBeNull();
+  });
+});

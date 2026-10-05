@@ -11,6 +11,12 @@ import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/cli
 import { ToastProvider } from '@/shared/ui/Toast';
 import { InviteUserModal } from './InviteUserModal';
 
+// Current-user role for the super-admin guard (`roleKey` is what `/auth/me` returned).
+const authState = vi.hoisted(() => ({ roleKey: 'SUPER_ADMIN' }));
+vi.mock('@/shared/auth/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: 'current_caller_id', email: 'caller@example.com', roleKey: authState.roleKey } }),
+}));
+
 const ROLES = [
   { id: 'rol_admin', key: 'ADMIN', name: 'Admin', isSystem: true, permissions: {}, userCount: 3 },
   {
@@ -61,6 +67,7 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'bypass' }));
 afterEach(() => {
   server.resetHandlers();
   resetAuthBridge();
+  authState.roleKey = 'SUPER_ADMIN';
 });
 afterAll(() => server.close());
 
@@ -87,7 +94,7 @@ describe('InviteUserModal — 11.18', () => {
     server.use(
       http.post(url(endpoints.users.create), async ({ request }) => {
         body = await request.json();
-        return ok({ user: { id: 'usr_9', status: 'INVITED' }, inviteToken: 'tok' }, 201);
+        return ok({ user: { id: 'usr_9', status: 'INVITED' }, emailDelivered: true }, 201);
       }),
     );
 
@@ -110,6 +117,28 @@ describe('InviteUserModal — 11.18', () => {
       roleId: 'rol_fm',
     });
     expect(await screen.findByText('Invitation sent')).toBeInTheDocument();
+  });
+
+  it('says the email was not sent when the server could not deliver it', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post(url(endpoints.users.create), () =>
+        ok({ user: { id: 'usr_9', status: 'INVITED' }, emailDelivered: false }, 201),
+      ),
+    );
+
+    renderModal();
+
+    await rolesReady();
+    await user.type(screen.getByPlaceholderText('Anna Weiss'), 'Anna Weiss');
+    await user.type(
+      screen.getByPlaceholderText('anna.weiss@example.com'),
+      'anna.weiss@example.com',
+    );
+    await user.click(screen.getByRole('button', { name: 'Send invitation' }));
+
+    expect(await screen.findByText('User invited — email not sent')).toBeInTheDocument();
+    expect(screen.queryByText('Invitation sent')).not.toBeInTheDocument();
   });
 
   it('maps a 409 conflict onto the email field', async () => {
@@ -238,7 +267,7 @@ describe('InviteUserModal — role error, double submit and dirty close', () => 
       http.post(url(endpoints.users.create), async ({ request }) => {
         posts.push(await request.json());
         await gate;
-        return ok({ user: { id: 'usr_9', status: 'INVITED' }, inviteToken: 'tok' }, 201);
+        return ok({ user: { id: 'usr_9', status: 'INVITED' }, emailDelivered: true }, 201);
       }),
     );
 
@@ -291,7 +320,7 @@ describe('InviteUserModal — Terminal access and Message (B-85, shipped)', () =
     server.use(
       http.post(url(endpoints.users.create), async ({ request }) => {
         body = await request.json();
-        return ok({ user: { id: 'usr_1' }, inviteToken: 'tok' }, 201);
+        return ok({ user: { id: 'usr_1' }, emailDelivered: true }, 201);
       }),
     );
     renderModal();
@@ -405,7 +434,7 @@ describe('InviteUserModal — role picker states', () => {
     server.use(
       http.post(url(endpoints.users.create), async ({ request }) => {
         body = await request.json();
-        return ok({ user: { id: 'usr_9', status: 'INVITED' }, inviteToken: 'tok' }, 201);
+        return ok({ user: { id: 'usr_9', status: 'INVITED' }, emailDelivered: true }, 201);
       }),
     );
     renderModal(vi.fn(), DEV_ROLES);
@@ -472,7 +501,7 @@ describe('InviteUserModal — role picker states', () => {
     server.use(
       http.post(url(endpoints.users.create), async ({ request }) => {
         body = await request.json();
-        return ok({ user: { id: 'usr_9', status: 'INVITED' }, inviteToken: 'tok' }, 201);
+        return ok({ user: { id: 'usr_9', status: 'INVITED' }, emailDelivered: true }, 201);
       }),
     );
     renderModal();
@@ -533,5 +562,24 @@ describe('InviteUserModal — role picker states', () => {
     const error = await screen.findByText('This role cannot be invited.');
     expect(error).toHaveAttribute('id', 'invite-role-error');
     expect(screen.getByRole('radiogroup')).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('hides ADMIN and SUPER_ADMIN from a plain admin; a Super Admin sees both', async () => {
+    const withSuper = [
+      { id: 'rol_sa', key: 'SUPER_ADMIN', name: 'Super Admin', isSystem: true, permissions: {}, userCount: 1 },
+      ...(ROLES as unknown as unknown[]),
+    ];
+    authState.roleKey = 'ADMIN';
+    const first = renderModal(vi.fn(), withSuper);
+    await rolesReady();
+    expect(screen.queryByRole('radio', { name: /Super Admin/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: /^Admin/ })).not.toBeInTheDocument();
+    first.unmount();
+
+    authState.roleKey = 'SUPER_ADMIN';
+    renderModal(vi.fn(), withSuper);
+    await rolesReady();
+    expect(screen.getByRole('radio', { name: /Super Admin/ })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /^Admin/ })).toBeInTheDocument();
   });
 });

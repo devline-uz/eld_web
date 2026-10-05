@@ -505,6 +505,8 @@ describe('DvirDrawer — 11.15', () => {
     await screen.findByText(/Inspection/);
     const pdf = screen.getByRole('button', { name: 'Export PDF' });
     expect(pdf).not.toBeDisabled();
+    // WB-269 — same export icon as the page header `Export` (Lucide `Upload`).
+    expect(pdf.querySelector('svg.lucide-upload')).not.toBeNull();
 
     await user.click(pdf);
 

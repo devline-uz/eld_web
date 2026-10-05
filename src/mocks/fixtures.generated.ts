@@ -167,7 +167,7 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
       "id": "usr_1",
       "status": "INVITED"
     },
-    "inviteToken": "eyJ..."
+    "emailDelivered": true
   },
   'GET /api/users/{id}': {
     "id": "usr_1",
@@ -194,13 +194,7 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "success": true
   },
   'POST /api/users/{id}/resend-invite': {
-    "user": {
-      "id": "usr_8",
-      "email": "anna.weiss@universal-logistics.com",
-      "status": "INVITED"
-    },
-    "inviteToken": "eyJ...",
-    "expiresAt": "2026-09-15T15:41:00.000Z"
+    "emailDelivered": true
   },
   'GET /api/me/profile': {
     "id": "usr_1",

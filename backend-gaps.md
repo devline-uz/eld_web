@@ -373,3 +373,9 @@ table.
 
 ### Still open after Phase 13 (`web-hos-logs`, 2026-09-24)
 - **B-35 follow-up — W-08 grid caption `Recorded by ELD PT30_A86E`.** `GET /logs/:driverId` and `GET /logs/:driverId/events` (`toEventView()`) return no `deviceId` / ELD serial although `EldEvent.deviceId` exists. Needed: `events[].deviceId` + `eldSerial` (or `summary.devices: [{ id, serial }]` for the day). Until then the caption stays `Recorded by ELD Not assigned · all times Eastern` (WD-089 — the unit's current device is not used, it can misattribute a past day).
+
+### W-23 Audit log pagination (WB-271, 2026-10-02)
+- **B-102 — `GET /audit-log` has no `total` and no `page`/offset.** `AuditRepository.list()` is BigInt-cursor only (`{ items, nextCursor }`, `limit ≤ 200`). The web pages client-side over a bounded 1,000-entry window (WD-102). For true server-side pagination like Vehicles: `page`/`limit` + `total`/`totalPages` (or a `total` beside the cursor), and the B-64 params (`action`, `createdAtFrom`/`createdAtTo`, `q`) so a server page can honour every filter.
+
+### W-17 Company profile country (WD-103, 2026-10-03)
+- **B-103 — `Carrier` has no `country`.** The web now sends `country` (ISO 3166-1 alpha-2) on `PATCH /carrier`, but `UpdateCarrierDto` has no such key, so zod strips it and `GET /carrier` never returns one. The form infers the country on every load (stored `country` → region code → phone's country → US), which is wrong for e.g. a German carrier with no phone and a free-text state. Needed: `country String? @db.Char(2)` on `Carrier`, `country: z.string().length(2).regex(/^[A-Z]{2}$/).optional()` on `UpdateCarrierDto`, returned by `GET /carrier`. Also: `phone` is sent as E.164 (fits `max(30)`), `state` may be a free-text region up to 50 chars (fits `max(50)`). Status: **confirmed missing**.

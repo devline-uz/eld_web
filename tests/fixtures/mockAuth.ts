@@ -20,6 +20,7 @@ export function buildMockUser(role: Role, overrides: Partial<AuthUser> = {}): Au
     fullName: DISPLAY_NAME[role],
     email: DEMO_ACCOUNTS[role].email,
     role,
+    roleKey: role,
     avatarUrl: null,
     carrierName: 'Universal Logistics Inc.',
     homeTerminalTimezone: 'America/New_York',

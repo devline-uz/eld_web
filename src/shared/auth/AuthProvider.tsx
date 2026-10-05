@@ -44,6 +44,8 @@ import { IdleWarningModal } from './IdleWarningModal';
 import {
   NO_PERMISSIONS,
   isRole,
+  isAnyRole,
+  type AnyRole,
   toPermissionMap,
   type PermissionMap,
   type Role,
@@ -83,7 +85,10 @@ export interface AuthUser {
   id: string;
   fullName: string;
   email: string;
+  /** SUPER_ADMIN is normalised to ADMIN here (identical permissions/navigation); see `roleKey`. */
   role: Role;
+  /** The role key exactly as `/auth/me` returned it (may be SUPER_ADMIN). */
+  roleKey: AnyRole;
   avatarUrl: string | null;
   carrierName: string;
   homeTerminalTimezone: string;
@@ -133,7 +138,8 @@ function toAuthUser(me: MeResponse): AuthUser {
     id: me.id,
     fullName,
     email: me.email ?? '',
-    role: isRole(me.role) ? me.role : 'VIEWER',
+    role: me.role === 'SUPER_ADMIN' ? 'ADMIN' : isRole(me.role) ? me.role : 'VIEWER',
+    roleKey: isAnyRole(me.role) ? me.role : 'VIEWER',
     avatarUrl: me.avatarUrl ?? null,
     carrierName: me.carrierName ?? '',
     homeTerminalTimezone: me.homeTerminalTimezone ?? 'America/Chicago',

@@ -52,3 +52,18 @@ export function usePlaceSearch(query: string, enabled: boolean) {
     staleTime: 5 * 60_000,
   });
 }
+
+/** Reverse geocoding on the same MapTiler endpoint — the best-matching address for a map point
+ * (11.1 Create a geofence: a click on the map fills the Address field). `null` when geocoding is
+ * off or nothing matched; callers keep whatever the user typed. */
+export async function reverseGeocode(lat: number, lon: number, signal?: AbortSignal): Promise<string | null> {
+  if (!geocodingEnabled || !Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  const url = new URL(`${GEOCODING_BASE_URL}/${lon},${lat}.json`);
+  url.searchParams.set('key', API_KEY);
+  url.searchParams.set('limit', '1');
+  url.searchParams.set('language', 'en');
+  const response = await fetch(url, { signal });
+  if (!response.ok) throw new Error(`Reverse geocoding failed (${response.status})`);
+  const body = (await response.json()) as GeocodingResponse;
+  return body.features?.find((feature) => feature.place_name)?.place_name ?? null;
+}

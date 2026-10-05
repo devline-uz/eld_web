@@ -1,7 +1,6 @@
 // owner: web-settings-admin — W-17 Settings · Company profile (web/tz.md §10 W-17).
 // Design: web/roles and screens/admin panel/Settings — company profile and HOS ruleset.jpg
 import { useState } from 'react';
-import { z, type ZodTypeAny } from 'zod';
 import { Check } from 'lucide-react';
 import { Card, SectionHeader } from '@/shared/ui/Card';
 import { Button } from '@/shared/ui/Button';
@@ -13,7 +12,24 @@ import { usePermission } from '@/shared/auth/usePermission';
 import { ApiError, errorMessage } from '@/shared/api/errors';
 import { useCarrier, useUpdateCarrier, type CarrierRow, type HosRuleset } from '@/shared/api/settingsAdmin';
 import { Field, inputClass, ToggleRow } from './components/formKit';
-import { fields, inputFilters, LIMITS, US_STATES, VALIDATION_MESSAGES } from '@/shared/forms';
+import { CountryPhoneInput } from './components/CountryPhoneInput';
+import { inputFilters, LIMITS, VALIDATION_MESSAGES } from '@/shared/forms';
+import {
+  COUNTRY_OPTIONS,
+  countryPhonePlaceholder,
+  filterCityInput,
+  filterPostalInput,
+  filterTaxIdInput,
+  formatCountryPhone,
+  postalCodeLabel,
+  subdivisionLabel,
+  subdivisionOptionLabel,
+  subdivisionsOf,
+  taxIdLabel,
+  taxIdPlaceholder,
+  toCountryCode,
+  type CountryCode,
+} from '@/shared/forms/international';
 import { Select, type SelectOption } from '@/shared/ui/Select';
 import {
   CARRIER_FIELD_LABELS,
@@ -22,6 +38,15 @@ import {
   type CarrierFieldErrors,
   type CarrierFieldKey,
 } from './lib/carrierErrors';
+import {
+  companyProfileErrors,
+  COUNTRY_DEPENDENT_KEYS,
+  inferCountry,
+  normalizeCompanyProfile,
+  profileFieldError,
+  toProfileForm,
+  type ProfileKey,
+} from './lib/companyProfileRules';
 import { ConfirmDelete } from '@/shared/ui/Modal';
 import { usePageHeader } from '@/app/layouts/Topbar';
 
@@ -32,10 +57,6 @@ const HOS_RULESETS: { value: HosRuleset; label: string }[] = [
   { value: 'US_60_7_PASSENGER', label: 'US 60 hr / 7 day — Passenger carrying' },
 ];
 
-const STATE_OPTIONS: SelectOption[] = US_STATES.map((code) => ({ value: code, label: code }));
-
-type TextKey = 'name' | 'dotNumber' | 'mcNumber' | 'ein' | 'phone' | 'complianceEmail' | 'addressLine1' | 'city' | 'state' | 'zip';
-
 /** Toggles have no inline error slot — a backend error on one goes to the banner instead. */
 const TOGGLE_KEYS: CarrierFieldKey[] = ['allowPersonalConveyance', 'allowYardMove'];
 
@@ -45,39 +66,33 @@ const NUMBER_RULES: [CarrierFieldKey & ('unassignedThresholdMin' | 'dvirRetentio
   ['dvirRetentionMonths', 1, 120, VALIDATION_MESSAGES.dvirRetention],
 ];
 
-/** The list is US-only (no shared province list exists); a carrier already stored in Ontario
- * still shows and keeps the Canadian postal-code field. */
-const isCanadian = (state: string | null | undefined) => state === 'ON';
+type NumberKey = (typeof NUMBER_RULES)[number][0];
 
-/** Save-time check of the free-typed fields. Empty optional fields are skipped; the keystroke
- * filters already keep impossible characters out, this catches incomplete values (`4321`, `12-34`). */
-function companyErrors(form: Partial<CarrierRow>): CarrierFieldErrors {
-  const rules: [TextKey, ZodTypeAny, boolean][] = [
-    ['name', fields.companyText(VALIDATION_MESSAGES.companyName), true],
-    ['dotNumber', fields.dotNumber(), true],
-    ['mcNumber', fields.mcNumber(), false],
-    ['ein', fields.ein(), false],
-    ['phone', fields.phone(), false],
-    // The backend's `z.string().email()` also rejects `''`, so once the email holds a string
-    // (it is sent), it must be a valid address — only a never-set (`null`) email may stay empty.
-    ['complianceEmail', fields.email(), typeof form.complianceEmail === 'string'],
-    ['addressLine1', fields.companyText(), false],
-    ['city', fields.city(), false],
-    ['state', z.string().refine((value) => US_STATES.includes(value), VALIDATION_MESSAGES.state), false],
-    ['zip', fields.postalCode(isCanadian(form.state)), false],
-  ];
-  const errors: CarrierFieldErrors = {};
-  for (const [key, rule, required] of rules) {
-    const value = (form[key] ?? '').trim();
-    if (!value && !required) continue;
-    const result = rule.safeParse(value);
-    if (!result.success) errors[key] = result.error.issues[0]?.message;
-  }
-  for (const [key, min, max, message] of NUMBER_RULES) {
-    const value = form[key];
-    if (value != null && (!Number.isInteger(value) || value < min || value > max)) errors[key] = message;
+function numberError(form: Partial<CarrierRow>, key: NumberKey): string | undefined {
+  const [, min, max, message] = NUMBER_RULES.find(([k]) => k === key)!;
+  const value = form[key];
+  return value != null && (!Number.isInteger(value) || value < min || value > max) ? message : undefined;
+}
+
+/** Save-time check: the Company profile fields for the selected country, plus the number fields. */
+function formErrors(form: Partial<CarrierRow>, country: CountryCode): CarrierFieldErrors {
+  const errors = companyProfileErrors(form, country);
+  for (const [key] of NUMBER_RULES) {
+    const message = numberError(form, key);
+    if (message) errors[key] = message;
   }
   return errors;
+}
+
+function subdivisionOptions(country: CountryCode, current: string | null | undefined): SelectOption[] | undefined {
+  const list = subdivisionsOf(country);
+  if (!list) return undefined;
+  return [
+    { value: '', label: '—' },
+    // A stored value outside the list still shows (and is flagged on save / country change).
+    ...(current && !list.some((s) => s.code === current) ? [{ value: current, label: current }] : []),
+    ...list.map((s) => ({ value: s.code, label: subdivisionOptionLabel(s) })),
+  ];
 }
 
 export default function CompanyProfilePage() {
@@ -111,12 +126,14 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
   const { toast } = useToast();
   const updateMutation = useUpdateCarrier();
 
-  const [form, setForm] = useState<Partial<CarrierRow>>(carrier);
+  const [country, setCountry] = useState<CountryCode>(() => inferCountry(carrier));
+  const [form, setForm] = useState<Partial<CarrierRow>>(() => toProfileForm(carrier, country));
   const [dirty, setDirty] = useState(false);
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const [confirmProduction, setConfirmProduction] = useState(false);
   const [eldError, setEldError] = useState<string | null>(null);
   const [errors, setErrors] = useState<CarrierFieldErrors>({});
+  const stateOptions = subdivisionOptions(country, form.state);
   /** Save errors that name no field on this form (a backend 4xx) — never swallowed. */
   const [banner, setBanner] = useState<string[]>([]);
 
@@ -127,9 +144,36 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
     setErrors((prev) => (key in prev ? { ...prev, [key]: undefined } : prev));
   }
 
-  /** A free-typed field: the value arrives already filtered, and its save error clears on edit. */
-  function setText(key: TextKey, value: string) {
-    set(key, value);
+  /**
+   * A free-typed field. Errors appear on blur / Save only; once a field is showing one, each edit
+   * re-checks it, so the message goes away the moment the value becomes valid.
+   */
+  function setText(key: ProfileKey, value: string) {
+    const next = { ...form, [key]: value };
+    setForm(next);
+    setDirty(true);
+    setErrors((prev) => (prev[key] ? { ...prev, [key]: profileFieldError(key, next, country) } : prev));
+  }
+
+  /**
+   * A new country re-reads the phone under it, swaps the region / postal / tax rules, and
+   * re-checks every country-bound field that holds a value — nothing typed is thrown away.
+   */
+  function changeCountry(value: string) {
+    const next = toCountryCode(value);
+    if (!next || next === country) return;
+    const nextForm = { ...form, country: next, phone: form.phone ? formatCountryPhone(form.phone, next) : form.phone };
+    setCountry(next);
+    setForm(nextForm);
+    setDirty(true);
+    setErrors((prev) => {
+      const out = { ...prev, country: undefined };
+      for (const key of COUNTRY_DEPENDENT_KEYS) {
+        const filled = typeof nextForm[key] === 'string' && nextForm[key].trim() !== '';
+        out[key] = filled || prev[key] ? profileFieldError(key, nextForm, next) : undefined;
+      }
+      return out;
+    });
   }
 
   /** WB-202 — the message names the real fault: length/character set, or casing. */
@@ -152,18 +196,20 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
   }
 
   /** 11.30/§14.1 — free-typed fields are checked when the field is left, not only on Save. */
-  function validateField(key: TextKey | (typeof NUMBER_RULES)[number][0]) {
-    const all = companyErrors(form);
-    setErrors((prev) => ({ ...prev, [key]: all[key] }));
+  function validateField(key: ProfileKey | NumberKey) {
+    const message = key === 'unassignedThresholdMin' || key === 'dvirRetentionMonths'
+      ? numberError(form, key)
+      : profileFieldError(key, form, country);
+    setErrors((prev) => ({ ...prev, [key]: message }));
   }
 
   function doSave() {
-    const textErrors = companyErrors(form);
+    const textErrors = formErrors(form, country);
     setErrors(textErrors);
     setBanner([]);
     const eldOk = validateEldIdentifier(form.eldIdentifier);
     if (!eldOk || Object.values(textErrors).some(Boolean)) return;
-    updateMutation.mutate(toCarrierPatch(form), {
+    updateMutation.mutate(toCarrierPatch(normalizeCompanyProfile(form, country)), {
       onSuccess: () => {
         setDirty(false);
         setLastSynced(new Date().toISOString());
@@ -259,28 +305,28 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
               onChange={(e) => setText('mcNumber', inputFilters.mcNumber(e.target.value))}
             />
           </Field>
-          <Field label="EIN / Tax ID" error={errors.ein}>
+          <Field label={taxIdLabel(country)} error={errors.ein}>
             <input
               className={inputClass}
-              inputMode="numeric"
-              placeholder="12-3456789"
+              inputMode={country === 'US' ? 'numeric' : 'text'}
+              placeholder={taxIdPlaceholder(country)}
               value={form.ein ?? ''}
               readOnly={!canFull}
               aria-invalid={errors.ein ? true : undefined}
               onBlur={() => validateField('ein')}
-              onChange={(e) => setText('ein', inputFilters.ein(e.target.value))}
+              onChange={(e) => setText('ein', filterTaxIdInput(e.target.value, country))}
             />
           </Field>
-          <Field label="Main phone" error={errors.phone}>
-            <input
+          <Field label="Main phone" required error={errors.phone}>
+            <CountryPhoneInput
               className={inputClass}
-              type="tel"
-              autoComplete="tel"
-              value={form.phone ?? ''}
+              country={country}
+              placeholder={countryPhonePlaceholder(country)}
+              value={form.phone}
               readOnly={!canFull}
               aria-invalid={errors.phone ? true : undefined}
-              onBlur={() => validateField('phone')}
-              onChange={(e) => setText('phone', inputFilters.phone(e.target.value))}
+              onBlur={(value) => setErrors((prev) => ({ ...prev, phone: profileFieldError('phone', { ...form, phone: value }, country) }))}
+              onChange={(value) => setText('phone', value)}
             />
           </Field>
           <Field label="Compliance email" error={errors.complianceEmail}>
@@ -295,9 +341,22 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
               onChange={(e) => setText('complianceEmail', inputFilters.email(e.target.value))}
             />
           </Field>
+          <Field label="Country" required error={errors.country}>
+            <Select
+              className={inputClass}
+              value={country}
+              disabled={!canFull}
+              invalid={Boolean(errors.country)}
+              options={COUNTRY_OPTIONS}
+              searchable
+              searchLabel="Search countries"
+              onChange={changeCountry}
+            />
+          </Field>
           <Field label="Street address" error={errors.addressLine1}>
             <input
               className={inputClass}
+              autoComplete="address-line1"
               value={form.addressLine1 ?? ''}
               readOnly={!canFull}
               aria-invalid={errors.addressLine1 ? true : undefined}
@@ -308,42 +367,48 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
           <Field label="City" error={errors.city}>
             <input
               className={inputClass}
+              autoComplete="address-level2"
               value={form.city ?? ''}
               readOnly={!canFull}
               aria-invalid={errors.city ? true : undefined}
               onBlur={() => validateField('city')}
-              onChange={(e) => setText('city', inputFilters.city(e.target.value))}
+              onChange={(e) => setText('city', filterCityInput(e.target.value, LIMITS.cityMax))}
             />
           </Field>
           <div className="grid grid-cols-2 gap-4">
-            <Field label="State" error={errors.state}>
-              <Select
-                className={inputClass}
-                value={form.state ?? ''}
-                disabled={!canFull}
-                invalid={Boolean(errors.state)}
-                options={[
-                  { value: '', label: '—' },
-                  // A stored state outside the list still shows (and is flagged on save).
-                  ...(form.state && !US_STATES.includes(form.state) ? [{ value: form.state, label: form.state }] : []),
-                  ...STATE_OPTIONS,
-                ]}
-                onChange={(value) => {
-                  set('state', value);
-                  setErrors((prev) => ({ ...prev, zip: undefined }));
-                }}
-              />
+            <Field label={subdivisionLabel(country)} error={errors.state}>
+              {stateOptions ? (
+                <Select
+                  className={inputClass}
+                  value={form.state ?? ''}
+                  disabled={!canFull}
+                  invalid={Boolean(errors.state)}
+                  options={stateOptions}
+                  onChange={(value) => set('state', value)}
+                />
+              ) : (
+                <input
+                  className={inputClass}
+                  autoComplete="address-level1"
+                  value={form.state ?? ''}
+                  readOnly={!canFull}
+                  aria-invalid={errors.state ? true : undefined}
+                  onBlur={() => validateField('state')}
+                  onChange={(e) => setText('state', filterCityInput(e.target.value, 50))}
+                />
+              )}
             </Field>
-            <Field label={isCanadian(form.state) ? 'Postal code' : 'ZIP'} error={errors.zip}>
+            <Field label={postalCodeLabel(country)} error={errors.zip}>
               <input
                 className={inputClass}
-                inputMode={isCanadian(form.state) ? 'text' : 'numeric'}
+                autoComplete="postal-code"
+                inputMode={country === 'US' ? 'numeric' : 'text'}
                 value={form.zip ?? ''}
                 readOnly={!canFull}
                 aria-invalid={errors.zip ? true : undefined}
                 onBlur={() => validateField('zip')}
                 onChange={(e) =>
-                  setText('zip', isCanadian(form.state) ? inputFilters.caPostal(e.target.value) : inputFilters.usZip(e.target.value))
+                  setText('zip', country === 'US' ? inputFilters.usZip(e.target.value) : filterPostalInput(e.target.value))
                 }
               />
             </Field>

@@ -19,6 +19,12 @@ import { PairDeviceModal } from './PairDeviceModal';
 import { UpdateFirmwareModal } from './UpdateFirmwareModal';
 import { EditApiKeyScopesModal } from './EditApiKeyScopesModal';
 
+// Current-user role for the super-admin guard (`roleKey` is what `/auth/me` returned).
+const authState = vi.hoisted(() => ({ roleKey: 'SUPER_ADMIN' }));
+vi.mock('@/shared/auth/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: 'current_caller_id', email: 'caller@example.com', roleKey: authState.roleKey } }),
+}));
+
 function renderModal(children: React.ReactNode) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(

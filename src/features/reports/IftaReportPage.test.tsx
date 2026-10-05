@@ -555,3 +555,14 @@ describe('W-12 Reports · IFTA', () => {
     });
   });
 });
+
+// WB-273 — `Download IFTA PDF` is an export: Lucide `Upload`, like `Export CSV` in the toolbar.
+describe('WB-273 export icon', () => {
+  it('Download IFTA PDF renders the Upload icon, not Download', async () => {
+    renderPage(<IftaReportPage />, ROUTE);
+    await screen.findByRole('row', { name: /Ohio/ });
+    const button = screen.getByRole('button', { name: 'Download IFTA PDF' });
+    expect(button.querySelector('svg.lucide-upload')).not.toBeNull();
+    expect(button.querySelector('svg.lucide-download')).toBeNull();
+  });
+});

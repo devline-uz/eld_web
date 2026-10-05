@@ -12,7 +12,7 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { ColumnDef } from '@tanstack/react-table';
-import { AlertTriangle, Calendar, ClipboardCheck, Clock, Download, Upload, Wrench } from 'lucide-react';
+import { AlertTriangle, Calendar, ClipboardCheck, Clock, Upload, Wrench } from 'lucide-react';
 import { useDynamicSubtitle } from '@/app/layouts/Topbar';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { Can } from '@/shared/auth/Can';
@@ -321,7 +321,7 @@ export default function DvirReportPage() {
               Export CSV, so this stays for every role that can see the screen (WB-247). */}
           <Button
             variant="primary"
-            iconLeft={<Download size={16} strokeWidth={1.75} />}
+            iconLeft={<Upload size={16} strokeWidth={1.75} />}
             loading={exportPdf.isPending}
             disabled={exportPdf.isPending}
             onClick={() =>

@@ -8,6 +8,7 @@
 // Every `B-NN` below is a backend gap recorded in web/backend-gaps.md ("Stage 2 — Settings/Support",
 // B-84…B-89); WD-080 records how these ids replaced the earlier invented ones.
 import type { ToastCopy } from '@/shared/ui/copy';
+import { SUPER_ADMIN_ONLY_REASON } from '@/shared/auth/permissions';
 
 const plural = (count: number, singular: string): string => `${singular}${count === 1 ? '' : 's'}`;
 
@@ -23,6 +24,15 @@ export const SETTINGS_TOAST = {
   invitationResent: (email: string): ToastCopy => ({
     title: 'Invitation resent',
     description: `A new invite was sent to ${email}.`,
+  }),
+  /** The user record exists, but the server could not email the invitation. */
+  invitationNotEmailed: (email: string): ToastCopy => ({
+    title: 'User invited — email not sent',
+    description: `Ask ${email} to sign in with Google at ${window.location.origin}/sign-in.`,
+  }),
+  invitationsNotEmailed: (notSent: number, total: number): ToastCopy => ({
+    title: `${notSent} of ${total} ${plural(total, 'invitation')} could not be emailed`,
+    description: `Ask those users to sign in with Google at ${window.location.origin}/sign-in.`,
   }),
   invitationsResent: (count: number): ToastCopy => ({
     title: `${count} ${plural(count, 'invitation')} resent`,
@@ -89,6 +99,8 @@ export const SETTINGS_TOAST = {
 
 /** Reasons shown next to controls this feature deliberately disables (never a dead control). */
 export const SETTINGS_REASON = {
+  /** Only a SUPER_ADMIN may manage ADMIN / SUPER_ADMIN users and the ADMIN role. */
+  superAdminOnly: SUPER_ADMIN_ONLY_REASON,
   /** B-85 — `POST /users` has no terminal-scope field. */
   inviteTerminal: 'Not available yet — the invite API has no terminal field. New users see every terminal.',
   /** B-85 — `POST /users` has no personal-message field. */
@@ -158,12 +170,10 @@ export const ROLE_COPY = {
  */
 export const AUDIT_SEARCH_COPY = {
   searching: (n: number) => `Searching older entries… ${n} entries searched so far.`,
-  capReached: (n: number) =>
-    `Searched the ${n} most recent entries (the automatic search limit) — action, date and search filters do not cover older entries yet. Use Load more to include them.`,
-  stopped: (n: number) =>
-    `Search stopped after ${n} entries — action, date and search filters do not cover older entries. Use Load more to include them.`,
-  partial: (n: number) =>
-    `Action, date and search filters apply to the ${n} entries loaded so far — use Load more to include older entries.`,
+  // WB-270 — the table pages over a bounded window of the most recent entries (B-64).
+  windowLimit: (n: number) =>
+    `Showing the ${n} most recent entries — older entries in the selected date range are not loaded yet.`,
+  stopped: (n: number) => `Search stopped after ${n} entries — older entries in the selected date range are not loaded.`,
   rangeCovered: (n: number) => `Searched every entry in the selected date range (${n} loaded).`,
 } as const;
 

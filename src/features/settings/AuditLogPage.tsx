@@ -1,13 +1,15 @@
 // owner: web-settings-admin — W-23 Settings · Audit log (web/tz.md §10 W-23).
 // Design: web/roles and screens/admin panel/Settings — immutable audit trail.jpg
-// Server cursor-paginated (web/backend-gaps.md — `GET /audit-log` answers `{ items, nextCursor }`,
-// not an offset envelope); rows are windowed with @tanstack/react-virtual above 500 matching rows
-// (`useVirtualRows`, WB-254 — 5,000 rows rendered ~95k DOM nodes before); timestamps
-// render in the carrier's own timezone (§8.3).
-import { useMemo, useState } from 'react';
+// `GET /audit-log` is cursor-only (`{ items, nextCursor }`, no offset/total — web/backend-gaps.md),
+// and action/date/search have no server param (B-64). WB-270: the page loads a bounded window of
+// cursor chunks and pages the filtered window client-side with the shared `Pagination`
+// (`?page=&limit=`, ≤ 100 rows a page, so no row virtualisation — WD-102). Timestamps render in
+// the carrier's own timezone (§8.3).
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { endOfDay, startOfDay } from 'date-fns';
 import { useQueries, useQueryClient } from '@tanstack/react-query';
-import { Search, Download, Filter } from 'lucide-react';
+import { Search, Upload, Filter } from 'lucide-react';
 import { Can } from '@/shared/auth/Can';
 import { Button } from '@/shared/ui/Button';
 import { Badge, type BadgeTone } from '@/shared/ui/Badge';
@@ -25,8 +27,7 @@ import { typedCachePolicy } from '@/shared/api/queryPolicy';
 import { useCarrier, useUsersList, type AuditEntry } from '@/shared/api/settingsAdmin';
 import { DateRangePicker, resolvePreset, type DateRange, type DateRangePreset } from '@/shared/ui/DateRangePicker';
 import { FilterDrawer, FilterGroup, FilterCheckbox } from '@/shared/ui/FilterDrawer';
-import { SpacerRow, STICKY_HEAD_CLASS, useVirtualRows, VIRTUAL_SCROLL_CLASS } from '@/shared/ui/virtualRows';
-import { cn } from '@/shared/ui/cn';
+import { Pagination } from '@/shared/ui/Pagination';
 import { AUDIT_SEARCH_COPY } from './lib/copy';
 import { usePageHeader } from '@/app/layouts/Topbar';
 
@@ -34,8 +35,6 @@ const ACTION_TONE: Record<string, BadgeTone> = { CREATE: 'success', UPDATE: 'inf
 const ACTION_LABEL: Record<string, string> = { CREATE: 'Created', UPDATE: 'Updated', DELETE: 'Deleted', VIEW: 'Viewed' };
 const ACTION_OPTIONS = ['CREATE', 'UPDATE', 'DELETE', 'VIEW'] as const;
 const AUDIT_COLUMNS = ['TIMESTAMP', 'USER', 'ACTION', 'OBJECT', 'DETAILS', 'IP ADDRESS'] as const;
-/** `h-row` (48) — the actor cell's name + e-mail stack can make a row taller; rows are measured. */
-const AUDIT_ROW_ESTIMATE = 54;
 
 /** `UPDATE_SCOPES` → `Update scopes` — the server writes ~40 verbs beyond the four above. */
 function actionLabel(action: string): string {
@@ -77,14 +76,24 @@ function objectOf(entry: AuditEntry): string {
 
 type AuditPage = { items: AuditEntry[]; nextCursor: string | null };
 
-const PAGE_SIZE = 50;
+/** One cursor request — the server's own `limit` ceiling (`audit.controller.ts`). */
+const CHUNK_SIZE = 200;
 /**
- * B-64 — `action`, the date range and free-text search have no server param. While one of them
- * is narrowed, older cursor pages are fetched automatically up to this many entries (20 pages of
- * 50), so the filters cover the whole log up to the cap instead of only the pages clicked open.
+ * WB-270 / B-64 — the cursor chunks are walked automatically up to this many entries (5 requests
+ * of 200), stopping early once a chunk reaches past the start of the date range. The table pages
+ * over that bounded window; `Load older entries` extends it by another window on request.
  */
-export const AUTO_SEARCH_MAX_ENTRIES = 1000;
-const AUTO_SEARCH_MAX_PAGES = AUTO_SEARCH_MAX_ENTRIES / PAGE_SIZE;
+export const AUDIT_WINDOW_ENTRIES = 1000;
+const WINDOW_CHUNKS = AUDIT_WINDOW_ENTRIES / CHUNK_SIZE;
+/** The shared Pagination offers 10/25/50/100; a hand-written `?limit=500` is capped here. */
+const DEFAULT_PAGE_SIZE = 10;
+const MAX_PAGE_SIZE = 100;
+
+/** Same guard as Vehicles/Drivers/DVIR: `?page=abc`, `?page=0` or `?limit=-3` fall back to the default. */
+function positiveIntParam(raw: string | null, fallback: number): number {
+  const value = Number(raw);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
 
 const startOfDayMs = (d: Date) => startOfDay(d).getTime();
 const endOfDayMs = (d: Date) => endOfDay(d).getTime();
@@ -98,12 +107,13 @@ export default function AuditLogPage() {
   const carrierQuery = useCarrier();
   const timezone = carrierQuery.data?.timezone ?? 'UTC';
   const usersQuery = useUsersList();
+  const [params, setParams] = useSearchParams();
 
   const [search, setSearch] = useState('');
   // WB-043 — the filter row §10 W-23 draws: `All users ▾` (`actorId` IS a real server-side param
   // on `GET /audit-log`, web/backend-gaps.md — `objectType`/`objectId`/`actorId` only) · `All
   // actions ▾` and the `Last 30 days ▾` date range (both gap B-64 — no server support, filtered
-  // over the already-loaded window only, same limitation `search` already has) · `Filters`
+  // over the loaded window only, same limitation `search` already has) · `Filters`
   // (opens the drawer for `Object type`, the other server-supported param).
   const [actorId, setActorId] = useState<string>('');
   const [action, setAction] = useState<string>('');
@@ -111,91 +121,112 @@ export default function AuditLogPage() {
   const [datePreset, setDatePreset] = useState<DateRangePreset>('last30');
   const [objectType, setObjectType] = useState<string>('');
   const [filtersOpen, setFiltersOpen] = useState(false);
-  // Server cursor pagination (web/backend-gaps.md — `{ items, nextCursor }`, not an offset
-  // envelope): each entry is a page already fetched, `Load more` appends the next cursor. Using
-  // `useQueries` (rather than one `useState<cursor>`) keeps every loaded page live in the cache
-  // and re-rendered together, so the table never lags a click behind the fetch that answered it.
-  // How many pages the user asked for with `Load more` (the automatic search adds its own on top).
-  const [requestedPages, setRequestedPages] = useState(1);
-  // The filter signature the user pressed `Stop` on — a new search/filter starts a new search.
+  // The filter signature the user pressed `Stop` on — a new search/filter starts a new walk.
   const [stoppedFor, setStoppedFor] = useState<string | null>(null);
+  // `Load older entries` widens the window for the filter signature it was pressed under.
+  const [windowFor, setWindowFor] = useState<{ signature: string; chunks: number } | null>(null);
   const [selected, setSelected] = useState<AuditEntry | null>(null);
   const queryClient = useQueryClient();
 
-  // actorId/objectType are real server params — changing either invalidates every already-loaded
-  // cursor page, so pagination restarts from the first page under the new filter.
+  // WB-270 — `?page=&limit=` in the URL, like Vehicles/Drivers/Trips/DVIR. A page size above
+  // 100 is capped, so a page never needs row virtualisation (WD-102).
+  const page = positiveIntParam(params.get('page'), 1);
+  const limit = Math.min(positiveIntParam(params.get('limit'), DEFAULT_PAGE_SIZE), MAX_PAGE_SIZE);
+  function setPaging(key: 'page' | 'limit', value: number) {
+    const next = new URLSearchParams(params);
+    next.set(key, String(value));
+    if (key === 'limit' || value === 1) next.delete('page');
+    setParams(next, { replace: true });
+  }
+  /** Every filter, the search and the date range re-page from page 1. */
+  function resetPage() {
+    if (!params.has('page')) return;
+    const next = new URLSearchParams(params);
+    next.delete('page');
+    setParams(next, { replace: true });
+  }
+  function changeSearch(next: string) {
+    setSearch(next);
+    resetPage();
+  }
+  function changeAction(next: string) {
+    setAction(next);
+    resetPage();
+  }
+  function changeDateRange(range: DateRange, preset: DateRangePreset) {
+    setDateRange(range);
+    setDatePreset(preset);
+    resetPage();
+  }
+  // actorId/objectType are real server params — changing either starts a new cursor chain.
   function setActorFilter(next: string) {
     setActorId(next);
-    setRequestedPages(1);
+    resetPage();
   }
   function setObjectTypeFilter(next: string) {
     setObjectType(next);
-    setRequestedPages(1);
+    resetPage();
   }
 
   const rangeStartMs = startOfDayMs(dateRange.from);
   const rangeEndMs = endOfDayMs(dateRange.to);
-  const serverParams = { limit: PAGE_SIZE, actorId: actorId || undefined, objectType: objectType || undefined };
+  const serverParams = { limit: CHUNK_SIZE, actorId: actorId || undefined, objectType: objectType || undefined };
   const filterSignature = JSON.stringify([search.trim(), action, rangeStartMs, rangeEndMs, actorId, objectType]);
-  // The default `Last 30 days` view is not a search — only a typed search, an action, or a
-  // different date range starts the automatic fetch of older pages.
   const localFilterActive = Boolean(search.trim()) || Boolean(action) || datePreset !== 'last30';
-  const autoSearching = localFilterActive && stoppedFor !== filterSignature;
-  // Entries arrive newest first, so once a page reaches past the start of the date range no older
-  // page can match any filter (the date range always applies).
-  const pastRange = (page: AuditPage) => page.items.some((e) => new Date(e.createdAt).getTime() < rangeStartMs);
+  const walking = stoppedFor !== filterSignature;
+  const windowChunks = windowFor?.signature === filterSignature ? windowFor.chunks : WINDOW_CHUNKS;
+  // Entries arrive newest first, so once a chunk reaches past the start of the date range no older
+  // chunk can match any filter (the date range always applies).
+  const pastRange = (chunk: AuditPage) => chunk.items.some((e) => new Date(e.createdAt).getTime() < rangeStartMs);
 
-  // Server cursor pagination: the cursor chain is walked through the query cache. It extends to
-  // the pages the user requested, to the automatic-search cap while a local filter is active,
-  // and over any page already cached (so `Stop` or clearing the search never hides loaded rows).
-  const targetPages = autoSearching ? Math.max(requestedPages, AUTO_SEARCH_MAX_PAGES) : requestedPages;
-  const pageCursors: (string | undefined)[] = [undefined];
+  // The cursor chain is walked through the query cache: up to the window, stopping past the start
+  // of the date range or on `Stop`, and over any chunk already cached (so `Stop` or clearing the
+  // search never hides loaded rows).
+  const chunkCursors: (string | undefined)[] = [undefined];
   for (;;) {
-    const page = queryClient.getQueryData<AuditPage>(qk.audit({ ...serverParams, cursor: pageCursors[pageCursors.length - 1] }));
-    if (!page?.nextCursor) break;
-    const nextCached = queryClient.getQueryData<AuditPage>(qk.audit({ ...serverParams, cursor: page.nextCursor })) !== undefined;
-    const wanted = pageCursors.length < requestedPages || (autoSearching && pageCursors.length < targetPages && !pastRange(page));
+    const chunk = queryClient.getQueryData<AuditPage>(qk.audit({ ...serverParams, cursor: chunkCursors[chunkCursors.length - 1] }));
+    // A cursor already in the chain would loop forever — the server never repeats one, but guard.
+    if (!chunk?.nextCursor || chunkCursors.includes(chunk.nextCursor)) break;
+    const nextCached = queryClient.getQueryData<AuditPage>(qk.audit({ ...serverParams, cursor: chunk.nextCursor })) !== undefined;
+    const wanted = walking && chunkCursors.length < windowChunks && !pastRange(chunk);
     if (!wanted && !nextCached) break;
-    pageCursors.push(page.nextCursor);
+    chunkCursors.push(chunk.nextCursor);
   }
 
-  const pageQueries = useQueries({
-    queries: pageCursors.map((cursor) => ({
+  const chunkQueries = useQueries({
+    queries: chunkCursors.map((cursor) => ({
       queryKey: qk.audit({ ...serverParams, cursor }),
       queryFn: () => client.get<AuditPage>(endpoints.auditLog.list, { params: { ...serverParams, cursor } }),
       ...typedCachePolicy<AuditPage>('slowList'),
     })),
   });
 
-  const firstQuery = pageQueries[0];
-  const lastQuery = pageQueries[pageQueries.length - 1];
+  const firstQuery = chunkQueries[0];
+  const lastQuery = chunkQueries[chunkQueries.length - 1];
   const isLoading = firstQuery?.isLoading ?? true;
-  const isError = pageQueries.some((q) => q.isError);
-  const isFetchingMore = pageQueries.length > 1 && (lastQuery?.isFetching ?? false);
-  const nextCursor = lastQuery?.data?.nextCursor;
-  // A later page still in flight means older entries exist even though its cursor is not known yet.
-  const hasOlder = lastQuery?.data ? Boolean(lastQuery.data.nextCursor) : pageQueries.length > 1;
-  // Every entry that could match is loaded: no older page, or the loaded pages reach past the
+  const isError = chunkQueries.some((q) => q.isError);
+  const isFetching = chunkQueries.some((q) => q.isFetching);
+  // A later chunk still in flight means older entries exist even though its cursor is not known yet.
+  const hasOlder = lastQuery?.data ? Boolean(lastQuery.data.nextCursor) : chunkQueries.length > 1;
+  // Every entry that could match is loaded: no older chunk, or the loaded chunks reach past the
   // start of the date range.
-  const rangeCovered = !hasOlder || pageQueries.some((q) => q.data !== undefined && pastRange(q.data));
-  const autoCapReached = pageCursors.length >= AUTO_SEARCH_MAX_PAGES;
-  const autoInProgress = autoSearching && !isError && !rangeCovered && !autoCapReached;
+  const rangeCovered = !hasOlder || chunkQueries.some((q) => q.data !== undefined && pastRange(q.data));
+  const windowFull = chunkCursors.length >= windowChunks;
+  const walkInProgress = walking && !isError && !rangeCovered && !windowFull;
 
-  // `useQueries` returns a new array every render, so the dependency is each page's own
-  // `dataUpdatedAt` (changes exactly when a page's data actually changes), not array identity.
-  const dataFingerprint = pageQueries.map((q) => q.dataUpdatedAt).join(',');
+  // `useQueries` returns a new array every render, so the dependency is each chunk's own
+  // `dataUpdatedAt` (changes exactly when a chunk's data actually changes), not array identity.
+  const dataFingerprint = chunkQueries.map((q) => q.dataUpdatedAt).join(',');
   const items = useMemo(
-    () => pageQueries.flatMap((q) => q.data?.items ?? []),
+    () => chunkQueries.flatMap((q) => q.data?.items ?? []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [dataFingerprint],
   );
 
   // WB-043 — `action` and the date range have no server-side param (web/backend-gaps.md B-64), so
-  // both only narrow the window of pages already loaded, exactly like `search` already did.
-  // WB-111 — the same predicate the table uses, factored out so `Export CSV` (below) can apply
-  // every active filter to the rows it fetches instead of shipping an unfiltered batch.
-  function applyLocalFilters(entries: AuditEntry[]): AuditEntry[] {
-    let out = entries;
+  // both narrow the loaded window, exactly like `search`.
+  const filtered = useMemo(() => {
+    let out = items;
     if (action) out = out.filter((e) => e.action === action);
     out = out.filter((e) => {
       const t = new Date(e.createdAt).getTime();
@@ -213,14 +244,21 @@ export default function AuditLogPage() {
       );
     }
     return out;
-  }
-  const filtered = useMemo(
-    () => applyLocalFilters(items),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [items, search, action, rangeStartMs, rangeEndMs],
-  );
+  }, [items, search, action, rangeStartMs, rangeEndMs]);
 
-  const virtual = useVirtualRows({ count: filtered.length, estimateRowHeight: AUDIT_ROW_ESTIMATE });
+  // WB-270 — client-side paging over the filtered window (the server has no offset/total, and a
+  // cursor page could not honour the B-64 filters).
+  const totalPages = Math.max(1, Math.ceil(filtered.length / limit));
+  const shownPage = Math.min(page, totalPages);
+  const pageRows = useMemo(() => filtered.slice((shownPage - 1) * limit, shownPage * limit), [filtered, shownPage, limit]);
+  // A `page` past the end (a bookmark, the back button, a narrower filter) snaps back to the last
+  // page once the window has settled — not while chunks are still arriving.
+  const settled = !isLoading && !isFetching && !isError && !walkInProgress;
+  useEffect(() => {
+    if (!settled || page <= totalPages) return;
+    setPaging('page', totalPages);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settled, page, totalPages]);
 
   const objectTypeOptions = useMemo(
     () => Array.from(new Set([...KNOWN_OBJECT_TYPES, ...items.map((e) => e.objectType)])).sort(),
@@ -228,36 +266,31 @@ export default function AuditLogPage() {
   );
 
   function clearAllFilters() {
-    setActorFilter('');
+    setActorId('');
     setAction('');
-    setObjectTypeFilter('');
+    setObjectType('');
     setDatePreset('last30');
     setDateRange(resolvePreset('last30'));
     setSearch('');
+    resetPage();
   }
 
-  function loadMore() {
-    if (!nextCursor) return;
-    setRequestedPages(pageCursors.length + 1);
+  function loadOlder() {
+    setStoppedFor(null);
+    setWindowFor({ signature: filterSignature, chunks: chunkCursors.length + WINDOW_CHUNKS });
   }
 
   function retry() {
-    for (const q of pageQueries) void q.refetch();
+    for (const q of chunkQueries) void q.refetch();
   }
 
-  async function handleExportCsv() {
-    // WB-111 — forward the same params the on-screen table query uses: `actorId`/`objectType`
-    // are real server params (web/backend-gaps.md), `action`/date range/`search` have no server
-    // support (B-64) so they're applied locally to the fetched batch, exactly as the table does.
-    const data = await client.get<{ items: AuditEntry[] }>(endpoints.auditLog.list, {
-      params: { limit: 200, actorId: actorId || undefined, objectType: objectType || undefined },
-    });
-    const rows = applyLocalFilters(data.items);
+  function handleExportCsv() {
+    // WB-270 — exports the page shown (every active filter already applied), as DVIR does (WB-268).
     // WB-135 — every field goes through the RFC 4180 escaper: the 'MMM dd, HH:mm:ss' timestamp
     // and actor/object names can contain commas, quotes or line breaks.
     const csv = toCsv([
       ['timestamp', 'user', 'action', 'object', 'ip'],
-      ...rows.map((e) => [formatCarrier(e.createdAt, timezone, 'dateTimeSeconds'), e.actorName, actionLabel(e.action), objectOf(e), ipOf(e)]),
+      ...pageRows.map((e) => [formatCarrier(e.createdAt, timezone, 'dateTimeSeconds'), e.actorName, actionLabel(e.action), objectOf(e), ipOf(e)]),
     ]);
     const blob = new Blob([csv], { type: 'text/csv' });
     const link = document.createElement('a');
@@ -273,7 +306,7 @@ export default function AuditLogPage() {
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-end">
         <Can perm="auditLog" level="READ">
-          <Button variant="secondary" iconLeft={<Download size={16} strokeWidth={1.75} />} onClick={handleExportCsv}>
+          <Button variant="secondary" iconLeft={<Upload size={16} strokeWidth={1.75} />} onClick={handleExportCsv}>
             Export CSV
           </Button>
         </Can>
@@ -286,7 +319,7 @@ export default function AuditLogPage() {
             type="search"
             aria-label="Search action, object or user"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => changeSearch(e.target.value)}
             placeholder="Search action, object or user…"
             className="w-full bg-transparent text-body outline-none"
           />
@@ -307,7 +340,7 @@ export default function AuditLogPage() {
         <select
           aria-label="Filter by action"
           value={action}
-          onChange={(e) => setAction(e.target.value)}
+          onChange={(e) => changeAction(e.target.value)}
           className="h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text"
         >
           <option value="">All actions</option>
@@ -317,14 +350,7 @@ export default function AuditLogPage() {
             </option>
           ))}
         </select>
-        <DateRangePicker
-          value={dateRange}
-          preset={datePreset}
-          onChange={(range, preset) => {
-            setDateRange(range);
-            setDatePreset(preset);
-          }}
-        />
+        <DateRangePicker value={dateRange} preset={datePreset} onChange={changeDateRange} />
         <Button
           variant="secondary"
           iconLeft={<Filter size={16} strokeWidth={1.75} />}
@@ -334,111 +360,99 @@ export default function AuditLogPage() {
         </Button>
       </div>
 
-      {/* B-64 — action, date range and search have no server param. While one is narrowed, older
-          pages are fetched automatically up to AUTO_SEARCH_MAX_ENTRIES, with a live count and a
-          Stop. Whenever older entries remain unsearched (cap, Stop, or the plain default view) it
-          is said on screen, so an empty or short result is not read as "nothing happened". */}
-      {autoInProgress ? (
+      {/* B-64 / WB-270 — the window is walked automatically (live count + Stop). Whenever entries in
+          the date range remain outside it (window limit or Stop) it is said on screen, with
+          `Load older entries`, so a short or empty result is not read as "nothing happened". */}
+      {walkInProgress ? (
         <div role="status" className="flex items-center gap-3 text-caption text-text-muted">
           <span className="tabular-nums">{AUDIT_SEARCH_COPY.searching(items.length)}</span>
           <Button variant="secondary" size="sm" onClick={() => setStoppedFor(filterSignature)}>
             Stop
           </Button>
         </div>
-      ) : !rangeCovered ? (
-        <p className="text-caption tabular-nums text-text-muted">
-          {autoSearching && autoCapReached
-            ? AUDIT_SEARCH_COPY.capReached(items.length)
-            : localFilterActive && stoppedFor === filterSignature
-              ? AUDIT_SEARCH_COPY.stopped(items.length)
-              : AUDIT_SEARCH_COPY.partial(items.length)}
-        </p>
+      ) : !rangeCovered && !isError ? (
+        <div className="flex items-center gap-3 text-caption text-text-muted">
+          <span className="tabular-nums">
+            {walking ? AUDIT_SEARCH_COPY.windowLimit(items.length) : AUDIT_SEARCH_COPY.stopped(items.length)}
+          </span>
+          <Button variant="secondary" size="sm" onClick={loadOlder}>
+            Load older entries
+          </Button>
+        </div>
       ) : localFilterActive && hasOlder ? (
         <p className="text-caption tabular-nums text-text-muted">{AUDIT_SEARCH_COPY.rangeCovered(items.length)}</p>
       ) : null}
 
-      <Card padded={false}>
-        {isLoading && items.length === 0 ? (
-          <LoadingState className="p-4" />
-        ) : isError ? (
-          <ErrorState
-            title="Could not load the audit log"
-            description="The audit trail did not respond. Nothing was lost — every recorded event is still stored."
-            onRetry={retry}
-          />
-        ) : filtered.length === 0 ? (
-          <EmptyState {...EMPTY_STATE_COPY.auditLog} actions={[{ label: 'Reset filters', onClick: clearAllFilters }]} />
-        ) : (
-          <>
-            <div ref={virtual.scrollRef} className={virtual.enabled ? VIRTUAL_SCROLL_CLASS : undefined}>
-              <table
-                className="w-full border-collapse text-body"
-                aria-rowcount={virtual.enabled ? filtered.length + 1 : undefined}
-              >
-                <thead className="h-table-head">
-                  <tr className="border-b border-border" aria-rowindex={virtual.enabled ? 1 : undefined}>
-                    {AUDIT_COLUMNS.map((h) => (
-                      <th
-                        key={h}
-                        scope="col"
-                        className={cn(
-                          'px-3 text-left text-table-head font-semibold uppercase tracking-wide text-text-muted',
-                          virtual.enabled && STICKY_HEAD_CLASS,
-                        )}
-                      >
-                        {h}
-                      </th>
-                    ))}
+      {/* flex-1 lets the table area absorb any spare card height, so Pagination sits at the card
+          bottom (the WB-264 pattern). */}
+      <Card padded={false} className="flex flex-col">
+        <div className="flex-1">
+          {isLoading && items.length === 0 ? (
+            <LoadingState className="p-4" />
+          ) : isError ? (
+            <ErrorState
+              title="Could not load the audit log"
+              description="The audit trail did not respond. Nothing was lost — every recorded event is still stored."
+              onRetry={retry}
+            />
+          ) : filtered.length === 0 ? (
+            <EmptyState {...EMPTY_STATE_COPY.auditLog} actions={[{ label: 'Reset filters', onClick: clearAllFilters }]} />
+          ) : (
+            <table className="w-full border-collapse text-body">
+              <thead className="h-table-head">
+                <tr className="border-b border-border">
+                  {AUDIT_COLUMNS.map((h) => (
+                    <th
+                      key={h}
+                      scope="col"
+                      className="px-3 text-left text-table-head font-semibold uppercase tracking-wide text-text-muted"
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {pageRows.map((entry) => (
+                  <tr
+                    key={entry.id}
+                    tabIndex={0}
+                    onClick={() => setSelected(entry)}
+                    onKeyDown={(e) => e.key === 'Enter' && setSelected(entry)}
+                    className="h-row cursor-pointer border-b border-border last:border-b-0 hover:bg-bg-subtle"
+                  >
+                    <td className="px-3 tabular-nums text-text">{formatCarrier(entry.createdAt, timezone, 'dateTimeSeconds')}</td>
+                    <td className="px-3">
+                      <span className="flex items-center gap-2">
+                        <Avatar name={entry.actorName ?? entry.actorType} size="sm" />
+                        <span className="flex flex-col">
+                          <span className="text-text">{entry.actorName ?? entry.actorType}</span>
+                          {entry.actorEmail && <span className="text-caption text-text-muted">{entry.actorEmail}</span>}
+                        </span>
+                      </span>
+                    </td>
+                    <td className="px-3">
+                      <Badge tone={ACTION_TONE[entry.action] ?? 'neutral'}>{actionLabel(entry.action)}</Badge>
+                    </td>
+                    <td className="px-3 text-text">{objectOf(entry)}</td>
+                    <td className="max-w-64 truncate px-3 text-caption text-text-muted">{detailOf(entry) ?? '—'}</td>
+                    <td className="px-3 text-right tabular-nums text-text-secondary">{ipOf(entry) ?? '—'}</td>
                   </tr>
-                </thead>
-                <tbody>
-                  <SpacerRow height={virtual.padTop} colSpan={AUDIT_COLUMNS.length} />
-                  {virtual.rows.map(({ index }) => {
-                    const entry = filtered[index]!;
-                    return (
-                      <tr
-                        key={entry.id}
-                        ref={virtual.measureRow}
-                        data-index={index}
-                        aria-rowindex={virtual.enabled ? index + 2 : undefined}
-                        tabIndex={0}
-                        onClick={() => setSelected(entry)}
-                        onKeyDown={(e) => e.key === 'Enter' && setSelected(entry)}
-                        className="h-row cursor-pointer border-b border-border last:border-b-0 hover:bg-bg-subtle"
-                      >
-                        <td className="px-3 tabular-nums text-text">{formatCarrier(entry.createdAt, timezone, 'dateTimeSeconds')}</td>
-                        <td className="px-3">
-                          <span className="flex items-center gap-2">
-                            <Avatar name={entry.actorName ?? entry.actorType} size="sm" />
-                            <span className="flex flex-col">
-                              <span className="text-text">{entry.actorName ?? entry.actorType}</span>
-                              {entry.actorEmail && <span className="text-caption text-text-muted">{entry.actorEmail}</span>}
-                            </span>
-                          </span>
-                        </td>
-                        <td className="px-3">
-                          <Badge tone={ACTION_TONE[entry.action] ?? 'neutral'}>{actionLabel(entry.action)}</Badge>
-                        </td>
-                        <td className="px-3 text-text">{objectOf(entry)}</td>
-                        <td className="max-w-64 truncate px-3 text-caption text-text-muted">{detailOf(entry) ?? '—'}</td>
-                        <td className="px-3 text-right tabular-nums text-text-secondary">{ipOf(entry) ?? '—'}</td>
-                      </tr>
-                    );
-                  })}
-                  <SpacerRow height={virtual.padBottom} colSpan={AUDIT_COLUMNS.length} />
-                </tbody>
-              </table>
-            </div>
-          </>
-        )}
-        {/* Also under the empty state: when a filter matches nothing in the searched entries,
-            older pages can still be loaded by hand (B-64). */}
-        {nextCursor && !isError && items.length > 0 && (
-          <div className="flex justify-center border-t border-border p-3">
-            <Button variant="secondary" onClick={loadMore} loading={isFetchingMore}>
-              Load more
-            </Button>
-          </div>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        {!isLoading && !isError && filtered.length > 0 && (
+          <Pagination
+            page={shownPage}
+            limit={limit}
+            total={filtered.length}
+            totalPages={totalPages}
+            itemLabel="entries"
+            onPageChange={(p) => setPaging('page', p)}
+            onLimitChange={(l) => setPaging('limit', l)}
+          />
         )}
       </Card>
 
