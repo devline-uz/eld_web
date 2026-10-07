@@ -403,13 +403,131 @@ describe('W-26 — Profile card', () => {
     const phone = screen.getByLabelText('Mobile number');
     // Letters never reach the field; a too-short number still fails validation.
     await user.type(phone, 'abc12');
-    expect(phone).toHaveValue('12');
+    expect(phone).toHaveValue('+1 2');
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
-    expect(await screen.findByText('Enter a valid phone number.')).toBeInTheDocument();
+    expect(await screen.findByText('This phone number is incomplete.')).toBeInTheDocument();
     expect(calls.patches).toEqual([]);
 
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.getByLabelText(/First name/)).toHaveValue('Mike');
+  });
+
+  describe('Mobile number — international input', () => {
+    const save = () => screen.getByRole('button', { name: 'Save changes' });
+
+    it('is a tel input with the phone keyboard and autofill hints', async () => {
+      api();
+      renderPage();
+      const phone = await screen.findByLabelText('Mobile number');
+      expect(phone).toHaveAttribute('type', 'tel');
+      expect(phone).toHaveAttribute('inputmode', 'tel');
+      expect(phone).toHaveAttribute('autocomplete', 'tel');
+    });
+
+    it('typing 998… puts + in front and groups the digits; the API gets E.164', async () => {
+      const user = userEvent.setup();
+      const calls = api();
+      renderPage();
+      const phone = await screen.findByLabelText('Mobile number');
+      await user.type(phone, '9');
+      expect(phone).toHaveValue('+9');
+      await user.type(phone, '98901234567');
+      expect(phone).toHaveValue('+998 90 123 45 67');
+      await user.click(save());
+      expect(await screen.findByText('Settings saved')).toBeInTheDocument();
+      expect(calls.patches).toEqual([
+        { firstName: 'Mike', lastName: 'Torres', jobTitle: 'Fleet Manager', phone: '+998901234567' },
+      ]);
+      // The saved E.164 value comes back and is shown formatted again.
+      expect(phone).toHaveValue('+998 90 123 45 67');
+    });
+
+    it('typing +998… never adds a second +', async () => {
+      const user = userEvent.setup();
+      api();
+      renderPage();
+      const phone = await screen.findByLabelText('Mobile number');
+      await user.type(phone, '+');
+      expect(phone).toHaveValue('+');
+      await user.type(phone, '+998901234567');
+      expect(phone).toHaveValue('+998 90 123 45 67');
+    });
+
+    it('shows a stored number formatted, and clearing it sends the empty value as before', async () => {
+      const user = userEvent.setup();
+      const calls = api({ profile: { ...PROFILE, phone: '+79123456789' } });
+      renderPage();
+      const phone = await screen.findByLabelText('Mobile number');
+      expect(phone).toHaveValue('+7 912 345 67 89');
+      await user.clear(phone);
+      expect(phone).toHaveValue('');
+      await user.tab();
+      expect(phone).toHaveValue('');
+      await user.click(save());
+      expect(await screen.findByText('Settings saved')).toBeInTheDocument();
+      expect(calls.patches).toEqual([
+        { firstName: 'Mike', lastName: 'Torres', jobTitle: 'Fleet Manager', phone: '' },
+      ]);
+    });
+
+    it('backspacing every digit leaves the field empty, not a stuck +', async () => {
+      const user = userEvent.setup();
+      api();
+      renderPage();
+      const phone = await screen.findByLabelText('Mobile number');
+      await user.type(phone, '442079460958');
+      expect(phone).toHaveValue('+44 20 7946 0958');
+      await user.type(phone, '{Backspace>16/}');
+      expect(phone).toHaveValue('');
+    });
+
+    it('a pasted number with spaces, dashes and brackets is normalised', async () => {
+      const user = userEvent.setup();
+      const calls = api();
+      renderPage();
+      const phone = await screen.findByLabelText('Mobile number');
+      await user.click(phone);
+      await user.paste('+1 (202) 555-0123');
+      expect(phone).toHaveValue('+1 202 555 0123');
+      await user.click(save());
+      expect(await screen.findByText('Settings saved')).toBeInTheDocument();
+      expect(calls.patches).toEqual([
+        { firstName: 'Mike', lastName: 'Torres', jobTitle: 'Fleet Manager', phone: '+12025550123' },
+      ]);
+    });
+
+    it('keeps the caret beside the same digit while regrouping', async () => {
+      const user = userEvent.setup();
+      api({ profile: { ...PROFILE, phone: '+12025550123' } });
+      renderPage();
+      const phone = (await screen.findByLabelText('Mobile number')) as HTMLInputElement;
+      expect(phone).toHaveValue('+1 202 555 0123');
+      // Caret after "+1 202 5": delete that 5, then type it back.
+      await user.type(phone, '{Backspace}', { initialSelectionStart: 8, initialSelectionEnd: 8 });
+      expect(phone.value.replace(/\D/g, '')).toBe('1202550123');
+      expect(phone.selectionStart).toBe(6);
+      await user.keyboard('5');
+      expect(phone).toHaveValue('+1 202 555 0123');
+      expect(phone.selectionStart).toBe(8);
+    });
+
+    it.each([
+      ['999123456789', 'Enter a valid country code after +.'],
+      ['99890123', 'This phone number is incomplete.'],
+      ['9989012345678', 'This phone number is too long.'],
+      ['998001234567', 'Enter a valid phone number.'],
+    ])('%s is rejected with “%s” and nothing is sent', async (typed, message) => {
+      const user = userEvent.setup();
+      const calls = api();
+      renderPage();
+      const phone = await screen.findByLabelText('Mobile number');
+      await user.type(phone, typed);
+      await user.tab();
+      expect(await screen.findByText(message)).toBeInTheDocument();
+      expect(phone).toHaveAttribute('aria-invalid', 'true');
+      await user.click(save());
+      expect(calls.patches).toEqual([]);
+    });
   });
 
   it('maps a 422 onto its field and anything else into a banner', async () => {

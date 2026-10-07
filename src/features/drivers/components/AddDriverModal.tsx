@@ -19,7 +19,7 @@ import { conflictField, type ConflictRule } from '@/shared/api/conflicts';
 import { VALIDATION_MESSAGES } from '@/shared/forms/messages';
 import { HOME_TERMINAL_TIMEZONES } from '../lib/terminals';
 import { DRIVER_TOAST } from '../lib/copy';
-import { PhoneNumberInput } from './PhoneNumberInput';
+import { PhoneNumberInput } from '@/shared/forms/PhoneNumberInput';
 
 /** WB-187 — the list used to hold ten states, so a CDL from any other one could not be recorded. */
 const US_STATES = [

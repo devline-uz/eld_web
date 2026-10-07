@@ -23,7 +23,7 @@ import type { DriverRow } from '@/shared/api/drivers';
 import { ApiError } from '@/shared/api/errors';
 import { DRIVER_TOAST } from '../lib/copy';
 import { HOME_TERMINAL_TIMEZONES } from '../lib/terminals';
-import { PhoneNumberInput } from './PhoneNumberInput';
+import { PhoneNumberInput } from '@/shared/forms/PhoneNumberInput';
 
 const US_STATES = [
   'AL',

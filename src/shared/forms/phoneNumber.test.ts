@@ -6,6 +6,7 @@ import {
   detectPhoneCountry,
   formatPhoneInput,
   internationalPhone,
+  internationalPhoneRule,
   phoneForDisplay,
   phoneProblem,
   toE164,
@@ -124,7 +125,13 @@ describe('phoneProblem / toE164', () => {
     expect(phoneProblem('+998 00 123 45 67')).toBe('invalid');
     // NANP area codes never start with 0 or 1.
     expect(phoneProblem('+1 123 456 7890')).toBe('invalid');
-    expect(phoneProblem('+998 90 123 45 67 89')).toBe('invalid');
+  });
+
+  it('a number longer than its country allows is reported as too long', () => {
+    expect(phoneProblem('+998 90 123 45 67 89')).toBe('tooLong');
+    expect(phoneProblem('+1 202 555 01234')).toBe('tooLong');
+    // Past E.164's 15 digits, whatever the country.
+    expect(phoneProblem('+1234567890123456')).toBe('tooLong');
   });
 
   it('rejects multiple or misplaced + signs', () => {
@@ -136,6 +143,13 @@ describe('phoneProblem / toE164', () => {
   it('rejects letters inside the number', () => {
     expect(phoneProblem('+998 90 abc 45 67')).toBe('invalid');
     expect(phoneProblem('+1 234 567 890O')).toBe('invalid');
+  });
+
+  it('allows only + space - ( ) as formatting characters', () => {
+    expect(phoneProblem('+1 (202) 555-0123')).toBeNull();
+    expect(phoneProblem('+44.20.7946.0958')).toBe('invalid');
+    expect(phoneProblem('+1/202/555/0123')).toBe('invalid');
+    expect(phoneProblem('+998 90 123 45 67#')).toBe('invalid');
   });
 });
 
@@ -159,6 +173,19 @@ describe('internationalPhone (zod) — the value the API receives', () => {
     expect(message('+998 90 123')).toBe(M.phoneIncomplete);
     expect(message('+999 123 456 789')).toBe(M.phoneCountryCode);
     expect(message('+998 90 abc 45 67')).toBe(M.phone);
+    expect(message('+998 90 123 45 67 89')).toBe(M.phoneTooLong);
+  });
+
+  it('internationalPhoneRule validates only — the display value passes through', () => {
+    const rule = internationalPhoneRule();
+    expect(rule.parse('')).toBe('');
+    expect(rule.parse('+')).toBe('+');
+    expect(rule.parse('+998 90 123 45 67')).toBe('+998 90 123 45 67');
+    const message = (v: string) => rule.safeParse(v).error?.issues[0]?.message;
+    expect(message('+998 90 123')).toBe(M.phoneIncomplete);
+    expect(message('+999 123 456 789')).toBe(M.phoneCountryCode);
+    expect(message('+998 90 123 45 67 89')).toBe(M.phoneTooLong);
+    expect(message('+998 00 123 45 67')).toBe(M.phone);
   });
 
   it('driverSchema submits E.164 for the phone', () => {
@@ -174,6 +201,41 @@ describe('internationalPhone (zod) — the value the API receives', () => {
     expect(driverSchema.parse({ ...base, phone: '+998 90 123 45 67' }).phone).toBe('+998901234567');
     expect(driverSchema.parse({ ...base, phone: '' }).phone).toBeUndefined();
     expect(driverSchema.safeParse({ ...base, phone: '+998 90 12' }).success).toBe(false);
+  });
+});
+
+describe('W-26 Mobile number — the four reference numbers', () => {
+  it.each([
+    ['998901234567', '+998 90 123 45 67', '+998901234567', 'UZ'],
+    ['12025550123', '+1 202 555 0123', '+12025550123', 'US'],
+    ['442079460958', '+44 20 7946 0958', '+442079460958', 'GB'],
+    ['79123456789', '+7 912 345 67 89', '+79123456789', 'RU'],
+  ])('typed %s shows %s, sends %s (%s)', (digits, display, e164, country) => {
+    expect(typeInto('', digits)).toBe(display);
+    expect(typeInto('', `+${digits}`)).toBe(display);
+    expect(phoneProblem(display)).toBeNull();
+    expect(toE164(display)).toBe(e164);
+    expect(detectPhoneCountry(display)).toBe(country);
+    expect(phoneForDisplay(e164)).toBe(display);
+  });
+
+  it('a pasted number with spaces, dashes or brackets is normalised', () => {
+    for (const pasted of ['+1 (202) 555-0123', '1-202-555-0123', ' +1 202 555 0123 ']) {
+      expect(applyPhoneInput('', pasted, pasted.length, 'insertFromPaste').value).toBe(
+        '+1 202 555 0123',
+      );
+    }
+  });
+
+  it('a digit typed in the middle keeps the caret right after it', () => {
+    // "+44 20 7|946 0958" with the 7 deleted, then retyped: caret back after the 7 (index 8).
+    const raw = '+44 20 7946 0958';
+    const without = applyPhoneInput(raw, '+44 20 946 0958', 7, 'deleteContentBackward');
+    const typed = without.value.slice(0, without.caret) + '7' + without.value.slice(without.caret);
+    expect(applyPhoneInput(without.value, typed, without.caret + 1, 'insertText')).toEqual({
+      value: raw,
+      caret: 8,
+    });
   });
 });
 
