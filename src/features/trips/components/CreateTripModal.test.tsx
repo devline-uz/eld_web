@@ -236,9 +236,14 @@ describe('CreateTripModal — date, distance and rate validation', () => {
     expect(await screen.findByText('Enter a valid date and time.')).toBeInTheDocument();
   });
 
+  it('rejects a delivery equal to the pickup (the API needs end > start)', async () => {
+    await fillAndSubmit({ pickup: `${day(2)}T08:00`, delivery: `${day(2)}T08:00` });
+    expect(await screen.findByText('Delivery must be after pickup.')).toBeInTheDocument();
+  });
+
   it('rejects a delivery before pickup', async () => {
     await fillAndSubmit({ pickup: `${day(2)}T08:00`, delivery: `${day(1)}T08:00` });
-    expect(await screen.findByText('Delivery cannot be before pickup.')).toBeInTheDocument();
+    expect(await screen.findByText('Delivery must be after pickup.')).toBeInTheDocument();
   });
 
   it('requires a distance greater than 0', async () => {
@@ -494,6 +499,53 @@ describe('CreateTripModal — dirty close, payload and 422 mapping', () => {
     expect(await screen.findByText('This trailer has been deleted and cannot be assigned.')).toBeInTheDocument();
   });
 
+  it('shows a 409 TRIP_SCHEDULE_CONFLICT under the Unit field naming the other trip, and keeps the modal open', async () => {
+    const start = new Date(Date.UTC(2031, 0, 5, 14, 0));
+    const end = new Date(Date.UTC(2031, 0, 6, 2, 0));
+    const { onClose } = renderModal();
+    server.use(
+      http.post(url(endpoints.trips.create), () =>
+        fail(409, 'TRIP_SCHEDULE_CONFLICT', 'Unit 101 is already assigned to another trip (TRP-500) from 2031-01-05 14:00 UTC to 2031-01-06 02:00 UTC.', {
+          vehicleId: 'Unit 101 is already assigned to another trip (TRP-500) from 2031-01-05 14:00 UTC to 2031-01-06 02:00 UTC.',
+          conflict: { tripId: 'trp_500', number: 'TRP-500', status: 'ASSIGNED', unitNumber: '101', start: start.toISOString(), end: end.toISOString() },
+        }),
+      ),
+    );
+    const user = await fillValidForm();
+    await user.click(screen.getByRole('button', { name: 'Create trip' }));
+
+    const unitLabel = screen
+      .getByText((content, el) => el?.tagName === 'SPAN' && el.classList.contains('text-label') && content.trim().startsWith('Unit'))
+      .closest('label')!;
+    expect(await within(unitLabel).findByRole('alert')).toHaveTextContent(
+      `Unit 101 is already assigned to another trip (TRP-500) from ${format(start, 'MMM dd, HH:mm')} to ${format(end, 'MMM dd, HH:mm')}.`,
+    );
+    expect(screen.getByText('Overlaps trip TRP-500 on this unit.')).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  function tripIdLabel() {
+    return screen
+      .getByText((content, el) => el?.tagName === 'SPAN' && el.classList.contains('text-label') && content.trim().startsWith('Trip / load ID'))
+      .closest('label')!;
+  }
+
+  it.each([
+    ['keyed details.number (current backend)', { number: 'A trip with this number already exists.' }],
+    ['with no details (older backend build)', undefined],
+  ])('shows a duplicate trip / load ID 409 CONFLICT %s under that field, not the generic banner', async (_case, details) => {
+    const { onClose } = renderModal();
+    server.use(http.post(url(endpoints.trips.create), () => fail(409, 'CONFLICT', 'A trip with this number already exists.', details)));
+    const user = await fillValidForm();
+    await user.click(screen.getByRole('button', { name: 'Create trip' }));
+
+    expect(await within(tripIdLabel()).findByRole('alert')).toHaveTextContent('A trip with this ID already exists.');
+    expect(within(tripIdLabel()).getByRole('textbox')).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.queryByText('That value is already in use.')).not.toBeInTheDocument();
+    expect(screen.queryByText('A trip with this number already exists.')).not.toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it('shows a plain 500 in the banner as well as the toast', async () => {
     renderModal();
     server.use(http.post(url(endpoints.trips.create), () => fail(500, 'INTERNAL_ERROR', 'Boom')));
@@ -502,5 +554,35 @@ describe('CreateTripModal — dirty close, payload and 422 mapping', () => {
     await user.click(screen.getByRole('button', { name: 'Create trip' }));
 
     expect((await screen.findAllByText('Something went wrong on our side. Try again.')).length).toBeGreaterThan(0);
+  });
+});
+
+describe('CreateTripModal — trailer list shape (crash on open)', () => {
+  function trailerTriggerButton() {
+    const label = screen
+      .getByText((content, element) => element?.tagName === 'SPAN' && element.classList.contains('text-label') && content.trim().startsWith('Trailer'))
+      .closest('label');
+    if (!label) throw new Error('Trailer field label not found');
+    return within(label).getByRole('button');
+  }
+
+  it('opens without crashing when `GET /trailers` answers with a bare array (pre-paging backend)', async () => {
+    let trailerRequests = 0;
+    server.use(
+      http.get(url(endpoints.trailers.list), () => {
+        trailerRequests += 1;
+        return ok([
+          { id: 'trl_a', number: 'T-100', vin: null, status: 'ACTIVE', deletedAt: null },
+          { id: 'trl_off', number: 'T-900', vin: null, status: 'INACTIVE', deletedAt: null },
+        ]);
+      }),
+    );
+    renderModal();
+    await vi.waitFor(() => expect(trailerRequests).toBeGreaterThan(0));
+    const user = userEvent.setup();
+    await user.click(trailerTriggerButton());
+    expect(await screen.findByText('#T-100')).toBeInTheDocument();
+    // The old build ignored `?status=ACTIVE`; the normaliser applies it client-side.
+    expect(screen.queryByText('#T-900')).not.toBeInTheDocument();
   });
 });

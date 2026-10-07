@@ -12,13 +12,19 @@ import { useToast } from '@/shared/ui/Toast';
 import { useDriversList } from '@/shared/api/drivers';
 import { useVehiclesPicker } from '@/shared/api/vehicles';
 import { useDriverHos } from '@/shared/api/drivers';
-import { useCreateTrip, blocksAssignment, type CreateTripStopInput } from '@/shared/api/trips';
+import {
+  useCreateTrip,
+  blocksAssignment,
+  isTripNumberTaken,
+  tripScheduleConflict,
+  type CreateTripStopInput,
+} from '@/shared/api/trips';
 import { useTrailersPage } from '@/shared/api/trailers';
 import { tripSchema } from '@/shared/forms/schemas';
 import { requiredString } from '@/shared/forms/fields';
 import { ApiError } from '@/shared/api/errors';
 import { formatHosHours } from '@/shared/format/hos';
-import { TRAILER_LOOKUP_ERROR } from '../lib/copy';
+import { TRAILER_LOOKUP_ERROR, TRIP_NUMBER_TAKEN, scheduleConflictMessage, scheduleConflictWindowHint } from '../lib/copy';
 
 /** Rows the trailer picker loads per search (`ListQueryDto` caps `limit` at 200). */
 const TRAILER_PICKER_LIMIT = 50;
@@ -108,9 +114,10 @@ const createTripSchema = tripSchema
     (v) => {
       const start = parseLocalDateTime(v.scheduledStart);
       const end = v.scheduledEnd ? parseLocalDateTime(v.scheduledEnd) : null;
-      return !start || !end || end >= start;
+      // Strictly after — the API refuses `plannedEndAt <= plannedStartAt` (422).
+      return !start || !end || end > start;
     },
-    { path: ['scheduledEnd'], message: 'Delivery cannot be before pickup.' },
+    { path: ['scheduledEnd'], message: 'Delivery must be after pickup.' },
   );
 type CreateTripValues = z.infer<typeof createTripSchema>;
 
@@ -314,12 +321,12 @@ export function CreateTripModal({ onClose }: { onClose: () => void }) {
     [trailersQuery.data],
   );
 
-  const selectedDriver = driversQuery.data?.items.find((d) => d.id === driverId) ?? null;
+  const selectedDriver = (driversQuery.data?.items ?? []).find((d) => d.id === driverId) ?? null;
   const selectedDriverOption = driverOptions.find((o) => o.id === driverId);
   const selectedUnitOption = unitOptions.find((o) => o.id === vehicleId);
   const selectedTrailerOption = trailerId ? pickedTrailer : undefined;
   const trailerTotal = trailersQuery.data?.total ?? 0;
-  const trailerShown = trailersQuery.data?.items.length ?? 0;
+  const trailerShown = trailersQuery.data?.items?.length ?? 0;
 
   // B-31 — always "not blocking" today: `DriverRow` (the real endpoint this modal reads) has no
   // e-mail verification field at all; the check lives here, in one place, so the day a verified
@@ -382,6 +389,19 @@ export function CreateTripModal({ onClose }: { onClose: () => void }) {
         },
         onSettled: () => setPendingIntent(null),
         onError: (error) => {
+          // 409 — the unit already has a live trip in this range: say which one, next to the
+          // Unit field (and point at the pickup window), in the dispatcher's own time zone.
+          const conflict = tripScheduleConflict(error);
+          if (conflict) {
+            setError('vehicleId', { message: scheduleConflictMessage(conflict) });
+            setError('scheduledStart', { message: scheduleConflictWindowHint(conflict) });
+            return;
+          }
+          // 409 — the trip / load ID is already used: under that input, not the generic banner.
+          if (isTripNumberTaken(error)) {
+            setError('reference', { message: TRIP_NUMBER_TAKEN }, { shouldFocus: true });
+            return;
+          }
           if (error instanceof ApiError) {
             // `details` may be `{ fields: {...} }` or flat, and uses backend names (`number`,
             // `plannedStartAt`) — `fieldErrors` normalises the shape, the map renames.
@@ -458,7 +478,12 @@ export function CreateTripModal({ onClose }: { onClose: () => void }) {
         )}
         <div className="grid grid-cols-3 gap-3">
           <Field label="Trip / load ID" required error={errors.reference?.message}>
-            <input {...register('reference')} placeholder="TR-4834" className={inputClass} />
+            <input
+              {...register('reference')}
+              placeholder="TR-4834"
+              aria-invalid={errors.reference ? true : undefined}
+              className={inputClass}
+            />
           </Field>
           <Field label="Customer" error={errors.customer?.message}>
             <input {...register('customer')} placeholder="Major Retail Co." className={inputClass} />

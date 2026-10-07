@@ -14,6 +14,7 @@ import {
   useUnassignedLoads,
   useAutoAssignTrips,
   usePublishTrip,
+  tripScheduleConflict,
   tripsActiveSliceQuery,
   tripsKpiQuery,
   type TripTableRow,
@@ -38,6 +39,7 @@ import { CreateTripModal } from './components/CreateTripModal';
 import { AssignLoadModal } from './components/AssignLoadModal';
 import { TripFiltersDrawer, TripFilterChips } from './components/TripFiltersDrawer';
 import { PeriodDropdown } from './components/PeriodDropdown';
+import { scheduleConflictMessage } from './lib/copy';
 import { parseTripFilters, writeTripFilters, matchesTripFilters, EMPTY_TRIP_FILTERS, countActiveTripFilters } from './lib/filters';
 
 type Segment = 'ACTIVE' | 'SCHEDULED' | 'COMPLETED' | 'UNASSIGNED';
@@ -228,6 +230,22 @@ export default function TripsPage() {
       },
     },
     {
+      id: 'startDate',
+      header: 'START DATE',
+      cell: ({ row }) => {
+        const at = row.original.startedAt ?? row.original.plannedStartAt;
+        return <span className="tabular-nums text-text">{at ? formatLocal(at, 'dateTime') : '—'}</span>;
+      },
+    },
+    {
+      id: 'endDate',
+      header: 'END DATE',
+      cell: ({ row }) => {
+        const at = row.original.completedAt ?? row.original.plannedEndAt;
+        return <span className="tabular-nums text-text">{at ? formatLocal(at, 'dateTime') : '—'}</span>;
+      },
+    },
+    {
       id: 'status',
       header: 'STATUS',
       cell: ({ row }) => {
@@ -257,7 +275,11 @@ export default function TripsPage() {
                 setPublishingId(row.original.id);
                 publishTrip.mutate(row.original.id, {
                   onSuccess: () => toast({ kind: 'success', title: `Trip ${row.original.number} published` }),
-                  onError: () => toast({ kind: 'error', title: 'Something went wrong.' }),
+                  // Publishing puts the draft on its unit's timeline — a 409 names the trip in the way.
+                  onError: (error) => {
+                    const conflict = tripScheduleConflict(error);
+                    toast({ kind: 'error', title: conflict ? scheduleConflictMessage(conflict) : 'Something went wrong.' });
+                  },
                   onSettled: () => setPublishingId(null),
                 });
               }}

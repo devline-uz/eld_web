@@ -182,6 +182,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   TRIP_NOT_FOUND: 'Trip not found.',
   TRAILER_NOT_FOUND: 'Trailer not found.',
   TRIP_NOT_DRAFT: 'Only a draft trip can be published.',
+  TRIP_SCHEDULE_CONFLICT: 'This unit already has a trip in that time range.',
   GEOCODER_NOT_CONFIGURED: 'Address lookup is not configured. Draw the geofence on the map instead.',
   GEOCODE_FAILED: 'That address could not be found. Check it or draw the geofence on the map.',
 };
