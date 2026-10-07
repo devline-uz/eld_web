@@ -6,6 +6,8 @@ export const VALIDATION_MESSAGES = {
   password: 'Use at least 8 characters.',
   vin: 'A VIN is 17 characters and cannot contain I, O or Q.',
   unitNumberTaken: 'A unit with this number already exists.',
+  trailerNumberTaken: 'A trailer with this number already exists.',
+  trailerNumber: 'Enter a trailer number of up to 40 characters.',
   vinTaken: 'A unit with this VIN already exists.',
   eldSerialUnknown: 'No ELD device with this serial is registered.',
   eldSerialTaken: 'This ELD serial is already assigned to another unit.',

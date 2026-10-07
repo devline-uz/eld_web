@@ -29,6 +29,7 @@ const NotFoundPage = lazy(() => import('@/features/auth/NotFoundPage'));
 const DashboardPage = lazy(ROUTE_LOADERS['/']);
 const LiveFleetPage = lazy(ROUTE_LOADERS['/live-fleet']);
 const VehiclesPage = lazy(ROUTE_LOADERS['/vehicles']);
+const TrailersPage = lazy(ROUTE_LOADERS['/trailers']);
 const UnitProfilePage = lazy(() => import('@/features/vehicles/UnitProfilePage'));
 const UnitHistoriesPage = lazy(() => import('@/features/vehicles/UnitHistoriesPage'));
 const DriversPage = lazy(ROUTE_LOADERS['/drivers']);
@@ -91,6 +92,7 @@ const SHELL_ROUTES: GuardedRoute[] = [
     perm: 'vehicles',
     handle: { title: 'Unit histories' },
   },
+  { path: 'trailers', element: <TrailersPage />, perm: 'vehicles', handle: { title: 'Trailers' } },
   { path: 'drivers', element: <DriversPage />, perm: 'drivers', handle: { title: 'Drivers' } },
   {
     path: 'drivers/:id',

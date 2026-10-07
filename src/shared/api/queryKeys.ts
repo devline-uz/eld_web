@@ -124,6 +124,7 @@ export const qk = {
 export const qkRoot = {
   vehicles: ['vehicles'] as const,
   drivers: ['drivers'] as const,
+  trailers: ['trailers'] as const,
   logs: ['logs'] as const,
   trips: ['trips'] as const,
   dvir: ['dvir'] as const,

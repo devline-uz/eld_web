@@ -10,6 +10,7 @@ export const ROUTE_LOADERS = {
   '/': () => import('@/features/dashboard/DashboardPage'),
   '/live-fleet': () => import('@/features/live-fleet/LiveFleetPage'),
   '/vehicles': () => import('@/features/vehicles/VehiclesPage'),
+  '/trailers': () => import('@/features/trailers/TrailersPage'),
   '/drivers': () => import('@/features/drivers/DriversPage'),
   '/trips': () => import('@/features/trips/TripsPage'),
   '/hos-logs': () => import('@/features/hos-logs/HosLogsPage'),

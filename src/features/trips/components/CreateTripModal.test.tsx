@@ -443,6 +443,57 @@ describe('CreateTripModal — dirty close, payload and 422 mapping', () => {
     expect(await screen.findByText('A trip with this number already exists.')).toBeInTheDocument();
   });
 
+  function trailerTrigger() {
+    const label = screen
+      .getByText((content, el) => el?.tagName === 'SPAN' && el.classList.contains('text-label') && content.trim().startsWith('Trailer'))
+      .closest('label')!;
+    return within(label).getByRole('button');
+  }
+
+  it('searches trailers on the server (`q`, ACTIVE only, limit ≤ 200) and keeps the pick after a new search', async () => {
+    const queries: URLSearchParams[] = [];
+    const T = (id: string, number: string) => ({ id, number, vin: null, status: 'ACTIVE', deletedAt: null });
+    renderModal();
+    server.use(
+      http.get(url(endpoints.trailers.list), ({ request }) => {
+        const params = new URL(request.url).searchParams;
+        queries.push(params);
+        const q = params.get('q');
+        const items = q ? [T('trl_9', 'T-9000')] : [T('trl_1', 'T-1000'), T('trl_2', 'T-2000')];
+        return ok({ items, page: 1, limit: 50, total: q ? 1 : 120, totalPages: 1 });
+      }),
+    );
+    const user = userEvent.setup();
+    await user.click(trailerTrigger());
+    await user.click(await screen.findByText('#T-1000'));
+    expect(queries[0]?.get('status')).toBe('ACTIVE');
+    expect(Number(queries[0]?.get('limit'))).toBeLessThanOrEqual(200);
+    // not silently truncated: the hint says only 2 of 120 are shown
+    expect(await screen.findByText(/Showing 2 of 120 trailers/)).toBeInTheDocument();
+    await user.click(trailerTrigger());
+    await user.type(screen.getByPlaceholderText('Search'), 'T-9');
+    await vi.waitFor(() => expect(queries.some((p) => p.get('q') === 'T-9')).toBe(true));
+    await user.click(await screen.findByText('#T-9000'));
+    expect(trailerTrigger()).toHaveTextContent('#T-9000');
+  });
+
+  it('maps 422 TRAILER_NOT_FOUND (deleted trailer) onto the Trailer field', async () => {
+    renderModal();
+    server.use(
+      http.get(url(endpoints.trailers.list), () =>
+        ok({ items: [{ id: 'trl_1', number: 'T-1000', vin: null, status: 'ACTIVE', deletedAt: null }], page: 1, limit: 50, total: 1, totalPages: 1 }),
+      ),
+      http.post(url(endpoints.trips.create), () =>
+        fail(422, 'TRAILER_NOT_FOUND', 'Trailer not found.', { trailerId: 'This trailer has been deleted and cannot be assigned.' }),
+      ),
+    );
+    const user = await fillValidForm();
+    await user.click(trailerTrigger());
+    await user.click(await screen.findByText('#T-1000'));
+    await user.click(screen.getByRole('button', { name: 'Create trip' }));
+    expect(await screen.findByText('This trailer has been deleted and cannot be assigned.')).toBeInTheDocument();
+  });
+
   it('shows a plain 500 in the banner as well as the toast', async () => {
     renderModal();
     server.use(http.post(url(endpoints.trips.create), () => fail(500, 'INTERNAL_ERROR', 'Boom')));

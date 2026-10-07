@@ -18,6 +18,19 @@ export const vehicleSchema = z.object({
 });
 export type VehicleFormValues = z.infer<typeof vehicleSchema>;
 
+/** Add / Edit trailer — mirrors `CreateTrailerDto` (`number` 1–40, `vin` optional) + `status`. */
+export const trailerSchema = z.object({
+  number: f.requiredString(M.trailerNumber).max(40, M.trailerNumber),
+  // A blank VIN is allowed (the DTO field is optional); a typed one must be a real 17-char VIN.
+  vin: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .refine((v) => v === '' || /^[A-HJ-NPR-Z0-9]{17}$/.test(v), M.vin),
+  status: z.enum(['ACTIVE', 'INACTIVE', 'OUT_OF_SERVICE']),
+});
+export type TrailerFormValues = z.infer<typeof trailerSchema>;
+
 /** 11.5 · Calibrate odometer */
 export const calibrateOdometerSchema = z.object({
   odometer: f.odometer(),
