@@ -11,9 +11,15 @@ import { vehicleSchema, type VehicleFormValues } from '@/shared/forms/schemas';
 import { VALIDATION_MESSAGES } from '@/shared/forms/messages';
 import { nonNegativeIntInputProps } from '@/shared/forms/nonNegativeIntInput';
 import { useCreateVehicle, useUpdateVehicle, type VehicleRow } from '@/shared/api/vehicles';
+import { useDevicesLookup } from '@/shared/api/lookups';
 import { ApiError } from '@/shared/api/errors';
 import { conflictField } from '@/shared/api/conflicts';
-import { VEHICLE_CONFLICT_RULES, findCachedVehicleConflicts } from '../lib/vehicleConflicts';
+import {
+  VEHICLE_CONFLICT_RULES,
+  findCachedVehicleConflicts,
+  normalizeVehicleUniques,
+  type VehicleConflictField,
+} from '../lib/vehicleConflicts';
 import { fuelLabel } from '../lib/activity';
 
 const FUEL_TYPES = ['DIESEL', 'GASOLINE', 'CNG', 'LNG', 'ELECTRIC'] as const;
@@ -39,6 +45,26 @@ function Field({
     </label>
   );
 }
+
+/** Where each conflict is shown in the form (the plate + state pair is flagged on the plate). */
+const CONFLICT_FORM_FIELD: Record<VehicleConflictField, keyof VehicleFormValues> = {
+  unitNumber: 'unitNumber',
+  vin: 'vin',
+  eldSerial: 'deviceId',
+  licensePlate: 'licensePlate',
+};
+const CONFLICT_MESSAGE: Record<VehicleConflictField, string> = {
+  unitNumber: VALIDATION_MESSAGES.unitNumberTaken,
+  vin: VALIDATION_MESSAGES.vinTaken,
+  eldSerial: VALIDATION_MESSAGES.eldSerialTaken,
+  licensePlate: VALIDATION_MESSAGES.licensePlateTaken,
+};
+/** Server field-error keys that name a form field differently. */
+const SERVER_FIELD_ALIAS: Record<string, keyof VehicleFormValues> = {
+  eldSerial: 'deviceId',
+  plateState: 'licenseState',
+  issuingState: 'licenseState',
+};
 
 const inputClass = 'h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text';
 
@@ -88,6 +114,8 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
     sleeperBerth !== initialSleeperBerth ||
     notes !== initialNotes;
 
+  // Fills the `/devices` cache so the ELD-serial pre-check below has something to compare against.
+  useDevicesLookup();
   const createMutation = useCreateVehicle();
   const updateMutation = useUpdateVehicle(vehicle?.id ?? '');
   const mutation = isEdit ? updateMutation : createMutation;
@@ -101,10 +129,14 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
     if (inFlight.current || submitting) return;
     // Cheap early warning from the cached `/vehicles` pages (the unit being edited excluded). The
     // server's 409 below stays the authority for anything the cache doesn't hold.
-    const cached = findCachedVehicleConflicts(queryClient, values, vehicle);
+    const uniques = normalizeVehicleUniques(values);
+    const cached = findCachedVehicleConflicts(
+      queryClient,
+      { ...values, licensePlate: uniques.licensePlate, licenseState: uniques.plateState, deviceId: uniques.deviceId },
+      vehicle,
+    );
     if (cached.length > 0) {
-      if (cached.includes('unitNumber')) setError('unitNumber', { message: VALIDATION_MESSAGES.unitNumberTaken });
-      if (cached.includes('vin')) setError('vin', { message: VALIDATION_MESSAGES.vinTaken });
+      for (const field of cached) setError(CONFLICT_FORM_FIELD[field], { message: CONFLICT_MESSAGE[field] });
       return;
     }
     const payload = {
@@ -113,13 +145,13 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
       make: values.make,
       model: values.model,
       year: values.year,
-      licensePlate: values.licensePlate || undefined,
-      plateState: values.licenseState || undefined,
+      licensePlate: uniques.licensePlate,
+      plateState: uniques.plateState,
       fuelType,
       sleeperBerth,
       odometerMi: values.odometer,
       notes: notes || undefined,
-      deviceId: values.deviceId || undefined,
+      deviceId: uniques.deviceId,
     };
     inFlight.current = true;
     mutation.mutate(payload, {
@@ -132,9 +164,9 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
         } else {
           // QA-B — without an ELD serial nothing is paired and no driver is notified, so the
           // §13.3 pairing sentence is only shown when a serial was actually sent.
-          const created = TOAST_COPY.unitCreated(values.unitNumber, values.deviceId ?? '');
+          const created = TOAST_COPY.unitCreated(values.unitNumber, uniques.deviceId ?? '');
           toast(
-            values.deviceId
+            uniques.deviceId
               ? { kind: 'success', ...created }
               : { kind: 'success', title: created.title },
           );
@@ -142,14 +174,19 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
         onClose();
       },
       onError: (error) => {
+        // 404 DEVICE_NOT_FOUND names the ELD serial; any other 404 keeps the generic toast below.
+        if (
+          error instanceof ApiError &&
+          error.status === 404 &&
+          (error.code === 'DEVICE_NOT_FOUND' || typeof (error.details as { eldSerial?: unknown }).eldSerial === 'string')
+        ) {
+          setError('deviceId', { message: VALIDATION_MESSAGES.eldSerialUnknown });
+          return;
+        }
         if (error instanceof ApiError && error.status === 409) {
           const field = conflictField(error, VEHICLE_CONFLICT_RULES);
-          if (field === 'vin') {
-            setError('vin', { message: VALIDATION_MESSAGES.vinTaken });
-            return;
-          }
-          if (field === 'unitNumber') {
-            setError('unitNumber', { message: VALIDATION_MESSAGES.unitNumberTaken });
+          if (field) {
+            setError(CONFLICT_FORM_FIELD[field], { message: CONFLICT_MESSAGE[field] });
             return;
           }
           // Unattributed conflict — don't guess a field; say the value is in use.
@@ -159,7 +196,7 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
         if (error instanceof ApiError) {
           const fieldErrors = error.fieldErrors;
           for (const [field, message] of Object.entries(fieldErrors)) {
-            setError(field as keyof VehicleFormValues, { message });
+            setError((SERVER_FIELD_ALIAS[field] ?? field) as keyof VehicleFormValues, { message });
           }
           if (Object.keys(fieldErrors).length > 0) return;
         }
@@ -190,7 +227,7 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
           <Field label="Unit number" required error={errors.unitNumber?.message}>
             <input {...register('unitNumber')} placeholder="e.g. 126" disabled={submitting} className={inputClass} />
           </Field>
-          <Field label="ELD serial">
+          <Field label="ELD serial" error={errors.deviceId?.message}>
             <input {...register('deviceId')} placeholder="PT30_1C4F" disabled={submitting} className={inputClass} />
           </Field>
         </div>

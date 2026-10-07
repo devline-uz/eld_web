@@ -11,11 +11,13 @@ import { TOAST_COPY } from '@/shared/ui/copy';
 import { driverSchema, type DriverFormValues } from '@/shared/forms/driverSchema';
 import { withLicenceStateCheck } from '@/shared/forms/driverLicence';
 import { useCreateDriver } from '@/shared/api/drivers';
-import { useAssignDriver, useVehiclesPicker } from '@/shared/api/vehicles';
+import { useVehiclesPicker } from '@/shared/api/vehicles';
 import { useCarrier } from '@/shared/api/carrier';
+import { useQueryClient } from '@tanstack/react-query';
 import { useDriversLookup } from '@/shared/api/lookups';
 import { ApiError, ERROR_MESSAGES, errorMessage } from '@/shared/api/errors';
-import { conflictField, type ConflictRule } from '@/shared/api/conflicts';
+import { conflictField } from '@/shared/api/conflicts';
+import { DRIVER_CONFLICT_RULES, CONFLICT_MESSAGES, findCachedDriverConflicts } from '../lib/driverConflicts';
 import { VALIDATION_MESSAGES } from '@/shared/forms/messages';
 import { HOME_TERMINAL_TIMEZONES } from '../lib/terminals';
 import { DRIVER_TOAST } from '../lib/copy';
@@ -76,46 +78,8 @@ const US_STATES = [
   'WY',
 ];
 
-type DriverConflictField = 'username' | 'email' | 'phone' | 'cdlNumber' | 'assignedVehicleId';
-
-/**
- * Which unique value a `POST /drivers` 409 collided on. Every 409 used to be pinned on `username`,
- * so a duplicate email told the user the *username* was taken, and phone / licence / unit
- * conflicts had no field at all. The backend sends a generic `CONFLICT` (backend_tasks.md B-100),
- * so `conflictField` reads every hint it may carry; `null` → a generic "already in use" banner.
- */
-const DRIVER_CONFLICT_RULES: readonly ConflictRule<DriverConflictField>[] = [
-  { field: 'username', code: /USERNAME/, hint: /username/, message: /\busername\b/i },
-  { field: 'email', code: /EMAIL/, hint: /email/, message: /\be-?mail\b/i },
-  { field: 'phone', code: /PHONE/, hint: /phone/, message: /\bphone\b/i },
-  {
-    field: 'cdlNumber',
-    code: /CDL|LICEN[CS]E/,
-    hint: /cdl|licen[cs]e/,
-    message: /\b(cdl|licen[cs]e)\b/i,
-  },
-  {
-    field: 'assignedVehicleId',
-    code: /VEHICLE|UNIT|ASSIGN/,
-    hint: /vehicle|unit/,
-    message: /\b(unit|vehicle)\b/i,
-  },
-];
-
-const CONFLICT_MESSAGES: Record<Exclude<DriverConflictField, 'assignedVehicleId'>, string> = {
-  username: VALIDATION_MESSAGES.usernameTaken,
-  email: VALIDATION_MESSAGES.driverEmailTaken,
-  phone: VALIDATION_MESSAGES.driverPhoneTaken,
-  cdlNumber: VALIDATION_MESSAGES.cdlNumberTaken,
-};
-
 /** The licence number is also checked against its issuing state's format on blur. */
 const addDriverResolver = withLicenceStateCheck(zodResolver(driverSchema));
-
-/** Licence numbers compare without case, spaces or dashes — `w 123-4567` is `W1234567`. */
-function normalizeCdl(value: string): string {
-  return value.toUpperCase().replace(/[\s-]/g, '');
-}
 
 function Field({
   label,
@@ -148,6 +112,7 @@ const inputClass = 'h-input rounded-md border border-border bg-bg-surface px-3 t
 
 export function AddDriverModal({ onClose }: { onClose: () => void }) {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [showPassword, setShowPassword] = useState(false);
   const [assignedVehicleId, setAssignedVehicleId] = useState('');
   const [allowPersonalConveyance, setAllowPersonalConveyance] = useState(true);
@@ -188,10 +153,8 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
     [vehiclesQuery.data, assignedUnitIds, assignedVehicleId],
   );
   const mutation = useCreateDriver();
-  // `POST /drivers` has no unit field (the backend DTO drops `assignedVehicleId`), so the picked
-  // unit is linked right after the create through the same `POST /vehicles/:id/assign-driver` the
-  // Vehicles screen uses; its `onSuccess` invalidates the drivers + vehicles lists and details.
-  const assignMutation = useAssignDriver(assignedVehicleId);
+  // `POST /drivers` takes `assignedVehicleId` (B-100): the driver and the unit link are one write,
+  // so a refused unit (409 / 404) is a field error and no driver is created.
   // An empty terminal zone falls back to the carrier's own zone (real `GET /carrier` data, never a
   // hardcoded guess), so both terminal fields stay optional as they were before.
   const carrierTimezone = useCarrier().data?.timezone;
@@ -227,7 +190,7 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
 
   // The submit guard is the mutation, not RHF: `isSubmitting` is already false again while the
   // POST is in flight, so a double click used to create two drivers.
-  const isPending = mutation.isPending || assignMutation.isPending;
+  const isPending = mutation.isPending;
 
   // Honest dirty tracking: the checkboxes, the unit and the exemption reason all
   // live outside RHF, so a real edit to any of them must confirm on close.
@@ -250,10 +213,14 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
     );
     const unitTaken = assignedVehicleId !== '' && assignedUnitIds.has(assignedVehicleId);
     setUnitError(unitTaken ? VALIDATION_MESSAGES.unitAlreadyAssigned : null);
-    const cdl = normalizeCdl(values.cdlNumber);
-    const cdlTaken = (drivers ?? []).some((d) => normalizeCdl(d.cdlNumber) === cdl);
-    if (cdlTaken) setError('cdlNumber', { message: VALIDATION_MESSAGES.cdlNumberTaken });
-    if (exemptMissing || unitTaken || cdlTaken) return;
+    const dupes = findCachedDriverConflicts(queryClient, {
+      username: values.username,
+      email: values.email,
+      phone: values.phone,
+      cdlNumber: values.cdlNumber,
+    });
+    for (const field of dupes) setError(field, { message: CONFLICT_MESSAGES[field] });
+    if (exemptMissing || unitTaken || dupes.length > 0) return;
     setBanner(null);
     mutation.mutate(
       {
@@ -276,42 +243,23 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
         eldExempt,
         eldExemptReason: eldExempt ? eldExemptReason : undefined,
         sendInvitation,
+        assignedVehicleId: assignedVehicleId || undefined,
       },
       {
-        onSuccess: (driver) => {
+        onSuccess: () => {
           const addedToast = sendInvitation
             ? TOAST_COPY.driverAdded(values.email)
             : DRIVER_TOAST.driverAddedNoInvitation();
-          if (!assignedVehicleId) {
-            toast({ kind: 'success', ...addedToast });
-            onClose();
-            return;
-          }
-          const unitNumber = (
-            unitOptions.find((v) => v.id === assignedVehicleId)?.unitNumber ?? ''
-          ).replace(/^#+/, '');
-          assignMutation.mutate(
-            { driverId: driver.id },
-            {
-              onSuccess: () => {
-                toast({ kind: 'success', ...addedToast });
-                onClose();
-              },
-              // The driver exists either way: the modal closes (a retry here would create a
-              // second driver) and the toast says exactly what did not happen.
-              onError: (error) => {
-                const reason =
-                  error instanceof ApiError ? error.userMessage : 'Something went wrong.';
-                toast({
-                  kind: 'error',
-                  ...DRIVER_TOAST.driverAddedUnitNotAssigned(unitNumber, reason),
-                });
-                onClose();
-              },
-            },
-          );
+          toast({ kind: 'success', ...addedToast });
+          onClose();
         },
         onError: (error) => {
+          // 404 VEHICLE_NOT_FOUND ("Select a unit.") — the picked unit no longer exists.
+          if (error instanceof ApiError && error.code === 'VEHICLE_NOT_FOUND') {
+            const details = error.details as { assignedVehicleId?: unknown };
+            setUnitError(typeof details.assignedVehicleId === 'string' ? details.assignedVehicleId : 'Select a unit.');
+            return;
+          }
           // The unit refused for being out of service — a unit problem, shown on the unit field.
           if (error instanceof ApiError && error.code === 'VEHICLE_OUT_OF_SERVICE') {
             setUnitError(error.userMessage);
