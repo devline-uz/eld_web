@@ -14,6 +14,12 @@ export const EMPTY_STATE_COPY = {
     description: 'Add your first unit or import a CSV to start recording hours of service.',
     actions: ['Import CSV', 'Add vehicle'],
   },
+  /** Not in §13.2 (no trailer inventory design) — worded like the `vehicles` entry (WD-trailers). */
+  trailers: {
+    title: 'No trailers yet',
+    description: 'Add your first trailer or import a CSV so dispatchers can attach it to a trip.',
+    actions: ['Import CSV', 'Add trailer'],
+  },
   drivers: {
     title: 'No drivers yet',
     description: 'Add drivers so they can sign in to the mobile app and start logging hours.',
@@ -113,6 +119,20 @@ export const TOAST_COPY = {
   unitDeleted: (unitNumber: string): ToastCopy => ({
     title: `Unit #${unitNumber} deleted`,
     description: 'Historical logs and DVIRs are still available for audits.',
+  }),
+  /** Trailers screen — not in §13.3's table; named consistently with `unitCreated`/`unitDeleted`. */
+  trailerCreated: (number: string): ToastCopy => ({
+    title: `Trailer ${number} created`,
+    description: 'It is now available in the Create trip trailer picker.',
+  }),
+  trailerUpdated: (number: string): ToastCopy => ({ title: `Trailer ${number} updated` }),
+  trailerDeleted: (number: string): ToastCopy => ({
+    title: `Trailer ${number} deleted`,
+    description: 'Past trips and inspections are kept; the number can be reused.',
+  }),
+  trailersImported: (created: number, updated: number, failed: number, total: number): ToastCopy => ({
+    title: `${total} trailer${total === 1 ? '' : 's'} imported`,
+    description: `${created} created · ${updated} updated · ${failed} failed.`,
   }),
   driverAdded: (email: string): ToastCopy => ({
     title: 'Driver added',

@@ -39,6 +39,12 @@ export interface DataTableProps<T> {
    */
   rowClassName?: (row: T) => string | undefined;
   className?: string;
+  /**
+   * Server-side sorting: pass the current sort and a change handler and the table stops sorting
+   * `data` itself (`manualSorting`) — the screen re-queries with the new `sort` param instead.
+   */
+  sorting?: SortingState;
+  onSortingChange?: (sorting: SortingState) => void;
 }
 
 export function DataTable<T>({
@@ -55,8 +61,12 @@ export function DataTable<T>({
   onRowClick,
   rowClassName,
   className,
+  sorting: controlledSorting,
+  onSortingChange,
 }: DataTableProps<T>) {
-  const [sorting, setSorting] = useState<SortingState>([]);
+  const [internalSorting, setInternalSorting] = useState<SortingState>([]);
+  const manualSorting = controlledSorting !== undefined;
+  const sorting = controlledSorting ?? internalSorting;
   const [internalSelection, setInternalSelection] = useState<RowSelectionState>({});
 
   const rowSelection =
@@ -154,7 +164,12 @@ export function DataTable<T>({
     data,
     columns: allColumns,
     state: { sorting, rowSelection },
-    onSortingChange: setSorting,
+    manualSorting,
+    onSortingChange: (updater) => {
+      const next = typeof updater === 'function' ? updater(sorting) : updater;
+      if (manualSorting) onSortingChange?.(next);
+      else setInternalSorting(next);
+    },
     onRowSelectionChange: (updater) => {
       const next = typeof updater === 'function' ? updater(rowSelection) : updater;
       setRowSelection(next);

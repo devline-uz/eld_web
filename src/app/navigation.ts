@@ -33,6 +33,8 @@ export interface NavItem {
   hiddenForRoles?: Role[];
   /** Counter pill; the value is supplied by the owning feature, never hard-coded here. */
   badge?: 'danger' | 'primary';
+  /** Sibling routes that keep this item highlighted (Trailers lives under Vehicles, §4.2 sidebar is fixed). */
+  alsoActive?: string[];
   /** `/` must match exactly, everything else matches its subtree. */
   end?: boolean;
 }
@@ -54,7 +56,7 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     title: 'OPERATIONS',
     items: [
-      { label: 'Vehicles', to: '/vehicles', icon: Truck, perm: 'vehicles' },
+      { label: 'Vehicles', to: '/vehicles', icon: Truck, perm: 'vehicles', alsoActive: ['/trailers'] },
       { label: 'Drivers', to: '/drivers', icon: Users, perm: 'drivers' },
       { label: 'Dispatch & Trips', to: '/trips', icon: Route, perm: 'trips' },
     ],

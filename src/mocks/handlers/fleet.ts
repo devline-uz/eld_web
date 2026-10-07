@@ -214,7 +214,6 @@ export const fleetHandlers = [
   http.get(url(endpoints.vehicles.dtc(':id')), () => ok(fixture('GET /api/vehicles/{id}/dtc'))),
   http.get(url(endpoints.drivers.list), ({ request }) => ok(serverPage(fixture('GET /api/drivers'), request, ['firstName', 'lastName', 'username', 'cdlNumber']))),
   http.get(url(endpoints.drivers.detail(':id')), () => ok(fixture('GET /api/drivers/{id}'))),
-  http.get(url(endpoints.trailers.list), () => ok(fixture('GET /api/trailers'))),
   http.get(url(endpoints.devices.list), ({ request }) => ok(serverPage(fixture('GET /api/devices'), request, ['serial', 'model']))),
   http.get(url(endpoints.geofences.list), () => ok(GEOFENCES)),
   http.get(url(endpoints.trips.list), ({ request }) => ok(serverPage(fixture('GET /api/trips'), request, ['number', 'shippingDocument']))),

@@ -22,6 +22,7 @@ import { Avatar } from '@/shared/ui/Avatar';
 import { DataTable } from '@/shared/ui/DataTable';
 import { Pagination } from '@/shared/ui/Pagination';
 import { Card } from '@/shared/ui/Card';
+import { InventoryTabs } from '@/shared/ui/InventoryTabs';
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
 import { EMPTY_STATE_COPY, TOAST_COPY, searchEmptyState } from '@/shared/ui/copy';
 import { toCsv } from '@/shared/lib/csv';
@@ -330,7 +331,8 @@ export default function VehiclesPage() {
 
   return (
     <div className="flex flex-col gap-4 xl:max-h-content-h">
-      <div className="flex items-center justify-end xl:shrink-0">
+      <div className="flex items-center justify-between xl:shrink-0">
+        <InventoryTabs />
         <div className="flex items-center gap-2">
           <div className="flex h-input items-center gap-2 rounded-md border border-border bg-bg-surface px-3">
             <Search size={16} strokeWidth={1.75} className="text-text-muted" />

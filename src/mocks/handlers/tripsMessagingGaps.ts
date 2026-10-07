@@ -6,7 +6,8 @@
 // first-match-wins rule as `vehiclesDriversGaps.ts`, web/bugs.md WB-018).
 import { http } from 'msw';
 import { endpoints } from '@/shared/api/endpoints';
-import { ok, url, serverPage } from '../envelope';
+import { fail, ok, url, serverPage } from '../envelope';
+import { TRAILERS } from './mockState';
 import type { StopStatus, StopType, TripRow, TripStopRow } from '@/shared/api/trips';
 import type { ConversationRow, MessageRow } from '@/shared/api/messaging';
 
@@ -357,13 +358,26 @@ const MESSAGES: Record<string, MessageRow[]> = {
   ],
 };
 
+/** Backend `TRAILER_NOT_FOUND` (422): an unknown or soft-deleted `trailerId` is refused. */
+function trailerRefusal(trailerId: unknown) {
+  if (typeof trailerId !== 'string' || trailerId === '') return null;
+  const trailer = TRAILERS.find((t) => t.id === trailerId);
+  if (trailer && !trailer.deletedAt) return null;
+  const message = trailer ? 'This trailer has been deleted and cannot be assigned.' : 'Trailer not found.';
+  return fail(422, 'TRAILER_NOT_FOUND', message, { trailerId: message });
+}
+
 export const tripsMessagingGapHandlers = [
   http.get(url(endpoints.trips.list), ({ request }) => ok(serverPage(TRIPS, request, ['number', 'shippingDocument']))),
   http.get(url(endpoints.trips.unassignedLoads), () => ok({ items: UNASSIGNED_LOADS })),
-  http.post(url(endpoints.trips.create), () =>
-    ok({ ...TRIPS[0], id: 'trp_new', number: 'TR-4834' }, 201),
-  ),
-  http.post(url(endpoints.trips.assign(':id')), () => ok({ id: 'trp_2001', status: 'ASSIGNED', driverId: 'drv_1' })),
+  http.post(url(endpoints.trips.create), async ({ request }) => {
+    const refusal = trailerRefusal(((await request.json()) as { trailerId?: unknown }).trailerId);
+    return refusal ?? ok({ ...TRIPS[0], id: 'trp_new', number: 'TR-4834' }, 201);
+  }),
+  http.post(url(endpoints.trips.assign(':id')), async ({ request }) => {
+    const refusal = trailerRefusal(((await request.json().catch(() => ({}))) as { trailerId?: unknown }).trailerId);
+    return refusal ?? ok({ id: 'trp_2001', status: 'ASSIGNED', driverId: 'drv_1' });
+  }),
   http.post(url(endpoints.trips.autoAssign), () => ok({ assigned: [{ tripId: 'trp_2001', driverId: 'drv_3' }], skipped: 0 })),
 
   http.get(url(endpoints.conversations.list), () => ok({ items: CONVERSATIONS })),

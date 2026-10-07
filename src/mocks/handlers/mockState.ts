@@ -21,6 +21,7 @@ import {
   type Role,
 } from '@/shared/auth/permissions';
 import type { DriverRow, VehicleRow } from '@/shared/api/vehicles';
+import type { TrailerRow } from '@/shared/api/trailers';
 import type {
   AlertRuleRow,
   DeviceRow,
@@ -178,6 +179,27 @@ function seedDevices(): DeviceRow[] {
 }
 
 export let DEVICES: DeviceRow[] = [];
+
+/** `Trailer` rows as the real API stores them: `{ id, number, vin, status, deletedAt }`. `DELETE` is
+ * soft (`deletedAt` set, status INACTIVE); the list never returns deleted rows and a deleted
+ * trailer's number may be reused. */
+export let TRAILERS: TrailerRow[] = [];
+function seedTrailers(): TrailerRow[] {
+  const row = (n: number, vin: string | null, status: TrailerRow['status'] = 'ACTIVE'): TrailerRow => ({
+    id: `trl_${n}`,
+    number: `T-${4470 + n}`,
+    vin,
+    status,
+    deletedAt: null,
+  });
+  return [
+    row(1, '1JJV532W7YL123456'),
+    row(2, '1JJV532W2YL654321'),
+    row(3, null, 'INACTIVE'),
+    row(4, '1GRAA0620EB700004'),
+    row(5, null, 'OUT_OF_SERVICE'),
+  ];
+}
 
 /* ------------------------------------------------------------------ carrier */
 
@@ -480,6 +502,7 @@ export function resetMockState(): void {
   VEHICLES = Array.from({ length: VEHICLE_COUNT }, (_, i) => seedVehicle(i + 1));
   DRIVERS = seedDrivers();
   DEVICES = seedDevices();
+  TRAILERS = seedTrailers();
   CARRIER = seedCarrier();
   ROLES = seedRoles();
   USERS = seedUsers();

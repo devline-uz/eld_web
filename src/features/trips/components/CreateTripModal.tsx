@@ -1,5 +1,5 @@
 // owner: web-dispatch-messaging — 11.10 Create trip (web/tz.md §11.10). `trips` FULL, size `lg`.
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm, useWatch } from 'react-hook-form';
 import { z } from 'zod';
@@ -13,12 +13,15 @@ import { useDriversList } from '@/shared/api/drivers';
 import { useVehiclesPicker } from '@/shared/api/vehicles';
 import { useDriverHos } from '@/shared/api/drivers';
 import { useCreateTrip, blocksAssignment, type CreateTripStopInput } from '@/shared/api/trips';
-import { useTrailersLookup } from '@/shared/api/trailers';
+import { useTrailersPage } from '@/shared/api/trailers';
 import { tripSchema } from '@/shared/forms/schemas';
 import { requiredString } from '@/shared/forms/fields';
 import { ApiError } from '@/shared/api/errors';
 import { formatHosHours } from '@/shared/format/hos';
 import { TRAILER_LOOKUP_ERROR } from '../lib/copy';
+
+/** Rows the trailer picker loads per search (`ListQueryDto` caps `limit` at 200). */
+const TRAILER_PICKER_LIMIT = 50;
 
 /** What `datetime-local` emits — `YYYY-MM-DDTHH:mm[:ss[.sss]]`, and never more than a 4-digit year. */
 const LOCAL_DATETIME_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?$/;
@@ -264,7 +267,23 @@ export function CreateTripModal({ onClose }: { onClose: () => void }) {
   // QA fix — only ACTIVE drivers can be dispatched (`?status=ACTIVE`).
   const driversQuery = useDriversList({ limit: 200, status: 'ACTIVE' });
   const vehiclesQuery = useVehiclesPicker();
-  const trailersQuery = useTrailersLookup();
+  // Trailers are searched on the server (`q` over number + VIN) — the fleet can exceed one 200-row
+  // page, so the picker shows the first page of ACTIVE trailers and says so until the user types.
+  const [trailerSearch, setTrailerSearch] = useState('');
+  const [debouncedTrailerSearch, setDebouncedTrailerSearch] = useState('');
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedTrailerSearch(trailerSearch.trim()), 250);
+    return () => clearTimeout(timer);
+  }, [trailerSearch]);
+  const trailersQuery = useTrailersPage({
+    page: 1,
+    limit: TRAILER_PICKER_LIMIT,
+    status: 'ACTIVE',
+    sort: 'number:asc',
+    q: debouncedTrailerSearch || undefined,
+  });
+  // The chosen trailer is remembered here: a later search can drop it from the result page.
+  const [pickedTrailer, setPickedTrailer] = useState<PickerOption | undefined>(undefined);
   const driverHos = useDriverHos(driverId ?? undefined);
 
   const driverOptions: PickerOption[] = useMemo(
@@ -290,7 +309,7 @@ export function CreateTripModal({ onClose }: { onClose: () => void }) {
       (trailersQuery.data?.items ?? []).map((t) => ({
         id: t.id,
         name: `#${t.number}`,
-        context: [t.licensePlate, t.licenseState].filter(Boolean).join(' '),
+        context: t.vin ?? '',
       })),
     [trailersQuery.data],
   );
@@ -298,7 +317,9 @@ export function CreateTripModal({ onClose }: { onClose: () => void }) {
   const selectedDriver = driversQuery.data?.items.find((d) => d.id === driverId) ?? null;
   const selectedDriverOption = driverOptions.find((o) => o.id === driverId);
   const selectedUnitOption = unitOptions.find((o) => o.id === vehicleId);
-  const selectedTrailerOption = trailerOptions.find((o) => o.id === trailerId);
+  const selectedTrailerOption = trailerId ? pickedTrailer : undefined;
+  const trailerTotal = trailersQuery.data?.total ?? 0;
+  const trailerShown = trailersQuery.data?.items.length ?? 0;
 
   // B-31 — always "not blocking" today: `DriverRow` (the real endpoint this modal reads) has no
   // e-mail verification field at all; the check lives here, in one place, so the day a verified
@@ -557,11 +578,25 @@ export function CreateTripModal({ onClose }: { onClose: () => void }) {
                 placeholder="Select a unit"
               />
             </Field>
-            <Field label="Trailer" hint={trailersQuery.isError ? TRAILER_LOOKUP_ERROR : undefined}>
+            <Field
+              label="Trailer"
+              error={errors.trailerId?.message}
+              hint={
+                trailersQuery.isError
+                  ? TRAILER_LOOKUP_ERROR
+                  : trailerTotal > trailerShown
+                    ? `Showing ${trailerShown} of ${trailerTotal} trailers — search by number or VIN to find another.`
+                    : undefined
+              }
+            >
               <TrailerPicker
                 value={selectedTrailerOption}
                 options={trailerOptions}
-                onSelect={(o) => setValue('trailerId', o.id, { shouldValidate: true, shouldDirty: true })}
+                onSearch={setTrailerSearch}
+                onSelect={(o) => {
+                  setPickedTrailer(o);
+                  setValue('trailerId', o.id, { shouldValidate: true, shouldDirty: true });
+                }}
                 placeholder="Select a trailer"
               />
             </Field>

@@ -1,7 +1,7 @@
 // Sidebar chrome — web/tz.md §4.1 brand block, §4.2 navigation, §4.3 organisation card.
 import { useEffect, useMemo, useState } from 'react';
 import { ChevronDown, PanelLeftClose, PanelLeftOpen, Truck } from 'lucide-react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { usePermission } from '@/shared/auth/usePermission';
@@ -144,6 +144,7 @@ function OrganisationCard({ collapsed }: { collapsed: boolean }) {
 export function Sidebar() {
   const { user } = useAuth();
   const { can } = usePermission();
+  const { pathname } = useLocation();
   const role = user?.role ?? null;
   // WD-073 — hover/focus intent warms the route chunk and its primary list query (debounced, so
   // sweeping the pointer down the sidebar fires only the link it settles on).
@@ -187,7 +188,8 @@ export function Sidebar() {
                         cn(
                           'flex h-nav-item items-center rounded-md text-nav',
                           collapsed ? 'justify-center px-0' : 'gap-3 px-3',
-                          isActive ? 'bg-bg-nav-active text-primary' : 'text-text-secondary hover:bg-bg-subtle',
+                          isActive || item.alsoActive?.some((p) => pathname === p || pathname.startsWith(`${p}/`))
+                            ? 'bg-bg-nav-active text-primary' : 'text-text-secondary hover:bg-bg-subtle',
                         )
                       }
                     >

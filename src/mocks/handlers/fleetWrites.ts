@@ -12,13 +12,16 @@ import type { DriverRow, VehicleRow } from '@/shared/api/vehicles';
 import { fixture } from '../fixtures.generated';
 import { fail, ok, serverPage, url } from '../envelope';
 import type { DeviceRow } from '@/shared/api/settingsAdmin';
-import { DEVICES, DRIVERS, VEHICLES, daysAgo, liveVehicles, mockId } from './mockState';
+import { DEVICES, DRIVERS, TRAILERS, VEHICLES, daysAgo, liveVehicles, mockId } from './mockState';
+import type { TrailerRow } from '@/shared/api/trailers';
 
 const VEHICLE_Q_FIELDS = ['unitNumber', 'vin', 'make', 'model', 'licensePlate'];
 const DRIVER_Q_FIELDS = ['firstName', 'lastName', 'username', 'cdlNumber', 'email'];
 
 /** A soft-deleted unit answers 404 on every `/vehicles/:id…` path, as a missing one does. */
 const findVehicle = (id: string): VehicleRow | undefined => liveVehicles().find((v) => v.id === id);
+/** Non-deleted trailers — a soft-deleted one answers 404 and frees its number. */
+const liveTrailers = (): TrailerRow[] => TRAILERS.filter((t) => !t.deletedAt);
 const findDriver = (id: string): DriverRow | undefined => DRIVERS.find((d) => d.id === id);
 /** Drivers whose unique values are still held — `DELETE /drivers/:id` leaves the row as
  * `TERMINATED`, and a deleted driver's username / email / phone / licence are free to reuse. */
@@ -127,7 +130,9 @@ export const fleetWriteHandlers = [
     }),
   ),
   http.get(url(endpoints.devices.export), () => ok(fixture('GET /api/devices/export'))),
-  http.get(url(endpoints.trailers.export), () => ok(fixture('GET /api/trailers/export'))),
+  http.get(url(endpoints.trailers.export), () =>
+    ok({ trailers: liveTrailers().map((t) => ({ number: t.number, ...(t.vin ? { vin: t.vin } : {}) })) }),
+  ),
 
   /* ---------------------------------------------------------------- vehicles */
   http.get(url(endpoints.vehicles.list), ({ request }) =>
@@ -515,7 +520,96 @@ export const fleetWriteHandlers = [
   }),
   http.post(url(endpoints.devices.import), () => ok(fixture('POST /api/devices/import'))),
 
-  http.post(url(endpoints.trailers.create), () => ok(fixture('POST /api/trailers'), 201)),
+  // Trailers (backend `TrailersService`): server-paged list over NON-deleted rows; `number` is unique
+  // among non-deleted rows only; DELETE is soft; export skips deleted rows.
+  http.get(url(endpoints.trailers.list), ({ request }) => {
+    const params = new URL(request.url).searchParams;
+    const page = params.has('page') ? Number(params.get('page')) : 1;
+    const limit = params.has('limit') ? Number(params.get('limit')) : 25;
+    const status = params.get('status');
+    const sort = params.get('sort');
+    const q = (params.get('q') ?? '').trim().toLowerCase();
+    const bad: Record<string, string> = {};
+    if (!Number.isInteger(page) || page < 1) bad.page = 'page must be an integer ≥ 1.';
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) bad.limit = 'limit must be an integer between 1 and 200.';
+    if (status && !['ACTIVE', 'INACTIVE', 'OUT_OF_SERVICE'].includes(status)) bad.status = 'Invalid status.';
+    if (sort && !/^(number|vin|status):(asc|desc)$/.test(sort)) bad.sort = 'sort must be number|vin|status:asc|desc.';
+    if (Object.keys(bad).length > 0) return fail(422, 'VALIDATION_FAILED', 'Validation failed.', bad);
+    let rows = liveTrailers().filter(
+      (t) => (!status || t.status === status) && (!q || t.number.toLowerCase().includes(q) || (t.vin ?? '').toLowerCase().includes(q)),
+    );
+    const [field, dir] = (sort ?? 'number:asc').split(':') as ['number' | 'vin' | 'status', 'asc' | 'desc'];
+    rows = [...rows].sort((a, b) => String(a[field] ?? '').localeCompare(String(b[field] ?? '')) * (dir === 'desc' ? -1 : 1));
+    return ok({
+      items: rows.slice((page - 1) * limit, page * limit),
+      page,
+      limit,
+      total: rows.length,
+      totalPages: Math.max(1, Math.ceil(rows.length / limit)),
+    });
+  }),
+  http.get(url(endpoints.trailers.detail(':id')), ({ params }) => {
+    const trailer = liveTrailers().find((t) => t.id === String(params.id));
+    return trailer ? ok(trailer) : NOT_FOUND('Trailer');
+  }),
+  http.post(url(endpoints.trailers.create), async ({ request }) => {
+    const dto = await body(request);
+    const number = String(dto.number ?? '').trim();
+    if (!number || number.length > 40) return fail(422, 'VALIDATION_FAILED', 'Invalid trailer.', { number: 'Enter a trailer number of up to 40 characters.' });
+    if (liveTrailers().some((t) => t.number.toUpperCase() === number.toUpperCase())) {
+      return fail(409, 'CONFLICT', `Trailer "${number}" already exists.`);
+    }
+    const created: TrailerRow = { id: mockId('trl'), number, vin: dto.vin ? String(dto.vin) : null, status: 'ACTIVE', deletedAt: null };
+    TRAILERS.push(created);
+    return ok(created, 201);
+  }),
+  http.patch(url(endpoints.trailers.update(':id')), async ({ params, request }) => {
+    const trailer = liveTrailers().find((t) => t.id === String(params.id));
+    if (!trailer) return NOT_FOUND('Trailer');
+    const dto = await body(request);
+    if (typeof dto.number === 'string' && dto.number.trim()) {
+      const number = dto.number.trim();
+      if (liveTrailers().some((t) => t.id !== trailer.id && t.number.toUpperCase() === number.toUpperCase())) {
+        return fail(409, 'CONFLICT', `Trailer "${number}" already exists.`);
+      }
+      trailer.number = number;
+    }
+    if (typeof dto.vin === 'string') trailer.vin = dto.vin || null;
+    if (typeof dto.status === 'string') trailer.status = dto.status as TrailerRow['status'];
+    return ok(trailer);
+  }),
+  // Soft delete: succeeds regardless of references; already-deleted → 404.
+  http.delete(url(endpoints.trailers.remove(':id')), ({ params }) => {
+    const trailer = liveTrailers().find((t) => t.id === String(params.id));
+    if (!trailer) return NOT_FOUND('Trailer');
+    trailer.deletedAt = new Date().toISOString();
+    trailer.status = 'INACTIVE';
+    return ok({ success: true });
+  }),
+  // Upsert by `number` among non-deleted rows, per-row failures in `failed` (201, not a 4xx).
+  http.post(url(endpoints.trailers.import), async ({ request }) => {
+    const dto = await body(request);
+    const rows = Array.isArray(dto.trailers) ? (dto.trailers as Array<Record<string, unknown>>) : [];
+    let imported = 0;
+    let updated = 0;
+    const failed: Array<{ index: number; error: string }> = [];
+    rows.forEach((row, index) => {
+      const number = String(row.number ?? '').trim();
+      if (!number || number.length > 40) {
+        failed.push({ index, error: 'Trailer number is required (up to 40 characters).' });
+        return;
+      }
+      const existing = liveTrailers().find((t) => t.number.toUpperCase() === number.toUpperCase());
+      if (existing) {
+        if (typeof row.vin === 'string') existing.vin = row.vin || null;
+        updated += 1;
+      } else {
+        TRAILERS.push({ id: mockId('trl'), number, vin: row.vin ? String(row.vin) : null, status: 'ACTIVE', deletedAt: null });
+        imported += 1;
+      }
+    });
+    return ok({ imported, updated, failed }, 201);
+  }),
 
   http.post(url(endpoints.geofences.create), async ({ request }) => {
     const dto = await body(request);
