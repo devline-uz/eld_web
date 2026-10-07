@@ -18,6 +18,7 @@ import { typedCachePolicy } from './queryPolicy';
 import { FILTER_WINDOW, useDriverMap, useVehicleMap } from './lookups';
 import { compactParams, pagePolicy, usePagedQuery, type PageQueryOptions } from './paging';
 import type { DriverRow, VehicleRow } from './vehicles';
+import { ApiError } from './errors';
 
 /** `DRAFT` (B-73, shipped 2026-09-24) — saved, not dispatched; publish = PATCH `{ status: 'PLANNED' }`. */
 export type TripStatus = 'DRAFT' | 'PLANNED' | 'ASSIGNED' | 'IN_PROGRESS' | 'DELIVERED' | 'CANCELLED';
@@ -387,6 +388,40 @@ export interface CreateTripPayload {
   estimatedDriveSec?: number;
   /** B-73 — saves as `DRAFT` even when `driverId` is set (never silently ASSIGNED, backend D-098). */
   draft?: boolean;
+}
+
+/** `details.conflict` of a 409 `TRIP_SCHEDULE_CONFLICT` — the other trip already holding the unit. */
+export interface TripScheduleConflict {
+  tripId: string;
+  number: string;
+  unitNumber: string | null;
+  /** ISO instants of the range the other trip occupies; `end: null` = no planned end. */
+  start: string;
+  end: string | null;
+}
+
+/** The conflicting trip from `POST /trips`, `PATCH /trips/:id` or `POST /trips/:id/assign`
+ * refusing to double-book a unit; `null` for any other error. */
+export function tripScheduleConflict(error: unknown): TripScheduleConflict | null {
+  if (!(error instanceof ApiError) || error.code !== 'TRIP_SCHEDULE_CONFLICT') return null;
+  const c = error.details.conflict as Partial<TripScheduleConflict> | undefined;
+  if (!c || typeof c.number !== 'string' || typeof c.start !== 'string') return null;
+  return {
+    tripId: String(c.tripId ?? ''),
+    number: c.number,
+    unitNumber: typeof c.unitNumber === 'string' ? c.unitNumber : null,
+    start: c.start,
+    end: typeof c.end === 'string' ? c.end : null,
+  };
+}
+
+/** `POST /trips` refusing a duplicate trip / load ID: 409 `CONFLICT`. Current backend keys it
+ * `details.number`; an older build sends no `details` at all — on create that bare `CONFLICT` can
+ * only be the number, so both are treated as this case. */
+export function isTripNumberTaken(error: unknown): boolean {
+  if (!(error instanceof ApiError) || error.status !== 409 || error.code !== 'CONFLICT') return false;
+  const fields = Object.keys(error.fieldErrors);
+  return fields.length === 0 || fields.includes('number');
 }
 
 export function useCreateTrip() {
