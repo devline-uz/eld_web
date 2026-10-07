@@ -1,5 +1,5 @@
 import * as Popover from '@radix-ui/react-popover';
-import { useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { ChevronDown, Search } from 'lucide-react';
 import { Avatar } from './Avatar';
 import { cn } from './cn';
@@ -27,11 +27,35 @@ export interface PickerProps {
 function Picker({ value, options, onSelect, onSearch, placeholder, triggerVariant = 'default' }: PickerProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  // Inside a modal Dialog the popover must portal INTO the dialog: otherwise the dialog's focus
+  // trap steals focus from the search input and react-remove-scroll swallows wheel events.
+  const [container, setContainer] = useState<HTMLElement | undefined>(undefined);
+
+  // Client-side filter (name + context, case-insensitive) so search works without an API callback.
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return options;
+    return options.filter((o) => `${o.name} ${o.context}`.toLowerCase().includes(q));
+  }, [options, query]);
 
   return (
-    <Popover.Root open={open} onOpenChange={setOpen}>
+    <Popover.Root
+      open={open}
+      onOpenChange={(next) => {
+        if (next) {
+          setContainer(
+            (triggerRef.current?.closest('[role="dialog"]') as HTMLElement | null) ?? undefined,
+          );
+        } else {
+          setQuery('');
+        }
+        setOpen(next);
+      }}
+    >
       <Popover.Trigger asChild>
         <button
+          ref={triggerRef}
           type="button"
           className={cn(
             'flex items-center gap-2 rounded-md border border-border bg-bg-surface px-3 text-body text-text hover:bg-bg-subtle',
@@ -49,7 +73,7 @@ function Picker({ value, options, onSelect, onSearch, placeholder, triggerVarian
           <ChevronDown size={16} strokeWidth={1.75} className="text-text-muted" />
         </button>
       </Popover.Trigger>
-      <Popover.Portal>
+      <Popover.Portal container={container}>
         <Popover.Content align="start" sideOffset={8} className="z-50 w-80 rounded-lg border border-border bg-bg-surface p-2 shadow-pop">
           <div className="flex items-center gap-2 rounded-md border border-border px-2">
             <Search size={14} strokeWidth={1.75} className="text-text-muted" />
@@ -64,8 +88,8 @@ function Picker({ value, options, onSelect, onSearch, placeholder, triggerVarian
               className="h-8 flex-1 bg-transparent text-body outline-none"
             />
           </div>
-          <ul className="mt-2 flex max-h-72 flex-col gap-0.5 overflow-y-auto">
-            {options.map((option) => (
+          <ul className="mt-2 flex max-h-72 flex-col gap-0.5 overflow-y-auto overscroll-contain">
+            {visible.map((option) => (
               <li key={option.id}>
                 <button
                   type="button"
@@ -95,6 +119,9 @@ function Picker({ value, options, onSelect, onSearch, placeholder, triggerVarian
                 </button>
               </li>
             ))}
+            {visible.length === 0 && (
+              <li className="p-2 text-caption text-text-muted">No results</li>
+            )}
           </ul>
         </Popover.Content>
       </Popover.Portal>
