@@ -6,12 +6,14 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import type { UseQueryResult } from '@tanstack/react-query';
 import { Mail, Phone, Trash2, Upload } from 'lucide-react';
 import { useId, useRef, useState, type ChangeEvent, type ReactNode } from 'react';
-import { useForm } from 'react-hook-form';
+import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { isApiError, toUserMessage } from '@/shared/api/errors';
 import { useDeleteAvatar, useUploadAvatar } from '@/shared/api/me';
 import { useAuth } from '@/shared/auth/AuthProvider';
-import { fields, inputFilters, profileSchema } from '@/shared/forms';
+import { profileSchema } from '@/shared/forms';
+import { internationalPhoneRule, phoneForDisplay, toE164 } from '@/shared/forms/phoneNumber';
+import { PhoneNumberInput } from '@/shared/forms/PhoneNumberInput';
 import { Avatar } from '@/shared/ui/Avatar';
 import { Button } from '@/shared/ui/Button';
 import { Card, SectionHeader } from '@/shared/ui/Card';
@@ -25,7 +27,9 @@ import { avatarProblem } from '../avatar';
 const JOB_TITLE_MAX = 120;
 const schema = profileSchema.extend({
   jobTitle: z.string().max(JOB_TITLE_MAX, `Job title must be ${JOB_TITLE_MAX} characters or fewer.`),
-  phone: z.union([z.literal(''), fields.phone()]),
+  // Typed/shown as `+998 90 123 45 67`, validated per country, submitted as E.164; empty → `''`
+  // (the API clears the number on `''`, as before).
+  phone: internationalPhoneRule(),
 });
 type ProfileValues = z.infer<typeof schema>;
 const EDITABLE = ['firstName', 'lastName', 'jobTitle', 'phone'] as const;
@@ -166,7 +170,7 @@ function ProfileForm({ profile }: { profile: MyProfile }) {
     firstName: profile.firstName,
     lastName: profile.lastName,
     jobTitle: profile.jobTitle ?? '',
-    phone: profile.phone ?? '',
+    phone: phoneForDisplay(profile.phone),
   };
   const {
     register,
@@ -174,13 +178,13 @@ function ProfileForm({ profile }: { profile: MyProfile }) {
     reset,
     setError,
     formState: { errors, isDirty, isSubmitting },
+    control,
   } = useForm<ProfileValues>({
     resolver: zodResolver(schema),
     mode: 'onBlur',
     reValidateMode: 'onChange',
     defaultValues: defaults,
   });
-  const phoneField = register('phone');
 
   const onSubmit = handleSubmit(async (values) => {
     setBanner(null);
@@ -189,13 +193,13 @@ function ProfileForm({ profile }: { profile: MyProfile }) {
         firstName: values.firstName.trim(),
         lastName: values.lastName.trim(),
         jobTitle: values.jobTitle.trim(),
-        phone: values.phone,
+        phone: toE164(values.phone) ?? '',
       });
       reset({
         firstName: saved.firstName,
         lastName: saved.lastName,
         jobTitle: saved.jobTitle ?? '',
-        phone: saved.phone ?? '',
+        phone: phoneForDisplay(saved.phone),
       });
       toast({ kind: 'success', ...TOAST_COPY.settingsSaved });
       void refreshUser?.().catch(() => undefined);
@@ -282,21 +286,24 @@ function ProfileForm({ profile }: { profile: MyProfile }) {
                 aria-hidden="true"
                 className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-text-muted"
               />
-              <input
-                id={`${uid}-phone`}
-                type="tel"
-                autoComplete="tel"
-                aria-invalid={errors.phone ? true : undefined}
-                aria-describedby={describe('phone', Boolean(errors.phone))}
-                maxLength={inputFilters.PHONE_MAX_LENGTH}
-                className={cn(INPUT, 'tabular pl-9', errors.phone ? 'border-danger' : 'border-border')}
-                {...phoneField}
-                onChange={(e) => {
-                  // Letters and other symbols are dropped as typed or pasted — only a phone number fits.
-                  const clean = inputFilters.phone(e.target.value);
-                  if (clean !== e.target.value) e.target.value = clean;
-                  return phoneField.onChange(e);
-                }}
+              <Controller
+                control={control}
+                name="phone"
+                render={({ field }) => (
+                  // `+` before the first digit, grouped by the detected country (AsYouType), letters
+                  // rejected, caret kept beside the same digit on type / paste / delete.
+                  <PhoneNumberInput
+                    id={`${uid}-phone`}
+                    name={field.name}
+                    inputRef={field.ref}
+                    value={field.value}
+                    onChange={field.onChange}
+                    onBlur={field.onBlur}
+                    aria-invalid={errors.phone ? true : undefined}
+                    aria-describedby={describe('phone', Boolean(errors.phone))}
+                    className={cn(INPUT, 'tabular pl-9', errors.phone ? 'border-danger' : 'border-border')}
+                  />
+                )}
               />
             </div>
           </Field>

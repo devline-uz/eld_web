@@ -5,7 +5,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
-import { ok, url } from '@/mocks/envelope';
+import { fail, ok, url } from '@/mocks/envelope';
 import { endpoints } from '@/shared/api/endpoints';
 import type { DriverRow } from '@/shared/api/drivers';
 import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/client';
@@ -196,5 +196,65 @@ describe('W-07 Edit driver — licence', () => {
     await user.click(save());
     await waitFor(() => expect(patched.body).not.toBeNull());
     expect(patched.body!.cdlNumber).toBe('OH-W8569238');
+  });
+});
+
+describe('W-07 Edit driver — duplicate values (B-100)', () => {
+  it.each([
+    ['EMAIL_TAKEN', { email: 'x' }, 'A driver with this email address already exists.'],
+    ['PHONE_TAKEN', { phone: 'x' }, 'A driver with this phone number already exists.'],
+    ['CDL_NUMBER_TAKEN', { cdlNumber: 'x' }, 'A driver with this licence number already exists.'],
+    ['CONFLICT', { field: 'phone' }, 'A driver with this phone number already exists.'],
+  ])('a 409 %s lands on its field, not a toast', async (code, details, message) => {
+    server.use(http.patch(url(endpoints.drivers.update('drv_1')), () => fail(409, code, 'Conflict', details)));
+    const user = userEvent.setup();
+    renderModal();
+    await user.clear(licenceInput());
+    await user.type(licenceInput(), 'W1234567');
+    await user.click(save());
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(screen.queryByText('That value is already in use.')).not.toBeInTheDocument();
+  });
+});
+
+describe('W-07 Edit driver — cached duplicate pre-check', () => {
+  const OTHER = { id: 'drv_2', username: 'other', email: 'taken@example.com', phone: null, cdlNumber: 'T7654321', status: 'ACTIVE' };
+
+  function renderWithList(list: unknown[]) {
+    server.use(
+      http.get(url(endpoints.drivers.list), () => ok({ items: list, page: 1, limit: 500, total: list.length, totalPages: 1 })),
+    );
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <EditDriverModal driver={DRIVER as DriverRow} onClose={() => {}} />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+    return queryClient;
+  }
+  const loaded = (qc: QueryClient) => waitFor(() => expect(qc.getQueriesData({ queryKey: ['drivers'] }).some(([, d]) => d)).toBe(true));
+
+  it("another driver's email blocks the save with no PATCH", async () => {
+    const patched = capturePatch();
+    const user = userEvent.setup();
+    const qc = renderWithList([OTHER]);
+    await loaded(qc);
+    const email = screen.getByLabelText(/Email/);
+    await user.clear(email);
+    await user.type(email, ' TAKEN@example.com ');
+    await user.click(save());
+    expect(await screen.findByText('A driver with this email address already exists.')).toBeInTheDocument();
+    expect(patched.body).toBeNull();
+  });
+
+  it('saving with its own values (it is in the list itself) is allowed', async () => {
+    const patched = capturePatch();
+    const user = userEvent.setup();
+    const qc = renderWithList([{ ...DRIVER, status: 'ACTIVE' }, OTHER]);
+    await loaded(qc);
+    await user.click(save());
+    await waitFor(() => expect(patched.body).not.toBeNull());
   });
 });

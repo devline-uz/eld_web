@@ -110,6 +110,10 @@ describe('11.2 Edit unit — duplicate values', () => {
     ['UNIT_NUMBER_TAKEN', { unitNumber: 'Taken.' }, /Unit number/, VALIDATION_MESSAGES.unitNumberTaken],
     ['VIN_TAKEN', { vin: 'Taken.' }, /^VIN/, VALIDATION_MESSAGES.vinTaken],
     ['CONFLICT', { field: 'vin' }, /^VIN/, VALIDATION_MESSAGES.vinTaken],
+    ['VIN_TAKEN', { vin: 'x' }, /^VIN/, VALIDATION_MESSAGES.vinTaken],
+    ['UNIT_NUMBER_TAKEN', { unitNumber: 'x' }, /Unit number/, VALIDATION_MESSAGES.unitNumberTaken],
+    ['ELD_SERIAL_TAKEN', { eldSerial: 'Taken.' }, /ELD serial/, VALIDATION_MESSAGES.eldSerialTaken],
+    ['CONFLICT', { target: ['licensePlate', 'plateState'] }, /License plate/, VALIDATION_MESSAGES.licensePlateTaken],
   ])('a 409 %s shows its message under the matching field', async (code, details, label, message) => {
     server.use(http.patch(url(endpoints.vehicles.update(':id')), () => fail(409, code, 'Conflict', details)));
     await saveEdit('102');
@@ -117,6 +121,25 @@ describe('11.2 Edit unit — duplicate values', () => {
     const error = await screen.findByText(message);
     expect(screen.getByLabelText(label).closest('label')).toContainElement(error);
     expect(screen.queryByText('That value is already in use.')).not.toBeInTheDocument();
+  });
+
+  it('a 404 DEVICE_NOT_FOUND shows under the ELD serial, not as a toast', async () => {
+    server.use(
+      http.patch(url(endpoints.vehicles.update(':id')), () =>
+        fail(404, 'DEVICE_NOT_FOUND', 'Not found', { eldSerial: 'No ELD device with this serial is registered.' }),
+      ),
+    );
+    await saveEdit('102');
+    const error = await screen.findByText(VALIDATION_MESSAGES.eldSerialUnknown);
+    expect(screen.getByLabelText(/ELD serial/).closest('label')).toContainElement(error);
+  });
+
+  it('a 404 without an ELD serial keeps the generic toast', async () => {
+    server.use(http.patch(url(endpoints.vehicles.update(':id')), () => fail(404, 'NOT_FOUND', 'Vehicle not found.')));
+    await saveEdit('102');
+    await screen.findByRole('button', { name: 'Save changes' });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByText(VALIDATION_MESSAGES.eldSerialUnknown)).not.toBeInTheDocument();
   });
 
   it('an unattributed 409 keeps the generic toast and pins no field', async () => {

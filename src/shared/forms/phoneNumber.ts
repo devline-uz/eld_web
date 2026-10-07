@@ -15,8 +15,11 @@ import { VALIDATION_MESSAGES as M } from './messages';
 /** E.164 caps a number at 15 digits, calling code included. */
 export const PHONE_MAX_DIGITS = 15;
 
-/** Only these characters may appear in a typed or pasted number; anything else is rejected. */
-const ALLOWED_RE = /^[\d\s().\-+]*$/;
+/**
+ * Only digits and the formatting characters `+`, space, `-`, `(` and `)` may appear in a typed or
+ * pasted number; anything else (letters, `.`, `/`, `#`, …) makes it invalid.
+ */
+const ALLOWED_RE = /^[\d\s()\-+]*$/;
 
 /** The digits of `raw`, capped at E.164's 15. Letters and punctuation are dropped. */
 export function phoneDigits(raw: string): string {
@@ -75,12 +78,13 @@ export function toE164(value: string): string | undefined {
   return parsed?.isValid() ? parsed.number : undefined;
 }
 
-export type PhoneProblem = 'invalid' | 'invalidCountry' | 'incomplete';
+export type PhoneProblem = 'invalid' | 'invalidCountry' | 'incomplete' | 'tooLong';
 
 export const PHONE_PROBLEM_MESSAGES: Record<PhoneProblem, string> = {
   invalid: M.phone,
   invalidCountry: M.phoneCountryCode,
   incomplete: M.phoneIncomplete,
+  tooLong: M.phoneTooLong,
 };
 
 /**
@@ -94,7 +98,7 @@ export function phoneProblem(value: string): PhoneProblem | null {
   if (trimmed.lastIndexOf('+') > 0) return 'invalid';
   const allDigits = trimmed.replace(/\D/g, '');
   if (!allDigits) return trimmed === '' || trimmed === '+' ? null : 'invalid';
-  if (allDigits.length > PHONE_MAX_DIGITS) return 'invalid';
+  if (allDigits.length > PHONE_MAX_DIGITS) return 'tooLong';
   const e164 = `+${allDigits}`;
   switch (validatePhoneNumberLength(e164)) {
     case 'INVALID_COUNTRY':
@@ -103,6 +107,7 @@ export function phoneProblem(value: string): PhoneProblem | null {
     case 'TOO_SHORT':
       return 'incomplete';
     case 'TOO_LONG':
+      return 'tooLong';
     case 'INVALID_LENGTH':
       return 'invalid';
     default:
@@ -115,16 +120,22 @@ export function phoneProblem(value: string): PhoneProblem | null {
  * E.164 form (what the API receives); anything else fails with the matching §14 message.
  */
 export const internationalPhone = () =>
-  z
-    .string()
+  internationalPhoneRule()
     .optional()
-    .superRefine((value, ctx) => {
-      const problem = value === undefined ? null : phoneProblem(value);
-      if (problem) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, message: PHONE_PROBLEM_MESSAGES[problem] });
-      }
-    })
     .transform((value) => (value === undefined ? undefined : toE164(value)));
+
+/**
+ * The validation alone, for a form that keeps the display value and converts at submit time
+ * (W-26 `Mobile number`: `toE164(value) ?? ''`, since `PATCH /me/profile` clears on `''`).
+ * Empty and a lone `+` pass — the field is optional.
+ */
+export const internationalPhoneRule = () =>
+  z.string().superRefine((value, ctx) => {
+    const problem = phoneProblem(value);
+    if (problem) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: PHONE_PROBLEM_MESSAGES[problem] });
+    }
+  });
 
 export type PhoneInputChange = { value: string; caret: number };
 

@@ -491,7 +491,7 @@ describe('11.8 Add driver — duplicate values and unit assignment', () => {
   }
 
   it('a duplicate email is shown on the email field, not on username', async () => {
-    await submitWithConflict('DUPLICATE_EMAIL', 'Email taken', { email: 'Email taken' });
+    await submitWithConflict('EMAIL_TAKEN', 'Email taken', { email: 'Email taken' });
     expect(
       await screen.findByText('A driver with this email address already exists.'),
     ).toBeInTheDocument();
@@ -501,10 +501,70 @@ describe('11.8 Add driver — duplicate values and unit assignment', () => {
   });
 
   it('a duplicate username still lands on the username field', async () => {
-    await submitWithConflict('DUPLICATE_USERNAME', 'This username is already taken.');
+    await submitWithConflict('USERNAME_TAKEN', 'A driver with this username already exists.', { username: 'x' });
     expect(
       await screen.findByText('A driver with this username already exists.'),
     ).toBeInTheDocument();
+  });
+
+  it('the cached driver list blocks submit before any POST, on each duplicated field', async () => {
+    let posts = 0;
+    stubLists([
+      { id: 'drv_y', username: 'kwatson', email: 'Kristin.Watson@gmail.com', cdlNumber: 'w-123 4567', assignedVehicleId: 'veh_a', status: 'ACTIVE' },
+      { id: 'drv_t', username: 'gone', email: 'gone@gmail.com', cdlNumber: 'G1', status: 'TERMINATED' },
+    ]);
+    server.use(http.post(url(endpoints.drivers.create), () => { posts += 1; return ok({ id: 'drv_new' }); }));
+    const user = userEvent.setup();
+    renderWithProviders(<AddDriverModal onClose={() => {}} />);
+    await fillRequiredFields(user);
+    const select = screen.getByLabelText(/Assigned unit/);
+    await waitFor(() => expect(within(select).queryByRole('option', { name: '#201' })).not.toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Save driver' }));
+
+    expect(await screen.findByText('A driver with this username already exists.')).toBeInTheDocument();
+    expect(screen.getByText('A driver with this email address already exists.')).toBeInTheDocument();
+    expect(screen.getByText('A driver with this licence number already exists.')).toBeInTheDocument();
+    expect(posts).toBe(0);
+  });
+
+  it('a PHONE_TAKEN is shown on the phone field', async () => {
+    await submitWithConflict('PHONE_TAKEN', 'Phone taken', { phone: 'x' });
+    expect(await screen.findByText('A driver with this phone number already exists.')).toBeInTheDocument();
+  });
+
+  it('a 404 VEHICLE_NOT_FOUND is shown on the unit field, not as a toast', async () => {
+    stubLists([]);
+    server.use(
+      http.post(url(endpoints.drivers.create), () =>
+        fail(404, 'VEHICLE_NOT_FOUND', 'Unit not found.', { assignedVehicleId: 'Select a unit.' }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<AddDriverModal onClose={() => {}} />);
+    await fillRequiredFields(user);
+    const select = screen.getByLabelText(/Assigned unit/);
+    await waitFor(() => expect(within(select).getByRole('option', { name: '#202' })).toBeInTheDocument());
+    await user.selectOptions(select, 'veh_b');
+    await user.click(screen.getByRole('button', { name: 'Save driver' }));
+    expect(await screen.findByText('Select a unit.')).toBeInTheDocument();
+    expect(select).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('a 409 VEHICLE_OUT_OF_SERVICE is shown on the unit field', async () => {
+    stubLists([]);
+    server.use(
+      http.post(url(endpoints.drivers.create), () =>
+        fail(409, 'VEHICLE_OUT_OF_SERVICE', 'x', { assignedVehicleId: 'x' }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<AddDriverModal onClose={() => {}} />);
+    await fillRequiredFields(user);
+    const select = screen.getByLabelText(/Assigned unit/);
+    await waitFor(() => expect(within(select).getByRole('option', { name: '#202' })).toBeInTheDocument());
+    await user.selectOptions(select, 'veh_b');
+    await user.click(screen.getByRole('button', { name: 'Save driver' }));
+    await waitFor(() => expect(select).toHaveAttribute('aria-invalid', 'true'));
   });
 
   it('a generic CONFLICT naming details.field: phone is shown on the phone field', async () => {
@@ -515,7 +575,7 @@ describe('11.8 Add driver — duplicate values and unit assignment', () => {
   });
 
   it('a duplicate licence number from the server is shown on the licence field', async () => {
-    await submitWithConflict('DUPLICATE_CDL_NUMBER', 'Licence taken');
+    await submitWithConflict('CDL_NUMBER_TAKEN', 'Licence taken', { cdlNumber: 'x' });
     expect(
       await screen.findByText('A driver with this licence number already exists.'),
     ).toBeInTheDocument();
@@ -549,33 +609,21 @@ describe('11.8 Add driver — duplicate values and unit assignment', () => {
     expect(within(select).queryByRole('option', { name: '#203' })).not.toBeInTheDocument();
   });
 
-  /** Stubs create + assign, recording what each received. */
-  function stubCreateAndAssign(
-    assign: () => Response | Promise<Response> = () => ok({ id: 'veh_b' }),
-  ) {
-    const calls: {
-      created: Record<string, unknown> | null;
-      assigned: { vehicleId: string; body: unknown }[];
-    } = {
-      created: null,
-      assigned: [],
-    };
+  /** Stubs create, recording the body it received. */
+  function stubCreate() {
+    const calls: { created: Record<string, unknown> | null } = { created: null };
     server.use(
       http.post(url(endpoints.drivers.create), async ({ request }) => {
         calls.created = (await request.json()) as Record<string, unknown>;
         return ok({ id: 'drv_new', username: 'kwatson', status: 'ACTIVE' });
       }),
-      http.post(url(endpoints.vehicles.assignDriver(':vehicleId')), async ({ request, params }) => {
-        calls.assigned.push({ vehicleId: String(params.vehicleId), body: await request.json() });
-        return assign();
-      }),
     );
     return calls;
   }
 
-  it('the unit picked in Add driver is assigned to the new driver right after the create', async () => {
+  it('the unit picked in Add driver travels in the same POST /drivers', async () => {
     stubLists([]);
-    const calls = stubCreateAndAssign();
+    const calls = stubCreate();
     const onClose = vi.fn();
     const user = userEvent.setup();
     renderWithProviders(<AddDriverModal onClose={onClose} />);
@@ -587,15 +635,14 @@ describe('11.8 Add driver — duplicate values and unit assignment', () => {
     await user.selectOptions(select, 'veh_b');
     await user.click(screen.getByRole('button', { name: 'Save driver' }));
 
-    await waitFor(() => expect(calls.assigned).toHaveLength(1));
-    expect(calls.assigned[0]).toEqual({ vehicleId: 'veh_b', body: { driverId: 'drv_new' } });
     expect(await screen.findByText('Driver added')).toBeInTheDocument();
+    expect(calls.created?.assignedVehicleId).toBe('veh_b');
     expect(onClose).toHaveBeenCalled();
   });
 
-  it('no unit picked → no assign call', async () => {
+  it('no unit picked → assignedVehicleId is not sent', async () => {
     stubLists([]);
-    const calls = stubCreateAndAssign();
+    const calls = stubCreate();
     const user = userEvent.setup();
     renderWithProviders(<AddDriverModal onClose={() => {}} />);
     await fillRequiredFields(user);
@@ -603,36 +650,7 @@ describe('11.8 Add driver — duplicate values and unit assignment', () => {
 
     expect(await screen.findByText('Driver added')).toBeInTheDocument();
     expect(calls.created).not.toBeNull();
-    expect(calls.assigned).toHaveLength(0);
-  });
-
-  it('a failed assign keeps the driver and says the unit was not assigned', async () => {
-    stubLists([]);
-    const calls = stubCreateAndAssign(() =>
-      fail(
-        409,
-        'VEHICLE_OUT_OF_SERVICE',
-        'Unit is OUT_OF_SERVICE — assign a driver only after the critical defect is closed.',
-      ),
-    );
-    const onClose = vi.fn();
-    const user = userEvent.setup();
-    renderWithProviders(<AddDriverModal onClose={onClose} />);
-    await fillRequiredFields(user);
-    const select = screen.getByLabelText(/Assigned unit/);
-    await waitFor(() =>
-      expect(within(select).getByRole('option', { name: '#202' })).toBeInTheDocument(),
-    );
-    await user.selectOptions(select, 'veh_b');
-    await user.click(screen.getByRole('button', { name: 'Save driver' }));
-
-    expect(
-      await screen.findByText('Driver added, but Unit #202 was not assigned'),
-    ).toBeInTheDocument();
-    expect(calls.created).not.toBeNull();
-    expect(calls.assigned).toHaveLength(1);
-    // Closed: the driver exists, so a second Save would create a duplicate.
-    expect(onClose).toHaveBeenCalled();
+    expect(calls.created).not.toHaveProperty('assignedVehicleId');
   });
 
   it('a 409 for an already-assigned unit is shown on the unit field', async () => {

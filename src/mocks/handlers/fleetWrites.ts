@@ -32,8 +32,63 @@ const phoneKey = (value: unknown): string => {
 /** Unit numbers compare without the display `#` or case; VINs without case. */
 const unitNumberKey = (value: unknown): string => String(value ?? '').trim().replace(/^#/, '').toUpperCase();
 const vinKey = (value: unknown): string => String(value ?? '').trim().toUpperCase();
+const upper = (value: unknown): string => String(value ?? '').trim().toUpperCase();
+/** `PLATE|STATE`; '' without a plate so an unplated unit never conflicts. */
+const plateStateKey = (plate: unknown, state: unknown): string => (upper(plate) ? `${upper(plate)}|${upper(state)}` : '');
+
+/** The server's rule (B-97): ELD serial unique across units, plate + issuing state unique as a pair,
+ * both normalised (trim + upper-case) and empty = no value. `exceptId` is the unit being edited. */
+function uniqueConflict(dto: Record<string, unknown>, exceptId?: string) {
+  const others = liveVehicles().filter((v) => v.id !== exceptId);
+  const serial = upper(dto.deviceId ?? dto.eldSerial);
+  if (serial && !DEVICES.some((d) => upper(d.serial) === serial)) {
+    return fail(404, 'DEVICE_NOT_FOUND', 'No ELD device with this serial is registered.', {
+      eldSerial: 'No ELD device with this serial is registered.',
+    });
+  }
+  if (serial && DEVICES.some((d) => upper(d.serial) === serial && d.vehicleId != null && d.vehicleId !== exceptId)) {
+    return fail(409, 'ELD_SERIAL_TAKEN', 'This ELD serial is already assigned to another unit.', {
+      eldSerial: 'This ELD serial is already assigned to another unit.',
+    });
+  }
+  const key = plateStateKey(dto.licensePlate, dto.plateState ?? dto.issuingState);
+  if (key && others.some((v) => plateStateKey(v.licensePlate, v.plateState) === key)) {
+    return fail(409, 'LICENSE_PLATE_TAKEN', 'This license plate is already registered for this state.', {
+      licensePlate: 'This license plate is already registered for this state.',
+    });
+  }
+  return null;
+}
 /** Licence numbers compare without case, spaces or dashes. */
 const cdlKey = (value: unknown): string => String(value ?? '').toUpperCase().replace(/[\s-]/g, '');
+
+const MSG = {
+  username: 'A driver with this username already exists.',
+  email: 'A driver with this email address already exists.',
+  phone: 'A driver with this phone number already exists.',
+  cdlNumber: 'A driver with this licence number already exists.',
+  unit: 'This unit already has a driver assigned.',
+} as const;
+
+/** B-100: one 409 per unique value, `details` keyed by the field. Username is trimmed, email
+ * trimmed + lower-cased, phone compared by digits, licence ignoring case / spaces / dashes. A
+ * deleted (TERMINATED) driver holds nothing, and `exceptId` (the driver being edited) is skipped.
+ * Only the values present in `dto` are checked, so a partial PATCH never re-checks the rest. */
+export function driverUniqueConflict(dto: Record<string, unknown>, exceptId?: string) {
+  const holders = undeletedDrivers().filter((d) => d.id !== exceptId);
+  const taken = (code: string, field: keyof typeof MSG) => fail(409, code, MSG[field], { [field]: MSG[field] });
+  if (dto.username != null) {
+    const username = String(dto.username).trim();
+    if (username && holders.some((d) => String(d.username).trim() === username)) return taken('USERNAME_TAKEN', 'username');
+  }
+  const email = String(dto.email ?? '').trim().toLowerCase();
+  if (email && holders.some((d) => d.email?.trim().toLowerCase() === email)) return taken('EMAIL_TAKEN', 'email');
+  const phone = phoneKey(dto.phone);
+  if (phone && holders.some((d) => d.phone && phoneKey(d.phone) === phone)) return taken('PHONE_TAKEN', 'phone');
+  const cdl = cdlKey(dto.cdlNumber);
+  if (cdl && holders.some((d) => cdlKey(d.cdlNumber) === cdl)) return taken('CDL_NUMBER_TAKEN', 'cdlNumber');
+  return null;
+}
 
 const NOT_FOUND = (what: string) => fail(404, 'NOT_FOUND', `${what} was not found.`);
 
@@ -96,7 +151,7 @@ export const fleetWriteHandlers = [
     // they can be used again (the real API's unique indexes are partial on `deletedAt IS NULL`).
     const live = liveVehicles();
     if (live.some((v) => unitNumberKey(v.unitNumber) === unitNumberKey(unitNumber))) {
-      return fail(409, 'DUPLICATE_UNIT_NUMBER', 'A unit with this number already exists.', {
+      return fail(409, 'UNIT_NUMBER_TAKEN', 'A unit with this number already exists.', {
         unitNumber: 'A unit with this number already exists.',
       });
     }
@@ -105,6 +160,8 @@ export const fleetWriteHandlers = [
         vin: 'A unit with this VIN already exists.',
       });
     }
+    const uniqueFail = uniqueConflict(dto);
+    if (uniqueFail) return uniqueFail;
     const odometerMi = Number(dto.odometerMi ?? 0);
     const created: VehicleRow = {
       id: mockId('veh'),
@@ -113,8 +170,8 @@ export const fleetWriteHandlers = [
       make: (dto.make as string) ?? null,
       model: (dto.model as string) ?? null,
       year: dto.year == null ? null : Number(dto.year),
-      licensePlate: (dto.licensePlate as string) ?? null,
-      plateState: (dto.plateState as string) ?? null,
+      licensePlate: upper(dto.licensePlate) || null,
+      plateState: upper(dto.plateState) || null,
       fuelType: (dto.fuelType as string) ?? 'DIESEL',
       sleeperBerth: Boolean(dto.sleeperBerth),
       odometerMi,
@@ -129,6 +186,9 @@ export const fleetWriteHandlers = [
       createdAt: new Date().toISOString(),
     };
     VEHICLES.unshift(created);
+    const serial = upper(dto.deviceId);
+    const device = serial ? DEVICES.find((d) => upper(d.serial) === serial) : undefined;
+    if (device) device.vehicleId = created.id;
     return ok(created, 201);
   }),
 
@@ -156,7 +216,19 @@ export const fleetWriteHandlers = [
         });
       }
     }
-    Object.assign(vehicle, dto);
+    // Merge with the unit's current plate/state so a partial PATCH is judged on the stored pair.
+    const uniqueFail = uniqueConflict(
+      { ...dto, licensePlate: dto.licensePlate ?? vehicle.licensePlate, plateState: dto.plateState ?? vehicle.plateState },
+      vehicle.id,
+    );
+    if (uniqueFail) return uniqueFail;
+    const { deviceId, ...fields } = dto;
+    Object.assign(vehicle, fields);
+    if (dto.licensePlate != null) vehicle.licensePlate = upper(dto.licensePlate) || null;
+    if (dto.plateState != null) vehicle.plateState = upper(dto.plateState) || null;
+    const serial = upper(deviceId);
+    const device = serial ? DEVICES.find((d) => upper(d.serial) === serial) : undefined;
+    if (device) device.vehicleId = vehicle.id;
     return ok(vehicle);
   }),
 
@@ -274,42 +346,24 @@ export const fleetWriteHandlers = [
     if (Object.keys(details).length) {
       return fail(422, 'VALIDATION_ERROR', 'Check the highlighted fields.', details);
     }
-    // One 409 per unique value, each naming its field — the shape B-100 asks the backend for.
-    // A deleted (TERMINATED) driver no longer holds any of them.
-    const holders = undeletedDrivers();
-    if (holders.some((d) => d.username === username)) {
-      return fail(409, 'DUPLICATE_USERNAME', 'This username is already taken.', {
-        username: 'This username is already taken.',
-      });
-    }
-    const email = String(dto.email ?? '').trim().toLowerCase();
-    if (email && holders.some((d) => d.email?.toLowerCase() === email)) {
-      return fail(409, 'DUPLICATE_EMAIL', 'A driver with this email address already exists.', {
-        email: 'A driver with this email address already exists.',
-      });
-    }
-    const phone = phoneKey(dto.phone);
-    if (phone && holders.some((d) => d.phone && phoneKey(d.phone) === phone)) {
-      return fail(409, 'DUPLICATE_PHONE', 'A driver with this phone number already exists.', {
-        phone: 'A driver with this phone number already exists.',
-      });
-    }
-    const cdl = cdlKey(dto.cdlNumber);
-    if (cdl && holders.some((d) => cdlKey(d.cdlNumber) === cdl)) {
-      return fail(409, 'DUPLICATE_CDL_NUMBER', 'A driver with this licence number already exists.', {
-        cdlNumber: 'A driver with this licence number already exists.',
-      });
-    }
+    const uniqueFail = driverUniqueConflict({ ...dto, username }, undefined);
+    if (uniqueFail) return uniqueFail;
     // A create never takes a unit away from another driver (that is 11.5's explicit reassign);
     // it used to silently unassign the current driver here.
     const assignedVehicleId = (dto.assignedVehicleId as string) || null;
     if (assignedVehicleId) {
       if (!findVehicle(assignedVehicleId)) {
-        return fail(422, 'VALIDATION_ERROR', 'Check the highlighted fields.', {
+        return fail(404, 'VEHICLE_NOT_FOUND', 'Unit not found.', {
           assignedVehicleId: 'Select a unit.',
         });
       }
-      if (DRIVERS.some((d) => d.assignedVehicleId === assignedVehicleId)) {
+      const unit = findVehicle(assignedVehicleId)!;
+      if (unit.status === 'OUT_OF_SERVICE') {
+        return fail(409, 'VEHICLE_OUT_OF_SERVICE', 'This unit is out of service.', {
+          assignedVehicleId: 'This unit is out of service.',
+        });
+      }
+      if (undeletedDrivers().some((d) => d.assignedVehicleId === assignedVehicleId)) {
         return fail(409, 'VEHICLE_ALREADY_ASSIGNED', 'This unit already has a driver assigned.', {
           assignedVehicleId: 'This unit already has a driver assigned.',
         });
@@ -348,7 +402,11 @@ export const fleetWriteHandlers = [
   http.patch(url(endpoints.drivers.update(':id')), async ({ params, request }) => {
     const driver = findDriver(String(params.id));
     if (!driver) return NOT_FOUND('Driver');
-    Object.assign(driver, await body(request));
+    // `assignedVehicleId` is create-only; the unit link changes through `assign-driver`.
+    const { assignedVehicleId: _ignored, ...dto } = await body(request);
+    const uniqueFail = driverUniqueConflict(dto, driver.id);
+    if (uniqueFail) return uniqueFail;
+    Object.assign(driver, dto);
     return ok(driver);
   }),
 

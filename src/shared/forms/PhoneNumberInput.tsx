@@ -1,7 +1,9 @@
-// 11.8 Add driver — the international phone input. Formatting, country detection and caret mapping
-// live in `shared/forms/phoneNumber.ts` (pure, unit-tested); this only wires them to the DOM.
+// The international phone input (11.8 Add / Edit driver, W-26 My account `Mobile number`).
+// Formatting, country detection and caret mapping live in `./phoneNumber.ts` (pure, unit-tested);
+// this only wires them to the DOM. Kept out of the `@/shared/forms` barrel so only the screens
+// that render it load the libphonenumber metadata.
 import type React from 'react';
-import { applyPhoneInput, phoneDigits } from '@/shared/forms/phoneNumber';
+import { applyPhoneInput, phoneDigits } from './phoneNumber';
 
 type Props = Omit<
   React.InputHTMLAttributes<HTMLInputElement>,

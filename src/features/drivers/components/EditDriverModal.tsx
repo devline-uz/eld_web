@@ -18,12 +18,16 @@ import {
   normalizeLicenceNumber,
   withLicenceStateCheck,
 } from '@/shared/forms/driverLicence';
+import { useQueryClient } from '@tanstack/react-query';
+import { useDriversLookup } from '@/shared/api/lookups';
 import { useUpdateDriver } from '@/shared/api/drivers';
 import type { DriverRow } from '@/shared/api/drivers';
 import { ApiError } from '@/shared/api/errors';
+import { conflictField } from '@/shared/api/conflicts';
+import { DRIVER_CONFLICT_RULES, CONFLICT_MESSAGES, findCachedDriverConflicts } from '../lib/driverConflicts';
 import { DRIVER_TOAST } from '../lib/copy';
 import { HOME_TERMINAL_TIMEZONES } from '../lib/terminals';
-import { PhoneNumberInput } from './PhoneNumberInput';
+import { PhoneNumberInput } from '@/shared/forms/PhoneNumberInput';
 
 const US_STATES = [
   'AL',
@@ -130,6 +134,9 @@ export interface EditDriverModalProps {
 
 export function EditDriverModal({ driver, onClose }: EditDriverModalProps) {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
+  // Fills the `/drivers` cache the duplicate pre-check below reads (the server 409 stays authoritative).
+  useDriversLookup();
   const mutation = useUpdateDriver(driver.id);
   const [banner, setBanner] = useState<string | null>(null);
   const [allowPersonalConveyance, setAllowPersonalConveyance] = useState(
@@ -203,6 +210,15 @@ export function EditDriverModal({ driver, onClose }: EditDriverModalProps) {
       return;
     }
     setExemptReasonError(null);
+    const dupes = findCachedDriverConflicts(
+      queryClient,
+      { email: values.email, phone: values.phone, cdlNumber: values.cdlNumber },
+      { excludeId: driver.id, current: driver },
+    ).filter((field) => field !== 'username');
+    if (dupes.length > 0) {
+      for (const field of dupes) setError(field as 'email' | 'phone' | 'cdlNumber', { message: CONFLICT_MESSAGES[field as 'email' | 'phone' | 'cdlNumber'] });
+      return;
+    }
     setBanner(null);
     mutation.mutate(
       {
@@ -234,6 +250,14 @@ export function EditDriverModal({ driver, onClose }: EditDriverModalProps) {
           onClose();
         },
         onError: (error) => {
+          if (error instanceof ApiError && error.status === 409) {
+            const field = conflictField(error, DRIVER_CONFLICT_RULES);
+            // `assignedVehicleId` is create-only and the username is not editable here.
+            if (field && field !== 'assignedVehicleId' && field !== 'username') {
+              setError(field, { message: CONFLICT_MESSAGES[field] });
+              return;
+            }
+          }
           if (error instanceof ApiError) {
             const fieldErrors = error.fieldErrors;
             for (const [field, message] of Object.entries(fieldErrors)) {

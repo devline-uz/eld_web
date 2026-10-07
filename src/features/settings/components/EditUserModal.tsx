@@ -7,13 +7,15 @@ import { useAuth } from '@/shared/auth/AuthProvider';
 import { isPrivilegedRole, isSuperAdmin } from '@/shared/auth/permissions';
 import { useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useForm } from 'react-hook-form';
+import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
 import { ApiError } from '@/shared/api/errors';
 import { fields } from '@/shared/forms';
+import { internationalPhoneRule, phoneForDisplay, toE164 } from '@/shared/forms/phoneNumber';
+import { PhoneNumberInput } from '@/shared/forms/PhoneNumberInput';
 import { useUpdateUser, type RoleRow, type UserRow } from '@/shared/api/settingsAdmin';
 import { Field, inputClass } from './formKit';
 import { SETTINGS_TOAST } from '../lib/copy';
@@ -23,7 +25,7 @@ const editUserSchema = z.object({
   lastName: fields.requiredString(),
   email: fields.email(),
   jobTitle: z.string().trim().max(100).optional(),
-  phone: z.string().trim().optional(),
+  phone: internationalPhoneRule(),
   /** Typed — no Terminal table to pick from yet (backend D-090). Empty = all terminals. */
   homeTerminalName: z.string().trim().optional(),
 });
@@ -58,6 +60,8 @@ export function EditUserModal({
 
   const {
     register,
+    control,
+    setError,
     handleSubmit,
     formState: { errors, isDirty },
   } = useForm<EditUserValues>({
@@ -68,7 +72,7 @@ export function EditUserModal({
       lastName: user.lastName,
       email: user.email,
       jobTitle: user.jobTitle ?? '',
-      phone: user.phone ?? '',
+      phone: phoneForDisplay(user.phone),
       homeTerminalName: user.homeTerminalName ?? '',
     },
   });
@@ -95,7 +99,7 @@ export function EditUserModal({
       dto.firstName = values.firstName;
       dto.lastName = values.lastName;
       dto.jobTitle = values.jobTitle || undefined;
-      dto.phone = values.phone || undefined;
+      dto.phone = toE164(values.phone); // '' / '+' → omitted, as before
       dto.homeTerminalName = values.homeTerminalName || undefined;
       if (values.email !== user.email) dto.email = values.email;
     }
@@ -131,6 +135,12 @@ export function EditUserModal({
           onClose();
         },
         onError: (error) => {
+          // 422 VALIDATION_FAILED with an issue on `phone` → the field, not the banner.
+          const phoneIssue = error instanceof ApiError ? error.fieldErrors.phone : undefined;
+          if (phoneIssue) {
+            setError('phone', { message: phoneIssue });
+            return;
+          }
           const message = error instanceof ApiError ? error.userMessage : 'Something went wrong.';
           setBanner(message);
         },
@@ -195,8 +205,23 @@ export function EditUserModal({
               <Field label="Job title">
                 <input {...register('jobTitle')} disabled={submitting} className={inputClass} />
               </Field>
-              <Field label="Phone">
-                <input {...register('phone')} disabled={submitting} className={inputClass} />
+              <Field label="Phone" error={errors.phone?.message}>
+                <Controller
+                  control={control}
+                  name="phone"
+                  render={({ field }) => (
+                    <PhoneNumberInput
+                      name={field.name}
+                      inputRef={field.ref}
+                      value={field.value}
+                      onChange={field.onChange}
+                      onBlur={field.onBlur}
+                      disabled={submitting}
+                      aria-invalid={errors.phone ? true : undefined}
+                      className={inputClass}
+                    />
+                  )}
+                />
               </Field>
             </div>
             <Field label="Home terminal" hint="Leave empty for all terminals.">

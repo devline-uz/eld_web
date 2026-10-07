@@ -17,17 +17,46 @@ const create = (dto: Record<string, unknown>) =>
     body: JSON.stringify({ firstName: 'New', lastName: 'Driver', username: 'brandnew', email: 'brand.new@example.com', cdlNumber: 'NEW0001', ...dto }),
   });
 
+const phoneDigits = (i: number) => DRIVERS[i]!.phone!.replace(/\D/g, '').slice(-10);
+
 describe('POST /drivers mock', () => {
   it.each([
-    ['email', () => ({ email: DRIVERS[0]!.email!.toUpperCase() }), 'DUPLICATE_EMAIL'],
-    ['phone', () => ({ phone: DRIVERS[0]!.phone!.replace(/\s/g, '-') }), 'DUPLICATE_PHONE'],
-    ['cdlNumber', () => ({ cdlNumber: DRIVERS[0]!.cdlNumber.toLowerCase() }), 'DUPLICATE_CDL_NUMBER'],
+    ['email', () => ({ email: DRIVERS[0]!.email!.toUpperCase() }), 'EMAIL_TAKEN'],
+    ['phone', () => ({ phone: DRIVERS[0]!.phone!.replace(/\s/g, '-') }), 'PHONE_TAKEN'],
+    ['cdlNumber', () => ({ cdlNumber: DRIVERS[0]!.cdlNumber.toLowerCase() }), 'CDL_NUMBER_TAKEN'],
   ])('rejects a duplicate %s with a 409 naming the field', async (field, dto, code) => {
     const res = await create(dto());
     const body = (await res.json()) as { code: string; details: Record<string, string> };
     expect(res.status).toBe(409);
     expect(body.code).toBe(code);
     expect(body.details[field]).toBeDefined();
+  });
+
+  it.each([
+    ['username with spaces', () => ({ username: `  ${DRIVERS[0]!.username} ` }), 'USERNAME_TAKEN', 'username'],
+    ['email with case and spaces', () => ({ email: ` ${DRIVERS[0]!.email!.toUpperCase()} ` }), 'EMAIL_TAKEN', 'email'],
+    ['phone in another format', () => ({ phone: `+1 (${phoneDigits(0).slice(0, 3)}) ${phoneDigits(0).slice(3, 6)}-${phoneDigits(0).slice(6)}` }), 'PHONE_TAKEN', 'phone'],
+    ['licence with dashes and spaces', () => ({ cdlNumber: ` ${DRIVERS[0]!.cdlNumber.toLowerCase().split('').join('-')} ` }), 'CDL_NUMBER_TAKEN', 'cdlNumber'],
+  ])('treats a %s as the same value', async (_name, dto, code, field) => {
+    const res = await create(dto());
+    const body = (await res.json()) as { code: string; details: Record<string, string> };
+    expect(res.status).toBe(409);
+    expect(body.code).toBe(code);
+    expect(body.details[field]).toBeDefined();
+  });
+
+  it('answers 404 VEHICLE_NOT_FOUND for an unknown unit and 409 VEHICLE_OUT_OF_SERVICE for a blocked one', async () => {
+    const missing = await create({ assignedVehicleId: 'veh_nope' });
+    expect(missing.status).toBe(404);
+    const body = (await missing.json()) as { code: string; details: Record<string, string> };
+    expect(body.code).toBe('VEHICLE_NOT_FOUND');
+    expect(body.details.assignedVehicleId).toBe('Select a unit.');
+    const taken = new Set(DRIVERS.map((d) => d.assignedVehicleId));
+    const free = VEHICLES.find((v) => !taken.has(v.id))!;
+    free.status = 'OUT_OF_SERVICE';
+    const oos = await create({ assignedVehicleId: free.id });
+    expect(oos.status).toBe(409);
+    expect(((await oos.json()) as { code: string }).code).toBe('VEHICLE_OUT_OF_SERVICE');
   });
 
   it('refuses a unit that already has a driver and leaves that driver assigned', async () => {
@@ -45,6 +74,40 @@ describe('POST /drivers mock', () => {
     const res = await create({ assignedVehicleId: free.id });
     expect(res.status).toBe(201);
     expect(DRIVERS.filter((d) => d.assignedVehicleId === free.id).map((d) => d.username)).toEqual(['brandnew']);
+  });
+});
+
+const patchDriver = (id: string, dto: Record<string, unknown>) =>
+  fetch(url(endpoints.drivers.update(id)), {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(dto),
+  });
+
+describe('PATCH /drivers/:id mock', () => {
+  it('rejects another driver\'s email, phone and licence with the *_TAKEN codes', async () => {
+    const other = DRIVERS[1]!;
+    const email = await patchDriver(DRIVERS[0]!.id, { email: other.email!.toUpperCase() });
+    expect(((await email.json()) as { code: string }).code).toBe('EMAIL_TAKEN');
+    const phone = await patchDriver(DRIVERS[0]!.id, { phone: other.phone });
+    expect(((await phone.json()) as { code: string }).code).toBe('PHONE_TAKEN');
+    const cdl = await patchDriver(DRIVERS[0]!.id, { cdlNumber: other.cdlNumber.toLowerCase() });
+    expect(((await cdl.json()) as { code: string }).code).toBe('CDL_NUMBER_TAKEN');
+  });
+
+  it('saves a driver unchanged (own values are not a conflict) and ignores assignedVehicleId', async () => {
+    const d = DRIVERS[0]!;
+    const before = d.assignedVehicleId;
+    const res = await patchDriver(d.id, { email: d.email, phone: d.phone, cdlNumber: d.cdlNumber, assignedVehicleId: 'veh_nope' });
+    expect(res.status).toBe(200);
+    expect(d.assignedVehicleId).toBe(before);
+  });
+
+  it('a deleted driver\'s values are free to take', async () => {
+    const [a, b] = [DRIVERS[0]!, DRIVERS[1]!];
+    b.status = 'TERMINATED';
+    const res = await patchDriver(a.id, { email: b.email, cdlNumber: b.cdlNumber });
+    expect(res.status).toBe(200);
   });
 });
 
