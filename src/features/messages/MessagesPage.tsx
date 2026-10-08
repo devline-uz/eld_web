@@ -1,6 +1,6 @@
 // owner: web-dispatch-messaging — W-16 Messages (web/tz.md §10 W-16).
 // Design: web/roles and screens/admin panel/Three-pane driver messaging with context panel.jpg
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { Phone, Plus, Search, Send, User } from 'lucide-react';
@@ -65,9 +65,37 @@ const QUICK_ACTIONS: ReadonlyArray<{ label: string; text: string }> = [
   },
 ];
 
+/** The composer grows with its content up to this many lines, then scrolls internally. */
+const COMPOSER_MAX_LINES = 6;
+
+/**
+ * Sizes the composer textarea to its content, capped at `COMPOSER_MAX_LINES`. Line height,
+ * padding and border come from the computed style so it tracks the `text-body` token.
+ */
+function autosizeComposer(el: HTMLTextAreaElement): void {
+  const style = window.getComputedStyle(el);
+  const fontSize = parseFloat(style.fontSize) || 16;
+  const lineHeight = parseFloat(style.lineHeight) || fontSize * 1.5;
+  const border = (parseFloat(style.borderTopWidth) || 0) + (parseFloat(style.borderBottomWidth) || 0);
+  const padding = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+  const maxHeight = lineHeight * COMPOSER_MAX_LINES + padding + border;
+  el.style.height = 'auto';
+  // scrollHeight covers content + padding but not the border; Tailwind preflight is border-box.
+  const contentHeight = el.scrollHeight + border;
+  el.style.height = `${Math.min(contentHeight, maxHeight)}px`;
+  el.style.overflowY = contentHeight > maxHeight ? 'auto' : 'hidden';
+}
+
 function conversationName(conversation: ConversationListItem): string {
   if (conversation.type === 'GROUP') return conversation.title ?? 'Group conversation';
   return conversation.driver ? `${conversation.driver.firstName} ${conversation.driver.lastName}` : (conversation.title ?? 'Conversation');
+}
+
+/** GROUP header line — the participant count (drivers + office users, the creator included). */
+function groupMembersLabel(conversation: ConversationListItem): string {
+  const count = conversation.participants.length;
+  const drivers = conversation.participants.filter((p) => p.driverId).length;
+  return `${count} member${count === 1 ? '' : 's'} · ${drivers} driver${drivers === 1 ? '' : 's'}`;
 }
 
 function conversationInitials(conversation: ConversationListItem): string {
@@ -100,6 +128,7 @@ export default function MessagesPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [newOpen, setNewOpen] = useState(false);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
 
   const conversations = useConversationsList(user?.id);
 
@@ -192,11 +221,17 @@ export default function MessagesPage() {
     [conversations.items, selectedId],
   );
 
+  // Runs on every draft change — typing, quick-action chips and the clear after Send — and when
+  // the composer remounts for another conversation, so it shrinks back to one line when empty.
+  useLayoutEffect(() => {
+    if (composerRef.current) autosizeComposer(composerRef.current);
+  }, [draft, selected?.id]);
+
   const messagesQuery = useMessages(selected?.id);
   const sendMessage = useSendMessage(selected?.id ?? '');
   const liveFleet = useLiveFleet();
   const trips = useActiveTrips();
-  const driverHos = useDriverHos(selected?.driver?.id);
+  const driverHos = useDriverHos(selected?.type === 'GROUP' ? undefined : selected?.driver?.id);
 
   useRoom(selected ? `conversation:${selected.id}` : null, {
     'message.new': (payload) => {
@@ -403,16 +438,26 @@ export default function MessagesPage() {
           <>
             <div className="flex items-center justify-between border-b border-border p-3">
               <div className="flex items-center gap-2">
-                <Avatar name={conversationName(selected)} size="md" />
+                {selected.type === 'GROUP' ? (
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-violet-soft text-caption font-semibold text-violet">
+                    {conversationInitials(selected)}
+                  </span>
+                ) : (
+                  <Avatar name={conversationName(selected)} size="md" />
+                )}
                 <div>
                   <p className="text-body-strong text-text">{conversationName(selected)}</p>
                   <p className="text-caption text-text-muted">
-                    {driverUnit ? `Unit ${driverUnit.unitNumber} · ${driverUnit.dutyStatus === 'DRIVING' ? 'Driving' : 'On duty'} · ${formatSpeed(driverUnit.speedMph)}` : 'Status unavailable'}
+                    {selected.type === 'GROUP'
+                      ? groupMembersLabel(selected)
+                      : driverUnit
+                        ? `Unit ${driverUnit.unitNumber} · ${driverUnit.dutyStatus === 'DRIVING' ? 'Driving' : 'On duty'} · ${formatSpeed(driverUnit.speedMph)}`
+                        : 'Status unavailable'}
                   </p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                {selected.driver && (
+                {selected.driver && selected.type !== 'GROUP' && (
                   <Button variant="secondary" size="sm" onClick={() => navigate(`/hos-logs?driverId=${selected.driver!.id}`)}>
                     View logs
                   </Button>
@@ -484,6 +529,7 @@ export default function MessagesPage() {
                 </div>
                 <div className="flex items-end gap-2">
                   <textarea
+                    ref={composerRef}
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
                     onKeyDown={(e) => {
@@ -494,7 +540,7 @@ export default function MessagesPage() {
                     }}
                     placeholder={`Write a message to ${conversationName(selected)}…`}
                     rows={1}
-                    className="max-h-32 flex-1 resize-none rounded-md border border-border bg-bg-surface px-3 py-2 text-body text-text outline-none"
+                    className="flex-1 resize-none rounded-md border border-border bg-bg-surface px-3 py-2 text-body text-text outline-none"
                   />
                   <Button
                     variant="primary"
@@ -515,7 +561,7 @@ export default function MessagesPage() {
       </div>
 
       {/* Right panel — driver context */}
-      {selected?.driver && (
+      {selected?.driver && selected.type !== 'GROUP' && (
         <div className="w-message-context shrink-0 overflow-y-auto border-l border-border p-4">
           <div className="flex flex-col items-center gap-1 text-center">
             <Avatar name={conversationName(selected)} size="xl" />
@@ -609,7 +655,18 @@ export default function MessagesPage() {
         </div>
       )}
 
-      {newOpen && <NewConversationModal onClose={() => setNewOpen(false)} onCreated={(id) => setSelectedId(id)} />}
+      {newOpen && (
+        <NewConversationModal
+          onClose={() => setNewOpen(false)}
+          onCreated={(id, type) => {
+            setSelectedId(id);
+            // Make the new row visible: a fresh group lands in `Groups`; any filter that would
+            // hide the new conversation (search, `Unread`) is cleared.
+            setSearch('');
+            setSegment(type === 'GROUP' ? 'GROUPS' : 'ALL');
+          }}
+        />
+      )}
     </div>
   );
 }
