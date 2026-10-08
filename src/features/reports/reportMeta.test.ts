@@ -144,7 +144,7 @@ describe('saveFile', () => {
     Object.assign(URL, { createObjectURL: create, revokeObjectURL: revoke });
 
     saveFile('http://127.0.0.1:19000/reports/a.csv', 'a.csv');
-    saveFile(new Blob(['x']), 'SMITH38018.csv');
+    saveFile(new Blob(['x']), 'SMITH3841091126-000000000.csv');
 
     const [presigned, blobLink] = links as [HTMLAnchorElement, HTMLAnchorElement];
     // WB-140 — a cross-origin presigned URL opens in a new context; `download` is ignored there
@@ -154,7 +154,7 @@ describe('saveFile', () => {
     expect(presigned.hasAttribute('download')).toBe(false);
     // A blob URL is same-origin, so it still downloads in place.
     expect(blobLink.target).toBe('');
-    expect(blobLink.getAttribute('download')).toBe('SMITH38018.csv');
+    expect(blobLink.getAttribute('download')).toBe('SMITH3841091126-000000000.csv');
 
     expect(click).toHaveBeenCalledTimes(2);
     expect(create).toHaveBeenCalledTimes(1);

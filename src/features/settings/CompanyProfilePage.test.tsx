@@ -45,7 +45,7 @@ const CARRIER = {
   zip: '43004',
   phone: '+1 614 555 0104',
   complianceEmail: 'compliance@universal-logistics.example',
-  eldIdentifier: 'OBK1',
+  eldIdentifier: 'OBK001',
   eldRegistrationId: 'OBK1',
   erodsMode: 'TEST',
 };
@@ -97,12 +97,12 @@ describe('CompanyProfilePage — W-17', () => {
     expect(await screen.findByText('Settings saved')).toBeInTheDocument();
   });
 
-  it('rejects an ELD identifier that is not exactly 4 [A-Z0-9] characters', async () => {
+  it('rejects an ELD identifier that is not exactly 6 [A-Z0-9] characters', async () => {
     const user = userEvent.setup();
     server.use(http.get(url(endpoints.carrier.root), () => ok(CARRIER)));
     renderPage();
 
-    const eldInputs = await screen.findAllByDisplayValue('OBK1');
+    const eldInputs = await screen.findAllByDisplayValue('OBK001');
     const eldInput = eldInputs[0]!;
     await user.clear(eldInput);
     await user.type(eldInput, 'AB');
@@ -111,7 +111,7 @@ describe('CompanyProfilePage — W-17', () => {
     await user.tab();
 
     expect(
-      await screen.findByText('The ELD identifier is exactly 4 characters, letters and digits only.'),
+      await screen.findByText('The ELD identifier is exactly 6 characters, letters and digits only.'),
     ).toBeInTheDocument();
   });
 
@@ -120,15 +120,15 @@ describe('CompanyProfilePage — W-17', () => {
     server.use(http.get(url(endpoints.carrier.root), () => ok(CARRIER)));
     renderPage();
 
-    const eldInputs = await screen.findAllByDisplayValue('OBK1');
+    const eldInputs = await screen.findAllByDisplayValue('OBK001');
     const eldInput = eldInputs[0]!;
     await user.clear(eldInput);
-    await user.type(eldInput, 'obk1');
+    await user.type(eldInput, 'obk001');
     await user.tab();
 
-    expect(eldInput).toHaveValue('obk1');
+    expect(eldInput).toHaveValue('obk001');
     // WB — the message names the real fault (casing), not a wrong length.
-    expect(await screen.findByText('The ELD identifier must be uppercase — enter OBK1.')).toBeInTheDocument();
+    expect(await screen.findByText('The ELD identifier must be uppercase — enter OBK001.')).toBeInTheDocument();
   });
 
   it('touches every remaining field once', async () => {
@@ -167,9 +167,9 @@ describe('CompanyProfilePage — W-17', () => {
     await user.click(pcToggle);
     await user.click(ymToggle);
 
-    const eldRegInputs = await screen.findAllByDisplayValue('OBK1');
-    await user.clear(eldRegInputs[1]!);
-    await user.type(eldRegInputs[1]!, 'OBK2');
+    const eldRegInput = await screen.findByDisplayValue('OBK1');
+    await user.clear(eldRegInput);
+    await user.type(eldRegInput, 'OBK2');
 
     expect(await screen.findByRole('button', { name: 'Save changes' })).toBeEnabled();
   });

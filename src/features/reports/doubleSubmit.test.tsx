@@ -144,7 +144,7 @@ describe('WB-146 · one click, one report', () => {
         open
         onClose={vi.fn()}
         erodsMode={undefined}
-        eldIdentifier="OBK1"
+        eldIdentifier="OBK001"
         timezone="America/New_York"
         initial={{ driverId: 'drv_1', from: '2026-09-03', to: '2026-09-10', outputFileComment: 'ROADSIDE INSPECTION' }}
       />,

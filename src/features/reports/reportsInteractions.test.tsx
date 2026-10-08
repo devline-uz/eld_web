@@ -374,7 +374,7 @@ describe('a list that shrinks under the open page', () => {
 describe('11.14 interactions', () => {
   function renderModal(onClose = vi.fn()) {
     renderPage(
-      <SendLogsModal open onClose={onClose} erodsMode={undefined} eldIdentifier="OBK1" timezone="America/New_York"
+      <SendLogsModal open onClose={onClose} erodsMode={undefined} eldIdentifier="OBK001" timezone="America/New_York"
         initial={{ from: '2026-09-03', to: '2026-09-10', outputFileComment: 'ROADSIDE INSPECTION 2026-09-10' }} />,
     );
     return onClose;

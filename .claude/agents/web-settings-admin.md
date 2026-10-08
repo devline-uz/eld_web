@@ -13,7 +13,7 @@ You own `features/settings/` and `features/support/` under `SettingsLayout`. Spe
 - **Q-2 lives here:** 11.21 SMS channel permanently disabled with the explanatory text; `SMS` never in `channels`; driver invitations by email.
 - W-19 renders the full 22 × 4 matrix; runtime permissions still come from `/auth/me`. ADMIN rows not editable (`Admin cannot be edited` chip — the one allowed disabled-looking control).
 - Audit log: server-paginated, virtualised > 500 rows (~50 000), `auditLog`-gated filters/range/CSV, carrier timezone.
-- `eldIdentifier` exactly 4 chars `[A-Z0-9]`, §14.2 text, never auto-corrected.
+- `eldIdentifier` exactly 6 chars `[A-Z0-9]` (Appendix A 7.15; registration id stays 4), §14.2 text, never auto-corrected.
 - Billing/plan/usage/invoices are not built (that design file draws Register an ELD device). Org switcher disabled.
 - Gaps recorded, not faked: `GET /devices/:id/diagnostics` (**B-8**, 11.20 Test connection), `POST /alert-rules/:id/test` (**B-9**), `POST /support/tickets` for `support:READ` (**B-12**), `GET/PUT /me/preferences` (**B-11**, fall back to `localStorage`).
 - Empty states verbatim from `copy.ts`; settings writes fire `Settings saved`.

@@ -183,8 +183,8 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
       setEldError(null);
       return true;
     }
-    if (!/^[A-Za-z0-9]{4}$/.test(value)) {
-      setEldError('The ELD identifier is exactly 4 characters, letters and digits only.');
+    if (!/^[A-Za-z0-9]{6}$/.test(value)) {
+      setEldError('The ELD identifier is exactly 6 characters, letters and digits only.');
       return false;
     }
     if (value !== value.toUpperCase()) {
@@ -524,11 +524,11 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
           <Field
             label="ELD identifier"
             error={eldError ?? undefined}
-            hint="Exactly 4 characters, uppercase letters and digits only (A-Z, 0-9). Entered as typed — never auto-corrected."
+            hint="Exactly 6 characters, uppercase letters and digits only (A-Z, 0-9). Entered as typed — never auto-corrected."
           >
             <input
               className={inputClass}
-              maxLength={4}
+              maxLength={6}
               value={form.eldIdentifier ?? ''}
               readOnly={!canFull}
               aria-invalid={eldError ? true : undefined}
@@ -542,7 +542,7 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
                 set('eldIdentifier', e.target.value);
                 setEldError(null);
               }}
-              placeholder="OBK1"
+              placeholder="OBK001"
             />
           </Field>
           <Field label="ELD registration ID" error={errors.eldRegistrationId}>

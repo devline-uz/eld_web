@@ -37,7 +37,7 @@ export const VALIDATION_MESSAGES = {
   ticketDescription: 'Enter a description.',
   deviceSerial: 'Enter a serial number.',
   alertRuleName: 'Enter a rule name.',
-  eldIdentifier: 'The ELD identifier is exactly 4 characters.',
+  eldIdentifier: 'The ELD identifier is exactly 6 characters.',
   transferRange: 'A transfer covers at most 8 days.',
   logRange: 'Select a range of 62 days or fewer.',
   csvFile: 'Upload a CSV file up to 5 MB.',
@@ -91,7 +91,7 @@ export const LIMITS = {
   deviceFirmwareMax: 20,
   /** CreateAlertRuleDto — `name` ≤ 200. */
   alertRuleNameMax: 200,
-  eldIdentifierLength: 4,
+  eldIdentifierLength: 6,
   /** W-17 Company profile. */
   cityMax: 60,
   companyTextMax: 120,

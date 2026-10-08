@@ -2312,7 +2312,7 @@ ko'rsatilgan (matn vertikal siqilgan); to'g'ri ko'rinish quyidagicha):
 
 **eRODS bloki** (⚠️ dizaynda yo'q, lekin `carrierSettings` ga tegishli va backend maydonlari
 bor — **qo'shiladi**, chunki `erodsMode` ni boshqarish joyi bo'lishi shart):
-`ELD identifier` (4 belgi, `OBK1`, `maxLength=4`, upper-case) ·
+`ELD identifier` (**6** belgi, `OBK001`, `maxLength=6`, upper-case) ·
 `ELD registration ID` (4 belgi) · `eRODS mode ▾` `TEST | PRODUCTION`.
 `PRODUCTION` tanlanganda tasdiq modali: `Switching to production sends real files to FMCSA.`
 
@@ -2321,7 +2321,7 @@ Saqlangach: `<SavedIndicator>` `✓ All changes saved · last synced 12 seconds 
 Sahifadan chiqishda `dirty` bo'lsa — `Discard changes?` tasdig'i.
 
 **Qabul mezoni:** ⬜ 10 + 6 maydon · ⬜ 2 toggle to'g'ri layout · ⬜ eRODS bloki ·
-⬜ `Save changes` disabled/enabled · ⬜ `eldIdentifier` aynan 4 belgi validatsiyasi
+⬜ `Save changes` disabled/enabled · ⬜ `eldIdentifier` aynan 6 belgi validatsiyasi
 
 ---
 
@@ -2963,10 +2963,10 @@ qoladi, faqat `Assigned by Sarah Chen · Sep 10` izohi qo'shiladi.
 
 > ⚠️ **Fayl nomi dizaynda noto'g'ri.** `ONEB01_Smith_20250910.csv` — `backend/tz.md` §10.2
 > (Appendix A 4.8.2.2) formatiga **zid**. To'g'ri format:
-> `[familiya 5 belgi][prava oxirgi 2][fayl ketma-ketligi 2][kun soni 1].csv` → **`SMITH38018.csv`**.
+> `[familiya 5 harf][prava oxirgi 2 raqam][prava raqamlari yig'indisi oxirgi 2][MMDDYY]-[9 raqamli ketma-ketlik].csv` → **`SMITH3841091126-000000000.csv`** (2026-10-08 yangi format).
 > Frontend fayl nomini **o'zi yasamaydi** — backend `POST /transfers` javobidagi `fileName`
 > ni ko'rsatadi. Preview panelida shu qiymat chiqadi.
-> Xuddi shunday `#ONEB01` — 6 belgi; `eldIdentifier` **4 belgi** (`OBK1`).
+> `eldIdentifier` **aynan 6 belgi** (`OBK001`, App. A 7.15); `eldRegistrationId` — 4 belgi (7.17).
 > Preview `carrier.eldIdentifier` dan oladi.
 
 `POST /transfers { driverId, method, rangeStart, rangeEnd, outputFileComment }`.
@@ -3449,7 +3449,7 @@ Web panelda **offline navbat yo'q** (bu faqat mobil ilova talabi, `backend/tz.md
 | Edit reason | 4–500 | `Explain why the record is being changed.` |
 | Message body | 1–2000 | `Messages are limited to 2,000 characters.` |
 | Ticket subject | 3–140 | — |
-| `eldIdentifier` | **aynan 4**, `[A-Z0-9]` | `The ELD identifier is exactly 4 characters.` |
+| `eldIdentifier` | **aynan 6**, `[A-Z0-9]` | `The ELD identifier is exactly 6 characters.` |
 | Sana oralig'i (transfer) | ≤ **8 kun** | `A transfer covers at most 8 days.` |
 | Sana oralig'i (log range) | ≤ **62 kun** | `Select a range of 62 days or fewer.` |
 | Fayl (CSV) | ≤ 5 MB, `.csv` | `Upload a CSV file up to 5 MB.` |
@@ -3793,8 +3793,8 @@ so'ramasligi uchun sabab ko'rsatilishi kerak. Backend enum'ida `SMS` ham qolaver
 
 ### 21.7. Transfer fayl nomi va ELD identifikatori
 **Dizayn:** `ONEB01_Smith_20250910.csv`, `ELD registration #ONEB01`.
-**TZ:** §10.2 — fayl nomi Appendix A 4.8.2.2 bo'yicha (`SMITH38018.csv`);
-§5.1 — `eldIdentifier` **aynan 4 belgi** (`OBK1`), `ONEB01` **yaroqsiz**.
+**TZ:** §10.2 — fayl nomi Appendix A 4.8.2.2 bo'yicha (`SMITH3841091126-000000000.csv`);
+§5.1 — `eldIdentifier` **aynan 6 belgi** (`OBK001`); dizayndagi `ONEB01` ham 6 belgi — shakl bo'yicha yaroqli.
 **Qaror:** frontend fayl nomini **yasamaydi** — `POST /transfers` javobidagi `fileName` va
 `carrier.eldIdentifier` ko'rsatiladi. Dizayndagi matn shunchaki mock qiymat.
 

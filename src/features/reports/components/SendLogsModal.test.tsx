@@ -34,7 +34,7 @@ function renderModal(props: Partial<SendLogsModalProps> = {}) {
     <QueryClientProvider client={client}>
       <ToastProvider>
         <MemoryRouter>
-          <SendLogsModal open onClose={onClose} erodsMode={undefined} eldIdentifier="OBK1" timezone="America/New_York" initial={BASE} {...props} />
+          <SendLogsModal open onClose={onClose} erodsMode={undefined} eldIdentifier="OBK001" timezone="America/New_York" initial={BASE} {...props} />
         </MemoryRouter>
       </ToastProvider>
     </QueryClientProvider>,
@@ -80,7 +80,7 @@ describe('11.14 Send logs to a safety official', () => {
     expect(d.getByText('Provided by the safety official. Maximum 60 characters.')).toBeInTheDocument();
     expect(d.getByText('30/60')).toBeInTheDocument();
     expect(d.getByText('RODS, edits, annotations, DVIRs, ELD malfunctions')).toBeInTheDocument();
-    expect(d.getByText('ELD registration #OBK1 · TEST (pending)')).toHaveClass('text-warning');
+    expect(d.getByText('ELD registration #OBK001 · TEST (pending)')).toHaveClass('text-warning');
     expect(d.getByText('—')).toBeInTheDocument(); // file name: never built client-side
     expect(await d.findByText('UNRESOLVED_UNIDENTIFIED')).toBeInTheDocument();
     expect(d.getByText('UNCERTIFIED_LOGS')).toBeInTheDocument();
@@ -112,7 +112,7 @@ describe('11.14 Send logs to a safety official', () => {
       { driverId: 'drv_1', method: 'WEB_SERVICES', rangeStart: '2026-09-03', rangeEnd: '2026-09-10', outputFileComment: 'ROADSIDE INSPECTION 2026-09-10' },
     ]);
     const d = within(dialog());
-    expect(d.getByText('SMITH38018.csv')).toBeInTheDocument();
+    expect(d.getByText('SMITH3841091126-000000000.csv')).toBeInTheDocument();
     expect(await d.findByText('3 daily logs · 42 events · 3 unassigned')).toBeInTheDocument();
     expect(d.getByText('ERODS_TEST_MODE')).toBeInTheDocument();
     expect(d.getByText('eRODS is in test mode — the file will not reach FMCSA.', { exact: false })).toBeInTheDocument();
@@ -198,7 +198,7 @@ describe('11.14 Send logs to a safety official', () => {
     expect(
       await within(dialog()).findByText('Validation passed. No unassigned segments or uncertified logs in this range.'),
     ).toBeInTheDocument();
-    expect(within(dialog()).getByText('ELD registration #OBK1')).toBeInTheDocument();
+    expect(within(dialog()).getByText('ELD registration #OBK001')).toBeInTheDocument();
     await userEvent.click(within(dialog()).getByRole('button', { name: 'Send transfer' }));
     expect(await screen.findByText('Transfer sent')).toBeInTheDocument();
     expect(screen.getByText('The file was accepted by the FMCSA endpoint.')).toBeInTheDocument();

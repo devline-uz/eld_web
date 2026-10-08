@@ -108,7 +108,7 @@ const FORMAT_COPY: Partial<Record<CarrierFieldKey, string>> = {
   zip: M.zip,
   unassignedThresholdMin: M.unassignedThreshold,
   dvirRetentionMonths: M.dvirRetention,
-  eldIdentifier: 'The ELD identifier is exactly 4 characters, letters and digits only.',
+  eldIdentifier: 'The ELD identifier is exactly 6 characters, letters and digits only.',
   eldRegistrationId: 'The ELD registration ID is exactly 4 characters, letters and digits only.',
 };
 

@@ -84,7 +84,7 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "id": "carrier",
     "name": "Acme Trucking",
     "dotNumber": "1234567",
-    "eldIdentifier": "OBK1",
+    "eldIdentifier": "OBK001",
     "erodsMode": "TEST"
   },
   'PATCH /api/carrier': {
@@ -92,13 +92,13 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "name": "Universal Logistics Inc.",
     "dotNumber": "1234567",
     "timezone": "America/New_York",
-    "eldIdentifier": "OBK1",
+    "eldIdentifier": "OBK001",
     "eldRegistrationId": null,
     "erodsMode": "TEST"
   },
   'GET /api/carrier/transfer-config': {
     "timezone": "America/New_York",
-    "eldIdentifier": "OBK1",
+    "eldIdentifier": "OBK001",
     "eldRegistrationId": null,
     "erodsMode": "TEST"
   },

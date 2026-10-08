@@ -48,7 +48,7 @@ export const transferRows = [
     rangeStart: '2026-09-03T00:00:00.000Z',
     rangeEnd: '2026-09-10T00:00:00.000Z',
     outputFileComment: 'ROADSIDE INSPECTION 2026-09-10',
-    fileName: 'SMITH38018.csv',
+    fileName: 'SMITH3841091126-000000000.csv',
     fileSizeBytes: 2048,
     encrypted: false,
     status: 'TEST_ONLY',
@@ -205,7 +205,7 @@ export const reportsHandlers = [
     ),
   ),
   http.get(url(endpoints.transfers.download(':id')), () =>
-    new HttpResponse('Header,OBK1,Universal Logistics Inc.,1234567\n', { headers: { 'Content-Type': 'text/csv' } }),
+    new HttpResponse('Header,OBK001,Universal Logistics Inc.,1234567\n', { headers: { 'Content-Type': 'text/csv' } }),
   ),
 ];
 
@@ -375,6 +375,6 @@ export const reportScreenHandlers = [
   http.get(url(endpoints.defects.list), () => ok(page(reportDefects, 200))),
   http.get(url(endpoints.unidentified.list), () => ok({ items: [], total: 3, page: 1, limit: 1, totalPages: 3 })),
   http.get(url(endpoints.carrier.root), () =>
-    ok({ id: 'carrier', name: 'Universal Logistics Inc.', timezone: 'America/New_York', eldIdentifier: 'OBK1', eldRegistrationId: null, erodsMode: 'PRODUCTION' }),
+    ok({ id: 'carrier', name: 'Universal Logistics Inc.', timezone: 'America/New_York', eldIdentifier: 'OBK001', eldRegistrationId: null, erodsMode: 'PRODUCTION' }),
   ),
 ];

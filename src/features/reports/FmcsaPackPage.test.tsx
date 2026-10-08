@@ -175,7 +175,7 @@ describe('W-15 Reports · FMCSA / DOT audit pack', () => {
   it('⬜ shows the TEST banner from GET /carrier/transfer-config for FLEET_MANAGER (B-45)', async () => {
     server.use(
       http.get(url(endpoints.carrier.transferConfig), () =>
-        ok({ timezone: 'America/New_York', eldIdentifier: 'OBK1', eldRegistrationId: null, erodsMode: 'TEST' }),
+        ok({ timezone: 'America/New_York', eldIdentifier: 'OBK001', eldRegistrationId: null, erodsMode: 'TEST' }),
       ),
     );
     renderPage(<FmcsaPackPage />, ROUTE);
@@ -189,7 +189,7 @@ describe('W-15 Reports · FMCSA / DOT audit pack', () => {
     mocks.role = role;
     server.use(
       http.get(url(endpoints.carrier.transferConfig), () =>
-        ok({ timezone: 'America/New_York', eldIdentifier: 'OBK1', eldRegistrationId: 'REG1', erodsMode: 'PRODUCTION' }),
+        ok({ timezone: 'America/New_York', eldIdentifier: 'OBK001', eldRegistrationId: 'REG1', erodsMode: 'PRODUCTION' }),
       ),
     );
     renderPage(<FmcsaPackPage />, ROUTE);
@@ -238,7 +238,7 @@ describe('W-15 Reports · FMCSA / DOT audit pack', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'ROADSIDE INSPECTION 2026-09-10' }));
     // Role queries over this large page outlast findBy's 1 s budget; anchor on a drawer-only label.
     const drawer = (await screen.findByText('eRODS mode')).closest('[role="dialog"]') as HTMLElement;
-    expect(within(drawer).getByText('SMITH38018.csv')).toBeInTheDocument();
+    expect(within(drawer).getByText('SMITH3841091126-000000000.csv')).toBeInTheDocument();
     expect(within(drawer).getByText('TEST')).toBeInTheDocument();
     await userEvent.click(within(drawer).getByRole('button', { name: 'Download a copy' }));
     await waitFor(() => expect(URL.createObjectURL).toHaveBeenCalled());

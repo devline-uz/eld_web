@@ -224,7 +224,7 @@ function seedCarrier(): CarrierRow {
     zip: '43215',
     phone: '+1 614 555 0100',
     complianceEmail: 'compliance@universal-logistics.example',
-    eldIdentifier: 'OBK1',
+    eldIdentifier: 'OBK001',
     eldRegistrationId: null,
     erodsMode: 'PRODUCTION',
   };

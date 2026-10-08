@@ -6,7 +6,7 @@ import { LIMITS, VALIDATION_MESSAGES as M } from './messages';
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const VIN_RE = /^[A-HJ-NPR-Z0-9]{17}$/;
 const USERNAME_RE = /^[a-z0-9._-]+$/;
-const ELD_ID_RE = /^[A-Z0-9]{4}$/;
+const ELD_ID_RE = /^[A-Z0-9]{6}$/;
 const PHONE_RE = /^(\+[1-9]\d{7,14}|\d{10})$/;
 const ISO_DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 const DOT_NUMBER_RE = /^\d{1,8}$/;
@@ -95,7 +95,7 @@ export const ticketSubject = () =>
     .max(LIMITS.ticketSubjectMax, M.ticketSubject);
 
 export const eldIdentifier = () =>
-  requiredString(M.eldIdentifier).toUpperCase().regex(ELD_ID_RE, M.eldIdentifier);
+  requiredString(M.eldIdentifier).regex(ELD_ID_RE, M.eldIdentifier);
 
 /** E.164 (`+14155552671`) or a 10-digit US number; spaces, `(`, `)` and `-` between the digits are
  * formatting only (`+1 614 555 0104`, `(614) 555-0188`). */

@@ -94,10 +94,12 @@ describe('field rules', () => {
     expect(f.ticketSubject().safeParse('Device offline on unit #101').success).toBe(true);
   });
 
-  it('requires an ELD identifier of exactly 4 characters', () => {
-    expect(f.eldIdentifier().safeParse('OBK1').success).toBe(true);
-    expect(firstError(f.eldIdentifier(), 'OBK')).toBe(M.eldIdentifier);
-    expect(firstError(f.eldIdentifier(), 'OBK-1')).toBe(M.eldIdentifier);
+  it('requires an ELD identifier of exactly 6 characters', () => {
+    expect(f.eldIdentifier().safeParse('OBK001').success).toBe(true);
+    expect(firstError(f.eldIdentifier(), 'OBK1')).toBe(M.eldIdentifier);
+    expect(firstError(f.eldIdentifier(), 'OBK-01')).toBe(M.eldIdentifier);
+    // never auto-corrected: lowercase is rejected, not uppercased
+    expect(firstError(f.eldIdentifier(), 'obk001')).toBe(M.eldIdentifier);
   });
 
   it('validates phone numbers in E.164 and US form', () => {
