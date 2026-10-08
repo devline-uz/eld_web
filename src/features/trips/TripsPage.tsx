@@ -38,6 +38,7 @@ import { orDash } from '@/shared/format/empty';
 import { CreateTripModal } from './components/CreateTripModal';
 import { AssignLoadModal } from './components/AssignLoadModal';
 import { TripFiltersDrawer, TripFilterChips } from './components/TripFiltersDrawer';
+import { RoutePreview } from './components/RoutePreview';
 import { PeriodDropdown } from './components/PeriodDropdown';
 import { scheduleConflictMessage } from './lib/copy';
 import { parseTripFilters, writeTripFilters, matchesTripFilters, EMPTY_TRIP_FILTERS, countActiveTripFilters } from './lib/filters';
@@ -519,9 +520,7 @@ export default function TripsPage() {
             {selectedTrip ? (
               <>
                 <SectionHeader title={`Route · ${selectedTrip.number}`} subtitle={`${selectedTrip.pickup?.name ?? '—'} → ${selectedTrip.delivery?.name ?? '—'}`} />
-                <div className="mt-3 flex h-32 items-center justify-center rounded-md bg-bg-subtle text-caption text-text-muted">
-                  Route preview
-                </div>
+                <RoutePreview pickup={selectedTrip.pickup} delivery={selectedTrip.delivery} />
                 <ol className="mt-4 flex flex-col gap-3">
                   {selectedTrip.stops.map((stop) => {
                     const done = stop.status === 'COMPLETED' || stop.status === 'ARRIVED';
