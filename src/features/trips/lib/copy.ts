@@ -10,7 +10,12 @@ export const TRAILER_LOOKUP_ERROR = 'Trailers unavailable — try again.';
 /** 409 `TRIP_SCHEDULE_CONFLICT`, in the browser zone — the same zone the modal's
  * `datetime-local` windows and the board's dates use. */
 export function scheduleConflictMessage(c: TripScheduleConflict): string {
-  const unit = c.unitNumber ? `Unit ${c.unitNumber}` : 'This unit';
+  const unit =
+    c.resource === 'driver'
+      ? c.driverName ? `Driver ${c.driverName}` : 'This driver'
+      : c.resource === 'trailer'
+        ? c.trailerNumber ? `Trailer ${c.trailerNumber}` : 'This trailer'
+        : c.unitNumber ? `Unit ${c.unitNumber}` : 'This unit';
   const range = c.end
     ? `from ${formatLocal(c.start, 'dateTime')} to ${formatLocal(c.end, 'dateTime')}`
     : `from ${formatLocal(c.start, 'dateTime')} onward (no planned end)`;
@@ -18,8 +23,12 @@ export function scheduleConflictMessage(c: TripScheduleConflict): string {
   return `${unit} is already assigned to another trip (${c.number}) ${range}.`;
 }
 
+/** Create-trip field the full 409 message belongs under. */
+export const scheduleConflictField = (c: TripScheduleConflict): 'vehicleId' | 'driverId' | 'trailerId' =>
+  c.resource === 'driver' ? 'driverId' : c.resource === 'trailer' ? 'trailerId' : 'vehicleId';
+
 /** Short pointer shown under the pickup window next to the full message on the Unit field. */
-export const scheduleConflictWindowHint = (c: TripScheduleConflict): string => `Overlaps trip ${c.number} on this unit.`;
+export const scheduleConflictWindowHint = (c: TripScheduleConflict): string => `Overlaps trip ${c.number} on this ${c.resource === 'vehicle' ? 'unit' : c.resource}.`;
 
 /** 409 `CONFLICT` on `POST /trips` — shown under the "Trip / load ID" input. */
 export const TRIP_NUMBER_TAKEN = 'A trip with this ID already exists.';

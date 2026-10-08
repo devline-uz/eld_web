@@ -46,6 +46,7 @@ import {
   TRIP_NOT_EDITABLE,
   TRIP_NOT_FOUND,
   TRIP_NUMBER_TAKEN,
+  scheduleConflictField,
   scheduleConflictMessage,
   scheduleConflictWindowHint,
   tripUpdatedToast,
@@ -592,7 +593,7 @@ export function CreateTripModal({
           // Unit field (and point at the pickup window), in the dispatcher's own time zone.
           const conflict = tripScheduleConflict(error);
           if (conflict) {
-            setError('vehicleId', { message: scheduleConflictMessage(conflict) });
+            setError(scheduleConflictField(conflict), { message: scheduleConflictMessage(conflict) });
             setError('scheduledStart', { message: scheduleConflictWindowHint(conflict) });
             return;
           }

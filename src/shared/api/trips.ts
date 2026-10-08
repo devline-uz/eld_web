@@ -390,11 +390,15 @@ export interface CreateTripPayload {
   draft?: boolean;
 }
 
-/** `details.conflict` of a 409 `TRIP_SCHEDULE_CONFLICT` — the other trip already holding the unit. */
+/** `details.conflict` of a 409 `TRIP_SCHEDULE_CONFLICT` — the other trip already holding the unit, driver or trailer. */
 export interface TripScheduleConflict {
+  /** Which resource is double-booked; a response without `resource` is a unit (older backend). */
+  resource: 'vehicle' | 'driver' | 'trailer';
   tripId: string;
   number: string;
   unitNumber: string | null;
+  driverName: string | null;
+  trailerNumber: string | null;
   /** ISO instants of the range the other trip occupies; `end: null` = no planned end. */
   start: string;
   end: string | null;
@@ -406,10 +410,14 @@ export function tripScheduleConflict(error: unknown): TripScheduleConflict | nul
   if (!(error instanceof ApiError) || error.code !== 'TRIP_SCHEDULE_CONFLICT') return null;
   const c = error.details.conflict as Partial<TripScheduleConflict> | undefined;
   if (!c || typeof c.number !== 'string' || typeof c.start !== 'string') return null;
+  const raw = (c as { resource?: unknown }).resource;
   return {
+    resource: raw === 'driver' || raw === 'trailer' ? raw : 'vehicle',
     tripId: String(c.tripId ?? ''),
     number: c.number,
     unitNumber: typeof c.unitNumber === 'string' ? c.unitNumber : null,
+    driverName: typeof c.driverName === 'string' ? c.driverName : null,
+    trailerNumber: typeof c.trailerNumber === 'string' ? c.trailerNumber : null,
     start: c.start,
     end: typeof c.end === 'string' ? c.end : null,
   };

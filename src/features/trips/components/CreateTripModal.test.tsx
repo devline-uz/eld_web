@@ -557,6 +557,29 @@ describe('CreateTripModal — dirty close, payload and 422 mapping', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['driver', 'Driver', 'Ana Silva', { driverName: 'Ana Silva' }, 'Driver Ana Silva is already assigned to another trip (TRP-501)', 'Overlaps trip TRP-501 on this driver.'],
+    ['trailer', 'Trailer', 'T-77', { trailerNumber: 'T-77' }, 'Trailer T-77 is already assigned to another trip (TRP-501)', 'Overlaps trip TRP-501 on this trailer.'],
+  ])('shows a 409 TRIP_SCHEDULE_CONFLICT for the %s under its own field', async (resource, label, _n, extra, message, hint) => {
+    const { onClose } = renderModal();
+    server.use(
+      http.post(url(endpoints.trips.create), () =>
+        fail(409, 'TRIP_SCHEDULE_CONFLICT', 'Conflict', {
+          conflict: { resource, tripId: 'trp_501', number: 'TRP-501', unitNumber: null, ...extra, start: new Date(Date.UTC(2031, 0, 5, 14, 0)).toISOString(), end: null },
+        }),
+      ),
+    );
+    const user = await fillValidForm();
+    await user.click(screen.getByRole('button', { name: 'Create trip' }));
+
+    const fieldLabel = screen
+      .getByText((content, el) => el?.tagName === 'SPAN' && el.classList.contains('text-label') && content.trim().startsWith(label))
+      .closest('label')!;
+    expect(await within(fieldLabel).findByRole('alert')).toHaveTextContent(message);
+    expect(screen.getByText(hint)).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   function tripIdLabel() {
     return screen
       .getByText((content, el) => el?.tagName === 'SPAN' && el.classList.contains('text-label') && content.trim().startsWith('Trip / load ID'))
