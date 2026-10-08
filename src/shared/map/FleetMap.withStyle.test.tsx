@@ -93,7 +93,10 @@ class FakeMap {
     this.images.add(id);
   }
 
+  sourceSpecs = new Map<string, Record<string, unknown>>();
+
   addSource(id: string, spec?: { data?: unknown }) {
+    this.sourceSpecs.set(id, (spec ?? {}) as Record<string, unknown>);
     this.sources.set(id, new FakeGeoJSONSource(spec));
   }
 
@@ -107,6 +110,9 @@ class FakeMap {
   });
   getLayer(id: string) {
     return this.layers.get(id);
+  }
+  getStyle() {
+    return { layers: [{ id: 'base-roads', type: 'line' }, { id: 'base-labels', type: 'symbol' }] };
   }
   setLayoutProperty = vi.fn((id: string, name: string, value: unknown) => {
     const layer = this.layers.get(id);
@@ -304,10 +310,55 @@ describe('FleetMap — GeoJSON source + symbol layer (style configured)', () => 
     act(() => map.fire('load'));
 
     expect(map.sources.has('fleet-traffic')).toBe(true);
-    expect(map.addLayer).toHaveBeenCalledWith(expect.objectContaining({ id: 'fleet-traffic-flow', type: 'raster' }));
+    expect(map.addLayer).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'fleet-traffic-flow', type: 'raster' }),
+      'base-labels',
+    );
     expect(map.visibility('fleet-traffic-flow')).toBe('none');
 
     rerender(<FleetMap units={UNITS} layers={new Set(['Vehicles', 'Traffic'] as const)} />);
+    expect(map.visibility('fleet-traffic-flow')).toBe('visible');
+  });
+
+  it('limits HERE raster traffic to zoom 8-20, attributes it and keeps it under labels', () => {
+    vi.stubEnv('VITE_TRAFFIC_TILES_URL', 'https://traffic.maps.hereapi.com/v3/flow/mc/{z}/{x}/{y}/png?apiKey=K');
+    render(<FleetMap units={UNITS} layers={new Set(['Vehicles', 'Traffic'] as const)} />);
+    const map = FakeMap.instances[0]!;
+    act(() => map.fire('load'));
+
+    expect(map.sourceSpecs.get('fleet-traffic')).toMatchObject({
+      type: 'raster',
+      tileSize: 256,
+      minzoom: 8,
+      maxzoom: 20,
+      attribution: '© HERE',
+    });
+    expect(map.addLayer).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'fleet-traffic-flow', type: 'raster' }),
+      'base-labels',
+    );
+  });
+
+  it('leaves other raster providers without zoom limits or attribution', () => {
+    vi.stubEnv('VITE_TRAFFIC_TILES_URL', 'https://tiles.example.com/{z}/{x}/{y}.png');
+    render(<FleetMap units={UNITS} layers={new Set(['Vehicles', 'Traffic'] as const)} />);
+    const map = FakeMap.instances[0]!;
+    act(() => map.fire('load'));
+    const spec = map.sourceSpecs.get('fleet-traffic')!;
+    expect(spec).not.toHaveProperty('minzoom');
+    expect(spec).not.toHaveProperty('attribution');
+  });
+
+  it('draws vector traffic as styled lines under the base labels when the URL is .pbf', () => {
+    vi.stubEnv('VITE_TRAFFIC_TILES_URL', 'https://tiles.example.com/flow/{z}/{x}/{y}.pbf?key=k');
+    render(<FleetMap units={UNITS} layers={new Set(['Vehicles', 'Traffic'] as const)} />);
+    const map = FakeMap.instances[0]!;
+    act(() => map.fire('load'));
+
+    expect(map.addLayer).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'fleet-traffic-flow', type: 'line', 'source-layer': 'Traffic flow' }),
+      'base-labels',
+    );
     expect(map.visibility('fleet-traffic-flow')).toBe('visible');
   });
 

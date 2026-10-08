@@ -295,6 +295,87 @@ function applyVisibility(map: maplibregl.Map, layers: ReadonlySet<MapLayer>) {
   }
 }
 
+/** TomTom Vector Flow Tiles: one line per road direction in the `Traffic flow` source layer, with
+ * `traffic_level` = current ÷ free-flow speed (0…1) for the `relative*` styles. */
+const TRAFFIC_SOURCE_LAYER = 'Traffic flow';
+
+function isVectorTiles(url: string): boolean {
+  return /\.(pbf|mvt)$/i.test(url.split('?')[0] ?? '');
+}
+
+/** Free flow → slow → jammed → closed, from the semantic tokens so it follows the theme. */
+function trafficColourExpression(): maplibregl.ExpressionSpecification {
+  return [
+    'case',
+    ['==', ['get', 'road_closure'], true],
+    token('--color-text', 'black'),
+    [
+      'step',
+      ['to-number', ['get', 'traffic_level'], 1],
+      token('--color-danger', 'red'),
+      0.4, token('--color-warning', 'orange'),
+      0.75, token('--color-success', 'green'),
+    ],
+  ];
+}
+
+/** Each direction of a divided road is its own line; push a one-side line to the driving side so
+ * the two directions sit next to each other instead of over one another. */
+function trafficOffsetExpression(): maplibregl.DataDrivenPropertyValueSpecification<number> {
+  const side: maplibregl.ExpressionSpecification = ['case', ['==', ['get', 'left_hand_traffic'], true], -1, 1];
+  const oneSide: maplibregl.ExpressionSpecification = ['case', ['==', ['get', 'traffic_road_coverage'], 'one_side'], 1, 0];
+  return ['interpolate', ['linear'], ['zoom'], 10, ['*', 1, side, oneSide], 16, ['*', 4, side, oneSide]];
+}
+
+/** The base style's first label layer — traffic goes under it so street names stay readable. */
+function firstLabelLayerId(map: maplibregl.Map): string | undefined {
+  return map.getStyle()?.layers?.find((l) => l.type === 'symbol')?.id;
+}
+
+/** HERE Traffic Raster v3 only serves zoom 8–20 and requires attribution; other providers: defaults. */
+function rasterProviderOptions(url: string): { minzoom?: number; maxzoom?: number; attribution?: string } {
+  let host = '';
+  try {
+    host = new URL(url.replace(/\{[xyz]\}/g, '0')).hostname;
+  } catch {
+    return {};
+  }
+  return host === 'traffic.maps.hereapi.com' ? { minzoom: 8, maxzoom: 20, attribution: '© HERE' } : {};
+}
+
+/** `VITE_TRAFFIC_TILES_URL` ending in `.pbf`/`.mvt` → crisp vector lines styled here; anything else →
+ * a raster overlay (`tileSize=512` in the URL is honoured for high-DPI raster tiles). */
+function installTraffic(map: maplibregl.Map, url: string) {
+  const beforeId = firstLabelLayerId(map);
+  if (isVectorTiles(url)) {
+    map.addSource(TRAFFIC_SOURCE, { type: 'vector', tiles: [url], minzoom: 0, maxzoom: 22 });
+    map.addLayer(
+      {
+        id: TRAFFIC_LAYER,
+        type: 'line',
+        source: TRAFFIC_SOURCE,
+        'source-layer': TRAFFIC_SOURCE_LAYER,
+        minzoom: 6,
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: {
+          'line-color': trafficColourExpression(),
+          'line-width': ['interpolate', ['exponential', 1.5], ['zoom'], 6, 1, 10, 2, 14, 4, 18, 8],
+          'line-offset': trafficOffsetExpression(),
+          'line-opacity': 0.9,
+        },
+      },
+      beforeId,
+    );
+    return;
+  }
+  const tileSize = /[?&]tileSize=512\b/.test(url) ? 512 : 256;
+  map.addSource(TRAFFIC_SOURCE, { type: 'raster', tiles: [url], tileSize, ...rasterProviderOptions(url) });
+  map.addLayer(
+    { id: TRAFFIC_LAYER, type: 'raster', source: TRAFFIC_SOURCE, paint: { 'raster-opacity': 0.85 } },
+    beforeId,
+  );
+}
+
 /** Adds every image, source and layer the fleet map owns — idempotent, so it is safe to call on
  * both `style.load` and `load`, and again after a style swap has wiped them. Draw order, bottom to
  * top: traffic → geofences → trips → units. */
@@ -309,10 +390,7 @@ function installLayers(map: maplibregl.Map, state: OverlayState) {
   }
 
   const traffic = trafficTilesUrl();
-  if (traffic) {
-    map.addSource(TRAFFIC_SOURCE, { type: 'raster', tiles: [traffic], tileSize: 256 });
-    map.addLayer({ id: TRAFFIC_LAYER, type: 'raster', source: TRAFFIC_SOURCE, paint: { 'raster-opacity': 0.85 } });
-  }
+  if (traffic) installTraffic(map, traffic);
 
   map.addSource(GEOFENCE_SOURCE, { type: 'geojson', data: state.geofences });
   map.addLayer({
@@ -475,7 +553,8 @@ export default function FleetMap({
       // clustered somewhere else never renders as a blank patch of ocean (web/bugs.md WB-049).
       center: DEFAULT_US_CENTER,
       zoom: DEFAULT_US_ZOOM,
-      attributionControl: false,
+      // Compact (collapsed) control: shows the style's own attribution plus per-source ones (HERE traffic).
+      attributionControl: { compact: true },
     });
     mapRef.current = map;
 

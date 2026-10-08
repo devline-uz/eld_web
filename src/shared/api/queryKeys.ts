@@ -69,6 +69,9 @@ export const qk = {
   // operations
   trips: (params?: QueryParams) => ['trips', p(params)] as const,
   trip: (id: string) => ['trips', id] as const,
+  /** Third-party geocode / road route for the W-11 Route Preview (not ELD API data). */
+  tripGeocode: (query: string) => ['trip-route', 'geocode', query] as const,
+  tripRoute: (coords: string) => ['trip-route', 'route', coords] as const,
   unassignedLoads: (params?: QueryParams) => ['trips', 'unassigned-loads', p(params)] as const,
   safetyEvents: (params?: QueryParams) => ['safety', 'events', p(params)] as const,
   scorecard: (params?: QueryParams) => ['safety', 'scorecard', p(params)] as const,

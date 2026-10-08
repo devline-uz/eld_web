@@ -327,3 +327,8 @@ export type Endpoints = typeof endpoints;
  * the provisional map provider (tz §22 Q-2, WD CSP note) — the same host the CSP already allows for
  * tiles, keyed by `VITE_MAP_API_KEY`. Called with plain `fetch`, never through `client.ts`. */
 export const GEOCODING_BASE_URL = 'https://api.maptiler.com/geocoding';
+
+/** Third-party road routing (OSRM `route` service): `{base}/route/v1/driving/{lon,lat;lon,lat}`.
+ * Default is the public OSRM demo server (development / low volume only); set `VITE_ROUTING_URL` to a
+ * self-hosted OSRM or compatible instance for production. No key. Plain `fetch`, never `client.ts`. */
+export const ROUTING_BASE_URL: string = (import.meta.env.VITE_ROUTING_URL ?? '') || 'https://router.project-osrm.org';
