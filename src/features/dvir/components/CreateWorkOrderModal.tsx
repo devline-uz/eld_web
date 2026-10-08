@@ -8,6 +8,7 @@ import { useDefectsList, useCreateWorkOrder, type WorkOrderPriority } from '@/sh
 import { useVehiclesPicker } from '@/shared/api/vehicles';
 import { ApiError } from '@/shared/api/errors';
 import { formatLocal } from '@/shared/format/datetime';
+import { blockCostKeys, blockOdometerKeys, getCostError, getOdometerError, sanitizeCost, sanitizeOdometer } from '../lib/workOrderNumberInputs';
 
 const PRIORITIES: { value: WorkOrderPriority; label: string }[] = [
   { value: 'URGENT', label: 'Critical — out of service' },
@@ -46,7 +47,9 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
     [vehiclesQuery.data, selectedVehicleId],
   );
 
-  const valid = selectedVehicleId !== '' && title.trim() !== '';
+  const partsCostError = getCostError(partsCost, 'Estimated parts cost');
+  const odometerError = getOdometerError(odometer);
+  const valid = selectedVehicleId !== '' && title.trim() !== '' && !partsCostError && !odometerError;
   // WB-150 — plain state, so `isDirty` compares against what the modal opened with; a freshly
   // opened form (unit pre-selected from the row action, `Normal` priority) is never dirty.
   const isDirty =
@@ -80,6 +83,7 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
     // B-42 (shipped 2026-09-24) — `estimatedLaborHours`, `keepOutOfService`, `notifyDriver` and
     // `blockDispatchAssignment` are real `CreateWorkOrderDto` fields now.
     setServerError(null);
+    if (!valid) return;
     mutation.mutate(
       {
         vehicleId: selectedVehicleId,
@@ -202,16 +206,48 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
           <label className="flex flex-col gap-1">
             <span className="text-label text-text">Estimated parts cost</span>
             <div className="flex items-center gap-2">
-              <input type="number" value={partsCost} onChange={(e) => setPartsCost(e.target.value)} className={inputClass} />
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                inputMode="decimal"
+                value={partsCost}
+                onKeyDown={blockCostKeys}
+                onChange={(e) => setPartsCost(sanitizeCost(e.target.value))}
+                aria-invalid={partsCostError ? true : undefined}
+                aria-describedby={partsCostError ? 'wo-parts-cost-error' : undefined}
+                className={inputClass}
+              />
               <span className="text-body text-text-muted">USD</span>
             </div>
+            {partsCostError && (
+              <span id="wo-parts-cost-error" role="alert" className="text-caption text-danger">
+                {partsCostError}
+              </span>
+            )}
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-label text-text">Odometer at service</span>
             <div className="flex items-center gap-2">
-              <input type="number" value={odometer} onChange={(e) => setOdometer(e.target.value)} className={inputClass} />
+              <input
+                type="number"
+                min={0}
+                step="1"
+                inputMode="numeric"
+                value={odometer}
+                onKeyDown={blockOdometerKeys}
+                onChange={(e) => setOdometer(sanitizeOdometer(e.target.value))}
+                aria-invalid={odometerError ? true : undefined}
+                aria-describedby={odometerError ? 'wo-odometer-error' : undefined}
+                className={inputClass}
+              />
               <span className="text-body text-text-muted">mi</span>
             </div>
+            {odometerError && (
+              <span id="wo-odometer-error" role="alert" className="text-caption text-danger">
+                {odometerError}
+              </span>
+            )}
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-label text-text">Estimated labor</span>
