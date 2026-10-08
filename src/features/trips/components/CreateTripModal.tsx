@@ -7,6 +7,8 @@ import { addYears, endOfDay, format, startOfToday } from 'date-fns';
 import { AlertTriangle } from 'lucide-react';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
+import type { Place } from '@/shared/map/geocode';
+import { PlaceInput } from './PlaceInput';
 import { DriverPicker, UnitPicker, TrailerPicker, type PickerOption } from '@/shared/ui/DriverPicker';
 import { useToast } from '@/shared/ui/Toast';
 import { useDriversList } from '@/shared/api/drivers';
@@ -182,9 +184,25 @@ function Field({
 
 const inputClass = 'h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text';
 
+/** Coordinates of a place the dispatcher picked from the suggestions; free text has none. */
+type Coords = { latitude: number; longitude: number };
+
+/** B-… — the API rejects out-of-range values and (0, 0) is a geocoder miss, so never send them. */
+function validCoords(c: Coords | null): Coords | null {
+  if (!c) return null;
+  const { latitude, longitude } = c;
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return null;
+  if (latitude === 0 && longitude === 0) return null;
+  return { latitude, longitude };
+}
+
+const toCoords = (place: Place): Coords => ({ latitude: place.lat, longitude: place.lon });
+
 interface IntermediateStop {
   key: number;
   name: string;
+  coords: Coords | null;
   scheduledAt: string;
 }
 
@@ -195,6 +213,8 @@ export function CreateTripModal({ onClose }: { onClose: () => void }) {
   // extra stops are collected here and sent between the pickup and the delivery.
   const [intermediateStops, setIntermediateStops] = useState<IntermediateStop[]>([]);
   const nextStopKey = useRef(1);
+  const [originCoords, setOriginCoords] = useState<Coords | null>(null);
+  const [destinationCoords, setDestinationCoords] = useState<Coords | null>(null);
   /** Rule 6 — a 422 detail with no visible input, and any other rejection, lands here. */
   const [banner, setBanner] = useState<string | null>(null);
 
@@ -231,6 +251,26 @@ export function CreateTripModal({ onClose }: { onClose: () => void }) {
 
   // The form is the single source of truth for the assignment — a parallel useState drifted out of
   // sync ("Pick another driver" cleared the picker but the old driver was still submitted).
+  const origin = useWatch({ control, name: 'origin' }) ?? '';
+  const destination = useWatch({ control, name: 'destination' }) ?? '';
+  /** Wires a location field to RHF + the place suggestions; typing drops the picked coordinates. */
+  function registerPlace(field: 'origin' | 'destination', setCoords: (c: Coords | null) => void) {
+    const reg = register(field);
+    return {
+      name: reg.name,
+      inputRef: reg.ref,
+      onBlur: reg.onBlur,
+      onTextChange: (text: string) => {
+        setCoords(null);
+        setValue(field, text, { shouldDirty: true, shouldValidate: Boolean(errors[field]) });
+      },
+      onPick: (place: Place) => {
+        setCoords(toCoords(place));
+        setValue(field, place.name, { shouldDirty: true, shouldValidate: true });
+      },
+    };
+  }
+
   const driverId = useWatch({ control, name: 'driverId' }) || null;
   const vehicleId = useWatch({ control, name: 'vehicleId' }) || null;
   const trailerId = useWatch({ control, name: 'trailerId' }) || null;
@@ -353,7 +393,7 @@ export function CreateTripModal({ onClose }: { onClose: () => void }) {
     const plannedEndAt = toIso(values.scheduledEnd);
     const named = intermediateStops.filter((stop) => stop.name.trim() !== '');
     const stops: CreateTripStopInput[] = [
-      { sequence: 1, type: 'PICKUP', name: values.origin, scheduledAt: plannedStartAt },
+      { sequence: 1, type: 'PICKUP', name: values.origin, scheduledAt: plannedStartAt, ...validCoords(originCoords) },
       ...named.map((stop, index) => ({
         sequence: index + 2,
         // `StopType` has no INTERMEDIATE member; CHECKPOINT is the API's stop between the
@@ -361,8 +401,9 @@ export function CreateTripModal({ onClose }: { onClose: () => void }) {
         type: 'CHECKPOINT' as const,
         name: stop.name.trim(),
         scheduledAt: toIso(stop.scheduledAt),
+        ...validCoords(stop.coords),
       })),
-      { sequence: named.length + 2, type: 'DELIVERY' as const, name: values.destination, scheduledAt: plannedEndAt },
+      { sequence: named.length + 2, type: 'DELIVERY' as const, name: values.destination, scheduledAt: plannedEndAt, ...validCoords(destinationCoords) },
     ];
     createMutation.mutate(
       {
@@ -499,7 +540,11 @@ export function CreateTripModal({ onClose }: { onClose: () => void }) {
           </h3>
           <div className="mt-2 grid grid-cols-2 gap-3">
             <Field label="Pickup location" required error={errors.origin?.message}>
-              <input {...register('origin')} className={inputClass} />
+              <PlaceInput
+                {...registerPlace('origin', setOriginCoords)}
+                value={origin}
+                className={inputClass}
+              />
             </Field>
             <Field label="Pickup window" required error={errors.scheduledStart?.message}>
               <input
@@ -511,7 +556,11 @@ export function CreateTripModal({ onClose }: { onClose: () => void }) {
               />
             </Field>
             <Field label="Delivery location" required error={errors.destination?.message}>
-              <input {...register('destination')} className={inputClass} />
+              <PlaceInput
+                {...registerPlace('destination', setDestinationCoords)}
+                value={destination}
+                className={inputClass}
+              />
             </Field>
             <Field label="Delivery window" error={errors.scheduledEnd?.message}>
               <input
@@ -526,10 +575,17 @@ export function CreateTripModal({ onClose }: { onClose: () => void }) {
           {intermediateStops.map((stop, index) => (
             <div key={stop.key} className="mt-2 grid grid-cols-[1fr_1fr_auto] items-end gap-3">
               <Field label={`Stop ${index + 1} location`}>
-                <input
+                <PlaceInput
                   value={stop.name}
-                  onChange={(e) =>
-                    setIntermediateStops((prev) => prev.map((s) => (s.key === stop.key ? { ...s, name: e.target.value } : s)))
+                  onTextChange={(text) =>
+                    setIntermediateStops((prev) =>
+                      prev.map((s) => (s.key === stop.key ? { ...s, name: text, coords: null } : s)),
+                    )
+                  }
+                  onPick={(place) =>
+                    setIntermediateStops((prev) =>
+                      prev.map((s) => (s.key === stop.key ? { ...s, name: place.name, coords: toCoords(place) } : s)),
+                    )
                   }
                   className={inputClass}
                 />
@@ -561,7 +617,7 @@ export function CreateTripModal({ onClose }: { onClose: () => void }) {
           <button
             type="button"
             onClick={() =>
-              setIntermediateStops((prev) => [...prev, { key: nextStopKey.current++, name: '', scheduledAt: '' }])
+              setIntermediateStops((prev) => [...prev, { key: nextStopKey.current++, name: '', coords: null, scheduledAt: '' }])
             }
             className="mt-2 w-full rounded-md border border-dashed border-border py-2 text-body text-text-secondary hover:bg-bg-subtle"
           >
