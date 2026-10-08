@@ -8,6 +8,7 @@ import { useToast } from '@/shared/ui/Toast';
 import { TOAST_COPY } from '@/shared/ui/copy';
 import { useUpdateWorkOrder, type WorkOrderPriority, type WorkOrderTableRow } from '@/shared/api/dvir';
 import { ApiError } from '@/shared/api/errors';
+import { blockCostKeys, blockOdometerKeys, getCostError, getOdometerError, sanitizeCost, sanitizeOdometer } from '../lib/workOrderNumberInputs';
 
 const PRIORITIES: { value: WorkOrderPriority; label: string }[] = [
   { value: 'URGENT', label: 'Critical — out of service' },
@@ -38,7 +39,9 @@ export function EditWorkOrderModal({ workOrder, onClose }: { workOrder: WorkOrde
   const [blockDispatchAssignment, setBlockDispatchAssignment] = useState(workOrder.blockDispatchAssignment ?? true);
   const [serverError, setServerError] = useState<string | null>(null);
 
-  const valid = title.trim() !== '';
+  const costError = getCostError(cost, 'Parts cost');
+  const odometerError = getOdometerError(odometer);
+  const valid = title.trim() !== '' && !costError && !odometerError;
   // WB-150 — plain state, so `isDirty` compares against the row the modal opened with.
   const isDirty =
     title !== workOrder.title ||
@@ -59,6 +62,7 @@ export function EditWorkOrderModal({ workOrder, onClose }: { workOrder: WorkOrde
     // silently discarded and the old value survived. Every one of those columns is nullable on
     // `WorkOrderRow`, so an emptied field now sends an explicit `null` and actually clears.
     setServerError(null);
+    if (!valid) return;
     mutation.mutate(
       {
         title: title.trim(),
@@ -135,16 +139,48 @@ export function EditWorkOrderModal({ workOrder, onClose }: { workOrder: WorkOrde
           <label className="flex flex-col gap-1">
             <span className="text-label text-text">Parts cost</span>
             <div className="flex items-center gap-2">
-              <input type="number" value={cost} onChange={(e) => setCost(e.target.value)} className={inputClass} />
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                inputMode="decimal"
+                value={cost}
+                onKeyDown={blockCostKeys}
+                onChange={(e) => setCost(sanitizeCost(e.target.value))}
+                aria-invalid={costError ? true : undefined}
+                aria-describedby={costError ? 'wo-edit-cost-error' : undefined}
+                className={inputClass}
+              />
               <span className="text-body text-text-muted">USD</span>
             </div>
+            {costError && (
+              <span id="wo-edit-cost-error" role="alert" className="text-caption text-danger">
+                {costError}
+              </span>
+            )}
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-label text-text">Odometer at service</span>
             <div className="flex items-center gap-2">
-              <input type="number" value={odometer} onChange={(e) => setOdometer(e.target.value)} className={inputClass} />
+              <input
+                type="number"
+                min={0}
+                step="1"
+                inputMode="numeric"
+                value={odometer}
+                onKeyDown={blockOdometerKeys}
+                onChange={(e) => setOdometer(sanitizeOdometer(e.target.value))}
+                aria-invalid={odometerError ? true : undefined}
+                aria-describedby={odometerError ? 'wo-edit-odometer-error' : undefined}
+                className={inputClass}
+              />
               <span className="text-body text-text-muted">mi</span>
             </div>
+            {odometerError && (
+              <span id="wo-edit-odometer-error" role="alert" className="text-caption text-danger">
+                {odometerError}
+              </span>
+            )}
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-label text-text">Estimated labor</span>
