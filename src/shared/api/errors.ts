@@ -183,6 +183,9 @@ export const ERROR_MESSAGES: Record<string, string> = {
   TRAILER_NOT_FOUND: 'Trailer not found.',
   TRIP_NOT_DRAFT: 'Only a draft trip can be published.',
   TRIP_SCHEDULE_CONFLICT: 'This unit already has a trip in that time range.',
+  // --- W-11 Edit / Delete trip (2026-10) ----------------------------------------------------------
+  TRIP_NOT_EDITABLE: 'Delivered and cancelled trips can no longer be edited.',
+  TRIP_IN_PROGRESS: 'This trip is in progress and cannot be deleted. Wait until it is delivered or cancel it first.',
   GEOCODER_NOT_CONFIGURED: 'Address lookup is not configured. Draw the geofence on the map instead.',
   GEOCODE_FAILED: 'That address could not be found. Check it or draw the geofence on the map.',
 };

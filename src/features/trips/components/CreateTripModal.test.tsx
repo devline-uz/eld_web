@@ -12,6 +12,7 @@ import { endpoints } from '@/shared/api/endpoints';
 import { ToastProvider } from '@/shared/ui/Toast';
 import { VALIDATION_MESSAGES } from '@/shared/forms/messages';
 import type * as GeocodeModule from '@/shared/map/geocode';
+import type { TripRow } from '@/shared/api/trips';
 import { CreateTripModal } from './CreateTripModal';
 
 // Place suggestions: only the query `Columbus` finds a place; everything else is free text.
@@ -616,5 +617,151 @@ describe('CreateTripModal — trailer list shape (crash on open)', () => {
     expect(await screen.findByText('#T-100')).toBeInTheDocument();
     // The old build ignored `?status=ACTIVE`; the normaliser applies it client-side.
     expect(screen.queryByText('#T-900')).not.toBeInTheDocument();
+  });
+});
+
+describe('CreateTripModal — edit mode (`PATCH /trips/:id`)', () => {
+  /** A PLANNED trip whose pickup is already in the past. */
+  const PAST_TRIP: TripRow = {
+    id: 'trp_edit',
+    number: 'TR-7001',
+    driverId: 'drv_verified',
+    vehicleId: 'veh_1',
+    trailerId: null,
+    status: 'PLANNED',
+    shippingDocument: 'BOL-1',
+    commodity: null,
+    weightLbs: 30000,
+    pieces: null,
+    plannedStartAt: addDays(new Date(), -3).toISOString(),
+    plannedEndAt: addDays(new Date(), -2).toISOString(),
+    startedAt: null,
+    completedAt: null,
+    etaAt: null,
+    onTime: null,
+    notes: null,
+    createdById: 'usr_1',
+    createdAt: addDays(new Date(), -5).toISOString(),
+    stops: [
+      { id: 's1', tripId: 'trp_edit', sequence: 1, type: 'PICKUP', name: 'Columbus, OH', address: null, latitude: null, longitude: null, scheduledAt: null, arrivedAt: null, departedAt: null, status: 'PENDING', note: null },
+      { id: 's2', tripId: 'trp_edit', sequence: 2, type: 'DELIVERY', name: 'Dayton, OH', address: null, latitude: null, longitude: null, scheduledAt: null, arrivedAt: null, departedAt: null, status: 'PENDING', note: null },
+    ],
+    distanceMi: '72.5',
+    rateUsd: '1240.00',
+    customer: 'Acme',
+    estimatedDriveSec: 7200,
+    driver: { id: 'drv_verified', firstName: 'Vera', lastName: 'Verified' },
+    vehicle: { id: 'veh_1', unitNumber: '101' },
+  };
+
+  function renderEdit(trip: TripRow = PAST_TRIP) {
+    const patches: Record<string, unknown>[] = [];
+    server.use(
+      http.get(url(endpoints.drivers.list), () => ok({ items: [VERIFIED_DRIVER], page: 1, limit: 200, total: 1, totalPages: 1 })),
+      http.get(url(endpoints.vehicles.list), () => ok({ items: [], page: 1, limit: 500, total: 0, totalPages: 1 })),
+      http.get(url(endpoints.drivers.hos(':id')), () =>
+        ok({ driveRemainingSec: 36000, shiftRemainingSec: 39600, cycleRemainingSec: 180000, breakInSec: 7200, onDutySince: null }),
+      ),
+      http.patch(url(endpoints.trips.update(':id')), async ({ request }) => {
+        patches.push((await request.json()) as Record<string, unknown>);
+        return ok({ ...trip });
+      }),
+    );
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const onClose = vi.fn();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <CreateTripModal trip={trip} onClose={onClose} />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+    return { onClose, patches };
+  }
+
+  it('prefills the trip and renders the ID, stops and assignment read-only', () => {
+    renderEdit();
+    expect(screen.getByText('Edit trip TR-7001')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('TR-7001')).toHaveAttribute('readonly');
+    expect(screen.getByDisplayValue('Acme')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('BOL-1')).toBeInTheDocument();
+    expect(screen.getByText('Columbus, OH')).toBeInTheDocument();
+    expect(screen.getByText('Vera Verified')).toBeInTheDocument();
+    expect(screen.getByText('#101')).toBeInTheDocument();
+    expect(screen.queryByText('+ Add an intermediate stop')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save as draft' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+  });
+
+  it('sends only the changed fields, and a past pickup left untouched is not refused', async () => {
+    const { patches, onClose } = renderEdit();
+    const user = userEvent.setup();
+    const customer = screen.getByDisplayValue('Acme');
+    await user.clear(customer);
+    await user.type(customer, 'Globex');
+    const rate = screen.getByPlaceholderText('USD');
+    await user.clear(rate);
+    await user.type(rate, '1500');
+
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await vi.waitFor(() => expect(patches).toHaveLength(1));
+    expect(patches[0]).toEqual({ customer: 'Globex', rateUsd: 1500 });
+    expect(await screen.findByText('Trip TR-7001 updated')).toBeInTheDocument();
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('still refuses moving the pickup to another past date', async () => {
+    const { patches } = renderEdit();
+    const user = userEvent.setup();
+    enterWindow('Pickup', `${format(addDays(new Date(), -1), 'yyyy-MM-dd')}T08:00`);
+
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(await screen.findByText('Pickup cannot be before today.')).toBeInTheDocument();
+    expect(patches).toHaveLength(0);
+  });
+
+  it('refuses clearing a number the PATCH cannot null', async () => {
+    const { patches } = renderEdit();
+    const user = userEvent.setup();
+    await user.clear(screen.getByPlaceholderText('lbs'));
+
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(await screen.findByText('This value can be changed but not cleared.')).toBeInTheDocument();
+    expect(patches).toHaveLength(0);
+  });
+
+  it('maps 409 TRIP_SCHEDULE_CONFLICT under the pickup window', async () => {
+    renderEdit();
+    server.use(
+      http.patch(url(endpoints.trips.update(':id')), () =>
+        fail(409, 'TRIP_SCHEDULE_CONFLICT', 'Conflict', {
+          conflict: { tripId: 'trp_x', number: 'TR-9', unitNumber: '101', start: new Date().toISOString(), end: null },
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    enterWindow('Pickup', `${format(addDays(new Date(), 2), 'yyyy-MM-dd')}T08:00`);
+    enterWindow('Delivery', `${format(addDays(new Date(), 3), 'yyyy-MM-dd')}T08:00`);
+
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(await screen.findByText(/already assigned to another trip \(TR-9\)/)).toBeInTheDocument();
+  });
+
+  it('toasts and closes on 409 TRIP_NOT_EDITABLE', async () => {
+    const { onClose } = renderEdit();
+    server.use(
+      http.patch(url(endpoints.trips.update(':id')), () => fail(409, 'TRIP_NOT_EDITABLE', 'Not editable')),
+    );
+    const user = userEvent.setup();
+    await user.type(screen.getByDisplayValue('Acme'), ' Inc');
+
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(await screen.findByText('Delivered and cancelled trips can no longer be edited.')).toBeInTheDocument();
+    expect(onClose).toHaveBeenCalled();
   });
 });

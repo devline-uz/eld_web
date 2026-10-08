@@ -358,6 +358,35 @@ const MESSAGES: Record<string, MessageRow[]> = {
   ],
 };
 
+/* ------------------------------------------------------------- mutable trip store (edit / delete) */
+
+// `PATCH` / `DELETE /trips/:id` (`fleetWrites.ts` `tripDetailHandlers`) change these arrays in
+// place, so the board reads its own writes in dev; `resetMockTrips()` restores the seed for tests.
+const TRIPS_SEED = structuredClone(TRIPS);
+const UNASSIGNED_SEED = structuredClone(UNASSIGNED_LOADS);
+
+export function resetMockTrips(): void {
+  TRIPS.splice(0, TRIPS.length, ...structuredClone(TRIPS_SEED));
+  UNASSIGNED_LOADS.splice(0, UNASSIGNED_LOADS.length, ...structuredClone(UNASSIGNED_SEED));
+}
+
+/** A seeded trip — on the board or in the unassigned-loads list. */
+export function findMockTrip(id: string): TripRow | undefined {
+  return TRIPS.find((t) => t.id === id) ?? UNASSIGNED_LOADS.find((t) => t.id === id);
+}
+
+/** Hard delete (the backend keeps nothing either); `false` if the id is unknown. */
+export function removeMockTrip(id: string): boolean {
+  for (const list of [TRIPS, UNASSIGNED_LOADS]) {
+    const index = list.findIndex((t) => t.id === id);
+    if (index !== -1) {
+      list.splice(index, 1);
+      return true;
+    }
+  }
+  return false;
+}
+
 /** Backend `TRAILER_NOT_FOUND` (422): an unknown or soft-deleted `trailerId` is refused. */
 function trailerRefusal(trailerId: unknown) {
   if (typeof trailerId !== 'string' || trailerId === '') return null;

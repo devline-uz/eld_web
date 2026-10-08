@@ -315,3 +315,95 @@ describe('W-11 Dispatch & Trips', () => {
     expect(await screen.findByRole('button', { name: /retry/i })).toBeInTheDocument();
   });
 });
+
+describe('W-11 Edit / Delete trip (row menu)', () => {
+  /** A stateful `GET /trips` over `rows`, so a DELETE really empties the board. */
+  function useTripRows(rows: Array<typeof TRIP>) {
+    const deletes: string[] = [];
+    server.use(
+      http.get(url(endpoints.trips.list), ({ request }) => {
+        const status = new URL(request.url).searchParams.get('status');
+        const items = rows.filter((t) => !status || t.status === status);
+        return ok({ items, page: 1, limit: 25, total: items.length, totalPages: 1 });
+      }),
+      http.get(url(endpoints.drivers.list), () => ok({ items: [DRIVER], page: 1, limit: 500, total: 1, totalPages: 1 })),
+      http.get(url(endpoints.vehicles.list), () => ok({ items: [VEHICLE], page: 1, limit: 500, total: 1, totalPages: 1 })),
+      http.get(url(endpoints.trips.unassignedLoads), () => ok({ items: [] })),
+      http.delete(url(endpoints.trips.remove(':id')), ({ params }) => {
+        deletes.push(String(params.id));
+        rows.splice(rows.findIndex((t) => t.id === params.id), 1);
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    return deletes;
+  }
+
+  it('disables Delete for an IN_PROGRESS trip but opens Edit with the trip prefilled', async () => {
+    useTripRows([{ ...TRIP }]);
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText('TR-4821');
+    await user.click(screen.getByRole('button', { name: 'Row actions' }));
+    expect(await screen.findByRole('menuitem', { name: 'Delete trip' })).toHaveAttribute('data-disabled');
+
+    await user.click(screen.getByRole('menuitem', { name: 'Edit trip' }));
+    expect(await screen.findByText('Edit trip TR-4821')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('BOL #4821-A')).toBeInTheDocument();
+  });
+
+  it('confirms a permanent delete, removes the trip and toasts', async () => {
+    const deletes = useTripRows([{ ...TRIP, status: 'ASSIGNED' }]);
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText('TR-4821');
+    await user.click(screen.getByRole('button', { name: 'Row actions' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Delete trip' }));
+
+    expect(await screen.findByText('Delete trip TR-4821?')).toBeInTheDocument();
+    expect(screen.getByText(/permanently deletes the trip/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Delete permanently' }));
+
+    await waitFor(() => expect(deletes).toEqual(['trp_1']));
+    expect(await screen.findByText('Trip TR-4821 deleted')).toBeInTheDocument();
+    expect(await screen.findByText('No active trips')).toBeInTheDocument();
+    expect(screen.queryByText('Route · TR-4821')).not.toBeInTheDocument();
+  });
+
+  it('toasts 409 TRIP_IN_PROGRESS when the driver started the trip meanwhile', async () => {
+    useTripRows([{ ...TRIP, status: 'ASSIGNED' }]);
+    server.use(
+      http.delete(url(endpoints.trips.remove(':id')), () =>
+        HttpResponse.json({ statusCode: 409, code: 'TRIP_IN_PROGRESS', message: 'In progress' }, { status: 409 }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText('TR-4821');
+    await user.click(screen.getByRole('button', { name: 'Row actions' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Delete trip' }));
+    await user.click(await screen.findByRole('button', { name: 'Delete permanently' }));
+
+    expect(await screen.findByText(/This trip is in progress and cannot be deleted/)).toBeInTheDocument();
+  });
+
+  it('toasts a 404 when the trip was already deleted', async () => {
+    useTripRows([{ ...TRIP, status: 'ASSIGNED' }]);
+    server.use(
+      http.delete(url(endpoints.trips.remove(':id')), () =>
+        HttpResponse.json({ statusCode: 404, code: 'NOT_FOUND', message: 'Not found' }, { status: 404 }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText('TR-4821');
+    await user.click(screen.getByRole('button', { name: 'Row actions' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Delete trip' }));
+    await user.click(await screen.findByRole('button', { name: 'Delete permanently' }));
+
+    expect(await screen.findByText('This trip no longer exists. The list has been refreshed.')).toBeInTheDocument();
+  });
+});

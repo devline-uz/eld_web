@@ -6,7 +6,7 @@
 // The reads are here too: `GET /vehicles` and `GET /drivers` answer from the same mutable
 // `mockState` tables the writes edit, so a unit added in the drawer is in the next page, and an
 // assigned driver shows up in the DRIVER column without a reload — the behaviour the real API has.
-import { http } from 'msw';
+import { http, HttpResponse } from 'msw';
 import { endpoints } from '@/shared/api/endpoints';
 import type { DriverRow, VehicleRow } from '@/shared/api/vehicles';
 import { fixture } from '../fixtures.generated';
@@ -14,6 +14,7 @@ import { fail, ok, serverPage, url } from '../envelope';
 import type { DeviceRow } from '@/shared/api/settingsAdmin';
 import { DEVICES, DRIVERS, TRAILERS, VEHICLES, daysAgo, liveVehicles, mockId } from './mockState';
 import type { TrailerRow } from '@/shared/api/trailers';
+import { findMockTrip, removeMockTrip } from './tripsMessagingGaps';
 
 const VEHICLE_Q_FIELDS = ['unitNumber', 'vin', 'make', 'model', 'licensePlate'];
 const DRIVER_Q_FIELDS = ['firstName', 'lastName', 'username', 'cdlNumber', 'email'];
@@ -654,13 +655,33 @@ export const fleetWriteHandlers = [
   ),
 ];
 
-/** `/trips/:id` captures the literal "unassigned-loads", so these two are registered AFTER
+/** `/trips/:id` captures the literal "unassigned-loads", so these are registered AFTER
  * `tripsMessagingGapHandlers` in `index.ts` rather than with the set above (WB-016). */
 export const tripDetailHandlers = [
   http.get(url(endpoints.trips.detail(':id')), ({ params }) =>
     ok({ ...(fixture('GET /api/trips/{id}') as Record<string, unknown>), id: String(params.id) }),
   ),
-  http.patch(url(endpoints.trips.update(':id')), async ({ params, request }) =>
-    ok({ ...(fixture('PATCH /api/trips/{id}') as Record<string, unknown>), ...(await body(request)), id: String(params.id) }),
-  ),
+  /** A seeded trip is patched in place; DELIVERED / CANCELLED refuse any non-status field with
+   * 409 `TRIP_NOT_EDITABLE` (backend contract). Unknown ids keep the generated fixture echo. */
+  http.patch(url(endpoints.trips.update(':id')), async ({ params, request }) => {
+    const dto = await body(request);
+    const trip = findMockTrip(String(params.id));
+    if (!trip) return ok({ ...(fixture('PATCH /api/trips/{id}') as Record<string, unknown>), ...dto, id: String(params.id) });
+    const fieldEdit = Object.keys(dto).some((key) => key !== 'status');
+    if (fieldEdit && (trip.status === 'DELIVERED' || trip.status === 'CANCELLED')) {
+      return fail(409, 'TRIP_NOT_EDITABLE', 'Delivered or cancelled trips cannot be edited.');
+    }
+    Object.assign(trip, dto);
+    return ok(trip);
+  }),
+  /** Hard delete → 204; 404 unknown; 409 `TRIP_IN_PROGRESS` while the driver is running it. */
+  http.delete(url(endpoints.trips.remove(':id')), ({ params }) => {
+    const trip = findMockTrip(String(params.id));
+    if (!trip) return NOT_FOUND('Trip');
+    if (trip.status === 'IN_PROGRESS') {
+      return fail(409, 'TRIP_IN_PROGRESS', 'This trip is in progress and cannot be deleted.');
+    }
+    removeMockTrip(trip.id);
+    return new HttpResponse(null, { status: 204 });
+  }),
 ];
