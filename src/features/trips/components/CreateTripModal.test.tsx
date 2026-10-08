@@ -11,7 +11,18 @@ import { fail, ok, url } from '@/mocks/envelope';
 import { endpoints } from '@/shared/api/endpoints';
 import { ToastProvider } from '@/shared/ui/Toast';
 import { VALIDATION_MESSAGES } from '@/shared/forms/messages';
+import type * as GeocodeModule from '@/shared/map/geocode';
 import { CreateTripModal } from './CreateTripModal';
+
+// Place suggestions: only the query `Columbus` finds a place; everything else is free text.
+const COLUMBUS = { name: 'Columbus, Ohio, United States', lat: 39.96, lon: -83 };
+vi.mock('@/shared/map/geocode', async (importOriginal) => ({
+  ...(await importOriginal<typeof GeocodeModule>()),
+  usePlaceSearch: (query: string, enabled: boolean) => ({
+    data: enabled && query.trim() === 'Columbus' ? [COLUMBUS] : [],
+    isError: false,
+  }),
+}));
 
 const VALIDATION_REQUIRED = VALIDATION_MESSAGES.required;
 
@@ -125,7 +136,7 @@ describe('CreateTripModal — submit', () => {
   async function fillRequiredAndSubmit(
     pickup: string,
     delivery: string,
-    { twice = false, intermediate }: { twice?: boolean; intermediate?: string } = {},
+    { twice = false, intermediate, pick, editAfterPick }: { twice?: boolean; intermediate?: string; pick?: boolean; editAfterPick?: string } = {},
   ) {
     const posts: Record<string, unknown>[] = [];
     let release: () => void = () => {};
@@ -146,14 +157,18 @@ describe('CreateTripModal — submit', () => {
     const inputs = document.querySelectorAll<HTMLInputElement>('form input');
     const [reference, , , origin, , destination] = Array.from(inputs);
     await user.type(reference!, 'TR-1');
-    await user.type(origin!, 'Columbus, OH');
+    if (pick) {
+      await user.type(origin!, 'Columbus');
+      await user.click(within(await screen.findByRole('option', { name: COLUMBUS.name })).getByRole('button'));
+      if (editAfterPick) await user.type(origin!, editAfterPick);
+    } else await user.type(origin!, 'Columbus, OH');
     await user.type(destination!, 'Dayton, OH');
     enterWindow('Pickup', pickup);
     enterWindow('Delivery', delivery);
     if (intermediate) {
       await user.click(screen.getByRole('button', { name: '+ Add an intermediate stop' }));
       const stopLabel = screen.getByText((content, el) => el?.tagName === 'SPAN' && content.trim() === 'Stop 1 location').closest('label')!;
-      await user.type(within(stopLabel).getByRole('textbox'), intermediate);
+      await user.type(within(stopLabel).getByRole('combobox'), intermediate);
     }
     await user.type(screen.getByPlaceholderText('mi'), '120.5');
     await selectDriver('Vera Verified');
@@ -195,6 +210,23 @@ describe('CreateTripModal — submit', () => {
       { sequence: 2, type: 'CHECKPOINT', name: 'Springfield, OH', scheduledAt: undefined },
       { sequence: 3, type: 'DELIVERY', name: 'Dayton, OH', scheduledAt: new Date(`${tomorrow}T14:00`).toISOString() },
     ]);
+  });
+
+  it('sends latitude/longitude of a picked pickup place and omits them for free-text delivery', async () => {
+    const posts = await fillRequiredAndSubmit(`${tomorrow}T08:00`, `${tomorrow}T14:00`, { pick: true });
+    const stops = posts[0]!.stops as Record<string, unknown>[];
+
+    expect(stops[0]).toMatchObject({ type: 'PICKUP', name: COLUMBUS.name, latitude: COLUMBUS.lat, longitude: COLUMBUS.lon });
+    expect(stops[1]).not.toHaveProperty('latitude');
+    expect(stops[1]).not.toHaveProperty('longitude');
+  });
+
+  it('drops the coordinates when the pickup text is edited after picking a place', async () => {
+    const posts = await fillRequiredAndSubmit(`${tomorrow}T08:00`, `${tomorrow}T14:00`, { pick: true, editAfterPick: ' dock 4' });
+    const stops = posts[0]!.stops as Record<string, unknown>[];
+
+    expect(stops[0]).toMatchObject({ type: 'PICKUP', name: `${COLUMBUS.name} dock 4` });
+    expect(stops[0]).not.toHaveProperty('latitude');
   });
 
   // An added-then-emptied row must not be sent as a nameless stop.
