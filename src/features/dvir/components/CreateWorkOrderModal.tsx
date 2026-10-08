@@ -8,7 +8,16 @@ import { useDefectsList, useCreateWorkOrder, type WorkOrderPriority } from '@/sh
 import { useVehiclesPicker } from '@/shared/api/vehicles';
 import { ApiError } from '@/shared/api/errors';
 import { formatLocal } from '@/shared/format/datetime';
-import { blockCostKeys, blockOdometerKeys, getCostError, getOdometerError, sanitizeCost, sanitizeOdometer } from '../lib/workOrderNumberInputs';
+import {
+  blockCostKeys,
+  blockOdometerKeys,
+  dueDateToIso,
+  getCostError,
+  getDueDateError,
+  getOdometerError,
+  sanitizeCost,
+  sanitizeOdometer,
+} from '../lib/workOrderFieldGuards';
 
 const PRIORITIES: { value: WorkOrderPriority; label: string }[] = [
   { value: 'URGENT', label: 'Critical — out of service' },
@@ -49,7 +58,10 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
 
   const partsCostError = getCostError(partsCost, 'Estimated parts cost');
   const odometerError = getOdometerError(odometer);
-  const valid = selectedVehicleId !== '' && title.trim() !== '' && !partsCostError && !odometerError;
+  // Not an HOS screen, so "today" is the browser's local date — the same zone the date picker uses.
+  const today = formatLocal(new Date(), 'yyyy-MM-dd');
+  const dueDateError = getDueDateError(dueDate, today);
+  const valid = selectedVehicleId !== '' && title.trim() !== '' && !partsCostError && !odometerError && !dueDateError;
   // WB-150 — plain state, so `isDirty` compares against what the modal opened with; a freshly
   // opened form (unit pre-selected from the row action, `Normal` priority) is never dirty.
   const isDirty =
@@ -94,7 +106,7 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
         costUsd: partsCost ? Number(partsCost) : undefined,
         odometerMi: odometer ? Number(odometer) : undefined,
         estimatedLaborHours: estimatedLaborHours ? Number(estimatedLaborHours) : undefined,
-        dueAt: dueDate ? new Date(dueDate).toISOString() : undefined,
+        dueAt: dueDateToIso(dueDate),
         defectIds: selectedDefects.length > 0 ? selectedDefects : undefined,
         keepOutOfService,
         notifyDriver,
@@ -198,7 +210,20 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-label text-text">Due date</span>
-            <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className={inputClass} />
+            <input
+              type="date"
+              min={today}
+              value={dueDate}
+              onChange={(e) => setDueDate(e.target.value)}
+              aria-invalid={dueDateError ? true : undefined}
+              aria-describedby={dueDateError ? 'wo-due-date-error' : undefined}
+              className={inputClass}
+            />
+            {dueDateError && (
+              <span id="wo-due-date-error" role="alert" className="text-caption text-danger">
+                {dueDateError}
+              </span>
+            )}
           </label>
         </div>
 
