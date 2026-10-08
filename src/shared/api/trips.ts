@@ -469,8 +469,11 @@ export function useAutoAssignTrips() {
 
 /* --------------------------------------------------------------------- Phase 13 (2026-09-24) */
 
-/** `TripPatchDto` — every field `PATCH /trips/:id` accepts. `status` follows backend
- * `ALLOWED_TRANSITIONS` (DRAFT → PLANNED | CANCELLED; 422 otherwise). */
+/** `UpdateTripDto` — every field `PATCH /trips/:id` accepts (none of them nullable, so a number
+ * or date can be changed but never cleared). `status` follows backend `ALLOWED_TRANSITIONS`
+ * (DRAFT → PLANNED | CANCELLED); an illegal transition is 409 `CONFLICT`. Any non-status edit of
+ * a DELIVERED / CANCELLED trip is 409 `TRIP_NOT_EDITABLE`. Driver / unit / trailer only change
+ * through `POST /trips/:id/assign`; stops and `number` are not editable. */
 export interface UpdateTripPayload {
   status?: TripStatus;
   shippingDocument?: string;
@@ -493,6 +496,57 @@ export function useUpdateTrip(tripId: string) {
     mutationFn: (payload: UpdateTripPayload) => client.patch<TripRow>(endpoints.trips.update(tripId), payload),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qkRoot.trips });
+    },
+    // A 404 (deleted elsewhere) or 409 `TRIP_NOT_EDITABLE` (delivered / cancelled since the board
+    // loaded) means the cached row is stale — refetch so the board stops offering the edit.
+    onError: (error) => {
+      if (isTripNotFound(error) || isTripNotEditable(error)) void queryClient.invalidateQueries({ queryKey: qkRoot.trips });
+    },
+  });
+}
+
+/** Statuses whose fields `PATCH /trips/:id` refuses to change (409 `TRIP_NOT_EDITABLE`). */
+export const TRIP_LOCKED_STATUSES = ['DELIVERED', 'CANCELLED'] as const satisfies readonly TripStatus[];
+export const isTripEditable = (trip: Pick<TripRow, 'status'>): boolean =>
+  !(TRIP_LOCKED_STATUSES as readonly TripStatus[]).includes(trip.status);
+/** `DELETE /trips/:id` refuses a trip the driver is running (409 `TRIP_IN_PROGRESS`). */
+export const isTripDeletable = (trip: Pick<TripRow, 'status'>): boolean => trip.status !== 'IN_PROGRESS';
+
+/** 409 `TRIP_NOT_EDITABLE` — `PATCH /trips/:id` on a DELIVERED / CANCELLED trip. */
+export function isTripNotEditable(error: unknown): boolean {
+  return error instanceof ApiError && error.code === 'TRIP_NOT_EDITABLE';
+}
+
+/** 409 `TRIP_IN_PROGRESS` — `DELETE /trips/:id` on a trip the driver is running. */
+export function isTripInProgress(error: unknown): boolean {
+  return error instanceof ApiError && error.code === 'TRIP_IN_PROGRESS';
+}
+
+/** 404 from `/trips/:id` — the trip was already deleted (or never existed). */
+export function isTripNotFound(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404;
+}
+
+/** `DELETE /trips/:id` — a hard delete (204, no body). `onDeleted` lets the board drop its
+ * selection when the removed trip was the one on the route panel. */
+export function useDeleteTrip({ onDeleted }: { onDeleted?: (tripId: string) => void } = {}) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (tripId: string) => client.delete<null>(endpoints.trips.remove(tripId)),
+    onSuccess: (_data, tripId) => {
+      queryClient.removeQueries({ queryKey: qk.trip(tripId) });
+      // `qkRoot.trips` also covers the unassigned-loads list (`['trips', 'unassigned-loads']`).
+      void queryClient.invalidateQueries({ queryKey: qkRoot.trips });
+      onDeleted?.(tripId);
+    },
+    onError: (error, tripId) => {
+      // 404 — already gone: refresh the board and drop it like a successful delete would.
+      // 409 `TRIP_IN_PROGRESS` — the driver started it since the board loaded: refresh its status.
+      if (isTripNotFound(error)) {
+        queryClient.removeQueries({ queryKey: qk.trip(tripId) });
+        void queryClient.invalidateQueries({ queryKey: qkRoot.trips });
+        onDeleted?.(tripId);
+      } else if (isTripInProgress(error)) void queryClient.invalidateQueries({ queryKey: qkRoot.trips });
     },
   });
 }

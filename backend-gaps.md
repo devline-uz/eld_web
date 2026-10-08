@@ -313,7 +313,8 @@ openapi example shows numbers. Tolerated only in `DECIMAL_STRING_FIELDS` of the 
 | `ResolveDefectPayload.correctedBy/completedAt/laborHours/partsCostUsd` | `PATCH /defects/:id/resolve` | re-add the four 11.17 inputs WB-151 removed |
 | `CreateWorkOrderPayload` / `UpdateWorkOrderPayload` `estimatedLaborHours`, `keepOutOfService`, `notifyDriver`, `blockDispatchAssignment` | `/work-orders` | 11.16 work-order fields (B-42) |
 | `CreateTripPayload` `customer`, `trailerId`, `distanceMi`, `rateUsd`, `estimatedDriveSec`, `draft` | `POST /trips` | L600 Customer, L609 Trailer, L610 Distance, L611 Est. drive time, L613 Rate, L616 Save as draft |
-| `usePublishTrip` / `useUpdateTrip` (`TripStatus` gains `DRAFT`) | `PATCH /trips/:id` | publishing a draft (422 `TRIP_NOT_DRAFT`) |
+| `usePublishTrip` / `useUpdateTrip` (`TripStatus` gains `DRAFT`) | `PATCH /trips/:id` | publishing a draft (illegal transition → 409 `CONFLICT`); W-11 `Edit trip` (row menu → `CreateTripModal` with `trip`; 409 `TRIP_NOT_EDITABLE` on DELIVERED / CANCELLED) |
+| `useDeleteTrip` | `DELETE /trips/:id` | W-11 `Delete trip` (hard delete, 204; 404; 409 `TRIP_IN_PROGRESS`) |
 | `AssignTripPayload.notify` | `POST /trips/:id/assign` | L629 Notify the driver |
 | `GenerateReportInput` `RODS` / `IDLE_FUEL` (PDF only), `REPORT_TYPE_FORMATS` | `POST /reports/generate` | L766 Idle & fuel report row |
 | `QueueShortcutInput.fmcsaPack` `vehicleId` + `include: FmcsaPackSection[]` | `GET /reports/fmcsa-pack` | L795 Unit selector, L798 Pack contents checkboxes |

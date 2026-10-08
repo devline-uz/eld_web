@@ -184,6 +184,8 @@ export const endpoints = {
     create: '/trips',
     detail: (id: string) => `/trips/${id}`,
     update: (id: string) => `/trips/${id}`,
+    /** `DELETE /trips/:id` — hard delete; 204, 404, 409 `TRIP_IN_PROGRESS`. */
+    remove: (id: string) => `/trips/${id}`,
     assign: (id: string) => `/trips/${id}/assign`,
     autoAssign: '/trips/auto-assign',
     unassignedLoads: '/trips/unassigned-loads',

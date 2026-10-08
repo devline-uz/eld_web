@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { ColumnDef } from '@tanstack/react-table';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Search, Plus, Filter, Users, MapPin, X } from 'lucide-react';
 import { usePermission } from '@/shared/auth/usePermission';
 import { Can } from '@/shared/auth/Can';
@@ -14,6 +15,11 @@ import {
   useUnassignedLoads,
   useAutoAssignTrips,
   usePublishTrip,
+  useDeleteTrip,
+  isTripDeletable,
+  isTripEditable,
+  isTripInProgress,
+  isTripNotFound,
   tripScheduleConflict,
   tripsActiveSliceQuery,
   tripsKpiQuery,
@@ -32,6 +38,8 @@ import { Pagination } from '@/shared/ui/Pagination';
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
 import { EMPTY_STATE_COPY, searchEmptyState } from '@/shared/ui/copy';
 import { useToast } from '@/shared/ui/Toast';
+import { ConfirmDelete } from '@/shared/ui/Modal';
+import { ApiError } from '@/shared/api/errors';
 import { formatLocal } from '@/shared/format/datetime';
 import { formatWeight } from '@/shared/format/numbers';
 import { orDash } from '@/shared/format/empty';
@@ -40,7 +48,15 @@ import { AssignLoadModal } from './components/AssignLoadModal';
 import { TripFiltersDrawer, TripFilterChips } from './components/TripFiltersDrawer';
 import { RoutePreview } from './components/RoutePreview';
 import { PeriodDropdown } from './components/PeriodDropdown';
-import { scheduleConflictMessage } from './lib/copy';
+import {
+  DELETE_TRIP_DESCRIPTION,
+  TRIP_IN_PROGRESS,
+  TRIP_NOT_EDITABLE,
+  TRIP_NOT_FOUND,
+  deleteTripTitle,
+  scheduleConflictMessage,
+  tripDeletedToast,
+} from './lib/copy';
 import { parseTripFilters, writeTripFilters, matchesTripFilters, EMPTY_TRIP_FILTERS, countActiveTripFilters } from './lib/filters';
 
 type Segment = 'ACTIVE' | 'SCHEDULED' | 'COMPLETED' | 'UNASSIGNED';
@@ -59,6 +75,8 @@ export default function TripsPage() {
   const [selectedTripId, setSelectedTripId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [assignLoad, setAssignLoad] = useState<TripRow | null>(null);
+  const [editTrip, setEditTrip] = useState<TripRow | null>(null);
+  const [deleteTrip, setDeleteTrip] = useState<TripRow | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filtersRevision, setFiltersRevision] = useState(0);
   const [params, setParams] = useSearchParams();
@@ -90,6 +108,65 @@ export default function TripsPage() {
   const autoAssign = useAutoAssignTrips();
   const publishTrip = usePublishTrip();
   const [publishingId, setPublishingId] = useState<string | null>(null);
+  // A deleted trip that was on the route panel must not linger there (the panel falls back to
+  // the first row once the selection is cleared).
+  const deleteMutation = useDeleteTrip({
+    onDeleted: (tripId) => setSelectedTripId((current) => (current === tripId ? null : current)),
+  });
+
+  function confirmDelete() {
+    const target = deleteTrip;
+    if (!target || deleteMutation.isPending) return;
+    deleteMutation.mutate(target.id, {
+      onSuccess: () => {
+        toast({ kind: 'success', title: tripDeletedToast(target.number) });
+        setDeleteTrip(null);
+      },
+      onError: (error) => {
+        if (isTripInProgress(error)) {
+          toast({ kind: 'error', title: TRIP_IN_PROGRESS });
+          setDeleteTrip(null);
+        } else if (isTripNotFound(error)) {
+          toast({ kind: 'error', title: TRIP_NOT_FOUND });
+          setDeleteTrip(null);
+        } else {
+          toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+        }
+      },
+    });
+  }
+
+  // `…` row menu (same pattern as Vehicles): Edit is off for DELIVERED / CANCELLED (PATCH answers
+  // 409 `TRIP_NOT_EDITABLE`), Delete is off for IN_PROGRESS (409 `TRIP_IN_PROGRESS`). The DataTable
+  // only renders the column when `rowActions` is passed, which is gated on `trips` FULL.
+  const itemClass =
+    'cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle data-[disabled]:cursor-not-allowed data-[disabled]:text-text-muted data-[disabled]:hover:bg-transparent';
+  const tripRowActions = canFull
+    ? (row: TripRow) => {
+        const editable = isTripEditable(row);
+        const deletable = isTripDeletable(row);
+        return (
+          <Can perm="trips" level="FULL">
+            <DropdownMenu.Item
+              disabled={!editable}
+              title={editable ? undefined : TRIP_NOT_EDITABLE}
+              onSelect={() => setEditTrip(row)}
+              className={itemClass}
+            >
+              Edit trip
+            </DropdownMenu.Item>
+            <DropdownMenu.Item
+              disabled={!deletable}
+              title={deletable ? undefined : TRIP_IN_PROGRESS}
+              onSelect={() => setDeleteTrip(row)}
+              className={`${itemClass} text-danger hover:bg-danger-soft`}
+            >
+              Delete trip
+            </DropdownMenu.Item>
+          </Can>
+        );
+      }
+    : undefined;
 
   const driverOptions = useMemo(
     () =>
@@ -459,7 +536,13 @@ export default function TripsPage() {
             <EmptyState {...EMPTY_STATE_COPY.unassignedLoads} />
           ) : (
             <div className="xl:min-h-0 xl:overflow-y-auto">
-              <DataTable data={unassigned.data?.items ?? []} columns={unassignedColumns} caption="Unassigned loads" getRowId={(r) => r.id} />
+              <DataTable
+                data={unassigned.data?.items ?? []}
+                columns={unassignedColumns}
+                caption="Unassigned loads"
+                getRowId={(r) => r.id}
+                rowActions={tripRowActions}
+              />
             </div>
           )}
         </Card>
@@ -498,6 +581,7 @@ export default function TripsPage() {
                     caption={segment === 'SCHEDULED' ? 'Scheduled trips' : 'Active trips'}
                     getRowId={(r) => r.id}
                     onRowClick={(row) => setSelectedTripId(row.id)}
+                    rowActions={tripRowActions}
                   />
                 </div>
                 <Pagination
@@ -555,6 +639,18 @@ export default function TripsPage() {
       )}
 
       {createOpen && <CreateTripModal onClose={() => setCreateOpen(false)} />}
+      {editTrip && <CreateTripModal key={editTrip.id} trip={editTrip} onClose={() => setEditTrip(null)} />}
+      <ConfirmDelete
+        open={deleteTrip !== null}
+        onClose={() => {
+          if (!deleteMutation.isPending) setDeleteTrip(null);
+        }}
+        onConfirm={confirmDelete}
+        title={deleteTrip ? deleteTripTitle(deleteTrip.number) : 'Delete trip?'}
+        description={DELETE_TRIP_DESCRIPTION}
+        confirmLabel="Delete permanently"
+        loading={deleteMutation.isPending}
+      />
       {assignLoad && <AssignLoadModal load={assignLoad} onClose={() => setAssignLoad(null)} />}
       <TripFiltersDrawer
         key={filtersRevision}
