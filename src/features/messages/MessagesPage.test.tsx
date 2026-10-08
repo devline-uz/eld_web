@@ -3,7 +3,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { StrictMode } from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -513,5 +513,108 @@ describe('W-16 Messages — stage-2 fixes', () => {
     expect(await screen.findByText('Discard changes?')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Keep editing' }));
     expect(await screen.findByDisplayValue('Chains required on I-70.')).toBeInTheDocument();
+  });
+});
+
+// New-message "Group" tab → MessagesPage: the new group is selected, lands in `Groups`, and a
+// GROUP thread has a members line and none of the single-driver chrome (logs, context panel, HOS).
+describe('W-16 Messages — group conversations', () => {
+  const DRIVER_2 = { ...DRIVER, id: 'drv_2', username: 'mariagarcia', firstName: 'Maria', lastName: 'Garcia' };
+  const GROUP = {
+    id: 'cnv_grp',
+    type: 'GROUP',
+    title: 'Night shift',
+    lastMessageAt: null,
+    createdById: 'usr_1',
+    createdAt: '2026-09-12T16:00:00.000Z',
+    participants: [
+      { id: 'cp_g1', conversationId: 'cnv_grp', userId: 'usr_1', driverId: null, lastReadAt: null, mutedUntil: null },
+      { id: 'cp_g2', conversationId: 'cnv_grp', userId: null, driverId: 'drv_1', lastReadAt: null, mutedUntil: null },
+      { id: 'cp_g3', conversationId: 'cnv_grp', userId: null, driverId: 'drv_2', lastReadAt: null, mutedUntil: null },
+    ],
+  };
+
+  it('creating a group selects it, clears the search and switches to the Groups segment', async () => {
+    let created = false;
+    const bodies: unknown[] = [];
+    server.use(
+      http.get(url(endpoints.conversations.list), () => ok({ items: created ? [GROUP, CONVERSATION] : [CONVERSATION] })),
+      http.get(url(endpoints.drivers.list), () => ok({ items: [DRIVER, DRIVER_2], page: 1, limit: 500, total: 2, totalPages: 1 })),
+      http.get(url(endpoints.conversations.messages(':id')), () => ok({ items: [], page: 1, limit: 100, total: 0, totalPages: 1 })),
+      http.post(url(endpoints.conversations.create), async ({ request }) => {
+        bodies.push(await request.json());
+        created = true;
+        return ok(GROUP, 201);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText('John Smith');
+    // A search that would hide the new group must be cleared on creation.
+    await user.type(screen.getByRole('textbox', { name: 'Search conversations' }), 'zzz');
+    await screen.findByText('Nothing matches "zzz"');
+
+    await user.click(screen.getByRole('button', { name: 'New' }));
+    const dialog = await screen.findByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Group' }));
+    await user.type(within(dialog).getByRole('textbox', { name: /Group name/ }), 'Night shift');
+    await user.click(await within(dialog).findByRole('button', { name: /John Smith$/ }));
+    await user.click(within(dialog).getByRole('button', { name: /Maria Garcia$/ }));
+    await user.click(within(dialog).getByRole('button', { name: 'Create group' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(bodies).toEqual([{ type: 'GROUP', title: 'Night shift', driverIds: ['drv_1', 'drv_2'] }]);
+
+    expect(await screen.findByRole('button', { name: 'Groups 1' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('textbox', { name: 'Search conversations' })).toHaveValue('');
+    expect(await screen.findByPlaceholderText('Write a message to Night shift…')).toBeInTheDocument();
+    expect(screen.getByText('3 members · 2 drivers')).toBeInTheDocument();
+    // Only the group row is listed under `Groups` — the DIRECT chat with John Smith is filtered out.
+    expect(screen.queryByText('Nothing matches "zzz"')).not.toBeInTheDocument();
+    expect(screen.queryByText('John Smith')).not.toBeInTheDocument();
+  });
+
+  it('a group thread shows the members line and skips View logs, the driver panel and the HOS request', async () => {
+    const hosRequests: string[] = [];
+    server.use(
+      http.get(url(endpoints.conversations.list), () => ok({ items: [GROUP] })),
+      http.get(url(endpoints.drivers.list), () => ok({ items: [DRIVER, DRIVER_2], page: 1, limit: 500, total: 2, totalPages: 1 })),
+      http.get(url(endpoints.conversations.messages(':id')), () => ok({ items: [], page: 1, limit: 100, total: 0, totalPages: 1 })),
+      http.get(url(endpoints.drivers.hos(':id')), ({ params }) => {
+        hosRequests.push(params.id as string);
+        return ok({});
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByText('Night shift'));
+
+    expect(await screen.findByText('3 members · 2 drivers')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Write a message to Night shift…')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'View logs' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Call' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Profile' })).not.toBeInTheDocument();
+    expect(screen.queryByText('@johnsmith', { exact: false })).not.toBeInTheDocument();
+    expect(hosRequests).toEqual([]);
+  });
+
+  it('a DIRECT thread still shows View logs and requests HOS (control for the group case)', async () => {
+    usePopulatedConversations();
+    const hosRequests: string[] = [];
+    server.use(
+      http.get(url(endpoints.drivers.hos(':id')), ({ params }) => {
+        hosRequests.push(params.id as string);
+        return ok({});
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByText('John Smith'));
+    expect(await screen.findByRole('button', { name: 'View logs' })).toBeInTheDocument();
+    await waitFor(() => expect(hosRequests).toContain('drv_1'));
+    expect(screen.queryByText(/members ·/)).not.toBeInTheDocument();
   });
 });

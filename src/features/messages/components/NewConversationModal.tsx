@@ -1,5 +1,5 @@
-// owner: web-dispatch-messaging — W-16 "+ New": start a direct conversation, or broadcast one
-// message to many drivers at once (`messaging` FULL — web/tz.md §11 / §16). Not drawn as its own
+// owner: web-dispatch-messaging — W-16 "+ New": start a direct conversation, start a named group
+// conversation with several drivers, or broadcast one message to many drivers at once (`messaging` FULL — web/tz.md §11 / §16). Not drawn as its own
 // overlay in the design files; built to the same Modal/footer/validation contract as every other
 // 11.x form (web-modal-spec).
 import { useState } from 'react';
@@ -17,14 +17,26 @@ import { ApiError } from '@/shared/api/errors';
 import type { z } from 'zod';
 
 type MessageFormValues = z.infer<typeof messageSchema>;
-type Tab = 'DIRECT' | 'BROADCAST';
+type Tab = 'DIRECT' | 'GROUP' | 'BROADCAST';
 
-export function NewConversationModal({ onClose, onCreated }: { onClose: () => void; onCreated: (conversationId: string) => void }) {
+/** `CreateConversationDto.title` is `max(200)`; a group of one driver is just a direct chat. */
+const GROUP_TITLE_MAX = 200;
+const GROUP_MIN_DRIVERS = 2;
+
+export function NewConversationModal({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void;
+  onCreated: (conversationId: string, type: 'DIRECT' | 'GROUP') => void;
+}) {
   const { toast } = useToast();
   const [tab, setTab] = useState<Tab>('DIRECT');
   const [query, setQuery] = useState('');
   const [driverId, setDriverId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [groupTitle, setGroupTitle] = useState('');
+  const [groupTitleTouched, setGroupTitleTouched] = useState(false);
 
   // QA fix — an INACTIVE driver has no app session to receive messages (`?status=ACTIVE`).
   const driversQuery = useDriversList({ q: query || undefined, limit: 50, status: 'ACTIVE' });
@@ -50,9 +62,32 @@ export function NewConversationModal({ onClose, onCreated }: { onClose: () => vo
       { type: 'DIRECT', driverIds: [driverId] },
       {
         onSuccess: (conversation) => {
-          onCreated(conversation.id);
+          onCreated(conversation.id, 'DIRECT');
           onClose();
           toast({ kind: 'success', title: 'Conversation started' });
+        },
+        onError: (error) => toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }),
+      },
+    );
+  }
+
+  const trimmedGroupTitle = groupTitle.trim();
+  const groupTitleError = !trimmedGroupTitle
+    ? 'Group name is required.'
+    : trimmedGroupTitle.length > GROUP_TITLE_MAX
+      ? `Group name must be ${GROUP_TITLE_MAX} characters or fewer.`
+      : null;
+
+  function handleCreateGroup() {
+    setGroupTitleTouched(true);
+    if (groupTitleError || selectedIds.length < GROUP_MIN_DRIVERS) return;
+    createConversation.mutate(
+      { type: 'GROUP', title: trimmedGroupTitle, driverIds: selectedIds },
+      {
+        onSuccess: (conversation) => {
+          onCreated(conversation.id, 'GROUP');
+          onClose();
+          toast({ kind: 'success', title: 'Group created' });
         },
         onError: (error) => toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }),
       },
@@ -73,17 +108,22 @@ export function NewConversationModal({ onClose, onCreated }: { onClose: () => vo
     );
   }
 
-  const canSubmit = tab === 'DIRECT' ? Boolean(driverId) : selectedIds.length > 0;
+  const canSubmit =
+    tab === 'DIRECT'
+      ? Boolean(driverId)
+      : tab === 'GROUP'
+        ? !groupTitleError && selectedIds.length >= GROUP_MIN_DRIVERS
+        : selectedIds.length > 0;
   // WB-165 — a typed broadcast or a picked recipient is unsaved work: closing now raises the
   // 11.30 discard confirm instead of dropping it, and `Cancel` goes through the same route.
-  const isDirty = Boolean(driverId) || selectedIds.length > 0 || bodyDirty;
+  const isDirty = Boolean(driverId) || selectedIds.length > 0 || bodyDirty || groupTitle.trim().length > 0;
 
   return (
     <Modal
       open
       onClose={onClose}
       title="New message"
-      subtitle="Message a driver or broadcast to the fleet"
+      subtitle="Message a driver, start a group or broadcast to the fleet"
       size="md"
       isDirty={isDirty && !submitting}
       footer={
@@ -94,9 +134,9 @@ export function NewConversationModal({ onClose, onCreated }: { onClose: () => vo
             size="lg"
             loading={submitting}
             disabled={!canSubmit}
-            onClick={tab === 'DIRECT' ? handleStartConversation : handleSubmit(handleBroadcast)}
+            onClick={tab === 'DIRECT' ? handleStartConversation : tab === 'GROUP' ? handleCreateGroup : handleSubmit(handleBroadcast)}
           >
-            {tab === 'DIRECT' ? 'Start conversation' : 'Send broadcast'}
+            {tab === 'DIRECT' ? 'Start conversation' : tab === 'GROUP' ? 'Create group' : 'Send broadcast'}
           </Button>
         </>
       }
@@ -106,6 +146,7 @@ export function NewConversationModal({ onClose, onCreated }: { onClose: () => vo
           {(
             [
               ['DIRECT', 'Message a driver'],
+              ['GROUP', 'Group'],
               ['BROADCAST', 'Broadcast to fleet'],
             ] as [Tab, string][]
           ).map(([value, label]) => (
@@ -120,6 +161,30 @@ export function NewConversationModal({ onClose, onCreated }: { onClose: () => vo
             </button>
           ))}
         </div>
+
+        {tab === 'GROUP' && (
+          <label className="flex flex-col gap-1">
+            <span className="text-label text-text">
+              Group name <span className="text-danger">*</span>
+            </span>
+            <input
+              value={groupTitle}
+              onChange={(e) => setGroupTitle(e.target.value)}
+              onBlur={() => setGroupTitleTouched(true)}
+              maxLength={GROUP_TITLE_MAX}
+              placeholder="e.g. Night shift — Columbus"
+              aria-invalid={groupTitleTouched && Boolean(groupTitleError)}
+              className="h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text outline-none"
+            />
+            {groupTitleTouched && groupTitleError && <span className="text-caption text-danger">{groupTitleError}</span>}
+          </label>
+        )}
+
+        {tab === 'GROUP' && (
+          <p className="text-caption text-text-muted">
+            {selectedIds.length} selected · pick at least {GROUP_MIN_DRIVERS} drivers
+          </p>
+        )}
 
         <div className="flex h-input items-center gap-2 rounded-md border border-border px-3">
           <Search size={16} strokeWidth={1.75} className="text-text-muted" />
