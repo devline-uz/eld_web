@@ -7,7 +7,8 @@ import type { Feature, FeatureCollection, LineString, Point, Polygon, Position }
 export const MAP_LAYERS = ['Vehicles', 'Trips', 'Geofences', 'Traffic'] as const;
 export type MapLayer = (typeof MAP_LAYERS)[number];
 
-/** Raster traffic tile template (`{z}/{x}/{y}`), e.g. TomTom flow tiles. Empty → no Traffic layer.
+/** Traffic tile template (`{z}/{x}/{y}`), e.g. TomTom flow tiles — `.pbf` → vector, else raster.
+ * Empty → no Traffic layer.
  * Read on every call, not at module eval, so tests can `vi.stubEnv` it. */
 export function trafficTilesUrl(): string {
   return (import.meta.env.VITE_TRAFFIC_TILES_URL as string | undefined) ?? '';
