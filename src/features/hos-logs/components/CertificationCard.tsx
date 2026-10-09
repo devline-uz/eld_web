@@ -44,7 +44,7 @@ export function CertificationCard({
         subtitle={`${certified} certified · ${pending} pending`}
         action={
           <Can perm="hosCertifyOnBehalf" level="FULL">
-            <Button variant="primary" onClick={onCertifyAll}>
+            <Button variant="primary" onClick={onCertifyAll} data-print-hide="">
               Certify all
             </Button>
           </Can>

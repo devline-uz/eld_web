@@ -89,6 +89,7 @@ export function ViolationsCard({
                     variant="secondary"
                     size="sm"
                     aria-label={`Resolve ${VIOLATION_TITLE[violation.type]}`}
+                    data-print-hide=""
                     onClick={() => setResolving(violation)}
                   >
                     Resolve
