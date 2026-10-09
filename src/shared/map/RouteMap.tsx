@@ -1,13 +1,13 @@
-// Route preview map (W-11 right rail): pickup + delivery markers, the route polyline and a
-// fitBounds over all of it. Same MapLibre setup as FleetMap (style URL, worker URL, CSS); lazy-imported
+// Route preview map (W-11 right rail, 11.10 Create trip): pickup, intermediate-stop and delivery
+// markers labelled in route order (P, 1…N, D), the route polyline and a fitBounds over all of it. Same MapLibre setup as FleetMap (style URL, worker URL, CSS); lazy-imported
 // by the Trips screen so `maplibre-gl` stays in the map chunk. The map is created once per mount and
 // updated through its GeoJSON source, so selecting another trip never remounts it.
 import { useEffect, useRef, useState } from 'react';
 import * as maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
-import type { Feature, FeatureCollection } from 'geojson';
 import type { LatLon } from './overlays';
+import { routeCoords, routeFeatures } from './routeFeatures';
 
 const STYLE_URL: string = import.meta.env.VITE_MAP_STYLE_URL ?? '';
 maplibregl.setWorkerUrl(maplibreWorkerUrl);
@@ -15,9 +15,11 @@ maplibregl.setWorkerUrl(maplibreWorkerUrl);
 export interface RouteMapProps {
   pickup: LatLon;
   delivery: LatLon;
+  /** Intermediate stops between the pickup and the delivery, in route order. */
+  waypoints?: readonly LatLon[];
   /** Road geometry as [lon, lat] pairs. Empty/`null` → a straight line is drawn (`approximate`). */
   line: [number, number][] | null;
-  /** The line is a straight pickup → delivery segment, not a road route. */
+  /** The line is straight pickup → stops → delivery segments, not a road route. */
   approximate?: boolean;
   className?: string;
 }
@@ -25,6 +27,7 @@ export interface RouteMapProps {
 const SOURCE = 'route-line';
 const LINE_LAYER = 'route-line-layer';
 const POINT_LAYER = 'route-points-layer';
+const LABEL_LAYER = 'route-labels-layer';
 const FIT_PADDING = 40;
 
 function cssToken(name: string, fallback: string): string {
@@ -32,19 +35,9 @@ function cssToken(name: string, fallback: string): string {
   return value || fallback;
 }
 
-function collection(p: RouteMapProps): FeatureCollection {
-  const coords = p.line && p.line.length >= 2 ? p.line : [[p.pickup.lon, p.pickup.lat], [p.delivery.lon, p.delivery.lat]];
-  const features: Feature[] = [
-    { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords } },
-    { type: 'Feature', properties: { kind: 'pickup' }, geometry: { type: 'Point', coordinates: [p.pickup.lon, p.pickup.lat] } },
-    { type: 'Feature', properties: { kind: 'delivery' }, geometry: { type: 'Point', coordinates: [p.delivery.lon, p.delivery.lat] } },
-  ];
-  return { type: 'FeatureCollection', features };
-}
-
 function install(map: maplibregl.Map, p: RouteMapProps) {
   if (map.getSource(SOURCE)) return;
-  const data = collection(p);
+  const data = routeFeatures(p);
   map.addSource(SOURCE, { type: 'geojson', data });
   map.addLayer({
     id: LINE_LAYER,
@@ -64,18 +57,38 @@ function install(map: maplibregl.Map, p: RouteMapProps) {
     source: SOURCE,
     filter: ['==', ['geometry-type'], 'Point'],
     paint: {
-      'circle-radius': 7,
-      'circle-color': ['match', ['get', 'kind'], 'pickup', cssToken('--color-success', 'green'), cssToken('--color-danger', 'red')],
+      'circle-radius': 9,
+      'circle-color': [
+        'match',
+        ['get', 'kind'],
+        'pickup',
+        cssToken('--color-success', 'green'),
+        'stop',
+        cssToken('--color-primary', 'blue'),
+        cssToken('--color-danger', 'red'),
+      ],
       'circle-stroke-width': 2,
       'circle-stroke-color': cssToken('--color-surface', 'white'),
     },
   });
+  map.addLayer({
+    id: LABEL_LAYER,
+    type: 'symbol',
+    source: SOURCE,
+    filter: ['==', ['geometry-type'], 'Point'],
+    layout: {
+      'text-field': ['get', 'label'],
+      'text-size': 11,
+      'text-font': ['Noto Sans Regular'],
+      'text-allow-overlap': true,
+      'text-ignore-placement': true,
+    },
+    paint: { 'text-color': cssToken('--color-text-inverse', 'white') },
+  });
 }
 
-type Coord = [number, number];
-
 function fit(map: maplibregl.Map, p: RouteMapProps) {
-  const coords: Coord[] = p.line && p.line.length >= 2 ? p.line : [[p.pickup.lon, p.pickup.lat], [p.delivery.lon, p.delivery.lat]];
+  const coords = routeCoords(p);
   const first = coords[0]!;
   const bounds = coords.reduce((acc, c) => acc.extend(c), new maplibregl.LngLatBounds(first, first));
   map.resize();
@@ -120,15 +133,15 @@ export default function RouteMap(props: RouteMapProps) {
     };
   }, [hasStyle]);
 
-  const { pickup, delivery, line, approximate } = props;
+  const { pickup, delivery, waypoints, line, approximate } = props;
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
-    const p = { pickup, delivery, line, approximate };
-    (map.getSource(SOURCE) as maplibregl.GeoJSONSource | undefined)?.setData(collection(p));
+    const p = { pickup, delivery, waypoints, line, approximate };
+    (map.getSource(SOURCE) as maplibregl.GeoJSONSource | undefined)?.setData(routeFeatures(p));
     map.setPaintProperty(LINE_LAYER, 'line-dasharray', approximate ? [2, 2] : [1, 0]);
     fit(map, p);
-  }, [pickup, delivery, line, approximate, ready]);
+  }, [pickup, delivery, waypoints, line, approximate, ready]);
 
   if (!hasStyle || failed) {
     return (

@@ -47,6 +47,7 @@ import { CreateTripModal } from './components/CreateTripModal';
 import { AssignLoadModal } from './components/AssignLoadModal';
 import { TripFiltersDrawer, TripFilterChips } from './components/TripFiltersDrawer';
 import { RoutePreview } from './components/RoutePreview';
+import { intermediateTripStops, orderTripStops } from './lib/useTripRoute';
 import { PeriodDropdown } from './components/PeriodDropdown';
 import {
   DELETE_TRIP_DESCRIPTION,
@@ -604,9 +605,9 @@ export default function TripsPage() {
             {selectedTrip ? (
               <>
                 <SectionHeader title={`Route · ${selectedTrip.number}`} subtitle={`${selectedTrip.pickup?.name ?? '—'} → ${selectedTrip.delivery?.name ?? '—'}`} />
-                <RoutePreview pickup={selectedTrip.pickup} delivery={selectedTrip.delivery} />
+                <RoutePreview pickup={selectedTrip.pickup} delivery={selectedTrip.delivery} waypoints={intermediateTripStops(selectedTrip.stops)} />
                 <ol className="mt-4 flex flex-col gap-3">
-                  {selectedTrip.stops.map((stop) => {
+                  {orderTripStops(selectedTrip.stops).map((stop) => {
                     const done = stop.status === 'COMPLETED' || stop.status === 'ARRIVED';
                     const label =
                       stop.status === 'COMPLETED'

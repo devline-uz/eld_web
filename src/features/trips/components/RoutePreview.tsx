@@ -1,15 +1,24 @@
-// W-11 right rail: real map of the selected trip's pickup → delivery route.
+// W-11 right rail (and the 11.10 Create trip form): real map of the pickup → intermediate stops →
+// delivery route. `waypoints` must already be in route order; stops that cannot be placed are skipped.
 import { lazy, Suspense } from 'react';
 import { MapPin } from 'lucide-react';
-import type { TripStopRow } from '@/shared/api/trips';
-import { useTripRoute } from '../lib/useTripRoute';
+import { useTripRoute, type RouteStop } from '../lib/useTripRoute';
 
 const RouteMap = lazy(() => import('@/shared/map/RouteMap'));
 
 const BOX = 'mt-3 h-48 overflow-hidden rounded-md bg-bg-subtle';
 
-export function RoutePreview({ pickup, delivery }: { pickup: TripStopRow | null; delivery: TripStopRow | null }) {
-  const route = useTripRoute(pickup, delivery);
+export function RoutePreview({
+  pickup,
+  delivery,
+  waypoints,
+}: {
+  pickup: RouteStop | null;
+  delivery: RouteStop | null;
+  /** Intermediate stops in route order (between the pickup and the delivery). */
+  waypoints?: readonly RouteStop[];
+}) {
+  const route = useTripRoute(pickup, delivery, waypoints);
   if (route.status === 'loading') {
     return <div className={BOX} role="status" aria-label="Loading route" data-testid="route-loading"><div className="size-full animate-pulse bg-bg-subtle" /></div>;
   }
@@ -25,7 +34,7 @@ export function RoutePreview({ pickup, delivery }: { pickup: TripStopRow | null;
   return (
     <div className={`${BOX} relative`}>
       <Suspense fallback={<div className="size-full animate-pulse bg-bg-subtle" />}>
-        <RouteMap pickup={route.pickup} delivery={route.delivery} line={route.line} approximate={route.approximate} />
+        <RouteMap pickup={route.pickup} delivery={route.delivery} waypoints={route.waypoints} line={route.line} approximate={route.approximate} />
       </Suspense>
       {!route.routing && route.approximate && (
         <span className="absolute bottom-1 left-1 rounded bg-bg-surface px-1.5 py-0.5 text-caption text-text-muted">Approximate route (straight line)</span>

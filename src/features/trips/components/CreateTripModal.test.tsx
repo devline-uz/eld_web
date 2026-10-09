@@ -15,14 +15,29 @@ import type * as GeocodeModule from '@/shared/map/geocode';
 import type { TripRow } from '@/shared/api/trips';
 import { CreateTripModal } from './CreateTripModal';
 
-// Place suggestions: only the query `Columbus` finds a place; everything else is free text.
+// Place suggestions: only the exact queries below find a place; everything else is free text.
 const COLUMBUS = { name: 'Columbus, Ohio, United States', lat: 39.96, lon: -83 };
+const PLACES: Record<string, { name: string; lat: number; lon: number }> = {
+  Columbus: COLUMBUS,
+  Dayton: { name: 'Dayton, Ohio, United States', lat: 39.76, lon: -84.19 },
+  Springfield: { name: 'Springfield, Ohio, United States', lat: 39.92, lon: -83.81 },
+  Xenia: { name: 'Xenia, Ohio, United States', lat: 39.68, lon: -83.93 },
+};
 vi.mock('@/shared/map/geocode', async (importOriginal) => ({
   ...(await importOriginal<typeof GeocodeModule>()),
-  usePlaceSearch: (query: string, enabled: boolean) => ({
-    data: enabled && query.trim() === 'Columbus' ? [COLUMBUS] : [],
-    isError: false,
-  }),
+  usePlaceSearch: (query: string, enabled: boolean) => {
+    const place = enabled ? PLACES[query.trim()] : undefined;
+    return { data: place ? [place] : [], isError: false };
+  },
+}));
+
+// The route preview renders its stops as `P | 1:name | … | D` so the order is assertable without a map.
+vi.mock('./RoutePreview', () => ({
+  RoutePreview: ({ pickup, delivery, waypoints = [] }: { pickup: { name: string } | null; delivery: { name: string } | null; waypoints?: { name: string }[] }) => (
+    <p data-testid="route-preview">
+      {[`P:${pickup?.name}`, ...waypoints.map((w, i) => `${i + 1}:${w.name}`), `D:${delivery?.name}`].join(' | ')}
+    </p>
+  ),
 }));
 
 const VALIDATION_REQUIRED = VALIDATION_MESSAGES.required;
@@ -137,7 +152,20 @@ describe('CreateTripModal — submit', () => {
   async function fillRequiredAndSubmit(
     pickup: string,
     delivery: string,
-    { twice = false, intermediate, pick, editAfterPick }: { twice?: boolean; intermediate?: string; pick?: boolean; editAfterPick?: string } = {},
+    {
+      twice = false,
+      intermediate,
+      pick,
+      editAfterPick,
+      moveStop,
+    }: {
+      twice?: boolean;
+      intermediate?: string | string[];
+      pick?: boolean;
+      editAfterPick?: string;
+      /** `[stop number, new position]` — picked in that stop's `Order` select before submitting. */
+      moveStop?: [number, number];
+    } = {},
   ) {
     const posts: Record<string, unknown>[] = [];
     let release: () => void = () => {};
@@ -166,10 +194,18 @@ describe('CreateTripModal — submit', () => {
     await user.type(destination!, 'Dayton, OH');
     enterWindow('Pickup', pickup);
     enterWindow('Delivery', delivery);
-    if (intermediate) {
+    const intermediates = intermediate === undefined ? [] : [intermediate].flat();
+    for (const [index, name] of intermediates.entries()) {
       await user.click(screen.getByRole('button', { name: '+ Add an intermediate stop' }));
-      const stopLabel = screen.getByText((content, el) => el?.tagName === 'SPAN' && content.trim() === 'Stop 1 location').closest('label')!;
-      await user.type(within(stopLabel).getByRole('combobox'), intermediate);
+      const stopLabel = screen
+        .getByText((content, el) => el?.tagName === 'SPAN' && content.trim() === `Stop ${index + 1} location`)
+        .closest('label')!;
+      await user.type(within(stopLabel).getByRole('combobox'), name);
+    }
+    if (moveStop) {
+      const [stopNumber, position] = moveStop;
+      await user.click(screen.getByRole('combobox', { name: `Stop ${stopNumber} order` }));
+      await user.click(await screen.findByRole('option', { name: String(position) }));
     }
     await user.type(screen.getByPlaceholderText('mi'), '120.5');
     await selectDriver('Vera Verified');
@@ -210,6 +246,22 @@ describe('CreateTripModal — submit', () => {
       { sequence: 1, type: 'PICKUP', name: 'Columbus, OH', scheduledAt: new Date(`${tomorrow}T08:00`).toISOString() },
       { sequence: 2, type: 'CHECKPOINT', name: 'Springfield, OH', scheduledAt: undefined },
       { sequence: 3, type: 'DELIVERY', name: 'Dayton, OH', scheduledAt: new Date(`${tomorrow}T14:00`).toISOString() },
+    ]);
+  });
+
+  it('sends intermediate stops in the order picked in their Order select', async () => {
+    const posts = await fillRequiredAndSubmit(`${tomorrow}T08:00`, `${tomorrow}T14:00`, {
+      intermediate: ['Springfield, OH', 'Xenia, OH', 'Fairborn, OH'],
+      moveStop: [3, 1],
+    });
+    const stops = posts[0]!.stops as { sequence: number; type: string; name: string }[];
+
+    expect(stops.map((s) => [s.sequence, s.type, s.name])).toEqual([
+      [1, 'PICKUP', 'Columbus, OH'],
+      [2, 'CHECKPOINT', 'Fairborn, OH'],
+      [3, 'CHECKPOINT', 'Springfield, OH'],
+      [4, 'CHECKPOINT', 'Xenia, OH'],
+      [5, 'DELIVERY', 'Dayton, OH'],
     ]);
   });
 
@@ -786,5 +838,60 @@ describe('CreateTripModal — edit mode (`PATCH /trips/:id`)', () => {
 
     expect(await screen.findByText('Delivered and cancelled trips can no longer be edited.')).toBeInTheDocument();
     expect(onClose).toHaveBeenCalled();
+  });
+});
+
+describe('CreateTripModal — route preview', () => {
+  async function pickPlace(input: HTMLElement, query: string) {
+    const user = userEvent.setup();
+    await user.type(input, query);
+    await user.click(within(await screen.findByRole('option', { name: PLACES[query]!.name })).getByRole('button'));
+  }
+  const stopInput = (n: number) =>
+    within(
+      screen.getByText((content, el) => el?.tagName === 'SPAN' && content.trim() === `Stop ${n} location`).closest('label')!,
+    ).getByRole('combobox');
+
+  it('shows pickup first, stops in their Order, delivery last — and follows reorders and removals', async () => {
+    renderModal();
+    const user = userEvent.setup();
+    const [, , , origin, , destination] = Array.from(document.querySelectorAll<HTMLInputElement>('form input'));
+
+    await pickPlace(origin!, 'Columbus');
+    expect(screen.queryByTestId('route-preview')).not.toBeInTheDocument();
+    await pickPlace(destination!, 'Dayton');
+    expect(screen.getByTestId('route-preview')).toHaveTextContent(`P:${COLUMBUS.name} | D:${PLACES.Dayton!.name}`);
+
+    const addStop = screen.getByRole('button', { name: '+ Add an intermediate stop' });
+    await user.click(addStop);
+    await pickPlace(stopInput(1), 'Springfield');
+    await user.click(addStop);
+    await user.type(stopInput(2), 'Somewhere unpicked'); // free text, no coordinates → skipped
+    await user.click(addStop); // left blank → skipped
+    await user.click(addStop);
+    await pickPlace(stopInput(4), 'Xenia');
+
+    const springfield = PLACES.Springfield!.name;
+    const xenia = PLACES.Xenia!.name;
+    expect(screen.getByTestId('route-preview')).toHaveTextContent(
+      `P:${COLUMBUS.name} | 1:${springfield} | 2:${xenia} | D:${PLACES.Dayton!.name}`,
+    );
+
+    // Move Xenia (stop 4) to position 1.
+    await user.click(screen.getByRole('combobox', { name: 'Stop 4 order' }));
+    await user.click(await screen.findByRole('option', { name: '1' }));
+    expect(screen.getByTestId('route-preview')).toHaveTextContent(
+      `P:${COLUMBUS.name} | 1:${xenia} | 2:${springfield} | D:${PLACES.Dayton!.name}`,
+    );
+
+    // Remove Xenia (now stop 1).
+    await user.click(screen.getByRole('button', { name: 'Remove stop 1' }));
+    expect(screen.getByTestId('route-preview')).toHaveTextContent(
+      `P:${COLUMBUS.name} | 1:${springfield} | D:${PLACES.Dayton!.name}`,
+    );
+
+    // Editing a stop's text drops its coordinates, so it leaves the preview.
+    await user.type(stopInput(1), ' dock'); // Springfield is stop 1 after the removal
+    expect(screen.getByTestId('route-preview')).toHaveTextContent(`P:${COLUMBUS.name} | D:${PLACES.Dayton!.name}`);
   });
 });

@@ -1449,3 +1449,9 @@ ends the fetch much sooner.
 **Options.** (a) mirror the backend and upper-case on the client; (b) keep the web strict and flag lowercase with the WB-112/WB-202 casing message; relax nothing.
 **Choice.** (b): `{6}` + uppercase check on blur, `f.eldIdentifier()` no longer transforms. No eRODS file-name builder exists in the web (`SendLogsModal`/`FmcsaPackPage` show the backend `fileName`), so the new 4.8.2.2 name only changed in mocks/tests.
 **Why.** It is an FMCSA field the carrier must see and confirm; a silent rewrite would hide a typo. The server remains the authority.
+
+## WD-109 — Route preview: intermediate stops in route order; live preview in Create trip (2026-10-09)
+**Problem.** The W-11 Route Preview (`RoutePreview` → `useTripRoute` → `RouteMap`) drew only pickup → delivery, and 11.10 Create trip — where stops are now added and reordered — had no preview at all (§11.10 draws none).
+**Options.** (a) Extend only the W-11 rail; (b) also mount the same `RoutePreview` inside Create trip.
+**Choice.** (b). Order is always pickup → intermediate stops → delivery (`orderTripStops`: PICKUP first, DELIVERY last, the rest by `sequence`; the W-11 stop timeline uses it too). OSRM gets the stops as waypoints; markers are labelled `P`, `1…N`, `D` (`shared/map/routeFeatures.ts`); unplaceable stops are skipped. In Create trip the preview appears only once both pickup and delivery have a picked place, uses picked coordinates only (no geocoding while typing), drops blank stops as submit does, and follows the `Order` select, add/remove and place picks. Not shown in edit mode (stops are read-only there).
+**Why.** One preview implementation for both places; the dispatcher sees the order that will be sent as `sequence`.
