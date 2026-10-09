@@ -11,8 +11,11 @@ import { addYears, endOfDay, format, startOfToday } from 'date-fns';
 import { AlertTriangle } from 'lucide-react';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
+import { Select, type SelectOption } from '@/shared/ui/Select';
 import type { Place } from '@/shared/map/geocode';
 import { PlaceInput } from './PlaceInput';
+import { RoutePreview } from './RoutePreview';
+import type { RouteStop } from '../lib/useTripRoute';
 import {
   DriverPicker,
   UnitPicker,
@@ -296,6 +299,40 @@ interface IntermediateStop {
   scheduledAt: string;
 }
 
+/** Moves the stop with `key` to `toIndex`; the others shift to make room (array order is the
+ * route order — `sequence` is derived from it on submit). */
+function moveStop(stops: IntermediateStop[], key: number, toIndex: number): IntermediateStop[] {
+  const from = stops.findIndex((s) => s.key === key);
+  if (from < 0 || toIndex < 0 || toIndex >= stops.length || from === toIndex) return stops;
+  const next = [...stops];
+  const [moved] = next.splice(from, 1);
+  next.splice(toIndex, 0, moved!);
+  return next;
+}
+
+/** A form stop as a route-preview point — `null` until a place with usable coordinates is picked. */
+function previewStop(name: string, coords: Coords | null): RouteStop | null {
+  const valid = validCoords(coords);
+  return valid ? { name, address: null, ...valid } : null;
+}
+
+/** The route preview's stops: the pickup first, the intermediate stops in their `Order`, the delivery
+ * last. Blank stops are dropped as on submit, and so is any stop with no picked place. */
+function previewRoute(
+  origin: { name: string; coords: Coords | null },
+  stops: IntermediateStop[],
+  destination: { name: string; coords: Coords | null },
+): { pickup: RouteStop | null; waypoints: RouteStop[]; delivery: RouteStop | null } {
+  return {
+    pickup: previewStop(origin.name, origin.coords),
+    waypoints: stops
+      .filter((stop) => stop.name.trim() !== '')
+      .map((stop) => previewStop(stop.name.trim(), stop.coords))
+      .filter((stop): stop is RouteStop => stop !== null),
+    delivery: previewStop(destination.name, destination.coords),
+  };
+}
+
 /** `estimatedDriveSec` as the hours the form shows (two decimals at most); `''` for none. */
 const secToHours = (sec: number | null | undefined): string =>
   sec && sec > 0 ? String(Math.round((sec / 3600) * 100) / 100) : '';
@@ -333,6 +370,12 @@ export function CreateTripModal({
   // extra stops are collected here and sent between the pickup and the delivery.
   const [intermediateStops, setIntermediateStops] = useState<IntermediateStop[]>([]);
   const nextStopKey = useRef(1);
+  /** `1…N` — the position picker every intermediate stop shows. */
+  const stopOrderOptions: SelectOption[] = useMemo(
+    () =>
+      intermediateStops.map((_, index) => ({ value: String(index + 1), label: String(index + 1) })),
+    [intermediateStops],
+  );
   const [originCoords, setOriginCoords] = useState<Coords | null>(null);
   const [destinationCoords, setDestinationCoords] = useState<Coords | null>(null);
   /** Rule 6 — a 422 detail with no visible input, and any other rejection, lands here. */
@@ -407,6 +450,16 @@ export function CreateTripModal({
       },
     };
   }
+
+  const route = useMemo(
+    () =>
+      previewRoute(
+        { name: origin, coords: originCoords },
+        intermediateStops,
+        { name: destination, coords: destinationCoords },
+      ),
+    [origin, originCoords, intermediateStops, destination, destinationCoords],
+  );
 
   const driverId = useWatch({ control, name: 'driverId' }) || null;
   const vehicleId = useWatch({ control, name: 'vehicleId' }) || null;
@@ -593,7 +646,9 @@ export function CreateTripModal({
           // Unit field (and point at the pickup window), in the dispatcher's own time zone.
           const conflict = tripScheduleConflict(error);
           if (conflict) {
-            setError(scheduleConflictField(conflict), { message: scheduleConflictMessage(conflict) });
+            setError(scheduleConflictField(conflict), {
+              message: scheduleConflictMessage(conflict),
+            });
             setError('scheduledStart', { message: scheduleConflictWindowHint(conflict) });
             return;
           }
@@ -888,7 +943,22 @@ export function CreateTripModal({
           )}
           {!editing &&
             intermediateStops.map((stop, index) => (
-              <div key={stop.key} className="mt-2 grid grid-cols-[1fr_1fr_auto] items-end gap-3">
+              <div
+                key={stop.key}
+                className="mt-2 grid grid-cols-[5rem_1fr_1fr_auto] items-end gap-3"
+              >
+                <Field label="Order">
+                  <Select
+                    value={String(index + 1)}
+                    options={stopOrderOptions}
+                    onChange={(value) =>
+                      setIntermediateStops((prev) => moveStop(prev, stop.key, Number(value) - 1))
+                    }
+                    disabled={intermediateStops.length < 2}
+                    aria-label={`Stop ${index + 1} order`}
+                    className={inputClass}
+                  />
+                </Field>
                 <Field label={`Stop ${index + 1} location`}>
                   <PlaceInput
                     value={stop.name}
@@ -952,6 +1022,9 @@ export function CreateTripModal({
             >
               + Add an intermediate stop
             </button>
+          )}
+          {!editing && route.pickup && route.delivery && (
+            <RoutePreview pickup={route.pickup} delivery={route.delivery} waypoints={route.waypoints} />
           )}
         </div>
 
