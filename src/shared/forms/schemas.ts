@@ -135,7 +135,7 @@ export const resolveDefectSchema = z.object({
 /** 11.10 · Create trip */
 export const tripSchema = z.object({
   reference: f.requiredString(),
-  driverId: f.requiredString(),
+  driverId: z.string().optional(), // WD-110: optional — a driverless trip is PLANNED (Unassigned loads)
   vehicleId: f.requiredString(),
   origin: f.requiredString(),
   destination: f.requiredString(),

@@ -1054,7 +1054,7 @@ export function CreateTripModal({
             </div>
           ) : (
             <div className="mt-2 grid grid-cols-3 gap-3">
-              <Field label="Driver" required error={errors.driverId?.message}>
+              <Field label="Driver" error={errors.driverId?.message}>
                 <DriverPicker
                   value={selectedDriverOption}
                   options={driverOptions}

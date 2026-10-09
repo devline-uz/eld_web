@@ -158,7 +158,9 @@ describe('CreateTripModal — submit', () => {
       pick,
       editAfterPick,
       moveStop,
+      noDriver,
     }: {
+      noDriver?: boolean;
       twice?: boolean;
       intermediate?: string | string[];
       pick?: boolean;
@@ -208,7 +210,7 @@ describe('CreateTripModal — submit', () => {
       await user.click(await screen.findByRole('option', { name: String(position) }));
     }
     await user.type(screen.getByPlaceholderText('mi'), '120.5');
-    await selectDriver('Vera Verified');
+    if (!noDriver) await selectDriver('Vera Verified');
     const unitLabel = screen
       .getByText((content, el) => el?.tagName === 'SPAN' && el.classList.contains('text-label') && content.trim().startsWith('Unit'))
       .closest('label')!;
@@ -236,6 +238,13 @@ describe('CreateTripModal — submit', () => {
       plannedEndAt: new Date(`${tomorrow}T14:00`).toISOString(),
     });
     expect(posts[0]!.weightLbs).toBeUndefined();
+  });
+
+  // WD-110 — Driver is optional: a driverless trip is PLANNED and lands in Unassigned loads.
+  it('creates a trip without a driver: no validation error, POST has no driverId', async () => {
+    const posts = await fillRequiredAndSubmit(`${tomorrow}T08:00`, `${tomorrow}T14:00`, { noDriver: true });
+    expect(posts[0]).not.toHaveProperty('driverId');
+    expect(screen.queryByText('Required')).toBeNull();
   });
 
   // WB-164 — `+ Add an intermediate stop` had no `onClick`; `CreateTripPayload.stops` is real.

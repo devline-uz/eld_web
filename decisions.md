@@ -1455,3 +1455,9 @@ ends the fetch much sooner.
 **Options.** (a) Extend only the W-11 rail; (b) also mount the same `RoutePreview` inside Create trip.
 **Choice.** (b). Order is always pickup → intermediate stops → delivery (`orderTripStops`: PICKUP first, DELIVERY last, the rest by `sequence`; the W-11 stop timeline uses it too). OSRM gets the stops as waypoints; markers are labelled `P`, `1…N`, `D` (`shared/map/routeFeatures.ts`); unplaceable stops are skipped. In Create trip the preview appears only once both pickup and delivery have a picked place, uses picked coordinates only (no geocoding while typing), drops blank stops as submit does, and follows the `Order` select, add/remove and place picks. Not shown in edit mode (stops are read-only there).
 **Why.** One preview implementation for both places; the dispatcher sees the order that will be sent as `sequence`.
+
+## WD-110 — Create trip: Driver optional; driverless trip lands in Unassigned loads (2026-10-09)
+**Problem.** 11.10 required a driver, so a dispatcher could not post a load before knowing who hauls it; W-11 `Unassigned loads` could only be fed from elsewhere.
+**Options.** (a) keep required; (b) make Driver optional, keep Unit required; (c) make both optional.
+**Choice.** (b). Backend `CreateTripDto` allows all three assignees optional; `create()` sets `DRAFT` (draft) / `ASSIGNED` (driver) / `PLANNED` (no driver), and `unassignedLoads()` = `PLANNED` + `driverId null`. Unit stays required (UX/design: a load needs equipment to be dispatchable; not a backend rule). No driver ⇒ no HOS lookup (`useDriverHos(undefined)` disabled), no HOS warning, no e-mail-verified block, no driver conflict; no helper text under the empty field. `tripSchema.driverId` is now optional. Create already invalidates `qkRoot.trips`, which covers `['trips','unassigned-loads']`.
+**Why.** Matches the backend contract; the assign step (Assign trip, with the B-31 check) happens later.
