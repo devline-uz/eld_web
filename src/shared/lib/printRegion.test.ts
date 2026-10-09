@@ -24,6 +24,28 @@ describe('printRegion', () => {
     other.remove();
   });
 
+  it('marks the ancestor chain (not siblings) so the shell can be flattened, and clears it', () => {
+    const shell = document.createElement('div');
+    const main = document.createElement('main');
+    const sidebar = document.createElement('aside');
+    const region = document.createElement('section');
+    main.append(region);
+    shell.append(sidebar, main);
+    document.body.append(shell);
+    vi.spyOn(window, 'print').mockImplementation(() => {
+      expect(shell).toHaveAttribute('data-print-ancestor');
+      expect(main).toHaveAttribute('data-print-ancestor');
+      expect(sidebar).not.toHaveAttribute('data-print-ancestor');
+      expect(region).not.toHaveAttribute('data-print-ancestor');
+    });
+
+    printRegion(region);
+    window.dispatchEvent(new Event('afterprint'));
+    expect(shell).not.toHaveAttribute('data-print-ancestor');
+    expect(main).not.toHaveAttribute('data-print-ancestor');
+    shell.remove();
+  });
+
   it('does nothing without an element', () => {
     const print = vi.spyOn(window, 'print').mockImplementation(() => {});
     printRegion(null);

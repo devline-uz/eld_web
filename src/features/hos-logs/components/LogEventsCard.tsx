@@ -173,19 +173,19 @@ export function LogEventsCard({
   );
 
   return (
-    <Card padded={false}>
+    <Card padded={false} className="print:shadow-none">
       <div className="p-card">
         <SectionHeader
           title="Log events"
           subtitle={`${events.filter((event) => event.recordStatus === RECORD_STATUS.active).length} events today · ${pendingEditCount} driver edit${pendingEditCount === 1 ? '' : 's'} pending review`}
           action={
-            <Button variant="secondary" onClick={onViewAll}>
+            <Button variant="secondary" onClick={onViewAll} data-print-hide="">
               <ChevronRight size={16} strokeWidth={1.75} />
               View all events
             </Button>
           }
         />
-        <label className="mt-3 flex items-center gap-2 text-body text-text-secondary">
+        <label className="mt-3 flex items-center gap-2 text-body text-text-secondary" data-print-hide="">
           <input
             type="checkbox"
             checked={showAllRecords}
@@ -236,6 +236,7 @@ export function LogEventsCard({
               }
               emptyState={
                 <EmptyState
+                  className="print:gap-1 print:py-3 [&>span:first-child]:print:hidden"
                   title={EMPTY_STATE_COPY.hosLogsDay.title}
                   description={EMPTY_STATE_COPY.hosLogsDay.description}
                 />
@@ -248,6 +249,7 @@ export function LogEventsCard({
                 </span>
                 <Button
                   variant="secondary"
+                  data-print-hide=""
                   onClick={() => setRequestedRows(shownCount + EVENT_WINDOW)}
                 >
                   Show more events

@@ -128,6 +128,7 @@ export function DataTable<T>({
                 <DropdownMenu.Trigger asChild>
                   <button
                     aria-label="Row actions"
+                    data-print-hide=""
                     onClick={(e) => e.stopPropagation()}
                     className="flex size-8 items-center justify-center rounded-md hover:bg-bg-subtle"
                   >

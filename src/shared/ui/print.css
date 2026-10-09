@@ -1,22 +1,59 @@
 /* owner: web-design-system — print-only regions. `printRegion(el)` (shared/lib/printRegion.ts)
-   marks one element and the body for the length of a print job; everything else on the page —
-   sidebar, topbar, toolbars — is left out of the printout. `data-print-hide` drops a control
-   (buttons, pickers) that is meaningless on paper from inside the printed region. */
+   marks one element, its ancestors and the body for the length of a print job; everything else on
+   the page — sidebar, topbar, toolbars, portals — is left out of the printout. `data-print-hide`
+   drops a control (buttons, pickers) that is meaningless on paper from inside the printed region.
+
+   WB-283 — the region used to be kept in place with `visibility:hidden` on everything else. Hidden
+   elements still occupy layout, so the sidebar's width stayed as a left offset and the region was
+   positioned against `<main>` (`relative`, scrolling, `p-page`) instead of the page: the 24-hour
+   grid was cut after hour 9 and the right-hand card ran off the paper. Now everything outside the
+   region and its ancestor chain is `display:none`, and the ancestors are flattened to plain blocks
+   so the region flows at the full printable width. */
+@page {
+  size: letter;
+  margin: 12mm 10mm;
+}
+
 @media print {
-  body[data-printing] * {
-    visibility: hidden;
+  body[data-printing] *:not([data-print-ancestor]):not([data-print-target]):not([data-print-target] *) {
+    display: none !important;
   }
-  body[data-printing] [data-print-target],
-  body[data-printing] [data-print-target] * {
-    visibility: visible;
+  body[data-printing],
+  body[data-printing] [data-print-ancestor] {
+    display: block !important;
+    position: static !important;
+    inset: auto !important;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    transform: none !important;
+    background: none !important;
+    border: 0 !important;
+    box-shadow: none !important;
   }
   body[data-printing] [data-print-target] {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
+    position: static !important;
+    width: auto !important;
+    max-width: none !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    background: none !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  body[data-printing] [data-print-target] * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
   body[data-printing] [data-print-target] [data-print-hide] {
-    display: none;
+    display: none !important;
   }
 }

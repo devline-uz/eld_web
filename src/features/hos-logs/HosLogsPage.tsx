@@ -213,16 +213,34 @@ export default function HosLogsPage() {
   return (
     // Stage 3 — `Export PDF` used to `window.print()` the whole app (sidebar, topbar, toolbar).
     // The page root is now the print region; its controls carry `data-print-hide`.
-    <div ref={printRef} className="flex flex-col gap-card-gap p-page">
+    <div ref={printRef} className="flex flex-col gap-card-gap p-page print:gap-3">
       {/* The on-screen title lives in the top bar (outside the print region); the printout
           still needs it, so it is repeated here for print only (display:none on screen). */}
+      {/* WB-283 — on paper the driver picker, day arrows and toolbar are replaced by this static
+          header: driver, RODS date and certification status as plain text. */}
       <header className="hidden print:block">
         <p className="text-page-title text-text">Hours of Service · Driver log</p>
         <p className="text-page-sub text-text-muted">{headerSubtitle}</p>
+        <dl className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-body text-text">
+          <div className="flex gap-1">
+            <dt className="text-text-muted">Driver:</dt>
+            <dd className="font-medium">{driverName || EMPTY.dash}</dd>
+          </div>
+          <div className="flex gap-1">
+            <dt className="text-text-muted">Date:</dt>
+            <dd className="tabular font-medium">{`${dateLabel} · all times ${zone}`}</dd>
+          </div>
+          <div className="flex gap-1">
+            <dt className="text-text-muted">Certification:</dt>
+            <dd className="font-medium">
+              {certification ? (certification.certified ? 'Certified' : 'Uncertified') : EMPTY.dash}
+            </dd>
+          </div>
+        </dl>
       </header>
 
-      {/* control row */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      {/* control row — interactive only, dropped from the printout */}
+      <div className="flex flex-wrap items-center justify-between gap-3" data-print-hide="">
         <div className="flex items-center gap-3">
           <DriverPicker
             value={driverOptions.find((option) => option.id === driverId)}
@@ -258,7 +276,7 @@ export default function HosLogsPage() {
           )}
         </div>
 
-        <div className="flex items-center gap-2" data-print-hide="">
+        <div className="flex items-center gap-2">
           <Can perm="hosEdit" level="FULL">
             <Button
               variant="secondary"
@@ -299,7 +317,7 @@ export default function HosLogsPage() {
       ) : (
         <>
           {/* ⭐ 24-hour graph grid */}
-          <Card>
+          <Card className="print:break-inside-avoid print:shadow-none">
             <SectionHeader
               title="24-hour graph grid"
               subtitle={`Recorded by ELD ${EMPTY.notAssigned} · all times ${zone}`}
@@ -375,7 +393,7 @@ export default function HosLogsPage() {
           </Card>
 
           {/* three-card row */}
-          <div className="grid grid-cols-3 gap-card-gap">
+          <div className="grid grid-cols-3 gap-card-gap print:break-inside-avoid [&>*]:min-w-0 [&>*]:print:shadow-none">
             <AvailableHoursCard driverId={driverId} />
             <ViolationsCard
               driverId={driverId}
