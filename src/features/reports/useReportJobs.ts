@@ -13,7 +13,7 @@ import { useQueryClient, type UseMutationResult } from '@tanstack/react-query';
 import { qk, qkRoot } from '@/shared/api/queryKeys';
 import {
   fetchReport,
-  fetchReportDownload,
+  downloadReportFile,
   isReportPending,
   useQueueReport,
   useReport,
@@ -23,7 +23,7 @@ import {
 import { useRealtimeEvent } from '@/shared/realtime/useRealtimeEvent';
 import { TOAST_COPY } from '@/shared/ui/copy';
 import { useToast, type ToastInput } from '@/shared/ui/Toast';
-import { reportLabel, fileSizeLabel, refusalText, saveFile } from './reportMeta';
+import { reportLabel, fileSizeLabel, refusalText } from './reportMeta';
 
 /**
  * WB-146 — `mutation.isPending` is only true on the NEXT render, so the two clicks of a real
@@ -76,7 +76,7 @@ export function reportReadyToast(
     kind: 'success',
     title: copy.title,
     description: report.type === 'FMCSA_PACK' ? copy.description : `${reportLabel(report.type)} · ${size}`,
-    // §13.3 — `Download` fetches a fresh presigned URL at click time (GET /reports/:id/download).
+    // §13.3 — `Download` fetches the file through the API at click time (GET /reports/:id/file).
     action: { label: 'Download', altText: `Download ${reportLabel(report.type)}`, onClick: onDownload },
   };
 }
@@ -89,8 +89,7 @@ export function useAnnounceReport() {
     announced.add(report.id);
     toast(
       reportReadyToast(report, () => {
-        fetchReportDownload(report.id)
-          .then((file) => saveFile(file.downloadUrl, file.fileName))
+        downloadReportFile(report.id)
           .catch((error: unknown) => toast({ kind: 'error', title: refusalText(error) }));
       }),
     );
@@ -201,8 +200,7 @@ export function useExportWhenReady(options: ExportJobOptions = {}): ExportJob {
     if (!report || report.status !== 'READY' || downloaded.current === report.id) return;
     downloaded.current = report.id;
     if (options.announce) announce(report);
-    fetchReportDownload(report.id)
-      .then((file) => saveFile(file.downloadUrl, file.fileName))
+    downloadReportFile(report.id)
       .catch((cause: unknown) => setError(refusalText(cause)));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `announce` is idempotent per report id, `options.announce` is a caller-fixed flag
   }, [report]);

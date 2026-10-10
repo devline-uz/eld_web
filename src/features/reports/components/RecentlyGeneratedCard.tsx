@@ -10,7 +10,7 @@ import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
 import { qkRoot } from '@/shared/api/queryKeys';
 import {
-  fetchReportDownload,
+  downloadReportFile,
   isReportPending,
   useReport,
   useReportsList,
@@ -25,7 +25,7 @@ import { EMPTY_STATE_COPY } from '@/shared/ui/copy';
 import { DataTable } from '@/shared/ui/DataTable';
 import { Pagination } from '@/shared/ui/Pagination';
 import { EmptyState, ErrorState } from '@/shared/ui/states';
-import { REPORT_STATUS_BADGE, reportLabel, periodOf, refusalText, saveFile } from '../reportMeta';
+import { REPORT_STATUS_BADGE, reportLabel, periodOf, refusalText } from '../reportMeta';
 import { useAnnounceReport } from '../useReportJobs';
 import { ActionAlert } from './ActionAlert';
 
@@ -114,8 +114,7 @@ export function RecentlyGeneratedCard({ timezone, onSchedule, onGenerate }: Rece
                 aria-label={`Download ${reportLabel(row.original.type)}`}
                 onClick={() => {
                   setDownloadError(null);
-                  fetchReportDownload(row.original.id)
-                    .then((file) => saveFile(file.downloadUrl, file.fileName))
+                  downloadReportFile(row.original.id)
                     .catch((error: unknown) => setDownloadError(refusalText(error)));
                 }}
               >

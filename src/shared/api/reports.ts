@@ -165,7 +165,7 @@ export function useQueueReport() {
 }
 
 // WB-249 — the two one-shot reads live in `reportFiles.ts` (eager, shell `report.ready` toast).
-export { fetchReport, fetchReportDownload } from './reportFiles';
+export { downloadReportFile, fetchReport, fetchReportDownload } from './reportFiles';
 
 export interface ReportScheduleRow {
   id: string;

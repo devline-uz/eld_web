@@ -2,7 +2,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as AuthProviderModule from '@/shared/auth/AuthProvider';
 import type { ReactElement } from 'react';
-import { http } from 'msw';
+import { http, HttpResponse } from 'msw';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
@@ -255,9 +255,9 @@ describe('W-12 Reports · IFTA', () => {
     // Poll-fallback path: the same toast carries `Download` and requests this report's file.
     const downloads: string[] = [];
     server.use(
-      http.get(url(endpoints.reports.download(':id')), ({ params }) => {
+      http.get(url(endpoints.reports.file(':id')), ({ params }) => {
         downloads.push(String(params.id));
-        return ok({ downloadUrl: 'http://127.0.0.1:19000/onebook-dev/reports/pack.pdf', expiresAt: '2026-09-19T00:00:00.000Z', fileName: 'pack.pdf' });
+        return new HttpResponse('%PDF-1.4', { headers: { 'Content-Type': 'application/pdf' } });
       }),
     );
     const [action] = await screen.findAllByRole('button', { name: /^Download( FMCSA audit pack)?$/ });
@@ -271,18 +271,23 @@ describe('W-12 Reports · IFTA', () => {
     await screen.findByText('No reports generated yet');
     const downloads: string[] = [];
     server.use(
-      http.get(url(endpoints.reports.download(':id')), ({ params }) => {
+      http.get(url(endpoints.reports.file(':id')), ({ params }) => {
         downloads.push(String(params.id));
-        return ok({ downloadUrl: 'http://127.0.0.1:19000/onebook-dev/reports/rpt_ready.csv', expiresAt: '2026-09-19T00:00:00.000Z', fileName: 'rpt_ready.csv' });
+        return new HttpResponse('a,b\n', { headers: { 'Content-Type': 'text/csv; charset=utf-8' } });
       }),
     );
     act(() => mocks.handlers['report.ready']?.({ reportId: 'rpt_ready', type: 'IFTA', status: 'READY' }));
     expect((await screen.findAllByText('IFTA mileage report · 2.4 MB')).length).toBeGreaterThan(0);
-    // §13.3 — the toast carries `Download`, and activating it requests the presigned download.
+    // §13.3 — the toast carries `Download`, and activating it fetches the file through the API.
     const action = await screen.findByRole('button', { name: /^Download( IFTA mileage report)?$/ });
     await userEvent.click(action);
     await waitFor(() => expect(downloads).toEqual(['rpt_ready']));
-    expect(HTMLAnchorElement.prototype.click).toHaveBeenCalled();
+    await waitFor(() => expect(HTMLAnchorElement.prototype.click).toHaveBeenCalled());
+    // Saved as a same-origin Blob with a real file name — never a cross-origin presigned URL
+    // (MinIO on the server's loopback is unreachable from the browser).
+    const saved = vi.mocked(HTMLAnchorElement.prototype.click).mock.contexts.at(-1) as HTMLAnchorElement;
+    expect(saved.getAttribute('href')).toBe('blob:mock');
+    expect(saved.getAttribute('download')).toBe('rpt_ready.csv');
   });
 
   it('removes Generate report and Schedule a report for VIEWER, keeps Export CSV and Download IFTA PDF (B-96)', async () => {
@@ -364,7 +369,7 @@ describe('W-12 Reports · IFTA', () => {
   });
 
   it('shows a refused download in place', async () => {
-    server.use(http.get(url(endpoints.reports.download(':id')), () => fail(409, 'REPORT_NOT_READY', 'Report is not ready for download yet.')));
+    server.use(http.get(url(endpoints.reports.file(':id')), () => fail(409, 'REPORT_NOT_READY', 'Report is not ready for download yet.')));
     renderPage(<IftaReportPage />, ROUTE);
     const row = await screen.findByRole('row', { name: /IFTA mileage report/ });
     await userEvent.click(within(row).getByRole('button', { name: 'Download IFTA mileage report' }));

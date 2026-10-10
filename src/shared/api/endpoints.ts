@@ -225,6 +225,8 @@ export const endpoints = {
     list: '/reports',
     detail: (id: string) => `/reports/${id}`,
     download: (id: string) => `/reports/${id}/download`,
+    /** The READY file itself, streamed through the API (attachment) — what the panel downloads. */
+    file: (id: string) => `/reports/${id}/file`,
     generate: '/reports/generate',
     ifta: '/reports/ifta',
     /** B-46 (IFTA half shipped 2026-09-14) — JSON KPIs + `Miles by jurisdiction` for W-12. */

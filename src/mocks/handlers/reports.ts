@@ -181,6 +181,11 @@ export const reportsHandlers = [
   http.get(url(endpoints.reports.download(':id')), ({ params }) =>
     ok({ downloadUrl: `http://127.0.0.1:19000/onebook-dev/reports/${String(params.id)}.csv`, expiresAt: '2026-09-19T00:00:00.000Z', fileName: `${String(params.id)}.csv` }),
   ),
+  http.get(url(endpoints.reports.file(':id')), () =>
+    new HttpResponse('Jurisdiction,Total miles,Taxable miles\nOH,42,42\n', {
+      headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="report.csv"' },
+    }),
+  ),
   http.get(url(endpoints.reports.detail(':id')), ({ params }) => {
     const id = String(params.id);
     const known = reportRows.find((r) => r.id === id);

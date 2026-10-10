@@ -49,6 +49,8 @@ Element.prototype.releasePointerCapture ??= () => {};
 // worker), so any test that lazy-loads FleetMap crashes on import under jsdom, which has no such
 // API (WB-016). Real browsers provide it; the stub does not change what FleetMap renders.
 window.URL.createObjectURL ??= () => 'blob:mock';
+// Report downloads save a Blob and revoke its URL on the next tick (`saveFile`, reportFiles.ts).
+window.URL.revokeObjectURL ??= () => {};
 
 // jsdom 30 represents "focus on the viewport" by the Document once a focused element is removed
 // (Node-impl `_removingSteps`, e.g. RTL `cleanup()` unmounting the previous test's focused button).

@@ -70,3 +70,16 @@ export function fetchReport(id: string): Promise<ReportRow> {
 export function fetchReportDownload(id: string): Promise<ReportDownload> {
   return client.get<ReportDownload>(endpoints.reports.download(id));
 }
+
+/**
+ * Downloads a READY report through the API (`GET /reports/:id/file`) and saves it as a Blob.
+ * The presigned URL points at object storage (`S3_ENDPOINT`, MinIO on the server's loopback),
+ * which a browser cannot reach, and opening it in a new tab after an `await` is popup-blocked —
+ * so every `Download` action goes through here instead (web/decisions.md).
+ */
+export async function downloadReportFile(id: string): Promise<void> {
+  const blob = await client.blob(endpoints.reports.file(id));
+  // The backend stores every report as `reports/<id>.<csv|pdf>`; the type names the extension.
+  const ext = blob.type.includes('pdf') ? 'pdf' : 'csv';
+  saveFile(blob, `${id}.${ext}`);
+}
