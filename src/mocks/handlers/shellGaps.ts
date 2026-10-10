@@ -11,14 +11,18 @@ import { DRIVERS, liveVehicles } from './mockState';
 const MIN = 60_000;
 const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
 
-function seedNotifications(): NotificationItem[] {
+/** The wire row also carries the inbox owner — a web user's rows have `userId` set, `driverId` null. */
+type MockNotification = NotificationItem & { userId: string | null; driverId: string | null };
+const OWNER = { userId: 'usr_1', driverId: null } as const;
+
+function seedNotifications(): MockNotification[] {
   return [
-    { id: 'ntf_1', kind: 'VIOLATION', severity: 'CRITICAL', type: 'hos_violation', category: 'VIOLATIONS', title: 'HOS violation', body: 'John Smith exceeded the 11-hour driving limit by 00:26', objectType: 'Driver', objectId: 'drv_1', readAt: null, createdAt: ago(2 * MIN) },
-    { id: 'ntf_2', kind: 'DEVICE', severity: 'CRITICAL', type: 'eld_disconnected', category: 'VIOLATIONS', title: 'ELD disconnected', body: 'Unit #110 · PT30_77D2 has been offline for 46 minutes', objectType: 'Vehicle', objectId: 'veh_110', readAt: null, createdAt: ago(45 * MIN) },
-    { id: 'ntf_3', kind: 'WARNING', severity: 'WARNING', type: 'break_due', category: 'VIOLATIONS', title: 'Break due soon', body: 'Marvin McKinney needs a 30-minute break in 00:18', objectType: 'Driver', objectId: 'drv_7', readAt: null, createdAt: ago(60 * MIN) },
-    { id: 'ntf_4', kind: 'MAINTENANCE', severity: 'WARNING', type: 'maintenance_overdue', category: 'MAINTENANCE', title: 'Maintenance overdue', body: 'Unit #104 oil & filter service was due 2 days ago', objectType: 'WorkOrder', objectId: 'wo_1', readAt: null, createdAt: ago(180 * MIN) },
-    { id: 'ntf_5', kind: 'UNIDENTIFIED', severity: 'INFO', type: 'unassigned_driving', category: null, title: 'Unassigned driving', body: '1h 12m of driving with no driver logged in on unit #103', objectType: 'UnidentifiedSegment', objectId: 'uds_1', readAt: ago(200 * MIN), createdAt: ago(300 * MIN) },
-    { id: 'ntf_6', kind: 'OTHER', severity: 'INFO', type: 'report_ready', category: null, title: 'Report ready', body: 'FMCSA audit pack for Jun 2025 finished generating', objectType: 'Report', objectId: 'rpt_1', readAt: ago(600 * MIN), createdAt: ago(30 * 60 * MIN) },
+    { ...OWNER, id: 'ntf_1', kind: 'VIOLATION', severity: 'CRITICAL', type: 'hos_violation', category: 'VIOLATIONS', title: 'HOS violation', body: 'John Smith exceeded the 11-hour driving limit by 00:26', objectType: 'Driver', objectId: 'drv_1', readAt: null, createdAt: ago(2 * MIN) },
+    { ...OWNER, id: 'ntf_2', kind: 'DEVICE', severity: 'CRITICAL', type: 'eld_disconnected', category: 'VIOLATIONS', title: 'ELD disconnected', body: 'Unit #110 · PT30_77D2 has been offline for 46 minutes', objectType: 'Vehicle', objectId: 'veh_110', readAt: null, createdAt: ago(45 * MIN) },
+    { ...OWNER, id: 'ntf_3', kind: 'WARNING', severity: 'WARNING', type: 'break_due', category: 'VIOLATIONS', title: 'Break due soon', body: 'Marvin McKinney needs a 30-minute break in 00:18', objectType: 'Driver', objectId: 'drv_7', readAt: null, createdAt: ago(60 * MIN) },
+    { ...OWNER, id: 'ntf_4', kind: 'MAINTENANCE', severity: 'WARNING', type: 'maintenance_overdue', category: 'MAINTENANCE', title: 'Maintenance overdue', body: 'Unit #104 oil & filter service was due 2 days ago', objectType: 'WorkOrder', objectId: 'wo_1', readAt: null, createdAt: ago(180 * MIN) },
+    { ...OWNER, id: 'ntf_5', kind: 'UNIDENTIFIED', severity: 'INFO', type: 'unassigned_driving', category: null, title: 'Unassigned driving', body: '1h 12m of driving with no driver logged in on unit #103', objectType: 'UnidentifiedSegment', objectId: 'uds_1', readAt: ago(200 * MIN), createdAt: ago(300 * MIN) },
+    { ...OWNER, id: 'ntf_6', kind: 'OTHER', severity: 'INFO', type: 'report_ready', category: null, title: 'Report ready', body: 'FMCSA audit pack for Jun 2025 finished generating', objectType: 'Report', objectId: 'rpt_1', readAt: ago(600 * MIN), createdAt: ago(30 * 60 * MIN) },
   ];
 }
 
@@ -58,6 +62,7 @@ export const shellGapHandlers = [
         violations: notifications.filter((item) => item.category === 'VIOLATIONS').length,
         maintenance: notifications.filter((item) => item.category === 'MAINTENANCE').length,
       },
+      unreadCount: notifications.filter((item) => !item.readAt).length,
     });
   }),
 

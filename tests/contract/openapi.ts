@@ -32,7 +32,24 @@ export function documentedExample(method: string, path: string): unknown {
     ? op.responses?.[status]?.content?.['application/json']?.schema?.example
     : undefined;
   if (example === undefined) throw new Error(`${method} ${path} documents no success example`);
-  return example;
+  return unwrapEnvelope(example);
+}
+
+const isEnvelope = (value: unknown): value is { data: unknown; traceId: string; timestamp: string } =>
+  value !== null &&
+  typeof value === 'object' &&
+  !Array.isArray(value) &&
+  'data' in value &&
+  typeof (value as Record<string, unknown>).traceId === 'string' &&
+  typeof (value as Record<string, unknown>).timestamp === 'string';
+
+/**
+ * Routes documented with the backend's `@ApiEnvelopeResponse` show the full wire envelope
+ * `{ data, traceId, timestamp }` (what `TransformInterceptor` really sends); the rest document the
+ * `data` payload only. `client.ts` unwraps the envelope (§6.1), so the contract compares `data`.
+ */
+function unwrapEnvelope(example: unknown): unknown {
+  return isEnvelope(example) ? example.data : example;
 }
 
 type Shape = 'null' | 'array' | 'object' | 'string' | 'number' | 'boolean' | 'undefined';

@@ -823,6 +823,8 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "items": [
       {
         "id": "ntf_1",
+        "userId": "usr_1",
+        "driverId": null,
         "type": "hos_violation",
         "kind": "VIOLATION",
         "title": "HOS violation",
@@ -831,7 +833,8 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
         "objectId": "drv_1",
         "category": "VIOLATIONS",
         "severity": "CRITICAL",
-        "readAt": null
+        "readAt": null,
+        "createdAt": "2026-10-08T15:41:00.000Z"
       }
     ],
     "page": 1,
@@ -842,7 +845,8 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
       "all": 12,
       "violations": 5,
       "maintenance": 3
-    }
+    },
+    "unreadCount": 4
   },
   'POST /api/notifications/read-all': {
     "updated": 3
