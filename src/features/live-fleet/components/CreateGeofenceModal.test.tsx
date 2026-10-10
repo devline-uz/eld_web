@@ -256,7 +256,7 @@ describe('11.1 Create a geofence — Applies to (vehicle groups)', () => {
     expect(within(select).getAllByRole('option').map((o) => o.textContent)).toEqual(['All vehicle groups']);
   });
 
-  it('never sends the picked group — `POST /geofences` has no vehicle-group field (B-104)', async () => {
+  async function submitWithGroup(group: string): Promise<Record<string, unknown> | null> {
     let posted: Record<string, unknown> | null = null;
     server.use(
       http.post(url(endpoints.geofences.create), async ({ request }) => {
@@ -268,8 +268,8 @@ describe('11.1 Create a geofence — Applies to (vehicle groups)', () => {
     renderModal();
     const select = screen.getByRole('combobox', { name: 'Applies to' });
     await vi.waitFor(() => expect(select).not.toBeDisabled());
-    await user.selectOptions(select, 'vg_2');
-    expect(select).toHaveValue('vg_2');
+    await user.selectOptions(select, group);
+    expect(select).toHaveValue(group);
 
     await user.click(screen.getByRole('button', { name: 'Address' }));
     await user.type(screen.getByPlaceholderText('Columbus terminal'), 'Yard A');
@@ -278,8 +278,18 @@ describe('11.1 Create a geofence — Applies to (vehicle groups)', () => {
     await user.click(screen.getByRole('button', { name: 'Save geofence' }));
 
     expect(await screen.findByText('Geofence created', {}, { timeout: 8000 })).toBeInTheDocument();
-    expect(posted).not.toBeNull();
-    expect(Object.values(posted ?? {})).not.toContain('vg_2');
+    return posted;
+  }
+
+  it('sends the picked group as `vehicleGroupId` (B-104)', async () => {
+    const posted = await submitWithGroup('vg_2');
+    expect(posted).toMatchObject({ vehicleGroupId: 'vg_2' });
     expect(posted).not.toHaveProperty('appliesTo');
+  });
+
+  it('sends `vehicleGroupId: null` for `All vehicle groups`', async () => {
+    const posted = await submitWithGroup('');
+    expect(posted).not.toBeNull();
+    expect(posted).toHaveProperty('vehicleGroupId', null);
   });
 });

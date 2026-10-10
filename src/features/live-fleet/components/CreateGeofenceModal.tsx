@@ -68,8 +68,7 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
   const { toast } = useToast();
   const createGeofence = useCreateGeofence();
   // `Applies to` options — the real `GET /vehicle-groups` list (backend D-107). Loading disables
-  // the select; an error leaves only `All vehicle groups`. The choice is UI-only for now: the
-  // backend geofence has no vehicle-group field (backend-gaps.md B-104), so it is never sent.
+  // the select; an error leaves only `All vehicle groups`. Sent as `vehicleGroupId` (B-104).
   const vehicleGroups = useVehicleGroups();
 
   // These fields drive their own visual state (segmented control / checkboxes) instead of
@@ -219,6 +218,8 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
         afterHoursOnly: values.afterHoursOnly,
         colour: values.colour,
         countAsYardMove: values.countAsYardMove,
+        // B-104 — `All vehicle groups` (`''`) is `null`: the fence applies to every group.
+        vehicleGroupId: values.appliesTo || null,
       };
       createGeofence.mutate(payload, {
         onSuccess: () => {

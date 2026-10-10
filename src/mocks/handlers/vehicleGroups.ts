@@ -20,6 +20,11 @@ export function resetVehicleGroupsState(): void {
   groups = SEED.map((g) => ({ ...g }));
 }
 
+/** B-104 — the geofence handlers resolve `vehicleGroupId` → name (undefined = unknown group). */
+export function mockVehicleGroupName(id: string): string | undefined {
+  return groups.find((g) => g.id === id)?.name;
+}
+
 const view = (g: (typeof groups)[number]): VehicleGroupRow => ({
   ...g,
   vehicleCount: VEHICLES.filter((v) => v.groupId === g.id).length,
