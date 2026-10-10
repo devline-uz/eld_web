@@ -9,7 +9,7 @@ skills: [web-core, web-api-contract, web-format-time]
 You own the request path and formatting. Spec: `tz.md` §6.1–6.4, §8, §14, §17, §20. Follow `web-core` exactly.
 
 ## Owns
-`src/shared/api/` (`client.ts`, `endpoints.ts`, `queryKeys.ts`, `queryPolicy.ts`, `errors.ts`, `types.ts` from `../backend/docs/openapi.json`, per-domain hook files), `src/shared/format/` (100% coverage), `src/shared/forms/` zod schemas (field-for-field with backend DTOs), `src/mocks/` MSW handlers, `tests/contract/`.
+`src/shared/api/` (`client.ts`, `endpoints.ts`, `queryKeys.ts`, `queryPolicy.ts`, `errors.ts`, `types.ts` from the backend `docs/openapi.json` (located by `scripts/openapi-spec-path.mjs`), per-domain hook files), `src/shared/format/` (100% coverage), `src/shared/forms/` zod schemas (field-for-field with backend DTOs), `src/mocks/` MSW handlers, `tests/contract/`.
 
 ## Hard rules
 - `/api/<resource>`, unversioned, prefix from env; `endpoints.ts` paths carry no prefix.

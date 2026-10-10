@@ -2,7 +2,7 @@
 // backend/docs/openapi.json. If the backend schema changes, these tests must fail — that is
 // their job. Never loosen a matcher to make one pass; fix the client or record a gap.
 import { readFileSync } from 'node:fs';
-import { fileURLToPath, URL } from 'node:url';
+import { resolveOpenApiSpecPath } from '../../scripts/openapi-spec-path.mjs';
 
 interface OpenApiDoc {
   paths: Record<string, Record<string, OpenApiOperation>>;
@@ -15,7 +15,7 @@ interface OpenApiOperation {
   >;
 }
 
-const SPEC_PATH = fileURLToPath(new URL('../../../backend/docs/openapi.json', import.meta.url));
+const SPEC_PATH = resolveOpenApiSpecPath();
 export const openapi: OpenApiDoc = JSON.parse(readFileSync(SPEC_PATH, 'utf8'));
 
 /** `GET /api/vehicles` → the operation object, or null when the backend does not have it. */

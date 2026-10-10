@@ -2,7 +2,8 @@
 # Gate order: npm ci → typecheck → lint → unit → build (incl. bundle budget) → audit.
 # No deploy, no secrets, no E2E against live servers. The backend repo is not checked out here,
 # so the Prisma enum cross-check in src/shared/api/cache.test.ts skips itself (WB-056), and
-# `test:contract` is not run: it reads ../backend/docs/openapi.json and cannot pass without it.
+# `test:contract` is not run: it needs the backend openapi.json (../eld_backend or ../backend, or
+# $OPENAPI_SPEC_PATH — scripts/openapi-spec-path.mjs) and cannot pass without it.
 name: web
 
 on:
