@@ -2,6 +2,7 @@
 import { useMemo, useState } from 'react';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
+import { Select } from '@/shared/ui/Select';
 import { SeverityBadge } from '@/shared/ui/Badge';
 import { useToast } from '@/shared/ui/Toast';
 import { useDefectsList, useCreateWorkOrder, type WorkOrderPriority } from '@/shared/api/dvir';
@@ -145,14 +146,17 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
             <span className="text-label text-text">
               Unit <span className="text-danger">*</span>
             </span>
-            <select value={selectedVehicleId} onChange={(e) => changeVehicle(e.target.value)} className={inputClass}>
-              <option value="">Select a unit…</option>
-              {(vehiclesQuery.data?.items ?? []).map((v) => (
-                <option key={v.id} value={v.id}>
-                  Unit {v.unitNumber}
-                </option>
-              ))}
-            </select>
+            {/* Shared Select, not a native <select>: its menu shows 10 rows and scrolls. */}
+            <Select
+              aria-label="Unit"
+              value={selectedVehicleId}
+              options={(vehiclesQuery.data?.items ?? []).map((v) => ({ value: v.id, label: `Unit ${v.unitNumber}` }))}
+              onChange={changeVehicle}
+              placeholder="Select a unit…"
+              searchable
+              searchLabel="Search units"
+              className={inputClass}
+            />
           </label>
         )}
 

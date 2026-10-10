@@ -458,7 +458,8 @@ describe('CompanyProfilePage — State dropdown', () => {
     expect(within(listbox).queryByRole('option', { name: 'ON' })).toBeNull();
     expect(within(listbox).getByRole('option', { name: 'OH' })).toHaveAttribute('aria-selected', 'true');
     // The menu scrolls itself instead of growing the page.
-    expect(listbox).toHaveClass('max-h-72', 'overflow-y-auto');
+    expect(listbox).toHaveClass('overflow-y-auto');
+    expect(listbox.style.maxHeight).toBe('320px'); // 10 rows × 32px
   });
 
   it('selecting a state updates the field and enables Save', async () => {

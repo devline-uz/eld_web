@@ -32,10 +32,21 @@ export interface SelectProps {
   searchable?: boolean;
   /** Accessible name / placeholder of the filter box. */
   searchLabel?: string;
+  /** How many option rows the open menu shows before it scrolls (default 10). */
+  maxVisibleItems?: number;
 }
 
-/** Menu height cap (Tailwind `max-h-72` = 18rem ≈ 288px, same as the Driver/Unit picker list). */
-export const SELECT_MENU_CLASS = 'max-h-72 overflow-y-auto';
+/** Height of one option row in px (`h-8`; = py-1.5 + the 20px `text-body` line). */
+export const SELECT_ROW_PX = 32;
+/** Rows an open dropdown menu shows at once; the rest are reached by scrolling. */
+export const SELECT_MAX_VISIBLE_ITEMS = 10;
+/** Scroll classes of the option list; its height cap is `selectMenuMaxHeight()`. */
+export const SELECT_MENU_CLASS = 'overflow-y-auto overscroll-contain';
+
+/** Max height of a menu list that shows exactly `rows` option rows (plus vertical padding). */
+export function selectMenuMaxHeight(rows: number = SELECT_MAX_VISIBLE_ITEMS, paddingPx = 0): string {
+  return `${Math.max(1, rows) * SELECT_ROW_PX + paddingPx}px`;
+}
 
 const TYPEAHEAD_RESET_MS = 500;
 
@@ -51,8 +62,13 @@ export function Select({
   className,
   searchable = false,
   searchLabel = 'Search',
+  maxVisibleItems = SELECT_MAX_VISIBLE_ITEMS,
 }: SelectProps) {
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  // Inside a modal Dialog the menu portals INTO the dialog (same as DriverPicker): otherwise the
+  // dialog's react-remove-scroll swallows wheel events on the list and it can't be scrolled.
+  const [container, setContainer] = useState<HTMLElement | undefined>(undefined);
   const [query, setQuery] = useState('');
   const searchRef = useRef<HTMLInputElement>(null);
   const [active, setActive] = useState(0);
@@ -72,6 +88,7 @@ export function Select({
     setQuery('');
     const index = options.findIndex((o) => o.value === value);
     setActive(Math.max(0, index));
+    setContainer((triggerRef.current?.closest('[role="dialog"]') as HTMLElement | null) ?? undefined);
     setOpen(true);
   }
 
@@ -151,6 +168,7 @@ export function Select({
     <Popover.Root open={open} onOpenChange={(next) => (next ? openMenu() : setOpen(false))}>
       <Popover.Trigger asChild>
         <button
+          ref={triggerRef}
           type="button"
           id={id}
           role="combobox"
@@ -174,7 +192,7 @@ export function Select({
           />
         </button>
       </Popover.Trigger>
-      <Popover.Portal>
+      <Popover.Portal container={container}>
         <Popover.Content
           align="start"
           sideOffset={4}
@@ -182,7 +200,8 @@ export function Select({
             event.preventDefault();
             (searchable ? searchRef.current : listRef.current)?.focus();
           }}
-          className="z-50 min-w-[var(--radix-popover-trigger-width)] rounded-md border border-border bg-bg-surface p-1 shadow-pop"
+          collisionPadding={8}
+          className="z-50 flex max-h-[var(--radix-popover-content-available-height)] min-w-[var(--radix-popover-trigger-width)] flex-col rounded-md border border-border bg-bg-surface p-1 shadow-pop"
         >
           {searchable && (
             <input
@@ -211,10 +230,11 @@ export function Select({
             aria-label={ariaLabel}
             aria-activedescendant={visible.length ? optionId(active) : undefined}
             onKeyDown={onListKeyDown}
-            className={cn('flex flex-col', SELECT_MENU_CLASS)}
+            style={{ maxHeight: selectMenuMaxHeight(maxVisibleItems) }}
+            className={cn('flex min-h-0 flex-col', SELECT_MENU_CLASS)}
           >
             {visible.length === 0 && (
-              <li role="presentation" className="px-3 py-1.5 text-body text-text-muted">
+              <li role="presentation" className="flex h-8 shrink-0 items-center px-3 text-body text-text-muted">
                 No matches
               </li>
             )}
@@ -227,7 +247,7 @@ export function Select({
                 onMouseMove={() => setActive(index)}
                 onClick={() => pick(index)}
                 className={cn(
-                  'cursor-pointer rounded-sm px-3 py-1.5 text-body text-text',
+                  'flex h-8 shrink-0 cursor-pointer items-center whitespace-nowrap rounded-sm px-3 text-body text-text',
                   index === active && 'bg-bg-subtle',
                   option.value === value && 'font-medium',
                 )}

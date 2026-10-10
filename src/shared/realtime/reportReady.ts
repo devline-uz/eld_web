@@ -14,10 +14,9 @@ import { ApiError } from '@/shared/api/errors';
 import { qk, qkRoot } from '@/shared/api/queryKeys';
 import {
   fetchReport,
-  fetchReportDownload,
+  downloadReportFile,
   fileSizeLabel,
   reportTypeLabel,
-  saveFile,
 } from '@/shared/api/reportFiles';
 import type { ReportRow } from '@/shared/api/reports';
 import { TOAST_COPY } from '@/shared/ui/copy';
@@ -67,9 +66,8 @@ export function useReportReadyShell(): void {
         announced.add(report.id);
         toast(
           shellReportReadyToast(report, () => {
-            // A fresh presigned URL at click time — never cached (§17).
-            fetchReportDownload(report.id)
-              .then((file) => saveFile(file.downloadUrl, file.fileName))
+            // Fetched through the API at click time — never cached (§17).
+            downloadReportFile(report.id)
               .catch((error: unknown) =>
                 toast({
                   kind: 'error',

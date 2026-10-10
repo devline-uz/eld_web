@@ -18,7 +18,7 @@ import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
 import {
   useReportDrivers,
-  fetchReportDownload,
+  downloadReportFile,
   useTransferConfig,
   useDvirReportRows,
   usePackRodsCounts,
@@ -56,7 +56,6 @@ import {
   dayKeyOf,
   rangeLabel,
   refusalText,
-  saveFile,
   shiftDayKey,
   visibleReportRoutes,
 } from './reportMeta';
@@ -270,8 +269,7 @@ export default function FmcsaPackPage() {
             onClick={() => {
               if (!latestPack) return;
               setActionError(null);
-              fetchReportDownload(latestPack.id)
-                .then((file) => saveFile(file.downloadUrl, file.fileName))
+              downloadReportFile(latestPack.id)
                 .catch((error: unknown) => setActionError(refusalText(error)));
             }}
           >
