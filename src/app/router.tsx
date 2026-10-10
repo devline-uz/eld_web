@@ -30,6 +30,7 @@ const DashboardPage = lazy(ROUTE_LOADERS['/']);
 const LiveFleetPage = lazy(ROUTE_LOADERS['/live-fleet']);
 const VehiclesPage = lazy(ROUTE_LOADERS['/vehicles']);
 const TrailersPage = lazy(ROUTE_LOADERS['/trailers']);
+const VehicleGroupsPage = lazy(() => import('@/features/vehicles/VehicleGroupsPage'));
 const UnitProfilePage = lazy(() => import('@/features/vehicles/UnitProfilePage'));
 const UnitHistoriesPage = lazy(() => import('@/features/vehicles/UnitHistoriesPage'));
 const DriversPage = lazy(ROUTE_LOADERS['/drivers']);
@@ -80,6 +81,13 @@ const SHELL_ROUTES: GuardedRoute[] = [
     handle: { title: 'Live Fleet', fullBleed: true },
   },
   { path: 'vehicles', element: <VehiclesPage />, perm: 'vehicles', handle: { title: 'Vehicles' } },
+  /* WD-116 — static segment, ranked above `vehicles/:id`; reached from the inventory switch. */
+  {
+    path: 'vehicles/groups',
+    element: <VehicleGroupsPage />,
+    perm: 'vehicles',
+    handle: { title: 'Vehicle groups' },
+  },
   {
     path: 'vehicles/:id',
     element: <UnitProfilePage />,

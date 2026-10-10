@@ -31,6 +31,15 @@ export const trailerSchema = z.object({
 });
 export type TrailerFormValues = z.infer<typeof trailerSchema>;
 
+/** Create / Edit vehicle group — mirrors `CreateVehicleGroupDto` (`name` 1–80, `description` ≤ 300,
+ * `color` `#RRGGBB` or none). Members are picked outside the form (`vehicleIds`). */
+export const vehicleGroupSchema = z.object({
+  name: f.requiredString(M.vehicleGroupName).max(LIMITS.vehicleGroupNameMax, M.vehicleGroupName),
+  description: z.string().trim().max(LIMITS.vehicleGroupDescriptionMax, M.vehicleGroupDescription),
+  color: z.string().refine((v) => v === '' || /^#[0-9a-fA-F]{6}$/.test(v)),
+});
+export type VehicleGroupFormValues = z.infer<typeof vehicleGroupSchema>;
+
 /** 11.5 · Calibrate odometer */
 export const calibrateOdometerSchema = z.object({
   odometer: f.odometer(),
@@ -260,7 +269,9 @@ export const geofenceSchema = z.object({
   address: z.string().trim().optional(),
   /** Backend field name is `radiusMi` (miles) — B-93/D-098. */
   radiusMi: z.number().positive().optional(),
-  appliesTo: z.string().trim().default('All vehicle groups'),
+  /** Overlay 11.1 `Applies to` — `''` = all vehicle groups, else a vehicle-group id. UI-only:
+   * `POST /geofences` has no vehicle-group field yet (backend-gaps.md B-104). */
+  appliesTo: z.string().trim().default(''),
   alertOnEnter: z.boolean().default(true),
   alertOnExit: z.boolean().default(true),
   dwellMinutes: z.number().int().positive().optional(),

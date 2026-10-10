@@ -380,3 +380,6 @@ table.
 
 ### W-17 Company profile country (WD-103, 2026-10-03)
 - **B-103 — `Carrier` has no `country`.** The web now sends `country` (ISO 3166-1 alpha-2) on `PATCH /carrier`, but `UpdateCarrierDto` has no such key, so zod strips it and `GET /carrier` never returns one. The form infers the country on every load (stored `country` → region code → phone's country → US), which is wrong for e.g. a German carrier with no phone and a free-text state. Needed: `country String? @db.Char(2)` on `Carrier`, `country: z.string().length(2).regex(/^[A-Z]{2}$/).optional()` on `UpdateCarrierDto`, returned by `GET /carrier`. Also: `phone` is sent as E.164 (fits `max(30)`), `state` may be a free-text region up to 50 chars (fits `max(50)`). Status: **confirmed missing**.
+
+### 11.1 Create a geofence — `Applies to` vehicle group (2026-10-10)
+- **B-104 — a geofence cannot be scoped to a vehicle group.** `Geofence` (prisma) and `CreateGeofenceDto`/`UpdateGeofenceDto` carry no `vehicleGroupId` (nor `vehicleIds`), so zod would strip it. The web `Applies to` select now lists the real `GET /vehicle-groups` (`All vehicle groups` = `''`, else the group id) but the choice is UI-only and never sent. Needed: optional `vehicleGroupId: string | null` (`null` = all groups) on `POST`/`PATCH /geofences` and on the `GET /geofences` row, honoured by geofence detection.

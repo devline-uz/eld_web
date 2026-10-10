@@ -18,14 +18,14 @@ import { usePermission } from '@/shared/auth/usePermission';
 import {
   useTransferConfig,
   useGenerateReport,
-  useIftaJurisdictions,
-  useIftaSummary,
   useReportVehicles,
   compactIftaFilters,
   type IftaJurisdictionRow,
   type IftaKpis,
 } from '@/shared/api/reports';
-import { useVehicleGroups } from '@/shared/api/vehicles';
+// DEMO DATA — these hooks fall back to `./mock` rows while the API is empty/failing
+// (`VITE_IFTA_MOCK`). Remove: import them from `@/shared/api/reports` / `@/shared/api/vehicles` again.
+import { useIftaJurisdictions, useIftaSummary, useVehicleGroups } from './mock/useIftaMock';
 import { EMPTY } from '@/shared/format/empty';
 import { formatJurisdiction } from '@/shared/format/jurisdiction';
 import { formatFuel, formatMoney, formatMpg, formatNumber, formatPercent } from '@/shared/format/numbers';

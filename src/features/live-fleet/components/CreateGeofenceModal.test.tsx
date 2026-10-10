@@ -2,11 +2,11 @@
 // shipped, web/backend-gaps.md 2026-09-24 handoff); posts to `POST /geofences` on save.
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
-import { ok, url } from '@/mocks/envelope';
+import { fail, ok, url } from '@/mocks/envelope';
 import { endpoints } from '@/shared/api/endpoints';
 import { ToastProvider } from '@/shared/ui/Toast';
 import { CreateGeofenceModal } from './CreateGeofenceModal';
@@ -231,5 +231,55 @@ describe('11.1 Create a geofence — shape segments and double-submit', () => {
     release();
     expect(await screen.findByText('Geofence created', {}, { timeout: 8000 })).toBeInTheDocument();
     expect(calls).toBe(1);
+  });
+});
+
+describe('11.1 Create a geofence — Applies to (vehicle groups)', () => {
+  it('lists the real vehicle groups after `All vehicle groups`, disabled while they load', async () => {
+    renderModal();
+    const select = screen.getByRole('combobox', { name: 'Applies to' });
+    expect(select).toBeDisabled();
+    expect(within(select).getByRole('option', { name: 'Loading…' })).toBeInTheDocument();
+
+    await vi.waitFor(() => expect(select).not.toBeDisabled());
+    const options = within(select).getAllByRole('option');
+    expect(options.map((o) => o.textContent)).toEqual(['All vehicle groups', 'Midwest linehaul', 'Regional']);
+    expect(options.map((o) => (o as HTMLOptionElement).value)).toEqual(['', 'vg_1', 'vg_2']);
+    expect(select).toHaveValue('');
+  });
+
+  it('falls back to just `All vehicle groups` when the list fails', async () => {
+    server.use(http.get(url(endpoints.vehicleGroups.list), () => fail(404, 'NOT_FOUND', 'Not found.')));
+    renderModal();
+    const select = screen.getByRole('combobox', { name: 'Applies to' });
+    await vi.waitFor(() => expect(select).not.toBeDisabled());
+    expect(within(select).getAllByRole('option').map((o) => o.textContent)).toEqual(['All vehicle groups']);
+  });
+
+  it('never sends the picked group — `POST /geofences` has no vehicle-group field (B-104)', async () => {
+    let posted: Record<string, unknown> | null = null;
+    server.use(
+      http.post(url(endpoints.geofences.create), async ({ request }) => {
+        posted = (await request.json()) as Record<string, unknown>;
+        return ok({ id: 'geo_1' });
+      }),
+    );
+    const user = userEvent.setup();
+    renderModal();
+    const select = screen.getByRole('combobox', { name: 'Applies to' });
+    await vi.waitFor(() => expect(select).not.toBeDisabled());
+    await user.selectOptions(select, 'vg_2');
+    expect(select).toHaveValue('vg_2');
+
+    await user.click(screen.getByRole('button', { name: 'Address' }));
+    await user.type(screen.getByPlaceholderText('Columbus terminal'), 'Yard A');
+    await user.type(screen.getByPlaceholderText('4517 Washington Ave., Columbus, OH 43004'), '123 Main St, Columbus, OH');
+    await user.type(screen.getByPlaceholderText('0.8'), '0.5');
+    await user.click(screen.getByRole('button', { name: 'Save geofence' }));
+
+    expect(await screen.findByText('Geofence created', {}, { timeout: 8000 })).toBeInTheDocument();
+    expect(posted).not.toBeNull();
+    expect(Object.values(posted ?? {})).not.toContain('vg_2');
+    expect(posted).not.toHaveProperty('appliesTo');
   });
 });

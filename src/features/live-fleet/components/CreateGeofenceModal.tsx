@@ -11,6 +11,7 @@ import { FilterCheckbox } from '@/shared/ui/FilterDrawer';
 import { useToast } from '@/shared/ui/Toast';
 import { TOAST_COPY } from '@/shared/ui/copy';
 import { useCreateGeofence, type GeofencePayload } from '@/shared/api/geofences';
+import { useVehicleGroups } from '@/shared/api/vehicles';
 import { geofenceSchema, type GeofenceFormValues } from '@/shared/forms/schemas';
 import { ApiError } from '@/shared/api/errors';
 import { reverseGeocode } from '@/shared/map/geocode';
@@ -66,6 +67,10 @@ const SHAPE_NEEDS_MAP =
 export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { toast } = useToast();
   const createGeofence = useCreateGeofence();
+  // `Applies to` options — the real `GET /vehicle-groups` list (backend D-107). Loading disables
+  // the select; an error leaves only `All vehicle groups`. The choice is UI-only for now: the
+  // backend geofence has no vehicle-group field (backend-gaps.md B-104), so it is never sent.
+  const vehicleGroups = useVehicleGroups();
 
   // These fields drive their own visual state (segmented control / checkboxes) instead of
   // `watch()` — react-hook-form's `watch()` cannot be safely memoized (its subscription changes
@@ -108,7 +113,7 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
       category: 'TERMINAL',
       colour: 'BLUE',
       type: 'POLYGON',
-      appliesTo: 'All vehicle groups',
+      appliesTo: '',
       alertOnEnter: true,
       alertOnExit: true,
       afterHoursOnly: false,
@@ -427,10 +432,21 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
             <span className="text-label text-text">Applies to</span>
             <select
               {...register('appliesTo')}
-              disabled={isPending}
+              disabled={isPending || vehicleGroups.isPending}
+              aria-busy={vehicleGroups.isPending}
               className="h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text"
             >
-              <option>All vehicle groups</option>
+              <option value="">All vehicle groups</option>
+              {vehicleGroups.isPending && (
+                <option value="" disabled>
+                  Loading…
+                </option>
+              )}
+              {vehicleGroups.data?.map((group) => (
+                <option key={group.id} value={group.id}>
+                  {group.name}
+                </option>
+              ))}
             </select>
           </label>
         </div>
