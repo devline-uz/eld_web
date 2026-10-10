@@ -70,6 +70,91 @@ export function useVehicleGroups() {
   });
 }
 
+/** `GET /vehicle-groups/:id` unit entry (the group's members). */
+export interface VehicleGroupMember {
+  id: string;
+  unitNumber: string;
+  vin: string;
+  make: string | null;
+  model: string | null;
+  status: string;
+}
+
+export interface VehicleGroupDetail extends VehicleGroupRow {
+  vehicles: VehicleGroupMember[];
+}
+
+/** `CreateVehicleGroupDto` — `vehicleIds` move those units in (out of any previous group). */
+export interface CreateVehicleGroupPayload {
+  name: string;
+  description?: string | null;
+  color?: string | null;
+  vehicleIds?: string[];
+}
+
+/** `UpdateVehicleGroupDto` — the create DTO minus `vehicleIds`, every field optional. */
+export type UpdateVehicleGroupPayload = Partial<Omit<CreateVehicleGroupPayload, 'vehicleIds'>>;
+
+/** One group with its units — the Vehicle groups edit modal pre-selects its members from it. */
+export function useVehicleGroup(id: string | undefined) {
+  return useQuery({
+    queryKey: qk.vehicleGroup(id ?? ''),
+    queryFn: ({ signal }) => client.get<VehicleGroupDetail>(endpoints.vehicleGroups.detail(id!), { signal }),
+    enabled: Boolean(id),
+    ...typedCachePolicy<VehicleGroupDetail>('list'),
+  });
+}
+
+/**
+ * Every group write refreshes the group list (and its detail entries, same root) so the W-12 IFTA
+ * `Vehicle group` and W-13 `Group by` menus follow. Membership writes also change `vehicle.groupId`
+ * and the per-group report totals, so those caches go too.
+ */
+function useInvalidateVehicleGroups() {
+  const queryClient = useQueryClient();
+  return (membershipChanged: boolean) => {
+    void queryClient.invalidateQueries({ queryKey: qk.vehicleGroups });
+    if (!membershipChanged) return;
+    void queryClient.invalidateQueries({ queryKey: qkRoot.vehicles });
+    void queryClient.invalidateQueries({ queryKey: qk.iftaSummary() });
+    void queryClient.invalidateQueries({ queryKey: qk.activitySummary() });
+  };
+}
+
+export function useCreateVehicleGroup() {
+  const invalidate = useInvalidateVehicleGroups();
+  return useMutation({
+    mutationFn: (payload: CreateVehicleGroupPayload) => client.post<VehicleGroupRow>(endpoints.vehicleGroups.create, payload),
+    onSuccess: (_group, payload) => invalidate(Boolean(payload.vehicleIds?.length)),
+  });
+}
+
+export function useUpdateVehicleGroup(id: string) {
+  const invalidate = useInvalidateVehicleGroups();
+  return useMutation({
+    mutationFn: (payload: UpdateVehicleGroupPayload) => client.patch<VehicleGroupRow>(endpoints.vehicleGroups.update(id), payload),
+    onSuccess: () => invalidate(false),
+  });
+}
+
+/** `PUT /vehicle-groups/:id/vehicles` — replaces the membership with exactly `vehicleIds`. */
+export function useSetVehicleGroupVehicles(id: string) {
+  const invalidate = useInvalidateVehicleGroups();
+  return useMutation({
+    mutationFn: (vehicleIds: string[]) => client.put<VehicleGroupRow>(endpoints.vehicleGroups.members(id), { vehicleIds }),
+    onSuccess: () => invalidate(true),
+  });
+}
+
+/** Deletes the group; its units stay, ungrouped. */
+export function useDeleteVehicleGroup() {
+  const invalidate = useInvalidateVehicleGroups();
+  return useMutation({
+    mutationFn: (id: string) => client.delete<{ success: boolean }>(endpoints.vehicleGroups.remove(id)),
+    onSuccess: () => invalidate(true),
+  });
+}
+
 /** The real, raw `Driver` row minus `passwordHash` (backend `DriverView`). */
 export interface DriverRow {
   id: string;

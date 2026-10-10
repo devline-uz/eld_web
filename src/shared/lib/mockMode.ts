@@ -1,4 +1,5 @@
-// Shared resolver for the per-screen demo-data switches (`VITE_DVIR_MOCK`, `VITE_SAFETY_MOCK`).
+// Shared resolver for the per-screen demo-data switches (`VITE_DVIR_MOCK`, `VITE_SAFETY_MOCK`,
+// `VITE_IFTA_MOCK`).
 //   (unset)    on as a fallback in `vite dev`, off in production builds
 //   `fallback` on as a fallback in any build (also `true` / `1`)
 //   `always`   ignore the API and always show the demo rows

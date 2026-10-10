@@ -35,6 +35,8 @@ export const qk = {
   trailers: (params?: QueryParams) => ['trailers', p(params)] as const,
   /** Backend D-107 — `GET /vehicle-groups` (no params, whole list). */
   vehicleGroups: ['vehicle-groups'] as const,
+  /** `GET /vehicle-groups/:id` — the group plus its units (edit modal); under the list root. */
+  vehicleGroup: (id: string) => ['vehicle-groups', id] as const,
   trailer: (id: string) => ['trailers', id] as const,
 
   // drivers

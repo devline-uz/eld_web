@@ -20,6 +20,12 @@ export const EMPTY_STATE_COPY = {
     description: 'Add your first trailer or import a CSV so dispatchers can attach it to a trip.',
     actions: ['Import CSV', 'Add trailer'],
   },
+  /** Not in §13.2 (no group-management design) — worded like the `trailers` entry (WD-116). */
+  vehicleGroups: {
+    title: 'No vehicle groups yet',
+    description: 'Group units by lane, region or customer to filter the IFTA and Activity reports.',
+    actions: ['New group'],
+  },
   drivers: {
     title: 'No drivers yet',
     description: 'Add drivers so they can sign in to the mobile app and start logging hours.',
@@ -129,6 +135,16 @@ export const TOAST_COPY = {
   trailerDeleted: (number: string): ToastCopy => ({
     title: `Trailer ${number} deleted`,
     description: 'Past trips and inspections are kept; the number can be reused.',
+  }),
+  /** Vehicle groups screen (WD-116) — not in §13.3's table; named like the trailer toasts. */
+  vehicleGroupCreated: (name: string, units: number): ToastCopy => ({
+    title: `Group ${name} created`,
+    description: `${units} unit${units === 1 ? '' : 's'} in the group.`,
+  }),
+  vehicleGroupUpdated: (name: string): ToastCopy => ({ title: `Group ${name} updated` }),
+  vehicleGroupDeleted: (name: string): ToastCopy => ({
+    title: `Group ${name} deleted`,
+    description: 'Its units are kept and are now ungrouped.',
   }),
   trailersImported: (created: number, updated: number, failed: number, total: number): ToastCopy => ({
     title: `${total} trailer${total === 1 ? '' : 's'} imported`,

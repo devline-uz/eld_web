@@ -75,7 +75,17 @@ export const vehicleGroupHandlers = [
   http.patch(url(endpoints.vehicleGroups.update(':id')), async ({ params, request }) => {
     const group = groups.find((g) => g.id === params.id);
     if (!group) return notFound();
-    Object.assign(group, await body(request), { updatedAt: new Date().toISOString() });
+    const dto = await body(request);
+    // Mirrors `VehicleGroupsService.update`: a rename onto another group's name is a 409.
+    const name = typeof dto.name === 'string' ? dto.name.trim() : undefined;
+    if (name !== undefined && name !== group.name && groups.some((g) => g.name === name)) {
+      return fail(409, 'CONFLICT', `Vehicle group "${name}" already exists.`);
+    }
+    // Only `UpdateVehicleGroupDto` fields are applied (`vehicleIds` goes through PUT /:id/vehicles).
+    if (name !== undefined) group.name = name;
+    if ('description' in dto) group.description = (dto.description as string | null) ?? null;
+    if ('color' in dto) group.color = (dto.color as string | null) ?? null;
+    group.updatedAt = new Date().toISOString();
     return ok(view(group));
   }),
   http.delete(url(endpoints.vehicleGroups.remove(':id')), ({ params }) => {

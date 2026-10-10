@@ -1,10 +1,12 @@
-// Vehicles ⇄ Trailers switch shown on top of both inventory screens. The sidebar (§4.2) is fixed,
-// so Trailers is reached from here; both screens are gated by the same `vehicles` key.
+// Vehicles ⇄ Trailers ⇄ Groups switch shown on top of the inventory screens. The sidebar (§4.2) is
+// fixed, so Trailers and Vehicle groups (WD-116) are reached from here; all three are gated by the
+// same `vehicles` key.
 import { NavLink } from 'react-router-dom';
 
 const tabs = [
   { to: '/vehicles', label: 'Vehicles' },
   { to: '/trailers', label: 'Trailers' },
+  { to: '/vehicles/groups', label: 'Groups' },
 ] as const;
 
 export function InventoryTabs() {
