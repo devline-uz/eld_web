@@ -8,7 +8,6 @@ import { SeverityBadge } from '@/shared/ui/Badge';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
 import {
-  useDvir,
   useMechanicSignoff,
   fetchDvirPdf,
   fetchAttachmentUrl,
@@ -23,6 +22,8 @@ import { orDash } from '@/shared/format/empty';
 import { useToast } from '@/shared/ui/Toast';
 import { ApiError } from '@/shared/api/errors';
 import { printDvir } from '../lib/printDvir';
+// DEMO DATA — answers `mock-*` DVIR ids locally (`VITE_DVIR_MOCK`). Remove: import `useDvir` from `@/shared/api/dvir` again.
+import { useDvir } from '../mock/useDvirMock';
 
 const DVIR_TYPE_LABEL: Record<string, string> = {
   PRE_TRIP: 'Pre-trip',

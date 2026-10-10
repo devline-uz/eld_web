@@ -27,11 +27,6 @@ import { useNowTick } from '@/shared/format/useRelativeTime';
 import { formatOdometer } from '@/shared/format/numbers';
 import { orDash, orNone, orUnassigned } from '@/shared/format/empty';
 import {
-  useRecentDvirs,
-  useOpenDefects,
-  useWorkOrdersList,
-  useSchedulesList,
-  useDueSchedules,
   useCloseWorkOrder,
   useCancelWorkOrder,
   useCompleteSchedule,
@@ -42,7 +37,16 @@ import {
   type WorkOrderTableRow,
   type ScheduleTableRow,
 } from '@/shared/api/dvir';
-import { useVehiclesLookup } from '@/shared/api/lookups';
+// DEMO DATA — these hooks fall back to `./mock` rows while the API is empty/failing
+// (`VITE_DVIR_MOCK`). Remove: import them from `@/shared/api/dvir` / `@/shared/api/lookups` again.
+import {
+  useRecentDvirs,
+  useOpenDefects,
+  useWorkOrdersList,
+  useSchedulesList,
+  useDueSchedules,
+  useVehiclesLookup,
+} from './mock/useDvirMock';
 import { useUsersList } from '@/shared/api/settingsAdmin';
 import { useDebouncedValue } from '@/shared/hooks/useDebouncedValue';
 import { DvirDrawer } from './components/DvirDrawer';

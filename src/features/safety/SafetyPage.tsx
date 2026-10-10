@@ -30,6 +30,8 @@ import { useSafetyEventsList, useScorecard, type SafetyEventTableRow, type Score
 import { AssignCoachingModal } from './components/AssignCoachingModal';
 import { SafetyFiltersDrawer, SafetyFilterChips } from './components/SafetyFiltersDrawer';
 import { parseSafetyFilters, writeSafetyFilters, matchesSafetyFilters, EMPTY_SAFETY_FILTERS, countActiveSafetyFilters, safetyEventLabel } from './lib/filters';
+// safetyMock — TEMPORARY demo fallback; delete this import and the `safetyMock` block below to remove.
+import { SAFETY_MOCK_MODE, MOCK_SAFETY_EVENTS, MOCK_SCORECARD } from './lib/mockData';
 
 /** Fleet-score verdict bands — the same 90 / 70 cut-offs as the driver SCORE badge. */
 const FLEET_VERDICT = {
@@ -325,8 +327,21 @@ export default function SafetyPage() {
     },
   });
 
-  const events = useSafetyEventsList({ limit: 500 });
-  const scorecard = useScorecard();
+  const eventsQuery = useSafetyEventsList({ limit: 500 });
+  const scorecardQuery = useScorecard();
+  // safetyMock — while the API returns no rows (empty or failed), show demo data from
+  // `./lib/mockData` instead. Real rows always win (unless `VITE_SAFETY_MOCK=always`).
+  // Remove: `const events = eventsQuery;` etc.
+  const shouldMockSafety = (q: { isLoading: boolean; rows: unknown[] }) =>
+    SAFETY_MOCK_MODE === 'always' || (SAFETY_MOCK_MODE === 'fallback' && !q.isLoading && q.rows.length === 0);
+  const eventsMock = shouldMockSafety(eventsQuery);
+  const scorecardMock = shouldMockSafety(scorecardQuery);
+  const events = eventsMock
+    ? { ...eventsQuery, rows: MOCK_SAFETY_EVENTS, isLoading: false, isError: false }
+    : eventsQuery;
+  const scorecard = scorecardMock
+    ? { ...scorecardQuery, rows: MOCK_SCORECARD, isLoading: false, isError: false }
+    : scorecardQuery;
 
   const now = useNowTick();
   const last30 = now - 30 * 24 * 60 * 60 * 1000;
