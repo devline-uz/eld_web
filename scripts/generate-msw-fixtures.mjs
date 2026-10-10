@@ -14,6 +14,17 @@ const OUT = fileURLToPath(new URL('../src/mocks/fixtures.generated.ts', import.m
 const spec = JSON.parse(readFileSync(SPEC, 'utf8'));
 const METHODS = ['get', 'post', 'put', 'patch', 'delete'];
 
+// Routes documented with the backend's `@ApiEnvelopeResponse` show the wire envelope
+// `{ data, traceId, timestamp }`; `ok()` in the handlers adds that envelope itself, so the fixture
+// is the `data` payload (same rule as tests/contract/openapi.ts).
+const isEnvelope = (v) =>
+  v !== null &&
+  typeof v === 'object' &&
+  !Array.isArray(v) &&
+  'data' in v &&
+  typeof v.traceId === 'string' &&
+  typeof v.timestamp === 'string';
+
 const entries = [];
 for (const [path, ops] of Object.entries(spec.paths)) {
   for (const method of METHODS) {
@@ -21,8 +32,9 @@ for (const [path, ops] of Object.entries(spec.paths)) {
     if (!op) continue;
     const status = Object.keys(op.responses ?? {}).find((s) => s.startsWith('2'));
     if (!status) continue;
-    const example = op.responses[status]?.content?.['application/json']?.schema?.example;
-    if (example === undefined) continue;
+    const documented = op.responses[status]?.content?.['application/json']?.schema?.example;
+    if (documented === undefined) continue;
+    const example = isEnvelope(documented) ? documented.data : documented;
     entries.push(
       `  '${method.toUpperCase()} ${path}': ${JSON.stringify(example, null, 2)
         .split('\n')
