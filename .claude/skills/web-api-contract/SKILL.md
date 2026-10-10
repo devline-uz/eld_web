@@ -7,7 +7,7 @@ description: OneBook ELD web API layer contract — base URL, envelope, the nine
 
 **Code is the source of truth — grep it before reading further:** `src/shared/api/client.ts`,
 `endpoints.ts`, `queryKeys.ts` (`qk`), `queryPolicy.ts` (cache policy), `errors.ts`,
-`types.ts` (generated from `../backend/docs/openapi.json`), per-domain hooks (`vehicles.ts`, `hosLogs.ts`…).
+`types.ts` (generated from the backend `docs/openapi.json`, located by `scripts/openapi-spec-path.mjs`), per-domain hooks (`vehicles.ts`, `hosLogs.ts`…).
 MSW handlers live in `src/mocks/`; contract tests in `tests/contract/`.
 
 ## Rules

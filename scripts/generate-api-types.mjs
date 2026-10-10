@@ -8,8 +8,9 @@
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath, URL } from 'node:url';
+import { resolveOpenApiSpecPath } from './openapi-spec-path.mjs';
 
-const SPEC = fileURLToPath(new URL('../../backend/docs/openapi.json', import.meta.url));
+const SPEC = resolveOpenApiSpecPath();
 const OUT = fileURLToPath(new URL('../src/shared/api/types.ts', import.meta.url));
 
 const spec = JSON.parse(readFileSync(SPEC, 'utf8'));

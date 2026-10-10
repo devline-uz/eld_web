@@ -15,6 +15,14 @@ import type { DeviceRow } from '@/shared/api/settingsAdmin';
 import { DEVICES, DRIVERS, TRAILERS, VEHICLES, daysAgo, liveVehicles, mockId } from './mockState';
 import type { TrailerRow } from '@/shared/api/trailers';
 import { findMockTrip, removeMockTrip } from './tripsMessagingGaps';
+import { mockVehicleGroupName } from './vehicleGroups';
+
+/** B-104 — `{ vehicleGroupId, vehicleGroupName }` for a geofence row, or null for an unknown group. */
+function geofenceGroup(id: unknown): { vehicleGroupId: string | null; vehicleGroupName: string | null } | null {
+  if (id == null || id === '') return { vehicleGroupId: null, vehicleGroupName: null };
+  const name = typeof id === 'string' ? mockVehicleGroupName(id) : undefined;
+  return name === undefined ? null : { vehicleGroupId: id as string, vehicleGroupName: name };
+}
 
 const VEHICLE_Q_FIELDS = ['unitNumber', 'vin', 'make', 'model', 'licensePlate'];
 const DRIVER_Q_FIELDS = ['firstName', 'lastName', 'username', 'cdlNumber', 'email'];
@@ -612,13 +620,20 @@ export const fleetWriteHandlers = [
     return ok({ imported, updated, failed }, 201);
   }),
 
+  // B-104 — `vehicleGroupId` (null = all groups) is echoed with its `vehicleGroupName`; an
+  // unknown group is the backend's 404 VEHICLE_GROUP_NOT_FOUND.
   http.post(url(endpoints.geofences.create), async ({ request }) => {
     const dto = await body(request);
-    return ok({ ...(fixture('POST /api/geofences') as Record<string, unknown>), ...dto, id: mockId('gf') }, 201);
+    const group = geofenceGroup(dto.vehicleGroupId ?? null);
+    if (!group) return fail(404, 'VEHICLE_GROUP_NOT_FOUND', 'Vehicle group not found.');
+    return ok({ ...(fixture('POST /api/geofences') as Record<string, unknown>), ...dto, ...group, id: mockId('gf') }, 201);
   }),
-  http.patch(url(endpoints.geofences.update(':id')), async ({ params, request }) =>
-    ok({ ...(fixture('PATCH /api/geofences/{id}') as Record<string, unknown>), ...(await body(request)), id: String(params.id) }),
-  ),
+  http.patch(url(endpoints.geofences.update(':id')), async ({ params, request }) => {
+    const dto = await body(request);
+    const group = dto.vehicleGroupId === undefined ? {} : geofenceGroup(dto.vehicleGroupId);
+    if (!group) return fail(404, 'VEHICLE_GROUP_NOT_FOUND', 'Vehicle group not found.');
+    return ok({ ...(fixture('PATCH /api/geofences/{id}') as Record<string, unknown>), ...dto, ...group, id: String(params.id) });
+  }),
   http.delete(url(endpoints.geofences.remove(':id')), () => ok(fixture('DELETE /api/geofences/{id}'))),
 
   /** B-7 (shipped 2026-09-24) — the documented offset page; no seeded pairings (team driving is rare). */

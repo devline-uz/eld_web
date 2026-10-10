@@ -16,7 +16,14 @@ export type GeofenceColour = 'BLUE' | 'GREEN' | 'AMBER' | 'RED' | 'VIOLET';
  * backend's OpenAPI example has no coordinates, so none of them are guaranteed. `colour` and
  * `countAsYardMove` are always on the row (DB defaults `BLUE` / `false`). */
 export type GeofenceRow = GeofencesListResponse['items'][number] &
-  GeofenceGeometrySource & { colour?: GeofenceColour; countAsYardMove?: boolean };
+  GeofenceGeometrySource & {
+    colour?: GeofenceColour;
+    countAsYardMove?: boolean;
+    /** B-104 — the `Applies to` vehicle group; `null` = all groups (also after the group is deleted). */
+    vehicleGroupId?: string | null;
+    /** B-104 — the group's name, joined server-side on `GET /geofences` and `GET /geofences/:id`. */
+    vehicleGroupName?: string | null;
+  };
 
 export interface GeofencesResponse {
   items: GeofenceRow[];
@@ -61,6 +68,9 @@ export interface GeofencePayload {
   /** Overlay 11.1 footer — time inside counts as on-duty yard move. Server default `false`. */
   countAsYardMove?: boolean;
   enabled?: boolean;
+  /** B-104 — overlay 11.1 `Applies to`. `null` = all vehicle groups (on PATCH: reset to all);
+   * an unknown id is `404 VEHICLE_GROUP_NOT_FOUND`. */
+  vehicleGroupId?: string | null;
 }
 
 export function useCreateGeofence() {
