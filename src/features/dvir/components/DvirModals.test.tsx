@@ -2,7 +2,7 @@
 // what they no longer pretend to collect, and that no route out of a dirty one skips the confirm.
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactElement } from 'react';
@@ -328,10 +328,17 @@ describe('CreateWorkOrderModal — 11.16', () => {
     renderModal(<CreateWorkOrderModal onClose={vi.fn()} />);
 
     const unit = screen.getByRole('combobox', { name: /Unit/ });
-    await screen.findByRole('option', { name: 'Unit 102' });
-    await user.selectOptions(unit, 'veh_1');
+    // Shared Select: open the menu (once the units have loaded) and click an option.
+    const pickUnit = async (name: string) => {
+      await waitFor(async () => {
+        await user.click(unit);
+        expect(screen.getByRole('listbox')).toBeInTheDocument();
+      });
+      await user.click(screen.getByRole('option', { name }));
+    };
+    await pickUnit('Unit 101');
     await user.click(await screen.findByRole('checkbox', { name: /Brake pads/ }));
-    await user.selectOptions(unit, 'veh_2');
+    await pickUnit('Unit 102');
     await user.type(screen.getByLabelText(/Title/), 'Brake repair');
     await user.click(screen.getByRole('button', { name: 'Create work order' }));
 
@@ -468,6 +475,55 @@ describe('EditScheduleModal — clearing a field clears it', () => {
 });
 
 
+/* ------------------------------------------------------------------ Schedule odometer / overdue (WD-112) */
+
+describe('EditScheduleModal — last-service odometer and overdue preview', () => {
+  const unitsHandler = (odometerMi: number) =>
+    http.get(url(endpoints.vehicles.list), () =>
+      ok({ items: [{ id: 'veh_1', unitNumber: '103', vin: 'VINveh_1', status: 'ACTIVE', odometerMi }], page: 1, limit: 1000, total: 1, totalPages: 1 }),
+    );
+
+  it('flags a last-service odometer above the unit odometer and blocks Save', async () => {
+    const user = userEvent.setup();
+    server.use(unitsHandler(110_000));
+    renderModal(<EditScheduleModal schedule={SCHEDULE} onClose={vi.fn()} />);
+    const field = screen.getByLabelText('Last service odometer');
+    await user.clear(field);
+    await user.type(field, '120000');
+    expect(await screen.findByText("Can't be greater than the unit's current odometer (110,000 mi).")).toBeInTheDocument();
+    expect(field).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+
+    await user.clear(field);
+    await user.type(field, '105000');
+    expect(screen.queryByText(/Can't be greater/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
+  });
+
+  it('warns (without blocking) when the values make the schedule Overdue on mileage', async () => {
+    const user = userEvent.setup();
+    server.use(unitsHandler(15_000));
+    const today = new Date().toISOString().slice(0, 10);
+    renderModal(<EditScheduleModal onClose={vi.fn()} />);
+    await user.selectOptions(await screen.findByRole('combobox'), await screen.findByRole('option', { name: 'Unit 103' }));
+    await user.type(screen.getByPlaceholderText('Oil & filter'), 'PM A');
+    await user.type(screen.getByLabelText('Interval (miles)'), '10000');
+    await user.type(screen.getByLabelText('Interval (days)'), '30');
+    await user.type(screen.getByLabelText('Last service odometer'), '2000');
+    await user.type(screen.getByLabelText('Last service date'), today);
+
+    expect(
+      await screen.findByText('This schedule will be Overdue as soon as it is saved — due at 12,000 mi, the unit is at 15,000 mi.'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create schedule' })).toBeEnabled();
+
+    await user.clear(screen.getByLabelText('Last service odometer'));
+    await user.type(screen.getByLabelText('Last service odometer'), '14000');
+    await waitFor(() => expect(screen.queryByText(/will be Overdue/)).not.toBeInTheDocument());
+  });
+});
+
+
 // WB-159 — 11.15 DVIR detail: `Export PDF` had no handler, `Print` printed the whole application
 // and the photo tiles were buttons that did nothing.
 describe('DvirDrawer — 11.15', () => {
@@ -585,7 +641,7 @@ describe('EditScheduleModal — create mode (QA-B)', () => {
     await user.selectOptions(await screen.findByRole('combobox'), await screen.findByRole('option', { name: 'Unit 7301' }));
     await user.type(screen.getByPlaceholderText('Oil & filter'), 'Oil & filter');
     await user.type(screen.getByLabelText('Interval (miles)'), '0');
-    expect(screen.getByRole('alert')).toHaveTextContent('intervals start at 1');
+    expect(screen.getByRole('alert')).toHaveTextContent('Must be at least 1.');
     expect(create).toBeDisabled();
     await user.clear(screen.getByLabelText('Interval (miles)'));
     await user.type(screen.getByLabelText('Interval (miles)'), '25000');
@@ -593,5 +649,66 @@ describe('EditScheduleModal — create mode (QA-B)', () => {
 
     await waitFor(() => expect(body).toBeTruthy());
     expect(body).toEqual({ vehicleId: 'veh_9', name: 'Oil & filter', intervalMi: 25000, enabled: true });
+  });
+});
+
+/* ------------------------------------------------------------------ Schedule: no negative numbers (WD-115) */
+
+describe('EditScheduleModal — interval and odometer fields reject negatives', () => {
+  const FIELDS = ['Interval (miles)', 'Interval (days)', 'Last service odometer'] as const;
+
+  it('sets min on the inputs and blocks typing -, + and e', async () => {
+    const user = userEvent.setup();
+    renderModal(<EditScheduleModal onClose={vi.fn()} />);
+    expect(screen.getByLabelText('Interval (miles)')).toHaveAttribute('min', '1');
+    expect(screen.getByLabelText('Interval (days)')).toHaveAttribute('min', '1');
+    expect(screen.getByLabelText('Last service odometer')).toHaveAttribute('min', '0');
+    for (const label of FIELDS) {
+      const field = screen.getByLabelText(label);
+      await user.type(field, '-1e+2');
+      expect(field).toHaveValue(12);
+    }
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it.each(FIELDS)('shows a field error and disables Save for a pasted negative in %s', async (label) => {
+    const user = userEvent.setup();
+    renderModal(<EditScheduleModal schedule={SCHEDULE} onClose={vi.fn()} />);
+    const field = screen.getByLabelText(label);
+    fireEvent.change(field, { target: { value: '-5' } });
+
+    const error = await screen.findByText("Can't be negative.");
+    expect(field).toHaveAttribute('aria-invalid', 'true');
+    expect(field).toHaveAttribute('aria-describedby', error.id);
+    const save = screen.getByRole('button', { name: 'Save changes' });
+    expect(save).toBeDisabled();
+
+    await user.clear(field);
+    await user.type(field, '10');
+    expect(screen.queryByText("Can't be negative.")).not.toBeInTheDocument();
+    expect(field).not.toHaveAttribute('aria-invalid');
+    expect(save).toBeEnabled();
+  });
+
+  it('allows 0 for the last-service odometer but not for the intervals (backend min 1)', async () => {
+    renderModal(<EditScheduleModal schedule={SCHEDULE} onClose={vi.fn()} />);
+    const save = screen.getByRole('button', { name: 'Save changes' });
+
+    fireEvent.change(screen.getByLabelText('Last service odometer'), { target: { value: '0' } });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(save).toBeEnabled();
+
+    fireEvent.change(screen.getByLabelText('Interval (days)'), { target: { value: '0' } });
+    expect(screen.getByText('Must be at least 1.')).toBeInTheDocument();
+    expect(save).toBeDisabled();
+  });
+
+  it('caps the intervals at the backend maximums', async () => {
+    renderModal(<EditScheduleModal schedule={SCHEDULE} onClose={vi.fn()} />);
+    fireEvent.change(screen.getByLabelText('Interval (miles)'), { target: { value: '2000001' } });
+    fireEvent.change(screen.getByLabelText('Interval (days)'), { target: { value: '3661' } });
+    expect(screen.getByText("Can't be more than 2,000,000 mi.")).toBeInTheDocument();
+    expect(screen.getByText("Can't be more than 3,660 days.")).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
   });
 });

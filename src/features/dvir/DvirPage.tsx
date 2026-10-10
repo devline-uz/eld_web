@@ -10,6 +10,7 @@ import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
 import { usePageHeader } from '@/app/layouts/Topbar';
 import { Button } from '@/shared/ui/Button';
+import { Select } from '@/shared/ui/Select';
 import { Card, SectionHeader } from '@/shared/ui/Card';
 import { Badge, SeverityBadge } from '@/shared/ui/Badge';
 import { Avatar } from '@/shared/ui/Avatar';
@@ -55,6 +56,7 @@ import { defectsCsv, dvirsCsv, schedulesCsv, workOrdersCsv } from './lib/exportC
 import { CreateWorkOrderModal } from './components/CreateWorkOrderModal';
 import { EditWorkOrderModal } from './components/EditWorkOrderModal';
 import { EditScheduleModal } from './components/EditScheduleModal';
+import { scheduleIntervalLabel, scheduleNextDueLabel } from './lib/scheduleLabels';
 import { ResolveDefectModal } from './components/ResolveDefectModal';
 import { DvirFiltersDrawer, DvirFilterChips } from './components/DvirFiltersDrawer';
 import {
@@ -718,25 +720,24 @@ function AssignedToCell({ defect }: { defect: DefectTableRow }) {
     return <span className="text-text-muted">{orUnassigned(assigneeLabel)}</span>;
   }
 
+  // Shared Select (10-row scrolling menu). The wrapper keeps clicks/Enter on the trigger and on
+  // the portalled menu (React bubbles through portals) from reaching the row's onRowClick.
   return (
-    <select
-      value={defect.assigneeId ?? ''}
-      disabled={assign.isPending}
-      onClick={(e) => e.stopPropagation()}
-      onChange={(e) => {
-        e.stopPropagation();
-        assign.mutate(e.target.value === '' ? null : e.target.value);
-      }}
-      aria-label={`Assign defect ${defect.category}`}
-      className="h-8 rounded-md border border-border bg-bg-surface px-2 text-body text-text"
-    >
-      <option value="">Unassigned</option>
-      {users.map((u) => (
-        <option key={u.id} value={u.id}>
-          {u.firstName} {u.lastName}
-        </option>
-      ))}
-    </select>
+    <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+      <Select
+        value={defect.assigneeId ?? ''}
+        disabled={assign.isPending}
+        options={[
+          { value: '', label: 'Unassigned' },
+          ...users.map((u) => ({ value: u.id, label: `${u.firstName} ${u.lastName}` })),
+        ]}
+        onChange={(next) => {
+          if (next !== (defect.assigneeId ?? '')) assign.mutate(next === '' ? null : next);
+        }}
+        aria-label={`Assign defect ${defect.category}`}
+        className="h-8 rounded-md border border-border bg-bg-surface px-2 text-body text-text"
+      />
+    </span>
   );
 }
 
@@ -1099,13 +1100,7 @@ function SchedulesTab({ search, onRows }: { search: string; onRows: (rows: Sched
                   id: 'interval',
                   header: 'INTERVAL',
                   cell: ({ row }) => (
-                    <span className="tabular-nums text-text">
-                      {row.original.intervalMi
-                        ? `Every ${formatOdometer(row.original.intervalMi)} mi`
-                        : row.original.intervalDays
-                          ? `Every ${row.original.intervalDays} days`
-                          : '—'}
-                    </span>
+<span className="tabular-nums text-text">{scheduleIntervalLabel(row.original)}</span>
                   ),
                 },
                 {
@@ -1117,9 +1112,7 @@ function SchedulesTab({ search, onRows }: { search: string; onRows: (rows: Sched
                   id: 'nextDue',
                   header: 'NEXT DUE',
                   cell: ({ row }) => (
-                    <span className="tabular-nums text-text">
-                      {row.original.nextDueAt ? formatLocal(row.original.nextDueAt, 'shortDate') : row.original.nextDueMi ? `${formatOdometer(row.original.nextDueMi)} mi` : '—'}
-                    </span>
+<span className="tabular-nums text-text">{scheduleNextDueLabel(row.original)}</span>
                   ),
                 },
                 {
