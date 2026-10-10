@@ -212,12 +212,22 @@ export function bumpConversation(
   /** Without it the row kept its old `lastMessage` (or none) and the sidebar preview read
    * "Tap to open the conversation" after a send. */
   lastMessage?: MessageRow,
+  /** `unread: true` — a `message.new` from someone else in a thread that is not open: adds one
+   * to the server's `unreadCount` (the pre-B-37 fallback already reads `lastMessageAt` as unread). */
+  options: { unread?: boolean } = {},
 ): void {
   queryClient.setQueryData<{ items: ConversationRow[] } | undefined>(qk.conversations(), (prev) => {
     if (!prev) return prev;
     return {
       items: prev.items.map((c) =>
-        c.id === conversationId ? { ...c, lastMessageAt, ...(lastMessage && { lastMessage }) } : c,
+        c.id === conversationId
+          ? {
+              ...c,
+              lastMessageAt,
+              ...(lastMessage && { lastMessage }),
+              ...(options.unread && c.unreadCount != null && { unreadCount: c.unreadCount + 1 }),
+            }
+          : c,
       ),
     };
   });

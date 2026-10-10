@@ -8,7 +8,8 @@ import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { useDynamicSubtitle } from '@/app/layouts/Topbar';
-import { useRoom } from '@/shared/realtime/useRoom';
+import { useRooms } from '@/shared/realtime/useRooms';
+import { MESSAGES_CONVERSATIONS_POLL_MS, useVisiblePolling } from '@/shared/realtime/polling';
 import { Avatar } from '@/shared/ui/Avatar';
 import { Button } from '@/shared/ui/Button';
 import { Badge } from '@/shared/ui/Badge';
@@ -233,16 +234,6 @@ export default function MessagesPage() {
   const trips = useActiveTrips();
   const driverHos = useDriverHos(selected?.type === 'GROUP' ? undefined : selected?.driver?.id);
 
-  useRoom(selected ? `conversation:${selected.id}` : null, {
-    'message.new': (payload) => {
-      if (!selected) return;
-      const message = payload.message as unknown as MessageRow;
-      if (message.conversationId !== selected.id) return;
-      upsertMessage(queryClient, selected.id, message);
-      bumpConversation(queryClient, selected.id, message.sentAt, message);
-    },
-  });
-
   const markRead = useMarkConversationRead(user?.id);
   const markReadMutate = markRead.mutate;
   /** B-67 (shipped) — opening a still-unread conversation persists `lastReadAt` server-side via
@@ -252,6 +243,35 @@ export default function MessagesPage() {
       markReadMutate(selected.id);
     }
   }, [selected?.id, selected?.unread, markReadMutate]);
+
+  // Every listed conversation's room, not just the open one — a reply in another thread used to
+  // reach nobody, so its preview, order and unread dot only changed on a page reload.
+  const conversationRooms = useMemo(
+    () => conversations.items.map((c) => `conversation:${c.id}` as const),
+    [conversations.items],
+  );
+  const refetchConversations = conversations.refetch;
+  useRooms(conversationRooms, {
+    'message.new': (payload) => {
+      const message = payload.message as unknown as MessageRow;
+      const conversationId = message.conversationId;
+      if (!conversations.items.some((c) => c.id === conversationId)) {
+        // Not in the cached list yet (created elsewhere since the last fetch) — pull the row in.
+        void refetchConversations();
+        return;
+      }
+      const isOpen = selected?.id === conversationId;
+      const fromOther = message.senderUserId !== user?.id;
+      upsertMessage(queryClient, conversationId, message);
+      bumpConversation(queryClient, conversationId, message.sentAt, message, { unread: fromOther && !isOpen });
+      // Read on arrival in the open thread, so a reload does not resurrect the unread dot.
+      if (fromOther && isOpen) markReadMutate(conversationId);
+    },
+  });
+
+  // There is no `conversation.created` push: a conversation another office user starts with the
+  // caller in it would otherwise only appear on reload (named fallback, `polling.ts`).
+  useVisiblePolling(MESSAGES_CONVERSATIONS_POLL_MS, () => void refetchConversations());
 
   const unreadCount = conversations.items.filter((c) => c.unread).length;
   const driverUnit = selected?.driver ? liveFleet.data?.items.find((u) => u.driverId === selected.driver!.id) : undefined;

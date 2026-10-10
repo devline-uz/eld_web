@@ -277,6 +277,49 @@ describe('W-16 Messages', () => {
     await waitFor(() => expect(screen.getAllByText('Pulling in now.')).toHaveLength(2));
   });
 
+  it('joins every listed conversation room and updates a closed thread live — preview + unread, no reload', async () => {
+    server.use(
+      http.get(url(endpoints.conversations.list), () =>
+        ok({
+          items: [
+            {
+              ...CONVERSATION,
+              unreadCount: 0,
+              participants: CONVERSATION.participants.map((p) => ({ ...p, lastReadAt: '2026-09-12T16:00:00.000Z' })),
+            },
+          ],
+        }),
+      ),
+      http.get(url(endpoints.drivers.list), () => ok({ items: [DRIVER], page: 1, limit: 500, total: 1, totalPages: 1 })),
+    );
+    const socket = fakeSocket();
+    renderPage(socket);
+
+    await screen.findByText('John Smith');
+    // Nothing is open, yet the conversation's room is joined.
+    await waitFor(() => expect(socket.emit).toHaveBeenCalledWith('subscribe', 'conversation:cnv_1', expect.any(Function)));
+    expect(screen.getByRole('button', { name: 'Unread 0' })).toBeInTheDocument();
+
+    socket.trigger('message.new', {
+      message: {
+        id: 'msg_10',
+        conversationId: 'cnv_1',
+        senderUserId: null,
+        senderDriverId: 'drv_1',
+        body: 'Arrived at the shipper.',
+        attachmentId: null,
+        clientId: null,
+        sentAt: new Date().toISOString(),
+        deliveredAt: null,
+        readAt: null,
+      },
+    });
+
+    expect(await screen.findByText('Arrived at the shipper.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Unread 1' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Unread')).toBeInTheDocument();
+  });
+
   it('marks a failed send with a red-border/Retry state, never left looking delivered (WB-116)', async () => {
     usePopulatedConversations();
     let attempts = 0;

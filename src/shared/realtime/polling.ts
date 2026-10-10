@@ -9,6 +9,10 @@ export const DASHBOARD_POLL_MS = 30_000;
 export const LIVE_FLEET_POLL_MS = 30_000;
 /** HOS Logs stands in for the missing `hos.updated` event. */
 export const HOS_LOGS_POLL_MS = 60_000;
+/** Messages stands in for a missing `conversation.created` push: `message.new` (per
+ * `conversation:{id}` room) covers every conversation already in the list, but a conversation
+ * another office user creates with the caller in it only shows up on a list refetch. */
+export const MESSAGES_CONVERSATIONS_POLL_MS = 60_000;
 
 function isVisible(): boolean {
   return typeof document === 'undefined' || document.visibilityState === 'visible';
