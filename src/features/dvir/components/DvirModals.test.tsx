@@ -379,6 +379,62 @@ describe('CreateWorkOrderModal — 11.16', () => {
     expect(await screen.findByText('Discard changes?')).toBeInTheDocument();
     expect(onClose2).not.toHaveBeenCalled();
   });
+
+  it('refuses an odometer or labor past the CreateWorkOrderDto limits on the field, sending nothing', async () => {
+    const user = userEvent.setup();
+    let posts = 0;
+    server.use(
+      http.get(url(endpoints.defects.list), () => ok({ items: [], page: 1, limit: 200, total: 0, totalPages: 1 })),
+      http.post(url(endpoints.workOrders.create), () => {
+        posts += 1;
+        return ok({ ...WORK_ORDER, vehicle: undefined }, 201);
+      }),
+    );
+    renderModal(<CreateWorkOrderModal vehicleId="veh_1" onClose={vi.fn()} />);
+
+    await user.type(screen.getByLabelText(/Title/), 'Brake repair');
+    await user.type(screen.getByLabelText(/Odometer at service/), '99999999');
+    await user.type(screen.getByLabelText(/Estimated labor/), '10000');
+
+    expect(screen.getByText('Odometer at service cannot exceed 9,999,999 mi.')).toBeInTheDocument();
+    expect(screen.getByText('Estimated labor cannot exceed 999 hours.')).toBeInTheDocument();
+    expect(screen.getByLabelText(/Estimated labor/)).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByRole('button', { name: 'Create work order' })).toBeDisabled();
+    expect(posts).toBe(0);
+  });
+
+  it('puts a server 422 on the field it is about and shows it, instead of failing silently', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(url(endpoints.defects.list), () => ok({ items: [], page: 1, limit: 200, total: 0, totalPages: 1 })),
+      http.post(url(endpoints.workOrders.create), () =>
+        HttpResponse.json(
+          {
+            statusCode: 422,
+            code: 'VALIDATION_FAILED',
+            message: 'Request validation failed.',
+            details: {
+              issues: [
+                { path: 'estimatedLaborHours', code: 'too_big', message: 'Number must be less than or equal to 999' },
+                { path: 'vehicleId', code: 'invalid_string', message: 'Invalid uuid' },
+              ],
+            },
+          },
+          { status: 422 },
+        ),
+      ),
+    );
+    renderModal(<CreateWorkOrderModal vehicleId="veh_1" onClose={vi.fn()} />);
+
+    await user.type(screen.getByLabelText(/Title/), 'Brake repair');
+    await user.type(screen.getByLabelText(/Estimated labor/), '12');
+    await user.click(screen.getByRole('button', { name: 'Create work order' }));
+
+    expect(await screen.findByText('Number must be less than or equal to 999')).toBeInTheDocument();
+    expect(screen.getByLabelText(/Estimated labor/)).toHaveAttribute('aria-invalid', 'true');
+    // The issue with no field of its own is spelled out in the banner.
+    expect(screen.getByText('Unit: Invalid uuid.')).toBeInTheDocument();
+  });
 });
 
 /* ---------------------------------------------------------------- Edit work order (clear) */
@@ -710,5 +766,108 @@ describe('EditScheduleModal — interval and odometer fields reject negatives', 
     expect(screen.getByText("Can't be more than 2,000,000 mi.")).toBeInTheDocument();
     expect(screen.getByText("Can't be more than 3,660 days.")).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Save changes' })).toBeDisabled();
+  });
+});
+
+/* ------------------------------------------------ silent-failure sweep: 422s land on fields */
+
+function validation422(issues: { path: string | string[]; message: string }[]) {
+  return HttpResponse.json(
+    {
+      statusCode: 422,
+      code: 'VALIDATION_FAILED',
+      message: 'Request validation failed.',
+      details: { issues: issues.map((issue) => ({ code: 'custom', ...issue })) },
+    },
+    { status: 422 },
+  );
+}
+
+describe('ResolveDefectModal — validation feedback', () => {
+  it('puts a server 422 on its field and spells out the one with no field of its own', async () => {
+    const user = userEvent.setup();
+    server.use(
+      workOrdersListHandler(),
+      http.patch(url(endpoints.defects.resolve('def_1')), () =>
+        validation422([
+          { path: 'correctedBy', message: 'String must contain at most 120 character(s)' },
+          { path: 'resolutionType', message: 'Invalid enum value' },
+        ]),
+      ),
+    );
+    const onClose = vi.fn();
+    renderModal(<ResolveDefectModal defect={DEFECT} onClose={onClose} />);
+
+    await user.type(screen.getByLabelText(/Corrected by/), 'Mike');
+    await user.type(screen.getByLabelText(/Repair notes/i), 'Replaced pads');
+    await user.click(screen.getByRole('button', { name: 'Mark as resolved' }));
+
+    expect(await screen.findByText('String must contain at most 120 character(s)')).toBeInTheDocument();
+    expect(screen.getByLabelText(/Corrected by/)).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByText('Resolution: Invalid enum value.')).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('refuses labor hours past the ResolveDefectDto cap on the field, sending nothing', async () => {
+    const user = userEvent.setup();
+    let posted = false;
+    server.use(
+      workOrdersListHandler(),
+      http.patch(url(endpoints.defects.resolve('def_1')), () => {
+        posted = true;
+        return ok({ id: 'def_1', status: 'REPAIRED' });
+      }),
+    );
+    renderModal(<ResolveDefectModal defect={DEFECT} onClose={vi.fn()} />);
+
+    await user.type(screen.getByLabelText(/Labor hours/), '1000');
+    await user.type(screen.getByLabelText(/Repair notes/i), 'Replaced pads');
+
+    expect(screen.getByText('Labor hours cannot exceed 999 hours.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Mark as resolved' })).toBeDisabled();
+    expect(posted).toBe(false);
+    expect(screen.getByLabelText(/Corrected by/)).toHaveAttribute('maxLength', '120');
+    expect(screen.getByLabelText(/Repair notes/i)).toHaveAttribute('maxLength', '500');
+  });
+
+  it('says why Mark as resolved is disabled while the repair notes are empty', async () => {
+    const user = userEvent.setup();
+    server.use(workOrdersListHandler());
+    renderModal(<ResolveDefectModal defect={DEFECT} onClose={vi.fn()} />);
+
+    expect(screen.getByRole('button', { name: 'Mark as resolved' })).toBeDisabled();
+    expect(screen.getByText('Add repair notes to resolve.')).toBeInTheDocument();
+    await user.type(screen.getByLabelText(/Repair notes/i), 'Replaced pads');
+    expect(screen.queryByText('Add repair notes to resolve.')).not.toBeInTheDocument();
+  });
+});
+
+describe('EditScheduleModal — validation feedback', () => {
+  it('puts a server 422 on the name field and spells out a path-less refine', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.patch(url(endpoints.maintenanceSchedules.update('sch_1')), () =>
+        validation422([
+          { path: ['name'], message: 'Name is taken' },
+          { path: [], message: 'At least one of intervalMi/intervalDays is required.' },
+        ]),
+      ),
+    );
+    renderModal(<EditScheduleModal schedule={SCHEDULE} onClose={vi.fn()} />);
+
+    await user.type(screen.getByLabelText(/^Name/), ' x');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(await screen.findByText('Name is taken')).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Name/)).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByText('At least one of intervalMi/intervalDays is required.')).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Name/)).toHaveAttribute('maxLength', '120');
+  });
+});
+
+describe('DvirDrawer — mechanic sign-off', () => {
+  it('caps the mechanic name at the MechanicSignOffDto limit', async () => {
+    renderModal(<DvirDrawer dvirId="dvir_1" onClose={() => {}} onCreateWorkOrder={() => {}} />);
+    expect(await screen.findByRole('textbox', { name: 'Mechanic name' })).toHaveAttribute('maxLength', '120');
   });
 });

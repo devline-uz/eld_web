@@ -5,30 +5,48 @@
 // (backend D-101) — the modal shows that as a notice rather than claiming an instant change.
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { isPrivilegedRole, isSuperAdmin } from '@/shared/auth/permissions';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
-import { ApiError } from '@/shared/api/errors';
 import { fields } from '@/shared/forms';
 import { internationalPhoneRule, phoneForDisplay, toE164 } from '@/shared/forms/phoneNumber';
 import { PhoneNumberInput } from '@/shared/forms/PhoneNumberInput';
 import { useUpdateUser, type RoleRow, type UserRow } from '@/shared/api/settingsAdmin';
 import { Field, inputClass } from './formKit';
 import { SETTINGS_TOAST } from '../lib/copy';
+import { placeServerFieldErrors, serverErrorBanner } from '../lib/serverFieldErrors';
 
+/** `UpdateUserDto` limits — past them the server answered a 422 the form never pointed at. */
+const NAME_MAX = 80;
+const TERMINAL_MAX = 120;
 const editUserSchema = z.object({
-  firstName: fields.requiredString(),
-  lastName: fields.requiredString(),
+  firstName: fields.requiredString().max(NAME_MAX, `First name must be ${NAME_MAX} characters or fewer.`),
+  lastName: fields.requiredString().max(NAME_MAX, `Last name must be ${NAME_MAX} characters or fewer.`),
   email: fields.email(),
-  jobTitle: z.string().trim().max(100).optional(),
+  jobTitle: z.string().trim().max(100, 'Job title must be 100 characters or fewer.').optional(),
   phone: internationalPhoneRule(),
   /** Typed — no Terminal table to pick from yet (backend D-090). Empty = all terminals. */
-  homeTerminalName: z.string().trim().optional(),
+  homeTerminalName: z
+    .string()
+    .trim()
+    .max(TERMINAL_MAX, `Home terminal must be ${TERMINAL_MAX} characters or fewer.`)
+    .optional(),
 });
+
+/** Server issue path → the profile field that shows it. */
+const PROFILE_FIELDS = {
+  firstName: 'firstName',
+  lastName: 'lastName',
+  email: 'email',
+  jobTitle: 'jobTitle',
+  phone: 'phone',
+  homeTerminalName: 'homeTerminalName',
+} as const;
+const FIELD_LABELS = { roleId: 'Role', status: 'Status' };
 type EditUserValues = z.infer<typeof editUserSchema>;
 
 export interface EditUserModalProps {
@@ -51,6 +69,10 @@ export function EditUserModal({
   const { toast } = useToast();
   const updateUser = useUpdateUser();
   const [banner, setBanner] = useState<string | null>(null);
+  const bannerRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (banner) bannerRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [banner]);
   const currentRoleId = user.role.id ?? roles.find((r) => r.key === user.role.key)?.id ?? '';
   const { user: me } = useAuth();
   const superAdmin = isSuperAdmin(me);
@@ -135,14 +157,13 @@ export function EditUserModal({
           onClose();
         },
         onError: (error) => {
-          // 422 VALIDATION_FAILED with an issue on `phone` → the field, not the banner.
-          const phoneIssue = error instanceof ApiError ? error.fieldErrors.phone : undefined;
-          if (phoneIssue) {
-            setError('phone', { message: phoneIssue });
-            return;
-          }
-          const message = error instanceof ApiError ? error.userMessage : 'Something went wrong.';
-          setBanner(message);
+          // 422 VALIDATION_FAILED → each issue on its field (profile mode renders them); whatever
+          // has no field here (`roleId`, or anything in role mode) is spelled out in the banner.
+          const placed =
+            mode === 'profile'
+              ? placeServerFieldErrors(error, PROFILE_FIELDS, (field, message) => setError(field, { message }))
+              : [];
+          setBanner(serverErrorBanner(error, placed, FIELD_LABELS));
         },
       },
     );
@@ -173,7 +194,7 @@ export function EditUserModal({
     >
       <form className="flex flex-col gap-4" onSubmit={handleSubmit(submit)}>
         {banner && (
-          <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-body text-danger">
+          <p ref={bannerRef} role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-body text-danger">
             {banner}
           </p>
         )}
@@ -202,7 +223,7 @@ export function EditUserModal({
               <input {...register('email')} disabled={submitting} className={inputClass} />
             </Field>
             <div className="grid grid-cols-2 gap-4">
-              <Field label="Job title">
+              <Field label="Job title" error={errors.jobTitle?.message}>
                 <input {...register('jobTitle')} disabled={submitting} className={inputClass} />
               </Field>
               <Field label="Phone" error={errors.phone?.message}>
@@ -224,7 +245,11 @@ export function EditUserModal({
                 />
               </Field>
             </div>
-            <Field label="Home terminal" hint="Leave empty for all terminals.">
+            <Field
+              label="Home terminal"
+              hint="Leave empty for all terminals."
+              error={errors.homeTerminalName?.message}
+            >
               <input
                 {...register('homeTerminalName')}
                 disabled={submitting}

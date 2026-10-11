@@ -7,7 +7,7 @@ import { Badge } from '@/shared/ui/Badge';
 import { useToast } from '@/shared/ui/Toast';
 import { TOAST_COPY } from '@/shared/ui/copy';
 import { useImportTrailers } from '@/shared/api/trailers';
-import { ApiError } from '@/shared/api/errors';
+import { ApiError, formErrorMessage } from '@/shared/api/errors';
 import { parseCsv, toCsv } from '@/shared/lib/csv';
 import { importIssues } from '../lib/importIssues';
 import { toTrailerPayloads } from '../lib/trailerRows';
@@ -46,21 +46,31 @@ export function ImportTrailersModal({ onClose }: { onClose: () => void }) {
       setError('File is larger than 5 MB.');
       return;
     }
-    void selected.text().then((text) => {
-      const parsed = parseCsv(text);
-      if (parsed.length > MAX_ROWS) {
-        reset();
-        setError(`File has ${parsed.length} rows — 1,000 rows maximum.`);
-        return;
-      }
-      if (parsed.length > 0 && !('number' in parsed[0]!)) {
-        reset();
-        setError('The file needs a "number" column. Download the CSV template for the format.');
-        return;
-      }
-      setRows(parsed);
-      setFile(selected);
-    });
+    void selected
+      .text()
+      .then((text) => {
+        const parsed = parseCsv(text);
+        if (parsed.length > MAX_ROWS) {
+          reset();
+          setError(`File has ${parsed.length} rows — 1,000 rows maximum.`);
+          return;
+        }
+        if (parsed.length > 0 && !('number' in parsed[0]!)) {
+          reset();
+          setError('The file needs a "number" column. Download the CSV template for the format.');
+          return;
+        }
+        // A header-only file used to leave `Import` disabled with no word on why.
+        if (parsed.length === 0) {
+          reset();
+          setError('The file has no trailer rows. Add one trailer per row below the header.');
+          return;
+        }
+        setRows(parsed);
+        setFile(selected);
+      })
+      // An unreadable file used to reject into nothing — the drop zone just stayed empty.
+      .catch(() => setError('The file could not be read. Choose the CSV again.'));
   }
 
   function submit() {
@@ -92,7 +102,7 @@ export function ImportTrailersModal({ onClose }: { onClose: () => void }) {
             setError(`The file was not imported. ${rowIssues.join(' · ')}`);
             return;
           }
-          toast({ kind: 'error', title: err instanceof ApiError ? err.userMessage : 'Something went wrong.' });
+          toast({ kind: 'error', title: formErrorMessage(err) });
         },
       },
     );

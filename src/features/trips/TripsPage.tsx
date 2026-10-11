@@ -39,7 +39,7 @@ import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
 import { EMPTY_STATE_COPY, searchEmptyState } from '@/shared/ui/copy';
 import { useToast } from '@/shared/ui/Toast';
 import { ConfirmDelete } from '@/shared/ui/Modal';
-import { ApiError } from '@/shared/api/errors';
+import { formErrorMessage } from '@/shared/api/errors';
 import { formatLocal } from '@/shared/format/datetime';
 import { formatWeight } from '@/shared/format/numbers';
 import { orDash } from '@/shared/format/empty';
@@ -131,7 +131,7 @@ export default function TripsPage() {
           toast({ kind: 'error', title: TRIP_NOT_FOUND });
           setDeleteTrip(null);
         } else {
-          toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+          toast({ kind: 'error', title: formErrorMessage(error) });
         }
       },
     });
@@ -253,7 +253,7 @@ export default function TripsPage() {
           title: `${result.assigned.length} loads assigned · ${result.skipped} skipped (no driver with enough hours)`,
         });
       },
-      onError: () => toast({ kind: 'error', title: 'Something went wrong.' }),
+      onError: (error) => toast({ kind: 'error', title: formErrorMessage(error) }),
     });
   }
 
@@ -357,7 +357,7 @@ export default function TripsPage() {
                   // Publishing puts the draft on its unit's timeline — a 409 names the trip in the way.
                   onError: (error) => {
                     const conflict = tripScheduleConflict(error);
-                    toast({ kind: 'error', title: conflict ? scheduleConflictMessage(conflict) : 'Something went wrong.' });
+                    toast({ kind: 'error', title: conflict ? scheduleConflictMessage(conflict) : formErrorMessage(error) });
                   },
                   onSettled: () => setPublishingId(null),
                 });

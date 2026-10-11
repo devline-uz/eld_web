@@ -22,7 +22,7 @@ import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
 import { EMPTY_STATE_COPY, searchEmptyState, TOAST_COPY } from '@/shared/ui/copy';
 import { useToast } from '@/shared/ui/Toast';
-import { ApiError } from '@/shared/api/errors';
+import { ApiError, formErrorMessage } from '@/shared/api/errors';
 import { formatLocal } from '@/shared/format/datetime';
 import { useNowTick } from '@/shared/format/useRelativeTime';
 import { formatOdometer } from '@/shared/format/numbers';
@@ -39,7 +39,7 @@ import {
   type ScheduleTableRow,
 } from '@/shared/api/dvir';
 // DEMO DATA — these hooks fall back to `./mock` rows while the API is empty/failing
-// (`VITE_DVIR_MOCK`). Remove: import them from `@/shared/api/dvir` / `@/shared/api/lookups` again.
+// (`VITE_DEMO_FALLBACK`, never in production). Remove: import them from `@/shared/api/dvir` / `@/shared/api/lookups` again.
 import {
   useRecentDvirs,
   useOpenDefects,
@@ -58,6 +58,7 @@ import { EditWorkOrderModal } from './components/EditWorkOrderModal';
 import { EditScheduleModal } from './components/EditScheduleModal';
 import { scheduleIntervalLabel, scheduleNextDueLabel } from './lib/scheduleLabels';
 import { ResolveDefectModal } from './components/ResolveDefectModal';
+import { blockOdometerKeys, getOdometerError, sanitizeOdometer } from './lib/workOrderFieldGuards';
 import { DvirFiltersDrawer, DvirFilterChips } from './components/DvirFiltersDrawer';
 import {
   parseDvirFilters,
@@ -711,6 +712,7 @@ interface ServerPageProps {
  * sees the resolved name (or `Unassigned`), never an editable control (§12.2). */
 function AssignedToCell({ defect }: { defect: DefectTableRow }) {
   const { can } = usePermission();
+  const { toast } = useToast();
   const { rows: users } = useUsersList();
   const assign = useAssignDefect(defect.id);
   const assignee = users.find((u) => u.id === defect.assigneeId);
@@ -732,7 +734,11 @@ function AssignedToCell({ defect }: { defect: DefectTableRow }) {
           ...users.map((u) => ({ value: u.id, label: `${u.firstName} ${u.lastName}` })),
         ]}
         onChange={(next) => {
-          if (next !== (defect.assigneeId ?? '')) assign.mutate(next === '' ? null : next);
+          if (next === (defect.assigneeId ?? '')) return;
+          // The assignment used to fail silently: the select snapped back with no reason.
+          assign.mutate(next === '' ? null : next, {
+            onError: (error) => toast({ kind: 'error', title: formErrorMessage(error, [], { assigneeId: 'Assignee' }) }),
+          });
         }}
         aria-label={`Assign defect ${defect.category}`}
         className="h-8 rounded-md border border-border bg-bg-surface px-2 text-body text-text"
@@ -953,7 +959,7 @@ function WorkOrderCloseModal({ workOrder, onClose }: { workOrder: WorkOrderTable
                   toast({ kind: 'success', ...TOAST_COPY.workOrderClosed(workOrder.number) });
                   onClose();
                 },
-                onError: (error) => setServerError(error instanceof ApiError ? error.userMessage : 'Something went wrong.'),
+                onError: (error) => setServerError(formErrorMessage(error)),
               })
             }
           >
@@ -964,7 +970,11 @@ function WorkOrderCloseModal({ workOrder, onClose }: { workOrder: WorkOrderTable
     >
       <div className="flex flex-col gap-3">
         <p className="text-body text-text-secondary">Marks the repair as done and clears it from open work.</p>
-        {serverError && <p className="text-body text-danger">{serverError}</p>}
+        {serverError && (
+          <p role="alert" className="text-body text-danger">
+            {serverError}
+          </p>
+        )}
       </div>
     </Modal>
   );
@@ -997,7 +1007,7 @@ function WorkOrderCancelModal({ workOrder, onClose }: { workOrder: WorkOrderTabl
                   toast({ kind: 'success', ...TOAST_COPY.workOrderCancelled(workOrder.number) });
                   onClose();
                 },
-                onError: (error) => setServerError(error instanceof ApiError ? error.userMessage : 'Something went wrong.'),
+                onError: (error) => setServerError(formErrorMessage(error)),
               })
             }
           >
@@ -1011,7 +1021,11 @@ function WorkOrderCancelModal({ workOrder, onClose }: { workOrder: WorkOrderTabl
           Unit {workOrder.vehicle?.unitNumber ?? '—'} · {workOrder.title}. No further work will be tracked against it; any
           linked defects stay open.
         </p>
-        {serverError && <p className="text-body text-danger">{serverError}</p>}
+        {serverError && (
+          <p role="alert" className="text-body text-danger">
+            {serverError}
+          </p>
+        )}
       </div>
     </Modal>
   );
@@ -1151,6 +1165,10 @@ function ScheduleCompleteModal({ schedule, onClose }: { schedule: ScheduleTableR
   // Stage 3 — typed odometer/date used to be lost silently on Cancel/×/Esc: the Modal had no
   // `isDirty` and Cancel called `onClose` straight past the 11.30 discard confirm.
   const isDirty = odometer !== '' || serviceDate !== initialServiceDate;
+  // `CompleteMaintenanceDto.serviceOdometerMi` is a whole number ≥ 0 — a negative or decimal
+  // reading used to go out and come back as an unexplained 422.
+  const [serverOdometerError, setServerOdometerError] = useState<string | null>(null);
+  const odometerError = getOdometerError(odometer) ?? serverOdometerError;
   const inputClass = 'h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text';
   return (
     <Modal
@@ -1167,6 +1185,7 @@ function ScheduleCompleteModal({ schedule, onClose }: { schedule: ScheduleTableR
             variant="primary"
             size="lg"
             loading={mutation.isPending}
+            disabled={Boolean(getOdometerError(odometer))}
             onClick={() =>
               mutation.mutate(
                 {
@@ -1178,7 +1197,16 @@ function ScheduleCompleteModal({ schedule, onClose }: { schedule: ScheduleTableR
                     toast({ kind: 'success', ...TOAST_COPY.scheduleCompleted(schedule.name) });
                     onClose();
                   },
-                  onError: (error) => setServerError(error instanceof ApiError ? error.userMessage : 'Something went wrong.'),
+                  onError: (error) => {
+                    const odometerIssue = error instanceof ApiError ? error.fieldErrors.serviceOdometerMi : undefined;
+                    setServerOdometerError(odometerIssue ?? null);
+                    setServerError(
+                      formErrorMessage(error, odometerIssue ? ['serviceOdometerMi'] : [], {
+                        serviceAt: 'Service date',
+                        serviceOdometerMi: 'Odometer at service',
+                      }),
+                    );
+                  },
                 },
               )
             }
@@ -1196,11 +1224,34 @@ function ScheduleCompleteModal({ schedule, onClose }: { schedule: ScheduleTableR
         <label className="flex flex-col gap-1">
           <span className="text-label text-text">Odometer at service</span>
           <div className="flex items-center gap-2">
-            <input type="number" value={odometer} onChange={(e) => setOdometer(e.target.value)} className={inputClass} />
+            <input
+              type="number"
+              min={0}
+              step={1}
+              inputMode="numeric"
+              value={odometer}
+              onKeyDown={blockOdometerKeys}
+              onChange={(e) => {
+                setOdometer(sanitizeOdometer(e.target.value));
+                setServerOdometerError(null);
+              }}
+              aria-invalid={odometerError ? true : undefined}
+              aria-describedby={odometerError ? 'complete-schedule-odometer-error' : undefined}
+              className={inputClass}
+            />
             <span className="text-body text-text-muted">mi</span>
           </div>
+          {odometerError && (
+            <span id="complete-schedule-odometer-error" role="alert" className="text-caption text-danger">
+              {odometerError}
+            </span>
+          )}
         </label>
-        {serverError && <p className="text-body text-danger">{serverError}</p>}
+        {serverError && (
+          <p role="alert" className="text-body text-danger">
+            {serverError}
+          </p>
+        )}
       </div>
     </Modal>
   );
@@ -1233,7 +1284,7 @@ function ScheduleDeleteModal({ schedule, onClose }: { schedule: ScheduleTableRow
                   toast({ kind: 'success', ...TOAST_COPY.scheduleDeleted(schedule.name) });
                   onClose();
                 },
-                onError: (error) => setServerError(error instanceof ApiError ? error.userMessage : 'Something went wrong.'),
+                onError: (error) => setServerError(formErrorMessage(error)),
               })
             }
           >
@@ -1247,7 +1298,11 @@ function ScheduleDeleteModal({ schedule, onClose }: { schedule: ScheduleTableRow
           Unit {schedule.vehicle?.unitNumber ?? '—'} · {schedule.name} stops tracking due dates. Historical service records
           stay in place for audits.
         </p>
-        {serverError && <p className="text-body text-danger">{serverError}</p>}
+        {serverError && (
+          <p role="alert" className="text-body text-danger">
+            {serverError}
+          </p>
+        )}
       </div>
     </Modal>
   );

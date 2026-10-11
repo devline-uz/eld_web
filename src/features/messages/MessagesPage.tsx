@@ -23,7 +23,7 @@ import { hosTone } from '@/shared/ui/ProgressBar';
 import { formatSpeed } from '@/shared/format/numbers';
 import { useDriver, useDriverHos } from '@/shared/api/drivers';
 import { useDriverMap } from '@/shared/api/lookups';
-import { errorMessage, toUserMessage } from '@/shared/api/errors';
+import { errorMessage, formErrorMessage, toUserMessage } from '@/shared/api/errors';
 import { useLiveFleet } from '@/shared/api/liveFleet';
 import { useActiveTrips } from '@/shared/api/trips';
 import {
@@ -34,6 +34,7 @@ import {
   useMarkConversationRead,
   upsertMessage,
   bumpConversation,
+  markConversationRead,
   setMessageStatus,
   type ConversationListItem,
   type MessageRow,
@@ -244,17 +245,27 @@ export default function MessagesPage() {
     }
   }, [selected?.id, selected?.unread, markReadMutate]);
 
-  // Every listed conversation's room, not just the open one — a reply in another thread used to
-  // reach nobody, so its preview, order and unread dot only changed on a page reload.
+  // `message.new` now also reaches the caller's auto-joined `user:{id}` room (one multi-room push
+  // per socket), so a thread created elsewhere arrives live too. The listed conversations' rooms
+  // stay joined for a backend that still pushes to `conversation:{id}` only — Socket.IO listeners
+  // are per socket, so it is still one handler call per push.
   const conversationRooms = useMemo(
     () => conversations.items.map((c) => `conversation:${c.id}` as const),
     [conversations.items],
   );
   const refetchConversations = conversations.refetch;
+  /** Message ids already applied — a reconnect replay or a duplicate delivery must never bump the
+   * unread count twice (bounded; old ids fall out first). */
+  const seenMessageIds = useRef<Set<string>>(new Set());
   useRooms(conversationRooms, {
     'message.new': (payload) => {
       const message = payload.message as unknown as MessageRow;
-      const conversationId = message.conversationId;
+      const conversationId = message.conversationId ?? payload.conversationId;
+      if (!conversationId) return;
+      const seen = seenMessageIds.current;
+      if (seen.has(message.id)) return;
+      seen.add(message.id);
+      if (seen.size > 500) seen.delete(seen.values().next().value as string);
       if (!conversations.items.some((c) => c.id === conversationId)) {
         // Not in the cached list yet (created elsewhere since the last fetch) — pull the row in.
         void refetchConversations();
@@ -267,10 +278,19 @@ export default function MessagesPage() {
       // Read on arrival in the open thread, so a reload does not resurrect the unread dot.
       if (fromOther && isOpen) markReadMutate(conversationId);
     },
+    // A conversation the caller is in was created (office user, broadcast, or a driver from the
+    // app) — add it to the list now instead of on the next poll.
+    'conversation.new': (payload) => {
+      if (!conversations.items.some((c) => c.id === payload.conversationId)) void refetchConversations();
+    },
+    // Read in another tab/device of the same user — clear the badge here too.
+    'conversation.read': (payload) => {
+      if (payload.userId && payload.userId === user?.id) markConversationRead(queryClient, payload.conversationId, user.id);
+    },
   });
 
-  // There is no `conversation.created` push: a conversation another office user starts with the
-  // caller in it would otherwise only appear on reload (named fallback, `polling.ts`).
+  // Safety net only — `conversation.new` / `message.new` on `user:{id}` keep the list live; this
+  // catches anything missed while the socket was down (named fallback, `polling.ts`).
   useVisiblePolling(MESSAGES_CONVERSATIONS_POLL_MS, () => void refetchConversations());
 
   const unreadCount = conversations.items.filter((c) => c.unread).length;
@@ -287,9 +307,15 @@ export default function MessagesPage() {
     sendMessage.mutate(
       { body, clientId },
       {
-        onError: () => {
+        onError: (error) => {
           setMessageStatus(queryClient, conversationId, clientId, 'failed');
-          toast({ kind: 'error', title: 'Could not send the message.' });
+          // The toast used to give no reason at all — a refusal (422 on the body, 403, 5xx) and a
+          // dropped connection read the same. The server's reason now rides along.
+          toast({
+            kind: 'error',
+            title: 'Could not send the message.',
+            description: formErrorMessage(error, [], { body: 'Message', attachmentId: 'Attachment' }),
+          });
         },
       },
     );

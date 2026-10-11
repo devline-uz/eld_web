@@ -4,17 +4,19 @@ import { z } from 'zod';
 import * as f from './fields';
 import { LIMITS, VALIDATION_MESSAGES as M } from './messages';
 
-/** 11.2 · Add vehicle */
+/** 11.2 · Add vehicle — `CreateVehicleDto`: `make` / `model` ≤ 60, `eldSerial` ≤ 60, `notes` ≤ 500. */
 export const vehicleSchema = z.object({
   unitNumber: f.unitNumber(),
   vin: f.vin(),
-  make: f.requiredString(),
-  model: f.requiredString(),
+  make: f.requiredString().max(LIMITS.vehicleMakeModelMax, M.vehicleMakeMax),
+  model: f.requiredString().max(LIMITS.vehicleMakeModelMax, M.vehicleModelMax),
   year: f.vehicleYear(),
   licensePlate: z.string().trim().max(20).optional(),
   licenseState: z.string().trim().length(2, 'Use the 2-letter state or province code.').optional(),
   odometer: f.odometer().optional(),
-  deviceId: z.string().trim().optional(),
+  /** The `ELD serial` input — sent as `eldSerial`. */
+  deviceId: z.string().trim().max(LIMITS.vehicleEldSerialMax, M.vehicleEldSerialMax).optional(),
+  notes: z.string().trim().max(LIMITS.vehicleNotesMax, M.vehicleNotesMax).optional(),
 });
 export type VehicleFormValues = z.infer<typeof vehicleSchema>;
 
@@ -152,18 +154,20 @@ export const tripSchema = z.object({
   notes: z.string().trim().max(500).optional(),
 });
 
-/** 11.18 · Invite a user (Q-1 — no password; the invite lands by email). */
+/** 11.18 · Invite a user (Q-1 — no password; the invite lands by email). `CreateUserDto` caps
+ * both names at 80. */
 export const inviteUserSchema = z.object({
   email: f.email(),
-  firstName: f.requiredString(),
-  lastName: f.requiredString(),
+  firstName: f.requiredString().max(LIMITS.personNameMax, M.firstNameMax),
+  lastName: f.requiredString().max(LIMITS.personNameMax, M.lastNameMax),
   roleKey: f.requiredString(),
 });
 
 /** 11.19 · Create a role */
 export const roleSchema = z.object({
-  name: f.requiredString(),
-  description: z.string().trim().max(200).optional(),
+  /** `CreateRoleDto.name` is 1–80. */
+  name: f.requiredString().max(LIMITS.roleNameMax, M.roleNameMax),
+  description: z.string().trim().max(LIMITS.roleDescriptionMax, M.roleDescriptionMax).optional(),
   permissions: z.record(z.enum(['NONE', 'READ', 'FULL'])),
 });
 
@@ -262,19 +266,29 @@ export const messageSchema = z.object({ body: f.messageBody() });
  * at submit time until B-15 ships (web/backend-gaps.md).
  */
 export const geofenceSchema = z.object({
-  name: f.requiredString(),
+  /** `CreateGeofenceDto` (backend geofences.dto.ts) — `name` 1–120. */
+  name: f.requiredString().max(LIMITS.geofenceNameMax, M.geofenceNameMax),
   category: z.enum(['TERMINAL', 'SHIPPER', 'CUSTOMER', 'REST_AREA', 'OTHER']).default('TERMINAL'),
   colour: z.enum(['BLUE', 'GREEN', 'AMBER', 'RED', 'VIOLET']).default('BLUE'),
   type: z.enum(['CIRCLE', 'POLYGON', 'ADDRESS']).default('POLYGON'),
-  address: z.string().trim().optional(),
-  /** Backend field name is `radiusMi` (miles) — B-93/D-098. */
-  radiusMi: z.number().positive().optional(),
+  address: z.string().trim().max(LIMITS.geofenceAddressMax, M.geofenceAddressMax).optional(),
+  /** Backend field name is `radiusMi` (miles) — B-93/D-098; `max(500)`. */
+  radiusMi: z
+    .number({ invalid_type_error: M.geofenceRadius })
+    .positive(M.geofenceRadiusPositive)
+    .max(LIMITS.geofenceRadiusMiMax, M.geofenceRadiusMax)
+    .optional(),
   /** Overlay 11.1 `Applies to` — `''` = all vehicle groups, else a vehicle-group id. UI-only:
    * `POST /geofences` has no vehicle-group field yet (backend-gaps.md B-104). */
   appliesTo: z.string().trim().default(''),
   alertOnEnter: z.boolean().default(true),
   alertOnExit: z.boolean().default(true),
-  dwellMinutes: z.number().int().positive().optional(),
+  dwellMinutes: z
+    .number({ invalid_type_error: M.geofenceDwell })
+    .int(M.geofenceDwell)
+    .positive(M.geofenceDwellMin)
+    .max(LIMITS.geofenceDwellMinutesMax, M.geofenceDwellMax)
+    .optional(),
   afterHoursOnly: z.boolean().default(false),
   countAsYardMove: z.boolean().default(false),
 });

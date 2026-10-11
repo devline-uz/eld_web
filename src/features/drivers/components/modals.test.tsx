@@ -64,6 +64,7 @@ describe('11.8 Add driver (Q-3)', () => {
     await user.type(screen.getByLabelText(/^Password/), 'password1');
     await user.type(screen.getByLabelText(/Email address/), 'kristin.watson@gmail.com');
     await user.type(screen.getByLabelText(/Driver licence number/), 'W1234567');
+    await user.type(screen.getByLabelText(/^Home terminal(?! time zone)/), 'Columbus, OH');
     await user.click(screen.getByRole('button', { name: 'Save driver' }));
 
     expect(await screen.findByText('Driver added')).toBeInTheDocument();
@@ -112,6 +113,7 @@ describe('11.8 Add driver (Q-3)', () => {
 
     await fillRequiredFields(user);
     // The zone string used to be written into `homeTerminalName` (WB-153) — name and zone stay apart.
+    await user.clear(screen.getByLabelText(/^Home terminal(?! time zone)/));
     await user.type(screen.getByLabelText(/^Home terminal(?! time zone)/), 'Dayton, OH');
     await user.selectOptions(screen.getByLabelText(/Home terminal time zone/), 'America/Chicago');
     await user.click(screen.getByRole('button', { name: 'Save driver' }));
@@ -120,7 +122,7 @@ describe('11.8 Add driver (Q-3)', () => {
     expect(body.homeTerminalTimezone).toBe('America/Chicago');
   });
 
-  it('home terminal and its zone are optional — no terminal is hardcoded, the zone falls back to the carrier', async () => {
+  it('no terminal is hardcoded and the zone is optional — an empty zone falls back to the carrier', async () => {
     let body: Record<string, unknown> | null = null;
     server.use(
       http.get(url(endpoints.vehicles.list), () =>
@@ -151,7 +153,7 @@ describe('11.8 Add driver (Q-3)', () => {
 
     expect(await screen.findByText('Driver added')).toBeInTheDocument();
     expect(body).not.toBeNull();
-    expect(body!.homeTerminalName).toBeUndefined();
+    expect(body!).not.toHaveProperty('homeTerminalName');
     expect(body!.homeTerminalTimezone).toBe('America/Denver');
   });
 
@@ -194,6 +196,73 @@ describe('11.8 Add driver (Q-3)', () => {
 
     expect(await screen.findByText('This licence number is already on file.')).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('home terminal is optional — an empty field is left out of the POST and the driver is created', async () => {
+    let body: Record<string, unknown> | null = null;
+    server.use(
+      http.get(url(endpoints.vehicles.list), () =>
+        ok({ items: [], page: 1, limit: 500, total: 0, totalPages: 1 }),
+      ),
+      http.post(url(endpoints.drivers.create), async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>;
+        return ok({ id: 'drv_new', username: 'kwatson', status: 'ACTIVE' });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<AddDriverModal onClose={() => {}} />);
+
+    await fillRequiredFields(user);
+    expect(screen.getByLabelText(/^Home terminal(?! time zone)/)).toHaveValue('');
+    expect(screen.getByLabelText(/^Home terminal(?! time zone)/)).not.toBeRequired();
+    await user.click(screen.getByRole('button', { name: 'Save driver' }));
+
+    expect(await screen.findByText('Driver added')).toBeInTheDocument();
+    expect(body).not.toBeNull();
+    expect(body!).not.toHaveProperty('homeTerminalName');
+    expect(screen.queryByText('Enter the home terminal.')).not.toBeInTheDocument();
+  });
+
+  it('CreateDriverDto — the inputs cap the lengths the server refuses past', () => {
+    server.use(
+      http.get(url(endpoints.vehicles.list), () =>
+        ok({ items: [], page: 1, limit: 500, total: 0, totalPages: 1 }),
+      ),
+    );
+    renderWithProviders(<AddDriverModal onClose={() => {}} />);
+    expect(screen.getByLabelText(/First name/)).toHaveAttribute('maxLength', '80');
+    expect(screen.getByLabelText(/Last name/)).toHaveAttribute('maxLength', '80');
+    expect(screen.getByLabelText(/^Password/)).toHaveAttribute('maxLength', '72');
+    expect(screen.getByLabelText(/^Home terminal(?! time zone)/)).toHaveAttribute('maxLength', '120');
+  });
+
+  it('a 422 on a field the form does not render is spelled out in the banner, not swallowed', async () => {
+    server.use(
+      http.get(url(endpoints.vehicles.list), () =>
+        ok({ items: [], page: 1, limit: 500, total: 0, totalPages: 1 }),
+      ),
+      http.post(url(endpoints.drivers.create), () =>
+        fail(422, 'VALIDATION_FAILED', 'Invalid payload', {
+          issues: [
+            { path: ['email'], code: 'invalid_string', message: 'Invalid email' },
+            { path: ['hosRuleset'], code: 'invalid_enum_value', message: 'Invalid enum value' },
+          ],
+        }),
+      ),
+    );
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    renderWithProviders(<AddDriverModal onClose={onClose} />);
+
+    await fillRequiredFields(user);
+    await user.click(screen.getByRole('button', { name: 'Save driver' }));
+
+    // The placed issue goes on its field; the unplaced one is named in the banner.
+    expect(await screen.findByText('Invalid email')).toBeInTheDocument();
+    const banner = await screen.findByRole('alert');
+    expect(banner).toHaveTextContent('HOS ruleset: Invalid enum value.');
+    expect(banner).not.toHaveTextContent('Check the highlighted fields');
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('WB — an untouched form closes without the 11.30 confirm', async () => {
@@ -447,6 +516,7 @@ describe('11.8 Add driver — licence number', () => {
     await user.type(screen.getByLabelText(/^Password/), 'password1');
     await user.type(screen.getByLabelText(/Email address/), 'kristin.watson@gmail.com');
     await user.type(licence(), ' w1234567 ');
+    await user.type(screen.getByLabelText(/^Home terminal(?! time zone)/), 'Columbus, OH');
     await user.click(screen.getByRole('button', { name: 'Save driver' }));
     await waitFor(() => expect(body).not.toBeNull());
     expect(body!.cdlNumber).toBe('W1234567');
@@ -796,6 +866,37 @@ describe('11.7 Import drivers', () => {
     expect(screen.getByRole('button', { name: 'Import drivers' })).toBeDisabled();
   });
 
+  it('a 422 lists per-row issues by row and spells out an options issue instead of a bare banner', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post(url(endpoints.drivers.import), () =>
+        fail(422, 'VALIDATION_FAILED', 'Invalid payload', {
+          issues: [
+            { path: ['drivers', 0, 'email'], code: 'invalid_string', message: 'Invalid email' },
+            { path: ['options', 'defaultHomeTerminalName'], code: 'too_big', message: 'String must contain at most 120 character(s)' },
+          ],
+        }),
+      ),
+    );
+    renderWithProviders(<ImportDriversModal onClose={() => {}} />);
+    const file = new File(
+      [
+        'username,firstName,lastName,cdlNumber,cdlState,homeTerminalName,email\n' +
+          'hana.w,Hana,Whitfield,HW204817,OH,Columbus,hana@example.test',
+      ],
+      'drivers.csv',
+      { type: 'text/csv' },
+    );
+    await user.upload(document.querySelector('input[type="file"]') as HTMLInputElement, file);
+    await user.click(await screen.findByRole('button', { name: 'Import 1 drivers' }));
+
+    expect(await screen.findByText(/Row 2\s+email: Invalid email/)).toBeInTheDocument();
+    expect(
+      (await screen.findAllByText('Default terminal: String must contain at most 120 character(s).')).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getByLabelText('Default terminal')).toHaveAttribute('maxLength', '120');
+  });
+
   it('QA — skips rows the API would refuse, fills the default terminal and sends typed cells', async () => {
     const user = userEvent.setup();
     let body: { drivers: Array<Record<string, unknown>> } | null = null;
@@ -819,15 +920,14 @@ describe('11.7 Import drivers', () => {
     );
     await user.upload(document.querySelector('input[type="file"]') as HTMLInputElement, file);
     expect(
-      await screen.findByText(/Row 2 Missing home terminal — will be skipped/),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/Row 3 Missing CDL issuing state — will be skipped/),
+      await screen.findByText(/Row 3 Missing CDL issuing state — will be skipped/),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/Row 4 Duplicate username "hana.w" — will be skipped/),
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Import drivers' })).toBeDisabled();
+    // Home terminal is optional — row 2 is valid without one.
+    expect(screen.queryByText(/Missing home terminal/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Import 1 drivers' })).toBeEnabled();
 
     await user.type(screen.getByLabelText('Default terminal'), 'Columbus, OH');
     await user.click(screen.getByRole('button', { name: 'Import 1 drivers' }));
@@ -845,5 +945,40 @@ describe('11.7 Import drivers', () => {
         allowYardMove: true,
       },
     ]);
+  });
+
+  it('home terminal is optional — a row without one and no default terminal is sent without homeTerminalName', async () => {
+    const user = userEvent.setup();
+    let body: { drivers: Array<Record<string, unknown>>; options?: Record<string, unknown> } | null =
+      null;
+    server.use(
+      http.post(url(endpoints.drivers.import), async ({ request }) => {
+        body = (await request.json()) as typeof body;
+        return ok({ imported: 1, updated: 0, failed: [] });
+      }),
+    );
+    renderWithProviders(<ImportDriversModal onClose={() => {}} />);
+
+    const file = new File(
+      [
+        'username,firstName,lastName,cdlNumber,cdlState,homeTerminalName,email\n' +
+          'hana.w,Hana,Whitfield,HW204817,OH,,hana@example.test\n' +
+          `jalen.b,Jalen,Brooks,JB663920,OH,${'x'.repeat(121)},jalen@example.test`,
+      ],
+      'drivers.csv',
+      { type: 'text/csv' },
+    );
+    await user.upload(document.querySelector('input[type="file"]') as HTMLInputElement, file);
+    // The 120-char cap still holds per row.
+    expect(
+      await screen.findByText(/Row 3 Home terminal longer than 120 characters — will be skipped/),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Import 1 drivers' }));
+
+    await waitFor(() => expect(body).not.toBeNull());
+    expect(body!.drivers).toHaveLength(1);
+    expect(body!.drivers[0]).not.toHaveProperty('homeTerminalName');
+    expect(body!.drivers[0]!.username).toBe('hana.w');
+    expect(body!.options).not.toHaveProperty('defaultHomeTerminalName');
   });
 });

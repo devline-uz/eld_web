@@ -7,13 +7,27 @@ import { Button } from '@/shared/ui/Button';
 import { Badge } from '@/shared/ui/Badge';
 import { useToast } from '@/shared/ui/Toast';
 import { useImportDrivers, type ImportDriversOptions } from '@/shared/api/drivers';
-import { ApiError } from '@/shared/api/errors';
+import { ApiError, formErrorMessage } from '@/shared/api/errors';
 import { parseCsv } from '@/shared/lib/csv';
 
 const MAX_BYTES = 5 * 1024 * 1024;
 const MAX_ROWS = 500;
 
-/** `CreateDriverDto` columns every row must carry — the backend refuses the whole batch otherwise. */
+/** `ImportDriversDto` issue paths outside the per-row `drivers.N.*` ones. */
+const IMPORT_FIELD_LABELS: Record<string, string> = {
+  drivers: 'Drivers',
+  'options.duplicateStrategy': 'Duplicates',
+  'options.defaultHomeTerminalName': 'Default terminal',
+  'options.sendInvitations': 'Send invitations',
+  'options.applyDefaultExemptions': 'Default exemptions',
+};
+/** `CreateDriverDto.homeTerminalName` and `ImportDriversOptionsDto.defaultHomeTerminalName` — `max(120)`. */
+const TERMINAL_MAX = 120;
+
+/**
+ * `CreateDriverDto` columns every row must carry — the backend refuses the whole batch otherwise.
+ * Home terminal is optional (product decision): a row without one is imported and stored as `''`.
+ */
 const REQUIRED_COLUMNS: ReadonlyArray<readonly [string, string]> = [
   ['username', 'username'],
   ['firstName', 'first name'],
@@ -53,7 +67,7 @@ function toDriverRow(raw: CsvRow): CsvRow {
 }
 
 interface ImportPlan {
-  /** Rows that go to the server (blank cells dropped, default terminal applied). */
+  /** Rows that go to the server (blank cells dropped, default terminal applied when one is typed). */
   payload: CsvRow[];
   /** CSV row index (0-based, header excluded) of each payload entry — maps `failed[].index` back. */
   sourceIndex: number[];
@@ -85,9 +99,15 @@ function planImport(parsed: CsvRow[], defaultTerminal: string): ImportPlan {
       attention = true;
     }
     const missing = REQUIRED_COLUMNS.filter(([key]) => !row[key]).map(([, label]) => label);
-    if (!row.homeTerminalName && !defaultTerminal) missing.push('home terminal');
     if (missing.length > 0) {
       plan.warnings.push(`Row ${line}  Missing ${missing.join(', ')} — will be skipped`);
+      attention = true;
+      skip = true;
+    }
+    if (typeof row.homeTerminalName === 'string' && row.homeTerminalName.length > TERMINAL_MAX) {
+      plan.warnings.push(
+        `Row ${line}  Home terminal longer than ${TERMINAL_MAX} characters — will be skipped`,
+      );
       attention = true;
       skip = true;
     }
@@ -105,7 +125,10 @@ function planImport(parsed: CsvRow[], defaultTerminal: string): ImportPlan {
     if (username) seenUsernames.add(username);
     if (attention) plan.rowsNeedingAttention += 1;
     if (skip) return;
-    plan.payload.push(row.homeTerminalName ? row : { ...row, homeTerminalName: defaultTerminal });
+    // No home terminal and no default → the field stays absent (optional on `CreateDriverDto`).
+    plan.payload.push(
+      row.homeTerminalName || !defaultTerminal ? row : { ...row, homeTerminalName: defaultTerminal },
+    );
     plan.sourceIndex.push(index);
   });
   return plan;
@@ -155,7 +178,8 @@ export function ImportDriversModal({ onClose }: { onClose: () => void }) {
       setError('File is larger than 5 MB.');
       return;
     }
-    selected.text().then((text) => {
+    // A file the browser cannot read used to reject into nothing — no rows, no reason.
+    void selected.text().then((text) => {
       const parsed = parseCsv(text);
       if (parsed.length > MAX_ROWS) {
         setError(`File has ${parsed.length} rows — 500 rows maximum.`);
@@ -164,6 +188,9 @@ export function ImportDriversModal({ onClose }: { onClose: () => void }) {
       }
       setRows(parsed);
       setFile(selected);
+    }, () => {
+      setError('The file could not be read. Choose it again.');
+      clearFile();
     });
   }
 
@@ -203,14 +230,20 @@ export function ImportDriversModal({ onClose }: { onClose: () => void }) {
           setServerProblems(summary.failed.map((f) => `${rowLabel(f.index)}  ${f.error}`));
         },
         onError: (err) => {
-          const message = err instanceof ApiError ? err.userMessage : 'Something went wrong.';
+          // Per-row issues (`drivers.3.cdlState`) are listed row by row below; any other issue
+          // (`options.defaultHomeTerminalName`, a path-less one) is spelled out in the banner
+          // instead of the bare "Check the highlighted fields" with nothing highlighted.
+          const rowPaths: string[] = [];
           if (err instanceof ApiError) {
             const problems = Object.entries(err.fieldErrors).flatMap(([path, text]) => {
               const match = /^drivers\.(\d+)\.(.+)$/.exec(path);
-              return match ? [`${rowLabel(Number(match[1]))}  ${match[2]}: ${text}`] : [];
+              if (!match) return [];
+              rowPaths.push(path);
+              return [`${rowLabel(Number(match[1]))}  ${match[2]}: ${text}`];
             });
             setServerProblems(problems);
           }
+          const message = formErrorMessage(err, rowPaths, IMPORT_FIELD_LABELS);
           setError(message);
           toast({ kind: 'error', title: message });
         },
@@ -304,7 +337,11 @@ export function ImportDriversModal({ onClose }: { onClose: () => void }) {
             if (selected) handleFile(selected);
           }}
         />
-        {error && <p className="text-body text-danger">{error}</p>}
+        {error && (
+          <p role="alert" className="text-body text-danger">
+            {error}
+          </p>
+        )}
         {serverProblems.length > 0 && (
           <div
             role="alert"
@@ -341,6 +378,7 @@ export function ImportDriversModal({ onClose }: { onClose: () => void }) {
               <span className="text-label text-text">Default terminal</span>
               <input
                 value={defaultHomeTerminalName}
+                maxLength={TERMINAL_MAX}
                 onChange={(e) => setDefaultHomeTerminalName(e.target.value)}
                 placeholder="Optional"
                 className="h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text"

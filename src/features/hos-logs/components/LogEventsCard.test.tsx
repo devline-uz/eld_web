@@ -80,3 +80,52 @@ describe('LogEventsCard windowing', () => {
     expect(bodyRows()).toHaveLength(1250);
   });
 });
+
+describe('LogEventsCard — the record carried in over midnight', () => {
+  // QA: the grid showed 24:00 of driving from a record opened two days earlier while this table
+  // said "No ELD records for this day". The carried-in record is now the day's first row.
+  const carried: LogEventView = {
+    ...event(0),
+    id: 'carried-1',
+    eventCode: 3,
+    status: 'D',
+    eventDateTime: '2026-10-08T07:44:00.000Z',
+  };
+
+  function renderWithCarry(events: LogEventView[]) {
+    return render(
+      <ToastProvider>
+        <LogEventsCard
+          events={events}
+          carriedIn={carried}
+          timezone="America/New_York"
+          isLoading={false}
+          isError={false}
+          onRetry={() => {}}
+          showAllRecords={false}
+          onToggleShowAll={() => {}}
+          pendingEditCount={0}
+          highlightedEventId={null}
+          onRequestEdit={() => {}}
+          onViewAll={() => {}}
+        />
+      </ToastProvider>,
+    );
+  }
+
+  it('shows the carried status with its date instead of the empty state', () => {
+    renderWithCarry([]);
+    expect(screen.queryByText('No ELD records for this day')).not.toBeInTheDocument();
+    const row = document.querySelector('[data-row-id="carried-1"]') as HTMLElement;
+    expect(row).not.toBeNull();
+    expect(within(row).getByText('Oct 8, 03:44:00')).toBeInTheDocument();
+    expect(within(row).getByText('Carried over from the previous day')).toBeInTheDocument();
+    // The subtitle still counts only the records of this day.
+    expect(screen.getByText(/^0 events today/)).toBeInTheDocument();
+  });
+
+  it('puts it before the records of the day', () => {
+    renderWithCarry([event(5)]);
+    expect(bodyRows().map((row) => row.getAttribute('data-row-id'))).toEqual(['carried-1', 'ev-5']);
+  });
+});

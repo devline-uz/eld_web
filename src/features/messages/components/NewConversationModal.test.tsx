@@ -105,30 +105,42 @@ describe('NewConversationModal — Group tab', () => {
     expect(driverButton('John Smith')).toBeInTheDocument();
     expect(driverButton('Maria Garcia')).toBeInTheDocument();
     expect(driverButton('Bruce Lee')).toBeInTheDocument();
-    expect(createButton()).toBeDisabled();
+    // Clickable — an incomplete form explains itself instead of sitting disabled.
+    expect(createButton()).toBeEnabled();
   });
 
-  it('keeps Create disabled without a name or with fewer than 2 drivers, enables it with both', async () => {
+  it('Create without a name or with fewer than 2 drivers shows what is missing and posts nothing', async () => {
     useGroupDrivers();
+    let posts = 0;
+    server.use(
+      http.post(url(endpoints.conversations.create), () => {
+        posts += 1;
+        return HttpResponse.json({ statusCode: 500, code: 'INTERNAL_ERROR', message: 'unexpected' }, { status: 500 });
+      }),
+    );
     const user = userEvent.setup();
     renderModal();
     await openGroupTab(user);
+
+    // No name, no drivers — used to be a silent no-op.
+    await user.click(createButton());
+    expect(await screen.findByText('Select at least 2 drivers.')).toBeInTheDocument();
+    expect(screen.getByText('Group name is required.')).toBeInTheDocument();
 
     // Two drivers, no name.
     await user.click(driverButton('John Smith'));
     await user.click(driverButton('Maria Garcia'));
     expect(screen.getByText('2 selected · pick at least 2 drivers')).toBeInTheDocument();
-    expect(createButton()).toBeDisabled();
-
-    // Name + two drivers.
-    await user.type(nameInput(), 'Night shift');
-    expect(createButton()).toBeEnabled();
+    expect(screen.queryByText('Select at least 2 drivers.')).not.toBeInTheDocument();
 
     // Name + only one driver.
+    await user.type(nameInput(), 'Night shift');
     await user.click(driverButton('Maria Garcia'));
     expect(driverButton('Maria Garcia')).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByText('1 selected · pick at least 2 drivers')).toBeInTheDocument();
-    expect(createButton()).toBeDisabled();
+    await user.click(createButton());
+    expect(screen.getByText('Select at least 2 drivers.')).toBeInTheDocument();
+    expect(posts).toBe(0);
   });
 
   it('treats a whitespace-only name as empty and shows the required error on blur', async () => {
@@ -148,12 +160,10 @@ describe('NewConversationModal — Group tab', () => {
 
     expect(await screen.findByText('Group name is required.')).toBeInTheDocument();
     expect(nameInput()).toHaveAttribute('aria-invalid', 'true');
-    expect(createButton()).toBeDisabled();
 
     await user.type(nameInput(), 'Night shift');
     expect(screen.queryByText('Group name is required.')).not.toBeInTheDocument();
     expect(nameInput()).toHaveAttribute('aria-invalid', 'false');
-    expect(createButton()).toBeEnabled();
   });
 
   it('submits { type: GROUP, trimmed title, driverIds }, calls onCreated(id, GROUP) and toasts', async () => {

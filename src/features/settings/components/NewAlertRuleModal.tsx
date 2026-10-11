@@ -2,14 +2,13 @@
 // `alertRules` FULL.
 // Q-2 — SMS is permanently disabled and is never put into the `channels` array; the backend
 // rejects it with `422 CHANNEL_NOT_AVAILABLE` if it ever were sent.
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Trash2 } from 'lucide-react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
-import { ApiError } from '@/shared/api/errors';
 import {
   useCreateAlertRule,
   useUpdateAlertRule,
@@ -17,12 +16,30 @@ import {
   type AlertRuleRow,
   type AlertSeverity,
 } from '@/shared/api/settingsAdmin';
+import { ApiError } from '@/shared/api/errors';
 import { Field, inputClass, ToggleRow } from './formKit';
 import { SETTINGS_TOAST } from '../lib/copy';
+import { placeServerFieldErrors, serverErrorBanner } from '../lib/serverFieldErrors';
 
 // Validation comes from the shared `alertRuleFormSchema`, which matches `CreateAlertRuleDto` (WB-025).
 import { alertRuleFormSchema, type AlertRuleFormValues } from '@/shared/forms/schemas';
 import { EVENT_BY_VALUE, EVENT_OPTIONS } from '../lib/alertConditions';
+
+/** Server issue path → where this modal shows it; the rest is spelled out in the banner. */
+const SERVER_FIELDS = {
+  name: 'name',
+  key: 'name',
+  conditions: 'conditions',
+  channels: 'channels',
+} as const;
+const FIELD_LABELS = {
+  recipients: 'Recipients',
+  throttle: 'Repeat',
+  quietHours: 'Quiet hours',
+  severity: 'Severity',
+};
+/** `CreateAlertRuleDto.key` is `max(100)` while the name allows 200. */
+const RULE_KEY_MAX = 100;
 
 const RECIPIENT_OPTIONS = [
   'Assigned fleet manager',
@@ -100,10 +117,17 @@ export function NewAlertRuleModal({ onClose, rule, mode = 'create' }: AlertRuleM
   const [repeat, setRepeat] = useState<RepeatKey>(repeatOf(rule?.throttle));
   const [conditionError, setConditionError] = useState<string | null>(null);
   const [channelError, setChannelError] = useState<string | null>(null);
+  // A server refusal the fields cannot show — top of this `lg` modal, scrolled into view.
+  const [banner, setBanner] = useState<string | null>(null);
+  const bannerRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (banner) bannerRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [banner]);
 
   const {
     register,
     handleSubmit,
+    setError,
     formState: { errors, isDirty },
   } = useForm<AlertRuleFormValues>({
     resolver: zodResolver(alertRuleFormSchema),
@@ -164,6 +188,7 @@ export function NewAlertRuleModal({ onClose, rule, mode = 'create' }: AlertRuleM
     // `mutate()` resolves RHF's `submitting` before the request lands — guard on the mutation
     // so a double click cannot create two rules.
     if (submitting) return;
+    setBanner(null);
     if (conditions.length === 0) {
       setConditionError('Add at least one condition.');
       return;
@@ -211,10 +236,19 @@ export function NewAlertRuleModal({ onClose, rule, mode = 'create' }: AlertRuleM
         onClose();
       },
       onError: (error: unknown) => {
-        toast({
-          kind: 'error' as const,
-          title: error instanceof ApiError ? error.userMessage : 'Something went wrong.',
+        // A 422 used to be one generic toast — nothing marked, nothing said about which part.
+        const placed = placeServerFieldErrors(error, SERVER_FIELDS, (field, message) => {
+          if (field === 'name') setError('name', { message });
+          else if (field === 'conditions') setConditionError(message);
+          else setChannelError(message);
         });
+        const message = serverErrorBanner(error, placed, FIELD_LABELS);
+        if (message === null) return;
+        setBanner(message);
+        // A validation issue stays in the banner; any other failure is also a toast (§13.3).
+        if (!(error instanceof ApiError && (error.status === 400 || error.status === 422))) {
+          toast({ kind: 'error' as const, title: message });
+        }
       },
     };
 
@@ -228,7 +262,8 @@ export function NewAlertRuleModal({ onClose, rule, mode = 'create' }: AlertRuleM
           key: values.name
             .trim()
             .toLowerCase()
-            .replace(/[^a-z0-9]+/g, '_'),
+            .replace(/[^a-z0-9]+/g, '_')
+            .slice(0, RULE_KEY_MAX),
         },
         handlers,
       );
@@ -274,6 +309,11 @@ export function NewAlertRuleModal({ onClose, rule, mode = 'create' }: AlertRuleM
       }
     >
       <form className="flex flex-col gap-4" onSubmit={handleSubmit(onSubmit)}>
+        {banner && (
+          <p ref={bannerRef} role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-body text-danger">
+            {banner}
+          </p>
+        )}
         <div className="grid grid-cols-2 gap-4">
           <Field label="Rule name" required error={errors.name?.message}>
             <input

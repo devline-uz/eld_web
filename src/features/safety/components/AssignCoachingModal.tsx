@@ -7,13 +7,21 @@ import { useState } from 'react';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
-import { useAssignCoaching, type ScorecardTableRow } from '@/shared/api/safety';
-import { ApiError } from '@/shared/api/errors';
+import { useAssignCoaching } from '@/shared/api/safety';
+import type { DriverRow } from '@/shared/api/vehicles';
+import { ApiError, formErrorMessage } from '@/shared/api/errors';
 
 const NOTE_MAX = 1000;
 const NOTE_TOO_LONG = 'Notes are limited to 1,000 characters.';
 
-export function AssignCoachingModal({ driver, onClose }: { driver: ScorecardTableRow; onClose: () => void }) {
+/** Who is being coached — a scorecard row, or a bare driver when the scorecard has no real rows. */
+export interface CoachingTarget {
+  driverId: string;
+  driver: Pick<DriverRow, 'firstName' | 'lastName'> | null;
+  score?: number | null;
+}
+
+export function AssignCoachingModal({ driver, onClose }: { driver: CoachingTarget; onClose: () => void }) {
   const { toast } = useToast();
   const mutation = useAssignCoaching();
   const [note, setNote] = useState('');
@@ -27,7 +35,7 @@ export function AssignCoachingModal({ driver, onClose }: { driver: ScorecardTabl
       open
       onClose={onClose}
       title="Assign coaching"
-      subtitle={`${driverName} · score ${driver.score}`}
+      subtitle={driver.score != null ? `${driverName} · score ${driver.score}` : driverName}
       size="md"
       isDirty={note !== ''}
       footer={
@@ -61,7 +69,14 @@ export function AssignCoachingModal({ driver, onClose }: { driver: ScorecardTabl
                       setNoteError(NOTE_TOO_LONG);
                       return;
                     }
-                    setServerError(error instanceof ApiError ? error.userMessage : 'Something went wrong.');
+                    // B-43 — a driver with no open NEW/REVIEWED event has nothing to coach (404).
+                    if (error instanceof ApiError && error.status === 404) {
+                      setServerError(`${driverName} has no open safety event to coach.`);
+                      return;
+                    }
+                    // Any other 422 issue (e.g. `driverId`) has no field here to highlight — spell
+                    // it out instead of the bare "Check the highlighted fields".
+                    setServerError(formErrorMessage(error, ['note'], { driverId: 'Driver' }));
                   },
                 },
               );

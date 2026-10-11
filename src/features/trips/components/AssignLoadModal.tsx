@@ -8,7 +8,10 @@ import { useToast } from '@/shared/ui/Toast';
 import { useDriversHosClocks, useDriversList, type DriverHosCell } from '@/shared/api/drivers';
 import { formatHosHours } from '@/shared/format/hos';
 import { useAssignTrip, blocksAssignment, type TripRow } from '@/shared/api/trips';
-import { ApiError } from '@/shared/api/errors';
+import { formErrorMessage } from '@/shared/api/errors';
+
+/** `AssignTripDto` issue paths → the words this modal uses, for a 400/422 spelled out in the toast. */
+const ASSIGN_FIELD_LABELS = { driverId: 'Driver', vehicleId: 'Unit', trailerId: 'Trailer' };
 
 export function AssignLoadModal({ load, onClose }: { load: TripRow; onClose: () => void }) {
   const { toast } = useToast();
@@ -60,7 +63,7 @@ export function AssignLoadModal({ load, onClose }: { load: TripRow; onClose: () 
                     onClose();
                   },
                   onError: (error) => {
-                    toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+                    toast({ kind: 'error', title: formErrorMessage(error, [], ASSIGN_FIELD_LABELS) });
                   },
                 },
               );

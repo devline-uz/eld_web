@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ApiError } from '@/shared/api/errors';
+import { ApiError, formErrorMessage } from '@/shared/api/errors';
 import {
   NOTIFICATIONS_EXPANDED_SIZE,
   NOTIFICATIONS_PAGE_SIZE,
@@ -36,7 +36,7 @@ import { cn } from '@/shared/ui/cn';
 import { EMPTY_STATE_COPY } from '@/shared/ui/copy';
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
 import { useToast } from '@/shared/ui/Toast';
-import { MARK_ONE_UNAVAILABLE_DESCRIPTION, MARK_ONE_UNAVAILABLE_TITLE } from './lib/copy';
+import { MARK_ALL_FAILED_TITLE, MARK_ONE_UNAVAILABLE_DESCRIPTION, MARK_ONE_UNAVAILABLE_TITLE } from './lib/copy';
 import { claimMarkReadNotice } from './lib/markReadNotice';
 
 export interface NotificationsPanelProps {
@@ -184,7 +184,17 @@ export default function NotificationsPanel({ onClose, isPathAllowed }: Notificat
         ) : null}
         <div className="ml-auto flex items-center gap-2">
           {unread > 0 ? (
-            <Button variant="link" className="text-label" loading={markAll.isPending} onClick={() => markAll.mutate()}>
+            <Button
+              variant="link"
+              className="text-label"
+              loading={markAll.isPending}
+              onClick={() =>
+                markAll.mutate(undefined, {
+                  onError: (error) =>
+                    toast({ kind: 'error', title: MARK_ALL_FAILED_TITLE, description: formErrorMessage(error) }),
+                })
+              }
+            >
               Mark all read
             </Button>
           ) : null}

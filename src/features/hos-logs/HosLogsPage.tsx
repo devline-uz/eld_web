@@ -400,6 +400,7 @@ export default function HosLogsPage() {
               date={date}
               timezone={timezone}
               violations={day?.violations ?? []}
+              ongoing={day?.ongoingViolations ?? []}
             />
             <CertificationCard
               days={rangeQuery.data?.days ?? []}
@@ -414,6 +415,8 @@ export default function HosLogsPage() {
 
           <LogEventsCard
             events={events}
+            // Only the dedicated records endpoint resolves the record in force at 00:00.
+            carriedIn={rawEvents ? (eventsQuery.data?.carriedIn ?? null) : null}
             timezone={timezone}
             isLoading={eventsQuery.isLoading}
             isError={eventsQuery.isError}

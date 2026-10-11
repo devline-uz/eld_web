@@ -7,6 +7,9 @@ import {
   alertRuleSchema,
   calibrateOdometerSchema,
   deviceSchema,
+  geofenceSchema,
+  inviteUserSchema,
+  roleSchema,
   ticketSchema,
   transferSchema,
   vehicleSchema,
@@ -331,5 +334,41 @@ describe('W-22 Custom webhook fields (WB-251)', () => {
     expect(f.webhookSecret().parse(' s3cret ')).toBe(' s3cret ');
     expect(f.webhookSecret().safeParse('   ').success).toBe(false);
     expect(f.webhookSecret().safeParse('').success).toBe(false);
+  });
+});
+
+describe('backend DTO limits', () => {
+  it('caps invite names (CreateUserDto) and role names (CreateRoleDto) at 80', () => {
+    const invite = { email: 'a@b.example', firstName: 'A', lastName: 'B', roleKey: 'VIEWER' };
+    expect(inviteUserSchema.safeParse({ ...invite, firstName: 'x'.repeat(80) }).success).toBe(true);
+    expect(firstError(inviteUserSchema, { ...invite, firstName: 'x'.repeat(81) })).toBe(M.firstNameMax);
+    expect(firstError(inviteUserSchema, { ...invite, lastName: 'x'.repeat(81) })).toBe(M.lastNameMax);
+    expect(firstError(roleSchema, { name: 'x'.repeat(81), permissions: {} })).toBe(M.roleNameMax);
+  });
+
+  it('caps role descriptions at 500 (CreateRoleDto / UpdateRoleDto)', () => {
+    const role = { name: 'Auditor', permissions: {} };
+    expect(roleSchema.safeParse({ ...role, description: 'd'.repeat(500) }).success).toBe(true);
+    expect(firstError(roleSchema, { ...role, description: 'd'.repeat(501) })).toBe(M.roleDescriptionMax);
+    expect(M.roleDescriptionMax).toBe('Description must be 500 characters or fewer.');
+  });
+
+  it('caps vehicle make / model / ELD serial at 60 and notes at 500 (CreateVehicleDto)', () => {
+    const base = { unitNumber: '101', vin: '1FUJGLDR7CLBP8834', make: 'Volvo', model: 'VNL', year: 2021 };
+    expect(vehicleSchema.safeParse({ ...base, make: 'x'.repeat(60), notes: 'n'.repeat(500) }).success).toBe(true);
+    expect(firstError(vehicleSchema, { ...base, make: 'x'.repeat(61) })).toBe(M.vehicleMakeMax);
+    expect(firstError(vehicleSchema, { ...base, model: 'x'.repeat(61) })).toBe(M.vehicleModelMax);
+    expect(firstError(vehicleSchema, { ...base, deviceId: 'x'.repeat(61) })).toBe(M.vehicleEldSerialMax);
+    expect(firstError(vehicleSchema, { ...base, notes: 'n'.repeat(501) })).toBe(M.vehicleNotesMax);
+  });
+
+  it('applies CreateGeofenceDto limits (name 120, address 300, radius ≤ 500 mi, dwell 1–1440)', () => {
+    const base = { name: 'Yard' };
+    expect(geofenceSchema.safeParse({ ...base, radiusMi: 500, dwellMinutes: 1440 }).success).toBe(true);
+    expect(firstError(geofenceSchema, { name: 'x'.repeat(121) })).toBe(M.geofenceNameMax);
+    expect(firstError(geofenceSchema, { ...base, address: 'x'.repeat(301) })).toBe(M.geofenceAddressMax);
+    expect(firstError(geofenceSchema, { ...base, radiusMi: 501 })).toBe(M.geofenceRadiusMax);
+    expect(firstError(geofenceSchema, { ...base, dwellMinutes: 0 })).toBe(M.geofenceDwellMin);
+    expect(firstError(geofenceSchema, { ...base, dwellMinutes: 1441 })).toBe(M.geofenceDwellMax);
   });
 });

@@ -20,9 +20,9 @@ import { formatLocal } from '@/shared/format/datetime';
 import { formatOdometer } from '@/shared/format/numbers';
 import { orDash } from '@/shared/format/empty';
 import { useToast } from '@/shared/ui/Toast';
-import { ApiError } from '@/shared/api/errors';
+import { formErrorMessage } from '@/shared/api/errors';
 import { printDvir } from '../lib/printDvir';
-// DEMO DATA — answers `mock-*` DVIR ids locally (`VITE_DVIR_MOCK`). Remove: import `useDvir` from `@/shared/api/dvir` again.
+// DEMO DATA — answers `mock-*` DVIR ids locally (`VITE_DEMO_FALLBACK`, never in production). Remove: import `useDvir` from `@/shared/api/dvir` again.
 import { useDvir } from '../mock/useDvirMock';
 
 const DVIR_TYPE_LABEL: Record<string, string> = {
@@ -213,7 +213,7 @@ export function DvirDrawer({
                     link.click();
                     URL.revokeObjectURL(url);
                   })
-                  .catch((error: unknown) => setPdfError(error instanceof ApiError ? error.userMessage : 'Something went wrong.'))
+                  .catch((error: unknown) => setPdfError(formErrorMessage(error)))
                   .finally(() => setPdfLoading(false));
               }}
             >
@@ -310,6 +310,8 @@ export function DvirDrawer({
                     <input
                       value={mechanicName}
                       onChange={(e) => setMechanicName(e.target.value)}
+                      // `MechanicSignOffDto.mechanicName` is `max(120)`.
+                      maxLength={120}
                       placeholder="Mechanic name"
                       disabled={signoff.isPending}
                       className="h-8 rounded-md border border-border bg-bg-surface px-2 text-body text-text"
@@ -335,7 +337,8 @@ export function DvirDrawer({
                     size="sm"
                     disabled={!mechanicName.trim()}
                     loading={signoff.isPending}
-                    onClick={() =>
+                    onClick={() => {
+                      setSignoffError(null);
                       signoff.mutate(
                         { mechanicName: mechanicName.trim(), repairStatus: repairStatus ?? defaultRepairStatus },
                         {
@@ -346,16 +349,22 @@ export function DvirDrawer({
                             toast({ kind: 'success', title: 'Mechanic sign-off recorded' });
                           },
                           onError: (error) =>
-                            setSignoffError(error instanceof ApiError ? error.userMessage : 'Something went wrong.'),
+                            setSignoffError(
+                              formErrorMessage(error, [], { mechanicName: 'Mechanic name', repairStatus: 'Repair status' }),
+                            ),
                         },
-                      )
-                    }
+                      );
+                    }}
                   >
                     Sign off
                   </Button>
                 </div>
               )}
-              {signoffError && <p className="mt-1 text-caption text-danger">{signoffError}</p>}
+              {signoffError && (
+                <p role="alert" className="mt-1 text-caption text-danger">
+                  {signoffError}
+                </p>
+              )}
             </div>
           </section>
         </div>

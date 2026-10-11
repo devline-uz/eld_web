@@ -6,7 +6,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
-import { ok, url } from '@/mocks/envelope';
+import { fail, ok, url } from '@/mocks/envelope';
 import { endpoints } from '@/shared/api/endpoints';
 import { resetAuthBridge, setAccessToken, setAuthBridge } from '@/shared/api/client';
 import { ToastProvider } from '@/shared/ui/Toast';
@@ -73,5 +73,56 @@ describe('ResolveViolationModal', () => {
 
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(screen.queryByText('Discard changes?')).toBeNull();
+  });
+
+  it('puts a server resolutionNote 422 under the textarea and keeps the modal open', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post(url(endpoints.violations.resolve('vio_1')), () =>
+        fail(422, 'VALIDATION_FAILED', 'Validation failed', {
+          issues: [{ path: ['resolutionNote'], code: 'too_big', message: 'String must contain at most 60 character(s)' }],
+        }),
+      ),
+    );
+    const onClose = renderModal();
+
+    await user.type(screen.getByRole('textbox'), 'Dispatcher error, corrected.');
+    await user.click(screen.getByRole('button', { name: 'Resolve' }));
+
+    expect(await screen.findByText('String must contain at most 60 character(s)')).toBeInTheDocument();
+    expect(screen.getByRole('textbox')).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('spells out an unplaced 422 issue in the banner', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post(url(endpoints.violations.resolve('vio_1')), () =>
+        fail(422, 'VALIDATION_FAILED', 'Validation failed', {
+          issues: [{ path: ['id'], code: 'invalid_string', message: 'Invalid uuid' }],
+        }),
+      ),
+    );
+    renderModal();
+
+    await user.type(screen.getByRole('textbox'), 'Dispatcher error, corrected.');
+    await user.click(screen.getByRole('button', { name: 'Resolve' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Id: Invalid uuid.');
+  });
+
+  it('shows a 409 refusal verbatim in the banner', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post(url(endpoints.violations.resolve('vio_1')), () => fail(409, 'CONFLICT', 'Violation is not open')),
+    );
+    const onClose = renderModal();
+
+    await user.type(screen.getByRole('textbox'), 'Dispatcher error, corrected.');
+    await user.click(screen.getByRole('button', { name: 'Resolve' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('That value is already in use.');
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

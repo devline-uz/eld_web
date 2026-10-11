@@ -254,6 +254,8 @@ export interface IftaJurisdictionTotals {
   totalMiles: number;
   taxableMiles: number;
   fuelGal: number | null;
+  /** This line's `totalMiles / fuelGal` (Total row: over the shown rows); `null` when no fuel.
+   * Not the fleet MPG — that is `IftaKpis.fleetMpg`, the IFTA taxable-gallons divisor. */
   mpg: number | null;
   taxDueUsd: number | null;
 }

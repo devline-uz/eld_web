@@ -11,7 +11,7 @@ import { Badge } from '@/shared/ui/Badge';
 import { Can } from '@/shared/auth/Can';
 import { cn } from '@/shared/ui/cn';
 import { formatHosHours } from '@/shared/format';
-import type { HosViolation } from '@/shared/api/hosLogs';
+import type { HosViolation, OngoingViolation } from '@/shared/api/hosLogs';
 import { ResolveViolationModal } from '@/shared/violations/ResolveViolationModal';
 import { VIOLATION_TITLE } from '../grid';
 
@@ -25,22 +25,56 @@ export function ViolationsCard({
   date,
   timezone,
   violations,
+  ongoing = [],
 }: {
   driverId: string;
   date: string;
   timezone: string;
   violations: HosViolation[];
+  /**
+   * Limits crossed on an earlier day that the driving carried over midnight is still breaking
+   * (`GET /logs/:id` `ongoingViolations`). They are the SAME violations as the rows filed on the
+   * day of the crossing — listed, never counted as new open ones and never resolved from here.
+   */
+  ongoing?: OngoingViolation[];
 }) {
   const [resolving, setResolving] = useState<HosViolation | null>(null);
   const open = violations.filter((violation) => violation.status === 'OPEN');
+  // A type already filed on this day is not repeated as "continuing".
+  const filedTypes = new Set(violations.map((violation) => violation.type));
+  const continuing = ongoing.filter((violation) => !filedTypes.has(violation.type));
+  const subtitle = continuing.length
+    ? `${open.length} open · ${continuing.length} continuing from an earlier day`
+    : `${open.length} open`;
 
   return (
     <Card>
       {/* WB-060 — `Resolve` lives on each OPEN row, so the violation resolved (and the note written
           against it) is always the one the user clicked, never `open[0]`. */}
-      <SectionHeader title="Violations · today" subtitle={`${open.length} open`} />
+      <SectionHeader title="Violations · today" subtitle={subtitle} />
       <div className="mt-4 flex flex-col gap-2">
-        {violations.length === 0 ? (
+        {continuing.map((violation) => (
+          <div
+            key={`ongoing-${violation.type}`}
+            data-status="continuing"
+            className="flex items-start gap-3 rounded-md bg-danger-soft p-3"
+          >
+            <AlertTriangle size={16} strokeWidth={1.75} className="mt-0.5 shrink-0 text-danger" />
+            <div className="min-w-0 flex-1">
+              <p className="flex items-center gap-2 text-body-strong text-text">
+                {VIOLATION_TITLE[violation.type]}
+                <Badge tone="danger">Continuing</Badge>
+              </p>
+              <p className="tabular text-caption text-text-muted">
+                {violation.crossedAt
+                  ? `In violation from 00:00 · limit crossed ${formatInTimeZone(new Date(violation.crossedAt), timezone, 'MMM d, HH:mm')}`
+                  : 'In violation from 00:00 · limit crossed on an earlier day'}
+              </p>
+              <p className="text-caption text-text-muted">{violation.detail}</p>
+            </div>
+          </div>
+        ))}
+        {violations.length === 0 && continuing.length === 0 ? (
           <p className="py-8 text-center text-body text-success">● No violations today</p>
         ) : (
           violations.map((violation) => {

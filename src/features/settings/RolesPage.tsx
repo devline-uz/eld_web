@@ -11,7 +11,7 @@ import { Card, SectionHeader } from '@/shared/ui/Card';
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
 import { ConfirmDelete } from '@/shared/ui/Modal';
 import { useToast } from '@/shared/ui/Toast';
-import { ApiError } from '@/shared/api/errors';
+import { formErrorMessage } from '@/shared/api/errors';
 import { formatCarrier } from '@/shared/format/datetime';
 import {
   useRolesList,
@@ -88,7 +88,7 @@ export default function RolesPage() {
     updateRole.mutate(
       { id: role.id, dto: { permissions } },
       {
-        onError: (error) => toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }),
+        onError: (error) => toast({ kind: 'error', title: formErrorMessage(error) }),
       },
     );
   }
@@ -298,10 +298,10 @@ export default function RolesPage() {
         <div className="grid grid-cols-2 gap-4">
           {roles.map((role) => (
             <Card key={role.id}>
-              <div className="flex items-start justify-between">
-                <div>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
                   <p className="text-card-title font-semibold text-text">{role.name}</p>
-                  <p className="text-card-sub text-text-muted">{role.description || '—'}</p>
+                  <p className="break-words text-card-sub text-text-muted">{role.description || '—'}</p>
                   <p className="mt-2 text-caption text-text-muted">{countLabel(role.userCount ?? 0, 'user')}</p>
                 </div>
                 {role.isSystem ? (
@@ -383,7 +383,7 @@ export default function RolesPage() {
               setDeleteTarget(null);
             },
             onError: (error) => {
-              toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+              toast({ kind: 'error', title: formErrorMessage(error) });
               setDeleteTarget(null);
             },
           });

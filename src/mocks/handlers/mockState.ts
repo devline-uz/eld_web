@@ -34,6 +34,7 @@ import type {
   UserRow,
 } from '@/shared/api/settingsAdmin';
 import type { DriverScoreRow, SafetyEventRow, SafetyEventType } from '@/shared/api/safety';
+import { demoDriverScore, demoFleet, rankDemoRows, type DemoFleet } from '@/features/safety/lib/scoreFormula';
 import { ROSTER_ENTRIES } from './vehiclesDriversGaps';
 
 const DAY = 86_400_000;
@@ -470,27 +471,69 @@ function seedSafetyEvents(): SafetyEventRow[] {
 
 export let SAFETY_EVENTS: SafetyEventRow[] = [];
 
-/** 12 ranked drivers — enough that the scorecard is worth ranking and the toast names a real
- * driver (the `driver` object itself is the client-side join against `/drivers`). */
-function seedScorecard(): DriverScoreRow[] {
+/** 12 drivers for the scorecard (10 ranked + 2 "Not enough miles") — enough that the scorecard is
+ * worth ranking and the toast names a real driver (the `driver` object itself is the client-side
+ * join against `/drivers`). Scores, ranks and the fleet block follow the backend Phase 1 formula
+ * (`features/safety/lib/scoreFormula.ts`, backend D-133). */
+const SCORE_COUNTS: [harsh: number[], speeding: number, seatbelt: number, miles: number, violations: number, previous: number | null][] = [
+  [[], 0, 0, 4_300, 0, 97],
+  [[1], 1, 0, 3_900, 0, 98],
+  [[2, 1], 2, 0, 4_100, 0, 92],
+  [[3, 1], 2, 1, 3_700, 0, null],
+  [[3, 2], 3, 1, 3_500, 1, 88],
+  [[4, 2], 4, 1, 3_300, 1, 85],
+  [[4, 3, 1], 5, 2, 3_100, 2, 82],
+  [[5, 4, 2], 6, 2, 2_900, 2, 70],
+  [[5, 4, 3], 8, 3, 2_800, 3, 77],
+  [[5, 5, 4, 3], 10, 3, 2_600, 4, 66],
+  [[], 1, 0, 72, 0, null],
+  [[], 0, 0, 0, 0, null],
+];
+
+function seedScorecard(): { rows: DriverScoreRow[]; fleet: DemoFleet } {
   const periodStart = daysAgo(30).slice(0, 10);
-  const periodEnd = daysAgo(0).slice(0, 10);
-  return Array.from({ length: 12 }, (_, i) => ({
+  const periodEnd = daysAgo(1).slice(0, 10);
+  const computedAt = daysAgo(0);
+  const base = SCORE_COUNTS.map(([harsh, speedingCount, seatbeltCount, milesDriven, violationCount, previous], i) => {
+    const driverId = `drv_${i + 1}`;
+    const d = DRIVERS.find((x) => x.id === driverId);
+    const score = demoDriverScore({ milesDriven, harshSeverities: harsh, speedingCount, seatbeltCount, violationCount });
+    return {
+      driverId,
+      name: d ? `${d.firstName} ${d.lastName}` : driverId,
+      score,
+      harshCount: harsh.length,
+      speedingCount,
+      seatbeltCount,
+      milesDriven,
+      violationCount,
+      previousScore: score == null ? null : previous,
+    };
+  });
+  const rows = rankDemoRows(base).map((r, i): DriverScoreRow => ({
     id: `dsc_${i + 1}`,
-    driverId: `drv_${i + 1}`,
+    driverId: r.driverId,
     periodStart,
     periodEnd,
-    score: 96 - i * 3,
-    harshCount: i % 6,
-    speedingCount: (i * 2) % 7,
-    milesDriven: 9_400 - i * 420,
-    violationCount: i % 4 === 0 ? 1 : 0,
-    rank: i + 1,
+    score: r.score,
+    scored: r.score != null,
+    harshCount: r.harshCount,
+    speedingCount: r.speedingCount,
+    seatbeltCount: r.seatbeltCount,
+    milesDriven: r.milesDriven,
+    violationCount: r.violationCount,
+    rank: r.rank,
+    previousScore: r.previousScore,
+    trend: r.score == null || r.previousScore == null ? null : r.score - r.previousScore,
+    computedAt,
   }));
+  const fleet = demoFleet(base, base.map((r) => ({ score: r.previousScore, milesDriven: r.milesDriven })));
+  return { rows, fleet };
 }
 
 export let SCORECARD: DriverScoreRow[] = [];
-export const SCORECARD_PERIOD = { periodStart: daysAgo(30).slice(0, 10), periodEnd: daysAgo(0).slice(0, 10) };
+export let SCORECARD_FLEET: DemoFleet = demoFleet([], []);
+export const SCORECARD_PERIOD = { periodStart: daysAgo(30).slice(0, 10), periodEnd: daysAgo(1).slice(0, 10) };
 
 /* ------------------------------------------------------------------ reset */
 
@@ -515,7 +558,7 @@ export function resetMockState(): void {
   AUDIT = seedAudit();
   TICKETS = seedTickets();
   SAFETY_EVENTS = seedSafetyEvents();
-  SCORECARD = seedScorecard();
+  ({ rows: SCORECARD, fleet: SCORECARD_FLEET } = seedScorecard());
   nextId = 0;
 }
 

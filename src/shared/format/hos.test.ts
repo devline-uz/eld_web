@@ -10,6 +10,8 @@ import {
   formatRodsDayKey,
   formatRodsTime,
   formatRodsTimeSeconds,
+  HOS_ZERO_NOTE,
+  hosClockNotes,
   rodsDayFraction,
   rodsDayOffsetSec,
 } from './hos';
@@ -75,5 +77,30 @@ describe('grid coordinates are measured against the backend day length (DST-safe
     expect(rodsDayOffsetSec(EVENT, '2026-09-10T04:00:00.000Z')).toBe(52_018);
     expect(rodsDayOffsetSec(null, '2026-09-10T04:00:00.000Z')).toBe(0);
     expect(rodsDayOffsetSec(EVENT, null)).toBe(0);
+  });
+});
+
+describe('hosClockNotes — a clock at 00:00 names its reason', () => {
+  it('says "limit exceeded" only while the driver is driving on a run-out clock', () => {
+    expect(hosClockNotes({ dutyStatus: 'DRIVING', cycleRemainingSec: 0 })).toEqual({
+      drive: HOS_ZERO_NOTE.exceeded,
+      shift: HOS_ZERO_NOTE.exceeded,
+      cycle: HOS_ZERO_NOTE.exceeded,
+      break: HOS_ZERO_NOTE.exceeded,
+    });
+  });
+
+  it('asks for a 10-hour break when an on-duty driver who has not driven today ran out of window', () => {
+    // QA: 0:00 driven, 2:46 on duty, no 10-hour break since the last shift.
+    const notes = hosClockNotes({ dutyStatus: 'ON_DUTY', cycleRemainingSec: 40 * 3600 });
+    expect(notes.drive).toBe('10-hour break required');
+    expect(notes.shift).toBe('10-hour break required');
+    expect(notes.break).toBe('30-minute break required');
+  });
+
+  it('names the cycle when it is what stops driving — a 10-hour break would not help', () => {
+    const notes = hosClockNotes({ dutyStatus: 'OFF_DUTY', cycleRemainingSec: 0 });
+    expect(notes.drive).toBe('cycle limit reached');
+    expect(notes.cycle).toBe('cycle limit reached');
   });
 });

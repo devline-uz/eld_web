@@ -42,21 +42,45 @@ export interface SafetyEventRow {
   coachingNote: string | null;
 }
 
+/** Phase 1 scorecard (backend D-133, 2026-10-11) — one row per driver for the latest nightly
+ * rolling-30-day period. `scored: false` (< `minMiles` driven) ⇒ `score`/`rank` are null and the
+ * row reads "Not enough miles". `rank` #1 = best; ties are broken server-side (more miles, then
+ * name). `previousScore`/`trend` (B-44) are null when either period is unscored. */
 export interface DriverScoreRow {
   id: string;
   driverId: string;
+  /** `YYYY-MM-DD` calendar dates (inclusive), each driver's home-terminal day. */
   periodStart: string;
   periodEnd: string;
-  score: number;
+  score: number | null;
+  /** Absent on pre-Phase-1 payloads — treated as `score != null`. */
+  scored?: boolean;
   harshCount: number;
   speedingCount: number;
+  seatbeltCount?: number;
   milesDriven: number;
   violationCount: number;
   rank: number | null;
-  /** B-44 (shipped 2026-09-24) — score for the prior period of the same length, and
-   * `score - previousScore` computed server-side. Null when there is no prior-period row. */
   previousScore?: number | null;
   trend?: number | null;
+  computedAt?: string;
+}
+
+/** Server-computed fleet aggregate — mile-weighted mean of scored drivers + trend vs the
+ * previous 30-day period. Never recomputed client-side. */
+export interface ScorecardFleet {
+  score: number | null;
+  previousScore: number | null;
+  trend: number | null;
+  scoredDrivers: number;
+  unscoredDrivers: number;
+  belowThresholdCount: number;
+  milesDriven: number;
+}
+
+/** True when the row has a score (≥ `minMiles` driven in the period). */
+export function isScored(row: Pick<DriverScoreRow, 'score' | 'scored'>): row is DriverScoreRow & { score: number } {
+  return row.scored !== false && row.score != null;
 }
 
 export interface SafetyEventTableRow extends SafetyEventRow {
@@ -120,9 +144,37 @@ export interface ScorecardParams {
 }
 
 export interface ScorecardResponse {
+  /** Null until the nightly job has computed a period. */
+  periodStart: string | null;
+  periodEnd: string | null;
+  computedAt?: string | null;
+  minMiles?: number;
+  fleet?: ScorecardFleet;
+  /** Server order: ranked rows by rank, then "Not enough miles" rows by miles desc. */
   items: DriverScoreRow[];
-  periodStart: string;
-  periodEnd: string;
+}
+
+export const SCORECARD_MIN_MILES_DEFAULT = 100;
+
+const EMPTY_FLEET: ScorecardFleet = {
+  score: null,
+  previousScore: null,
+  trend: null,
+  scoredDrivers: 0,
+  unscoredDrivers: 0,
+  belowThresholdCount: 0,
+  milesDriven: 0,
+};
+
+/** Ranked rows first (rank asc), unscored after — keeps the server order, only defends against
+ * a payload that is not already sorted. Stable sort, so equal keys keep server order. */
+export function sortScorecardRows<T extends DriverScoreRow>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => {
+    const ra = isScored(a) && a.rank != null ? a.rank : Number.POSITIVE_INFINITY;
+    const rb = isScored(b) && b.rank != null ? b.rank : Number.POSITIVE_INFINITY;
+    if (ra !== rb) return ra - rb;
+    return 0;
+  });
 }
 
 export function useScorecard(params: ScorecardParams = {}) {
@@ -136,15 +188,16 @@ export function useScorecard(params: ScorecardParams = {}) {
 
   const rows = useMemo((): ScorecardTableRow[] => {
     const drivers = new Map((driversQuery.data?.items ?? []).map((d) => [d.id, d]));
-    return (scorecardQuery.data?.items ?? [])
-      .map((s) => ({ ...s, driver: drivers.get(s.driverId) ?? null }))
-      .sort((a, b) => (a.rank ?? 999) - (b.rank ?? 999));
+    return sortScorecardRows((scorecardQuery.data?.items ?? []).map((s) => ({ ...s, driver: drivers.get(s.driverId) ?? null })));
   }, [scorecardQuery.data, driversQuery.data]);
 
   return {
     rows,
-    periodStart: scorecardQuery.data?.periodStart,
-    periodEnd: scorecardQuery.data?.periodEnd,
+    periodStart: scorecardQuery.data?.periodStart ?? null,
+    periodEnd: scorecardQuery.data?.periodEnd ?? null,
+    computedAt: scorecardQuery.data?.computedAt ?? null,
+    minMiles: scorecardQuery.data?.minMiles ?? SCORECARD_MIN_MILES_DEFAULT,
+    fleet: scorecardQuery.data?.fleet ?? EMPTY_FLEET,
     isLoading: scorecardQuery.isLoading || driversQuery.isLoading,
     // Same class as WB-038 — a transient `/drivers` join failure must not blank the scorecard
     // when the primary scorecard rows are good; DRIVER degrades to `—` via `driver` staying null.

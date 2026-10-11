@@ -1,6 +1,6 @@
 // owner: web-vehicles-drivers — 11.8 Add driver (web/tz.md §11.8). Q-3: this is how a driver
 // account is created — the driver never signs in to the web panel. `drivers` FULL only.
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Controller, useForm } from 'react-hook-form';
 import { Eye, EyeOff } from 'lucide-react';
@@ -15,12 +15,17 @@ import { useVehiclesPicker } from '@/shared/api/vehicles';
 import { useCarrier } from '@/shared/api/carrier';
 import { useQueryClient } from '@tanstack/react-query';
 import { useDriversLookup } from '@/shared/api/lookups';
-import { ApiError, ERROR_MESSAGES, errorMessage } from '@/shared/api/errors';
+import { ApiError, ERROR_MESSAGES, errorMessage, formErrorMessage } from '@/shared/api/errors';
 import { conflictField } from '@/shared/api/conflicts';
 import { DRIVER_CONFLICT_RULES, CONFLICT_MESSAGES, findCachedDriverConflicts } from '../lib/driverConflicts';
 import { VALIDATION_MESSAGES } from '@/shared/forms/messages';
 import { HOME_TERMINAL_TIMEZONES } from '../lib/terminals';
 import { DRIVER_TOAST } from '../lib/copy';
+import {
+  DRIVER_DTO_LIMITS,
+  DRIVER_FIELD_LABELS,
+  tooLongMessage,
+} from '../lib/driverFormLimits';
 import { PhoneNumberInput } from '@/shared/forms/PhoneNumberInput';
 
 /** WB-187 — the list used to hold ten states, so a CDL from any other one could not be recorded. */
@@ -78,8 +83,36 @@ const US_STATES = [
   'WY',
 ];
 
+/**
+ * `homeTerminalName` is optional on create (`CreateDriverDto`: `trim().max(120).optional()`); an
+ * empty field is not sent at all. The length caps the shared rules do not carry are checked here
+ * (the inputs also cap them).
+ */
+const addDriverSchema = driverSchema.superRefine((values, ctx) => {
+  for (const field of ['firstName', 'lastName', 'password', 'homeTerminalName'] as const) {
+    const max = DRIVER_DTO_LIMITS[field];
+    if ((values[field] ?? '').length > max) {
+      ctx.addIssue({ code: 'custom', path: [field], message: tooLongMessage(DRIVER_FIELD_LABELS[field]!, max) });
+    }
+  }
+});
+
 /** The licence number is also checked against its issuing state's format on blur. */
-const addDriverResolver = withLicenceStateCheck(zodResolver(driverSchema));
+const addDriverResolver = withLicenceStateCheck(zodResolver(addDriverSchema));
+
+/** The RHF fields this modal renders — a 422 issue on one of them goes on that field. */
+const RHF_FIELDS = [
+  'firstName',
+  'lastName',
+  'username',
+  'password',
+  'email',
+  'phone',
+  'cdlNumber',
+  'cdlState',
+  'homeTerminalName',
+  'homeTerminalTimezone',
+] as const satisfies readonly (keyof DriverFormValues)[];
 
 function Field({
   label,
@@ -128,6 +161,12 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
   const [sendInvitation, setSendInvitation] = useState(true);
   const [banner, setBanner] = useState<string | null>(null);
   const [unitError, setUnitError] = useState<string | null>(null);
+  // The banner sits at the top of this tall `lg` modal while Save is in the footer — bring it into
+  // view when it appears, or a refused POST looks like nothing happened.
+  const bannerRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (banner) bannerRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [banner]);
 
   const vehiclesQuery = useVehiclesPicker();
   // The session-wide `/drivers` lookup (already cached by W-03/W-06) — the only place a unit's
@@ -285,18 +324,23 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
             toast({ kind: 'error', title: message });
             return;
           }
-          if (error instanceof ApiError) {
-            const fieldErrors = error.fieldErrors;
-            for (const [field, message] of Object.entries(fieldErrors)) {
-              // The unit select lives outside RHF — its error is local state.
-              if (field === 'assignedVehicleId') setUnitError(message);
-              else setError(field as keyof DriverFormValues, { message });
-            }
-            if (Object.keys(fieldErrors).length > 0) return;
+          const fieldErrors = error instanceof ApiError ? error.fieldErrors : {};
+          const placed: string[] = [];
+          for (const [field, message] of Object.entries(fieldErrors)) {
+            // The unit select and the exemption reason live outside RHF — local state.
+            if (field === 'assignedVehicleId') setUnitError(message);
+            else if (field === 'eldExemptReason' && eldExempt) setEldExemptReasonError(message);
+            else if ((RHF_FIELDS as readonly string[]).includes(field)) {
+              setError(field as keyof DriverFormValues, { message });
+            } else continue;
+            placed.push(field);
           }
-          // The POST used to fail silently: the modal stayed open with nothing to read. An
-          // unmapped failure is shown in the modal (§6.2 rule 6) as well as toasted.
-          const message = error instanceof ApiError ? error.userMessage : 'Something went wrong.';
+          // Every issue is on a field the user can see — nothing else to say.
+          if (placed.length > 0 && placed.length === Object.keys(fieldErrors).length) return;
+          // The POST used to fail silently: the modal stayed open with nothing to read, and an issue
+          // on a field this form does not render (`setError` on it shows nothing) was dropped. Any
+          // unmapped failure is spelled out in the modal (§6.2 rule 6) as well as toasted.
+          const message = formErrorMessage(error, placed, DRIVER_FIELD_LABELS);
           setBanner(message);
           toast({ kind: 'error', title: message });
         },
@@ -339,7 +383,7 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
     >
       <form className="flex flex-col gap-5" onSubmit={handleSubmit(onSubmit)}>
         {banner && (
-          <p role="alert" className="rounded-md bg-danger-soft p-3 text-body text-danger">
+          <p ref={bannerRef} role="alert" className="rounded-md bg-danger-soft p-3 text-body text-danger">
             {banner}
           </p>
         )}
@@ -351,6 +395,7 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
             <Field label="First name" required error={errors.firstName?.message}>
               <input
                 {...register('firstName')}
+                maxLength={DRIVER_DTO_LIMITS.firstName}
                 aria-invalid={errors.firstName ? true : undefined}
                 disabled={isPending}
                 className={inputClass}
@@ -359,6 +404,7 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
             <Field label="Last name" required error={errors.lastName?.message}>
               <input
                 {...register('lastName')}
+                maxLength={DRIVER_DTO_LIMITS.lastName}
                 aria-invalid={errors.lastName ? true : undefined}
                 disabled={isPending}
                 className={inputClass}
@@ -389,6 +435,7 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
                   id="add-driver-password"
                   type={showPassword ? 'text' : 'password'}
                   {...register('password')}
+                  maxLength={DRIVER_DTO_LIMITS.password}
                   aria-invalid={errors.password ? true : undefined}
                   placeholder="Minimum 8 characters"
                   disabled={isPending}
@@ -474,6 +521,8 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
             <Field label="Home terminal" error={errors.homeTerminalName?.message}>
               <input
                 {...register('homeTerminalName')}
+                maxLength={DRIVER_DTO_LIMITS.homeTerminalName}
+                aria-invalid={errors.homeTerminalName ? true : undefined}
                 disabled={isPending}
                 className={inputClass}
               />
@@ -574,6 +623,7 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
             <Field label="Exemption reason" required error={eldExemptReasonError ?? undefined}>
               <input
                 value={eldExemptReason}
+                maxLength={DRIVER_DTO_LIMITS.eldExemptReason}
                 onChange={(e) => setEldExemptReason(e.target.value)}
                 disabled={isPending}
                 aria-invalid={eldExemptReasonError ? true : undefined}

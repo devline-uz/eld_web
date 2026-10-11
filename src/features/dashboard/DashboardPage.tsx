@@ -66,13 +66,20 @@ function assignDriverHref(row: DashboardViolation): string {
 /** Rows per page the violations table opens with — the first option of the shared select. */
 const VIOLATIONS_PAGE_SIZE = 10;
 
-/** B-6 `GET /violations` is server-paginated (`page`, `limit ≤ 200` → `OffsetPage`). */
+/**
+ * B-6 `GET /violations` is server-paginated (`page`, `limit ≤ 200` → `OffsetPage`).
+ *
+ * One definition of a violation across the panel: an OPEN (unresolved) `HosViolation`, whatever
+ * day it was filed on — the rows the Drivers roster counts as `openViolations` and the driver
+ * log lists. The old 24-hour window made this KPI read 0 while the Drivers header said "1 with
+ * active violations" for a violation filed two days earlier and still open.
+ */
 function useDashboardViolations(page: number, limit: number) {
   return useQuery({
-    queryKey: qk.violations({ window: '24h', page, limit }),
+    queryKey: qk.violations({ status: 'OPEN', page, limit }),
     queryFn: () =>
       client.get<OffsetPage<DashboardViolation>>(endpoints.violations.list, {
-        params: { window: '24h', page, limit },
+        params: { status: 'OPEN', page, limit },
       }),
     ...typedCachePolicy<OffsetPage<DashboardViolation>>('list'),
     // Changing page keeps the current rows on screen instead of flashing the table skeleton.
@@ -208,7 +215,7 @@ export default function DashboardPage() {
             iconTone="success"
           />
           <KpiCard
-            label="HOS violations · 24h"
+            label="Open HOS violations"
             value={summary.isError ? '—' : formatNumber(violationsTotal)}
             icon={AlertTriangle}
             iconTone="danger"
@@ -290,7 +297,7 @@ export default function DashboardPage() {
 
       <Card padded={false}>
         <div className="flex items-center justify-between border-b border-border p-card">
-          <SectionHeader title="HOS violations & alerts" subtitle="Last 24 hours" />
+          <SectionHeader title="HOS violations & alerts" subtitle="Open · newest first" />
           <button
             type="button"
             onClick={() => navigate('/hos-logs')}
@@ -315,7 +322,7 @@ export default function DashboardPage() {
           </div>
         ) : violationItems.length === 0 ? (
           <div className="p-card">
-            <EmptyState title="No violations in the last 24 hours" />
+            <EmptyState title="No open violations" />
           </div>
         ) : (
           <>

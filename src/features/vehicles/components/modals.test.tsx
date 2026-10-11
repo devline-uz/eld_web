@@ -429,7 +429,20 @@ describe('11.6 Import vehicles', () => {
     expect(screen.getByRole('button', { name: 'Import 1 unit' })).toBeInTheDocument();
   });
 
-  it('WB-108 — rejects a file over the advertised 2,000-row maximum', async () => {
+  it('WB-108 — accepts a file at exactly the 2,000-row maximum `ImportVehiclesDto` accepts', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ImportVehiclesModal onClose={() => {}} />);
+
+    const body = Array.from({ length: 2000 }, (_, i) => `${200 + i},1FUJGLDR8LLLL${String(i).padStart(4, '0')}`).join('\n');
+    const file = new File([`unitNumber,vin\n${body}`], 'units.csv', { type: 'text/csv' });
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(input, file);
+
+    expect(await screen.findByRole('button', { name: 'Import 2000 units' })).toBeEnabled();
+    expect(screen.queryByText(/rows maximum\./)).not.toBeInTheDocument();
+  });
+
+  it('WB-108 — rejects a file over the 2,000-row maximum `ImportVehiclesDto` accepts', async () => {
     const user = userEvent.setup();
     renderWithProviders(<ImportVehiclesModal onClose={() => {}} />);
 

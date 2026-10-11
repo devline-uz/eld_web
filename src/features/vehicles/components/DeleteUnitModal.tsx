@@ -7,7 +7,7 @@ import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
 import { TOAST_COPY } from '@/shared/ui/copy';
 import { useDeleteVehicle, type VehicleRow } from '@/shared/api/vehicles';
-import { ApiError } from '@/shared/api/errors';
+import { formErrorMessage } from '@/shared/api/errors';
 
 export function DeleteUnitModal({
   vehicle,
@@ -54,7 +54,7 @@ export function DeleteUnitModal({
                   onDeleted?.();
                 },
                 onError: (error) => {
-                  toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+                  toast({ kind: 'error', title: formErrorMessage(error) });
                 },
               })
             }

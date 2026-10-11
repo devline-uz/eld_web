@@ -41,7 +41,7 @@ import {
 import { useTrailersPage } from '@/shared/api/trailers';
 import { tripSchema } from '@/shared/forms/schemas';
 import { requiredString } from '@/shared/forms/fields';
-import { ApiError } from '@/shared/api/errors';
+import { ApiError, formErrorMessage } from '@/shared/api/errors';
 import { formatHosHours } from '@/shared/format/hos';
 import {
   TRAILER_LOOKUP_ERROR,
@@ -67,6 +67,15 @@ const INVALID_DATE_MESSAGE = 'Enter a valid date and time.';
 const DISTANCE_MESSAGE = 'Enter a distance greater than 0.';
 const RATE_MESSAGE = 'Enter a rate greater than 0.';
 const RATE_DECIMALS_MESSAGE = 'Use at most 2 decimal places.';
+/** `CreateTripDto` limits (backend trips.dto.ts) the shared `tripSchema` does not carry. */
+const TRIP_LIMITS = {
+  number: 40,
+  stopName: 200,
+  /** `stops` is `.max(50)` — pickup + delivery + at most 48 in between. */
+  intermediateStops: 48,
+  distanceMi: 10_000,
+  rateUsd: 1_000_000,
+} as const;
 
 /** Parses a local `datetime-local` value, or `null` if that calendar date doesn't exist. */
 function parseLocalDateTime(value: string): Date | null {
@@ -145,6 +154,18 @@ function buildTripSchema(original?: OriginalWindows) {
             message: 'Delivery must be within one year from today.',
           });
       }),
+    reference: requiredString().max(
+      TRIP_LIMITS.number,
+      `Trip / load ID must be ${TRIP_LIMITS.number} characters or fewer.`,
+    ),
+    origin: requiredString().max(
+      TRIP_LIMITS.stopName,
+      `Location must be ${TRIP_LIMITS.stopName} characters or fewer.`,
+    ),
+    destination: requiredString().max(
+      TRIP_LIMITS.stopName,
+      `Location must be ${TRIP_LIMITS.stopName} characters or fewer.`,
+    ),
     shippingDocument: z.string().trim().max(60).optional(),
     customer: z.string().trim().max(200).optional(),
     trailerId: z.string().optional(),
@@ -157,12 +178,14 @@ function buildTripSchema(original?: OriginalWindows) {
     distanceMi: z
       .number({ invalid_type_error: DISTANCE_MESSAGE })
       .positive(DISTANCE_MESSAGE)
+      .max(TRIP_LIMITS.distanceMi, 'Distance must be 10,000 mi or less.')
       .optional(),
     // USD, shown as `1,240.00` (formatMoney) — optional like the design, cents at most; B-73
     // (shipped) saves it.
     rateUsd: z
       .number({ invalid_type_error: RATE_MESSAGE })
       .positive(RATE_MESSAGE)
+      .max(TRIP_LIMITS.rateUsd, 'Rate must be $1,000,000 or less.')
       .refine((v) => Math.abs(v * 100 - Math.round(v * 100)) < 1e-6, RATE_DECIMALS_MESSAGE)
       .optional(),
   });
@@ -233,6 +256,17 @@ const SERVER_FIELD_LABEL: Record<string, string> = {
   stops: 'Stops',
   commodity: 'Commodity',
 };
+
+/** `stops.2.name` → `Stop 3 location`; any other path → its label from the table above. */
+function serverFieldLabel(field: string): string | undefined {
+  const stop = /^stops\.(\d+)(?:\.(\w+))?$/.exec(field);
+  if (stop) {
+    const n = Number(stop[1]) + 1;
+    const part = stop[2] === 'scheduledAt' ? 'window' : stop[2] === 'name' || stop[2] === 'address' ? 'location' : null;
+    return part ? `Stop ${n} ${part}` : `Stop ${n}`;
+  }
+  return SERVER_FIELD_LABEL[field] ?? SERVER_FIELD_LABEL[field.split('.')[0] ?? field];
+}
 
 function Field({
   label,
@@ -380,6 +414,12 @@ export function CreateTripModal({
   const [destinationCoords, setDestinationCoords] = useState<Coords | null>(null);
   /** Rule 6 — a 422 detail with no visible input, and any other rejection, lands here. */
   const [banner, setBanner] = useState<string | null>(null);
+  // The banner heads this tall `lg` modal while Create / Save sits in the footer — scrolled down
+  // to the rate or the stops, a refusal used to appear out of sight. Bring it into view.
+  const bannerRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (banner) bannerRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [banner]);
 
   const {
     register,
@@ -680,15 +720,18 @@ export function CreateTripModal({
         continue;
       }
       // No input renders this field's error — rule 6 says it belongs in the banner.
-      const label = SERVER_FIELD_LABEL[field];
-      unmapped.push(label ? `${label}: ${message}` : message);
+      const label = serverFieldLabel(field);
+      const sentence = /[.!?]$/.test(message) ? message : `${message}.`;
+      unmapped.push(label ? `${label}: ${sentence}` : sentence);
     }
     if (unmapped.length > 0) setBanner(unmapped.join(' '));
     return mapped > 0 || unmapped.length > 0;
   }
 
   function showGenericError(error: unknown) {
-    const message = error instanceof ApiError ? error.userMessage : 'Something went wrong.';
+    // `formErrorMessage` also names a network failure ("No connection…") instead of a bare
+    // "Something went wrong.".
+    const message = formErrorMessage(error);
     setBanner(message);
     toast({ kind: 'error', title: message });
   }
@@ -842,7 +885,7 @@ export function CreateTripModal({
         className="flex flex-col gap-4"
       >
         {banner && (
-          <p role="alert" className="rounded-md bg-danger-soft p-3 text-body text-danger">
+          <p ref={bannerRef} role="alert" className="rounded-md bg-danger-soft p-3 text-body text-danger">
             {banner}
           </p>
         )}
@@ -850,6 +893,7 @@ export function CreateTripModal({
           <Field label="Trip / load ID" required={!editing} error={errors.reference?.message}>
             <input
               {...register('reference')}
+              maxLength={TRIP_LIMITS.number}
               placeholder="TR-4834"
               aria-invalid={errors.reference ? true : undefined}
               readOnly={editing}
@@ -885,6 +929,7 @@ export function CreateTripModal({
                 <PlaceInput
                   {...registerPlace('origin', setOriginCoords)}
                   value={origin}
+                  maxLength={TRIP_LIMITS.stopName}
                   className={inputClass}
                 />
               )}
@@ -913,6 +958,7 @@ export function CreateTripModal({
                 <PlaceInput
                   {...registerPlace('destination', setDestinationCoords)}
                   value={destination}
+                  maxLength={TRIP_LIMITS.stopName}
                   className={inputClass}
                 />
               )}
@@ -962,6 +1008,7 @@ export function CreateTripModal({
                 <Field label={`Stop ${index + 1} location`}>
                   <PlaceInput
                     value={stop.name}
+                    maxLength={TRIP_LIMITS.stopName}
                     onTextChange={(text) =>
                       setIntermediateStops((prev) =>
                         prev.map((s) =>
@@ -1009,7 +1056,12 @@ export function CreateTripModal({
                 </Button>
               </div>
             ))}
-          {!editing && (
+          {!editing && intermediateStops.length >= TRIP_LIMITS.intermediateStops && (
+            <p className="mt-2 text-caption text-text-muted">
+              A trip can have at most {TRIP_LIMITS.intermediateStops + 2} stops, pickup and delivery included.
+            </p>
+          )}
+          {!editing && intermediateStops.length < TRIP_LIMITS.intermediateStops && (
             <button
               type="button"
               onClick={() =>

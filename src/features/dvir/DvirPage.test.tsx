@@ -218,6 +218,43 @@ describe('DvirPage', () => {
     await waitFor(() => expect(screen.getByText('WO-1003')).toBeInTheDocument(), { timeout: 3000 });
   });
 
+  it('open defects: a failed assignment is announced instead of snapping back silently', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(url(endpoints.defects.list), () =>
+        ok({
+          items: [
+            {
+              id: 'def_a',
+              vehicleId: 'veh_1',
+              dvirId: null,
+              category: 'Brake pads',
+              description: 'Worn',
+              severity: 'MAJOR',
+              status: 'OPEN',
+              outOfService: false,
+              assigneeId: null,
+              createdAt: new Date().toISOString(),
+            },
+          ],
+          page: 1,
+          limit: 25,
+          total: 1,
+          totalPages: 1,
+        }),
+      ),
+      http.patch(url(endpoints.defects.assign('def_a')), () =>
+        HttpResponse.json({ statusCode: 500, code: 'INTERNAL_ERROR', message: 'boom' }, { status: 500 }),
+      ),
+    );
+    renderPage('/dvir?tab=defects');
+
+    await user.click(await screen.findByRole('combobox', { name: 'Assign defect Brake pads' }));
+    await user.click(await screen.findByRole('option', { name: 'Sarah Chen' }));
+
+    expect(await screen.findByText('Something went wrong on our side. Try again.')).toBeInTheDocument();
+  });
+
   it('open defects: a search typed on page 2 re-pages to page 1', async () => {
     const user = userEvent.setup();
     const defects = Array.from({ length: 30 }, (_, i) => ({
@@ -403,6 +440,41 @@ describe('DvirPage', () => {
 
       expect(await screen.findByText('Discard changes?')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Mark complete', hidden: true })).toBeInTheDocument();
+    });
+
+    it('Schedules: Complete — a 422 on the odometer lands on the field, not a bare banner', async () => {
+      const user = userEvent.setup();
+      server.use(
+        http.post(url(endpoints.maintenanceSchedules.complete('ms_1')), () =>
+          HttpResponse.json(
+            {
+              statusCode: 422,
+              code: 'VALIDATION_FAILED',
+              message: 'Request validation failed.',
+              details: {
+                issues: [
+                  { path: ['serviceOdometerMi'], code: 'too_big', message: 'Number is too big' },
+                  { path: ['serviceAt'], code: 'invalid_string', message: 'Invalid datetime' },
+                ],
+              },
+            },
+            { status: 422 },
+          ),
+        ),
+      );
+      renderPage('/dvir?tab=schedules');
+
+      await user.click(await screen.findByRole('button', { name: 'Row actions' }));
+      await user.click(await screen.findByText('Complete'));
+      const odometer = await screen.findByLabelText(/Odometer at service/);
+      // `serviceOdometerMi` is a whole number ≥ 0: a sign or a decimal separator never gets in.
+      await user.type(odometer, '-12.5');
+      expect(odometer).toHaveValue(125);
+      await user.click(screen.getByRole('button', { name: 'Mark complete' }));
+
+      expect(await screen.findByText('Number is too big')).toBeInTheDocument();
+      expect(odometer).toHaveAttribute('aria-invalid', 'true');
+      expect(screen.getByText('Service date: Invalid datetime.')).toBeInTheDocument();
     });
 
     it('Schedules: Delete calls DELETE /maintenance-schedules/:id and toasts', async () => {

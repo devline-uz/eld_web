@@ -9,7 +9,7 @@ import { useToast } from '@/shared/ui/Toast';
 import { TOAST_COPY } from '@/shared/ui/copy';
 import { trailerSchema, type TrailerFormValues } from '@/shared/forms/schemas';
 import { VALIDATION_MESSAGES } from '@/shared/forms/messages';
-import { ApiError } from '@/shared/api/errors';
+import { ApiError, formErrorMessage } from '@/shared/api/errors';
 import {
   useCreateTrailer,
   useUpdateTrailer,
@@ -82,14 +82,20 @@ export function TrailerModal({ trailer, onClose }: { trailer?: TrailerRow; onClo
           setError('number', { message: VALIDATION_MESSAGES.trailerNumberTaken });
           return;
         }
+        // A 400/422 issue goes under its input. Any issue was treated as "shown" before, so one on
+        // a field this form does not render (e.g. `status` on Add) failed in complete silence.
+        const placed: string[] = [];
         if (error instanceof ApiError) {
           const fieldErrors = error.fieldErrors;
           for (const [field, message] of Object.entries(fieldErrors)) {
-            if (field === 'number' || field === 'vin' || field === 'status') setError(field, { message });
+            if (field === 'number' || field === 'vin' || (isEdit && field === 'status')) {
+              setError(field, { message });
+              placed.push(field);
+            }
           }
-          if (Object.keys(fieldErrors).length > 0) return;
+          if (placed.length > 0 && placed.length === Object.keys(fieldErrors).length) return;
         }
-        toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+        toast({ kind: 'error', title: formErrorMessage(error, placed, { number: 'Trailer number', vin: 'VIN', status: 'Status' }) });
       },
     };
     if (isEdit) {

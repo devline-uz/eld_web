@@ -8,9 +8,46 @@
 import { Card, SectionHeader } from '@/shared/ui/Card';
 import { HosMeter } from '@/shared/ui/HosMeter';
 import { ErrorState, LoadingState } from '@/shared/ui/states';
-import { formatHosHours } from '@/shared/format';
-import { useDriverHos } from '@/shared/api/drivers';
+import { formatHosHours, hosClockNotes } from '@/shared/format';
+import { useDriverHos, type DriverHosResponse } from '@/shared/api/drivers';
 import { cycleRuleLabel } from '../grid';
+
+function AvailableHoursMeters({ clocks }: { clocks: DriverHosResponse }) {
+  // A clock at 00:00 is "limit exceeded" only while the driver is driving; otherwise it names
+  // what the driver needs before driving again (10-hour break, cycle, 30-minute break).
+  const notes = hosClockNotes(clocks);
+  return (
+    <div className="flex flex-col gap-4">
+      <HosMeter
+        label="Drive"
+        remainingSec={clocks.driveRemainingSec}
+        limitSec={clocks.driveLimitSec}
+        zeroNote={notes.drive}
+      />
+      <HosMeter
+        label="Shift"
+        remainingSec={clocks.shiftRemainingSec}
+        limitSec={clocks.shiftLimitSec}
+        ofHint={`of ${formatHosHours(clocks.shiftLimitSec)}`}
+        zeroNote={notes.shift}
+      />
+      <HosMeter
+        label="Cycle"
+        remainingSec={clocks.cycleRemainingSec}
+        limitSec={clocks.cycleLimitSec}
+        ofHint={`of ${formatHosHours(clocks.cycleLimitSec)}`}
+        zeroNote={notes.cycle}
+      />
+      <HosMeter
+        label="Break in"
+        remainingSec={clocks.breakInSec}
+        limitSec={clocks.breakLimitSec}
+        ofHint={`of ${formatHosHours(clocks.breakLimitSec)} driving`}
+        zeroNote={notes.break}
+      />
+    </div>
+  );
+}
 
 export function AvailableHoursCard({ driverId }: { driverId: string }) {
   const query = useDriverHos(driverId);
@@ -28,27 +65,7 @@ export function AvailableHoursCard({ driverId }: { driverId: string }) {
             onRetry={() => void query.refetch()}
           />
         ) : (
-          <div className="flex flex-col gap-4">
-            <HosMeter label="Drive" remainingSec={query.data.driveRemainingSec} limitSec={query.data.driveLimitSec} />
-            <HosMeter
-              label="Shift"
-              remainingSec={query.data.shiftRemainingSec}
-              limitSec={query.data.shiftLimitSec}
-              ofHint={`of ${formatHosHours(query.data.shiftLimitSec)}`}
-            />
-            <HosMeter
-              label="Cycle"
-              remainingSec={query.data.cycleRemainingSec}
-              limitSec={query.data.cycleLimitSec}
-              ofHint={`of ${formatHosHours(query.data.cycleLimitSec)}`}
-            />
-            <HosMeter
-              label="Break in"
-              remainingSec={query.data.breakInSec}
-              limitSec={query.data.breakLimitSec}
-              ofHint={`of ${formatHosHours(query.data.breakLimitSec)} driving`}
-            />
-          </div>
+          <AvailableHoursMeters clocks={query.data} />
         )}
       </div>
     </Card>

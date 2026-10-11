@@ -3,7 +3,7 @@
 // ⭐ The rule that is easy to get wrong: after an assignment `recordOrigin` STAYS 1. The panel
 // never calls an assigned segment "driver entered" — `ORIGIN` keeps reading `ELD · automatic` and
 // only an `Assigned by …` annotation is added (§7.4 / §23). Nothing here deletes a record.
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { formatInTimeZone } from 'date-fns-tz';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
@@ -11,7 +11,7 @@ import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
 import { TOAST_COPY } from '@/shared/ui/copy';
 import { cn } from '@/shared/ui/cn';
-import { ApiError } from '@/shared/api/errors';
+import { ApiError, formErrorMessage } from '@/shared/api/errors';
 import { LIMITS, VALIDATION_MESSAGES } from '@/shared/forms/messages';
 import { formatHosHours, formatDistance } from '@/shared/format';
 import {
@@ -65,6 +65,12 @@ export function UnassignedDrivingModal({
   // (status PENDING_CONFIRMATION); off: the segment moves to the driver's log immediately.
   const [askDriver, setAskDriver] = useState(true);
   const [banner, setBanner] = useState<string | null>(null);
+  // The banner sits above the segment list while the annotation and the button are below it —
+  // bring it into view when it appears, so a refusal is never scrolled out of sight.
+  const bannerRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (banner) bannerRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [banner]);
   const [annotationError, setAnnotationError] = useState<string | null>(null);
   // WB-146 — same-tick guard: one click, one assignment batch.
   const inFlight = useRef(false);
@@ -121,7 +127,11 @@ export function UnassignedDrivingModal({
       },
       onError: (error) => {
         const cause = error instanceof UnidentifiedBatchError ? error.error : error;
-        const refusal = cause instanceof ApiError ? cause.userMessage : 'Something went wrong.';
+        // A 422 on the annotation goes under the textarea; any other issue (`driverId`) is spelled
+        // out instead of the bare "Check the highlighted fields" with nothing highlighted.
+        const annotationIssue = cause instanceof ApiError ? cause.fieldErrors.annotation : undefined;
+        if (annotationIssue) setAnnotationError(annotationIssue);
+        const refusal = formErrorMessage(cause, annotationIssue ? ['annotation'] : [], { driverId: 'Driver' });
         const done = error instanceof UnidentifiedBatchError ? error.succeededIds : [];
         if (done.length > 0) {
           // WB-063 — say exactly what was already written; drop it from the selection.
@@ -184,7 +194,7 @@ export function UnassignedDrivingModal({
       </div>
 
       {banner && (
-        <p role="alert" className="mt-4 rounded-md bg-danger-soft p-3 text-body text-danger">
+        <p ref={bannerRef} role="alert" className="mt-4 rounded-md bg-danger-soft p-3 text-body text-danger">
           {banner}
         </p>
       )}
@@ -258,7 +268,11 @@ export function UnassignedDrivingModal({
           aria-invalid={Boolean(annotationError)}
           className="min-h-20 rounded-md border border-border bg-bg-surface p-3 text-body text-text"
         />
-        {annotationError && <span className="text-caption text-danger">{annotationError}</span>}
+        {annotationError && (
+          <span role="alert" className="text-caption text-danger">
+            {annotationError}
+          </span>
+        )}
         {selected.some((id) => choice[id] === ANNOTATE) && (
           <span className="text-caption text-text-muted">
             The category is not stored separately — state yard move or personal conveyance in the

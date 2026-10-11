@@ -8,16 +8,25 @@ import { useForm } from 'react-hook-form';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
-import { ApiError } from '@/shared/api/errors';
+import { ApiError, formErrorMessage } from '@/shared/api/errors';
 import { useCreateTicket, type TicketAttachmentKind } from '@/shared/api/settingsAdmin';
 import { useVehiclesPicker } from '@/shared/api/vehicles';
 import { Field, inputClass } from './formKit';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { usePermission } from '@/shared/auth/usePermission';
 import { SUPPORT_REASON, SUPPORT_TOAST } from '../lib/copy';
 
 // Validation comes from the shared `ticketSchema`, which matches `CreateSupportTicketDto` (WB-026).
 import { ticketSchema as ticketFormSchema, type TicketFormValues } from '@/shared/forms/schemas';
+
+/** `CreateSupportTicketDto` issue path → the field that shows it (`body` is the Description). */
+const SERVER_FIELDS: Record<string, keyof TicketFormValues> = {
+  subject: 'subject',
+  body: 'description',
+  category: 'category',
+  priority: 'priority',
+};
+const FIELD_LABELS = { vehicleId: 'Vehicle', attachments: 'Attachments' };
 
 const CATEGORIES = ['ELD hardware', 'HOS & logs', 'Reports', 'Billing', 'Other'];
 const PRIORITIES: { value: 'URGENT' | 'HIGH' | 'NORMAL' | 'LOW'; label: string }[] = [
@@ -32,7 +41,13 @@ export function NewTicketModal({ contactEmail, onClose }: { contactEmail: string
   const createTicket = useCreateTicket();
   const { can } = usePermission();
   const canSubmit = can('support', 'READ');
-  const [forbiddenBanner, setForbiddenBanner] = useState<string | null>(null);
+  // A refusal the fields cannot show (403, or a 422 on the vehicle / attachments) — inside the
+  // modal and scrolled into view, not only a toast.
+  const [banner, setBanner] = useState<string | null>(null);
+  const bannerRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (banner) bannerRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [banner]);
   const [vehicleId, setVehicleId] = useState('');
   const [includeDiagnostics, setIncludeDiagnostics] = useState(false);
   const [includeEvents, setIncludeEvents] = useState(false);
@@ -41,6 +56,7 @@ export function NewTicketModal({ contactEmail, onClose }: { contactEmail: string
   const {
     register,
     handleSubmit,
+    setError,
     formState: { errors, isDirty },
   } = useForm<TicketFormValues>({
     resolver: zodResolver(ticketFormSchema),
@@ -54,7 +70,7 @@ export function NewTicketModal({ contactEmail, onClose }: { contactEmail: string
     // WB-146 — `mutate()` returns immediately, so RHF's `isSubmitting` is already false again by
     // the time the second click lands; guard on the mutation itself or a double click opens two.
     if (createTicket.isPending || !canSubmit) return;
-    setForbiddenBanner(null);
+    setBanner(null);
     const attachments: Array<{ kind: TicketAttachmentKind }> = [];
     if (includeDiagnostics) attachments.push({ kind: 'DEVICE_DIAGNOSTICS' });
     if (includeEvents) attachments.push({ kind: 'ELD_EVENTS_24H' });
@@ -74,10 +90,26 @@ export function NewTicketModal({ contactEmail, onClose }: { contactEmail: string
         },
         onError: (error) => {
           if (error instanceof ApiError && error.status === 403) {
-            setForbiddenBanner(error.userMessage);
+            setBanner(error.userMessage);
             return;
           }
-          toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+          // A 422 used to be one generic toast with nothing marked. Each issue now goes under its
+          // field; whatever has no field here is spelled out in the banner.
+          const validation = error instanceof ApiError && (error.status === 400 || error.status === 422);
+          const placed: string[] = [];
+          if (validation) {
+            for (const [path, message] of Object.entries(error.fieldErrors)) {
+              const field = Object.hasOwn(SERVER_FIELDS, path) ? SERVER_FIELDS[path] : undefined;
+              if (!field) continue;
+              placed.push(path);
+              setError(field, { message });
+            }
+            const rest = Object.keys(error.fieldErrors).filter((path) => !placed.includes(path));
+            if (placed.length > 0 && rest.length === 0) return;
+            setBanner(formErrorMessage(error, placed, FIELD_LABELS));
+            return;
+          }
+          toast({ kind: 'error', title: formErrorMessage(error) });
         },
       },
     );
@@ -115,9 +147,9 @@ export function NewTicketModal({ contactEmail, onClose }: { contactEmail: string
             {SUPPORT_REASON.ticketForbidden}
           </p>
         )}
-        {forbiddenBanner && (
-          <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-caption text-danger">
-            {forbiddenBanner}
+        {banner && (
+          <p ref={bannerRef} role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-caption text-danger">
+            {banner}
           </p>
         )}
         <div className="grid grid-cols-2 gap-4">

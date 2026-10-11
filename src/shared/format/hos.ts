@@ -92,3 +92,46 @@ export function rodsDayOffsetSec(value: DateInput, dayStartIso: DateInput): numb
   if (!at || !start) return 0;
   return Math.round((at.getTime() - start.getTime()) / 1000);
 }
+
+/** What a run-out HOS clock means (`HosMeter` `zeroNote`). Exported for tests and call sites. */
+export const HOS_ZERO_NOTE = {
+  /** The driver is DRIVING with the clock at 00:00 — a real overrun. */
+  exceeded: 'limit exceeded',
+  /** 11 h of driving used up or the 14-hour window closed — §395.3(a)(1) 10 h off resets both. */
+  tenHourBreak: '10-hour break required',
+  /** 70/8 (60/7) used up — hours come back at recap or after a 34-hour restart (§395.3(c)). */
+  cycle: 'cycle limit reached',
+  /** 8 h of driving since the last 30-minute interruption (§395.3(a)(3)(ii)). */
+  thirtyMinuteBreak: '30-minute break required',
+} as const;
+
+export interface HosClockState {
+  dutyStatus: 'DRIVING' | 'ON_DUTY' | 'SLEEPER' | 'OFF_DUTY';
+  cycleRemainingSec: number;
+}
+
+export interface HosClockNotes {
+  drive: string;
+  shift: string;
+  cycle: string;
+  break: string;
+}
+
+/**
+ * The note each clock shows at 00:00. A clock at zero is a violation only while the driver is
+ * DRIVING; otherwise it is the reason the driver may not drive yet, and the note names it.
+ * Drive left is the tightest of the 11-hour limit, the 14-hour window and the cycle (the backend
+ * `driveRemainingSec`), so at 00:00 it names whichever binds — the cycle first, because a 10-hour
+ * break does not give cycle hours back.
+ */
+export function hosClockNotes(clock: HosClockState): HosClockNotes {
+  if (clock.dutyStatus === 'DRIVING') {
+    return { drive: HOS_ZERO_NOTE.exceeded, shift: HOS_ZERO_NOTE.exceeded, cycle: HOS_ZERO_NOTE.exceeded, break: HOS_ZERO_NOTE.exceeded };
+  }
+  return {
+    drive: clock.cycleRemainingSec <= 0 ? HOS_ZERO_NOTE.cycle : HOS_ZERO_NOTE.tenHourBreak,
+    shift: HOS_ZERO_NOTE.tenHourBreak,
+    cycle: HOS_ZERO_NOTE.cycle,
+    break: HOS_ZERO_NOTE.thirtyMinuteBreak,
+  };
+}

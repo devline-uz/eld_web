@@ -4,7 +4,7 @@
 // the subset that `PATCH /drivers/:id` really accepts — identity, contact, licence, terminal and
 // the HOS allowances. The username and the password are deliberately not here: the username is the
 // driver's sign-in identity, and there is no carrier-side password reset at all (gap B-81).
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Controller, useForm, type Resolver } from 'react-hook-form';
 import { z } from 'zod';
@@ -22,10 +22,11 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useDriversLookup } from '@/shared/api/lookups';
 import { useUpdateDriver } from '@/shared/api/drivers';
 import type { DriverRow } from '@/shared/api/drivers';
-import { ApiError } from '@/shared/api/errors';
+import { ApiError, formErrorMessage } from '@/shared/api/errors';
 import { conflictField } from '@/shared/api/conflicts';
 import { DRIVER_CONFLICT_RULES, CONFLICT_MESSAGES, findCachedDriverConflicts } from '../lib/driverConflicts';
 import { DRIVER_TOAST } from '../lib/copy';
+import { DRIVER_DTO_LIMITS, DRIVER_FIELD_LABELS, tooLongMessage } from '../lib/driverFormLimits';
 import { HOME_TERMINAL_TIMEZONES } from '../lib/terminals';
 import { PhoneNumberInput } from '@/shared/forms/PhoneNumberInput';
 
@@ -84,8 +85,13 @@ const US_STATES = [
 ];
 
 const editDriverSchema = z.object({
-  firstName: f.requiredString(),
-  lastName: f.requiredString(),
+  // `UpdateDriverDto` caps (drivers.dto.ts) — past them the PATCH came back as an unexplained 422.
+  firstName: f
+    .requiredString()
+    .max(DRIVER_DTO_LIMITS.firstName, tooLongMessage('First name', DRIVER_DTO_LIMITS.firstName)),
+  lastName: f
+    .requiredString()
+    .max(DRIVER_DTO_LIMITS.lastName, tooLongMessage('Last name', DRIVER_DTO_LIMITS.lastName)),
   email: f.email(),
   /** Same international rule as Add driver: per-country validation, E.164 out. */
   phone: internationalPhone(),
@@ -93,9 +99,25 @@ const editDriverSchema = z.object({
   cdlNumber: licenceNumber(),
   cdlState: z.string().trim().length(2),
   /** Optional and typed — there is no Terminal table to pick from yet (backend D-090). */
-  homeTerminalName: z.string().trim().optional(),
+  homeTerminalName: z
+    .string()
+    .trim()
+    .max(DRIVER_DTO_LIMITS.homeTerminalName, tooLongMessage('Home terminal', DRIVER_DTO_LIMITS.homeTerminalName))
+    .optional(),
   homeTerminalTimezone: z.string(),
 });
+type EditDriverField = keyof z.infer<typeof editDriverSchema>;
+/** The RHF fields this modal renders — a 422 issue on one of them goes on that field. */
+const RHF_FIELDS: readonly EditDriverField[] = [
+  'firstName',
+  'lastName',
+  'email',
+  'phone',
+  'cdlNumber',
+  'cdlState',
+  'homeTerminalName',
+  'homeTerminalTimezone',
+];
 type EditDriverValues = z.infer<typeof editDriverSchema>;
 
 const inputClass = 'h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text';
@@ -149,6 +171,12 @@ export function EditDriverModal({ driver, onClose }: EditDriverModalProps) {
   const [eldExempt, setEldExempt] = useState(driver.eldExempt);
   const [eldExemptReason, setEldExemptReason] = useState(driver.eldExemptReason ?? '');
   const [exemptReasonError, setExemptReasonError] = useState<string | null>(null);
+  // The banner sits at the top of this tall `lg` modal while Save is in the footer — bring it into
+  // view when it appears, or a refused PATCH looks like nothing happened.
+  const bannerRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (banner) bannerRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [banner]);
 
   // The stored phone is shown formatted from the start (the default itself is formatted, so opening
   // the form never makes it dirty). A legacy value these rules would reject is left alone while it
@@ -258,14 +286,19 @@ export function EditDriverModal({ driver, onClose }: EditDriverModalProps) {
               return;
             }
           }
-          if (error instanceof ApiError) {
-            const fieldErrors = error.fieldErrors;
-            for (const [field, message] of Object.entries(fieldErrors)) {
-              setError(field as keyof EditDriverValues, { message });
-            }
-            if (Object.keys(fieldErrors).length > 0) return;
+          const fieldErrors = error instanceof ApiError ? error.fieldErrors : {};
+          const placed: string[] = [];
+          for (const [field, message] of Object.entries(fieldErrors)) {
+            if (field === 'eldExemptReason' && eldExempt) setExemptReasonError(message);
+            else if ((RHF_FIELDS as readonly string[]).includes(field)) {
+              setError(field as EditDriverField, { message });
+            } else continue;
+            placed.push(field);
           }
-          const message = error instanceof ApiError ? error.userMessage : 'Something went wrong.';
+          if (placed.length > 0 && placed.length === Object.keys(fieldErrors).length) return;
+          // An issue on a field this form does not render used to vanish into `setError` with
+          // nothing shown; it is spelled out in the banner instead (§6.2 rule 6).
+          const message = formErrorMessage(error, placed, DRIVER_FIELD_LABELS);
           setBanner(message);
           toast({ kind: 'error', title: message });
         },
@@ -298,7 +331,7 @@ export function EditDriverModal({ driver, onClose }: EditDriverModalProps) {
     >
       <form className="flex flex-col gap-5" onSubmit={handleSubmit(onSubmit)}>
         {banner && (
-          <p role="alert" className="rounded-md bg-danger-soft p-3 text-body text-danger">
+          <p ref={bannerRef} role="alert" className="rounded-md bg-danger-soft p-3 text-body text-danger">
             {banner}
           </p>
         )}
@@ -306,6 +339,7 @@ export function EditDriverModal({ driver, onClose }: EditDriverModalProps) {
           <Field label="First name" required error={errors.firstName?.message}>
             <input
               {...register('firstName')}
+              maxLength={DRIVER_DTO_LIMITS.firstName}
               disabled={isPending}
               aria-invalid={errors.firstName ? true : undefined}
               className={inputClass}
@@ -314,6 +348,7 @@ export function EditDriverModal({ driver, onClose }: EditDriverModalProps) {
           <Field label="Last name" required error={errors.lastName?.message}>
             <input
               {...register('lastName')}
+              maxLength={DRIVER_DTO_LIMITS.lastName}
               disabled={isPending}
               aria-invalid={errors.lastName ? true : undefined}
               className={inputClass}
@@ -366,6 +401,7 @@ export function EditDriverModal({ driver, onClose }: EditDriverModalProps) {
           <Field label="Home terminal" error={errors.homeTerminalName?.message}>
             <input
               {...register('homeTerminalName')}
+              maxLength={DRIVER_DTO_LIMITS.homeTerminalName}
               disabled={isPending}
               aria-invalid={errors.homeTerminalName ? true : undefined}
               className={inputClass}
@@ -450,6 +486,7 @@ export function EditDriverModal({ driver, onClose }: EditDriverModalProps) {
             <Field label="Exemption reason" required error={exemptReasonError ?? undefined}>
               <input
                 value={eldExemptReason}
+                maxLength={DRIVER_DTO_LIMITS.eldExemptReason}
                 onChange={(e) => setEldExemptReason(e.target.value)}
                 disabled={isPending}
                 aria-invalid={exemptReasonError ? true : undefined}

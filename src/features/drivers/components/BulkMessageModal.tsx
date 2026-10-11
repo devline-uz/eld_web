@@ -10,8 +10,11 @@ import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
 import { useBroadcastMessage } from '@/shared/api/messaging';
 import { messageSchema } from '@/shared/forms/schemas';
-import { toUserMessage } from '@/shared/api/errors';
+import { ApiError, formErrorMessage } from '@/shared/api/errors';
 import { DRIVER_TOAST } from '../lib/copy';
+
+/** `BroadcastMessageDto` issue paths (messaging.dto.ts). */
+const BROADCAST_FIELD_LABELS: Record<string, string> = { body: 'Message', driverIds: 'Recipients', title: 'Title' };
 
 type MessageFormValues = z.infer<typeof messageSchema>;
 
@@ -27,6 +30,7 @@ export function BulkMessageModal({ driverIds, onClose, onSent }: BulkMessageModa
   const {
     register,
     handleSubmit,
+    setError,
     formState: { errors, isDirty },
   } = useForm<MessageFormValues>({
     resolver: zodResolver(messageSchema),
@@ -44,7 +48,13 @@ export function BulkMessageModal({ driverIds, onClose, onSent }: BulkMessageModa
           onSent?.();
           onClose();
         },
-        onError: (error) => toast({ kind: 'error', title: toUserMessage(error) }),
+        onError: (error) => {
+          // A 422 on the message body goes under the textarea; anything else (an issue on the
+          // recipients, a refusal) is spelled out in the toast instead of a generic line.
+          const bodyError = error instanceof ApiError ? error.fieldErrors.body : undefined;
+          if (bodyError) setError('body', { message: bodyError });
+          toast({ kind: 'error', title: formErrorMessage(error, bodyError ? ['body'] : [], BROADCAST_FIELD_LABELS) });
+        },
       },
     );
   }

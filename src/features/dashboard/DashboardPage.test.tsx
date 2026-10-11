@@ -177,7 +177,7 @@ describe('W-01 Fleet Dashboard', () => {
 
     expect(await screen.findByText('Active vehicles', {}, { timeout: 8000 })).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText('69')).toBeInTheDocument());
-    expect(await screen.findByText('No violations in the last 24 hours', {}, { timeout: 8000 })).toBeInTheDocument();
+    expect(await screen.findByText('No open violations', {}, { timeout: 8000 })).toBeInTheDocument();
     // carrier-timezone subtitle is pushed into the topbar context, not this component's own DOM —
     // confirmed instead by the "Live fleet" card, which does render locally.
     expect(screen.getByText('Live fleet')).toBeInTheDocument();

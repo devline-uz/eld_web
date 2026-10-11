@@ -85,7 +85,8 @@ export const transferRows = [
 
 /**
  * `GET /reports/ifta/summary?quarter=` (gap B-46) — the jurisdiction rows drawn in
- * `IFTA by jurisdiction and the report library.jpg`; `totals` and `kpis` are their sums.
+ * `IFTA by jurisdiction and the report library.jpg`; `totals` and `kpis` are their sums. Every
+ * `mpg` is that line's `totalMiles / fuelGal` (one decimal), like the backend.
  */
 export const iftaSummaryFixture = {
   quarter: '2026-Q3',
@@ -101,10 +102,10 @@ export const iftaSummaryFixture = {
   },
   rows: [
     { jurisdiction: 'OH', totalMiles: 96_420, taxableMiles: 92_110, fuelGal: 14_980, mpg: 6.4, taxDueUsd: 2_184.3 },
-    { jurisdiction: 'KY', totalMiles: 71_880, taxableMiles: 68_240, fuelGal: 10_410, mpg: 6.6, taxDueUsd: 1_602.75 },
-    { jurisdiction: 'IN', totalMiles: 58_110, taxableMiles: 55_900, fuelGal: 8_720, mpg: 6.3, taxDueUsd: 1_398.1 },
-    { jurisdiction: 'IL', totalMiles: 49_640, taxableMiles: 47_020, fuelGal: 7_880, mpg: 6.1, taxDueUsd: 1_240.6 },
-    { jurisdiction: 'ON', totalMiles: 38_510, taxableMiles: 36_900, fuelGal: 5_910, mpg: 6.2, taxDueUsd: 871.05 },
+    { jurisdiction: 'KY', totalMiles: 71_880, taxableMiles: 68_240, fuelGal: 10_410, mpg: 6.9, taxDueUsd: 1_602.75 },
+    { jurisdiction: 'IN', totalMiles: 58_110, taxableMiles: 55_900, fuelGal: 8_720, mpg: 6.7, taxDueUsd: 1_398.1 },
+    { jurisdiction: 'IL', totalMiles: 49_640, taxableMiles: 47_020, fuelGal: 7_880, mpg: 6.3, taxDueUsd: 1_240.6 },
+    { jurisdiction: 'ON', totalMiles: 38_510, taxableMiles: 36_900, fuelGal: 5_910, mpg: 6.5, taxDueUsd: 871.05 },
   ],
   totals: { totalMiles: 314_560, taxableMiles: 300_170, fuelGal: 47_900, mpg: 6.6, taxDueUsd: 7_296.8 },
 };
@@ -121,7 +122,7 @@ export const iftaJurisdictionsFixture = [
 ];
 
 /** Summary as the backend narrows it (D-107): `jurisdiction` keeps one row and scopes miles /
- * gallons / receipts; fleet MPG stays fleet-wide. `vehicleGroupId` is echoed as-is. */
+ * gallons / receipts; the KPI fleet MPG stays fleet-wide, the Total row's MPG is the row's own. `vehicleGroupId` is echoed as-is. */
 export function iftaSummaryFor(search: URLSearchParams) {
   const quarter = search.get('quarter') ?? iftaSummaryFixture.quarter;
   const jurisdiction = search.get('jurisdiction')?.toUpperCase();
@@ -129,8 +130,8 @@ export function iftaSummaryFor(search: URLSearchParams) {
   const row = iftaSummaryFixture.rows.find((r) => r.jurisdiction === jurisdiction);
   const rows = row ? [row] : [];
   const totals = row
-    ? { totalMiles: row.totalMiles, taxableMiles: row.taxableMiles, fuelGal: row.fuelGal, mpg: iftaSummaryFixture.kpis.fleetMpg, taxDueUsd: row.taxDueUsd }
-    : { totalMiles: 0, taxableMiles: 0, fuelGal: 0, mpg: iftaSummaryFixture.kpis.fleetMpg, taxDueUsd: null };
+    ? { totalMiles: row.totalMiles, taxableMiles: row.taxableMiles, fuelGal: row.fuelGal, mpg: row.mpg, taxDueUsd: row.taxDueUsd }
+    : { totalMiles: 0, taxableMiles: 0, fuelGal: 0, mpg: null, taxDueUsd: null };
   return {
     ...iftaSummaryFixture,
     quarter,

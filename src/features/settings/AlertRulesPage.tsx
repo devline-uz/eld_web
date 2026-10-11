@@ -13,7 +13,7 @@ import { Card, SectionHeader } from '@/shared/ui/Card';
 import { ConfirmDelete } from '@/shared/ui/Modal';
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
 import { useToast } from '@/shared/ui/Toast';
-import { ApiError } from '@/shared/api/errors';
+import { formErrorMessage } from '@/shared/api/errors';
 import { useAlertRulesList, useUpdateAlertRule, useDeleteAlertRule, useTestAlertRule, useCarrier, type AlertRuleRow, type AlertSeverity } from '@/shared/api/settingsAdmin';
 import { useNotificationChannels, useUpdateNotificationChannels } from '@/shared/api/notifications';
 import { NewAlertRuleModal } from './components/NewAlertRuleModal';
@@ -71,7 +71,7 @@ export default function AlertRulesPage() {
   function toggleEnabled(rule: AlertRuleRow) {
     updateRule.mutate(
       { id: rule.id, dto: { enabled: !rule.enabled } },
-      { onError: (error) => toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }) },
+      { onError: (error) => toast({ kind: 'error', title: formErrorMessage(error) }) },
     );
   }
 
@@ -112,7 +112,7 @@ export default function AlertRulesPage() {
               onClick={() =>
                 updateChannels.mutate(
                   { email: { enabled: !(channelsQuery.data?.email.enabled ?? true) } },
-                  { onError: (error) => toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }) },
+                  { onError: (error) => toast({ kind: 'error', title: formErrorMessage(error) }) },
                 )
               }
               className={`relative h-6 w-10 shrink-0 rounded-full disabled:cursor-not-allowed disabled:opacity-60 ${channelsQuery.data?.email.enabled ?? true ? 'bg-primary' : 'bg-border'}`}
@@ -147,7 +147,7 @@ export default function AlertRulesPage() {
               onClick={() =>
                 updateChannels.mutate(
                   { webhook: { enabled: !(channelsQuery.data?.webhook.enabled ?? false) } },
-                  { onError: (error) => toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }) },
+                  { onError: (error) => toast({ kind: 'error', title: formErrorMessage(error) }) },
                 )
               }
               className={`relative h-6 w-10 shrink-0 rounded-full disabled:cursor-not-allowed disabled:opacity-60 ${channelsQuery.data?.webhook.enabled ? 'bg-primary' : 'bg-border'}`}
@@ -276,7 +276,7 @@ export default function AlertRulesPage() {
                                     title: result.triggered ? 'Test alert sent' : 'Rule is muted — no test alert sent',
                                   }),
                                 onError: (error) =>
-                                  toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }),
+                                  toast({ kind: 'error', title: formErrorMessage(error) }),
                               })
                             }
                             className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle"
@@ -291,7 +291,7 @@ export default function AlertRulesPage() {
                                 {
                                   onSuccess: () => toast({ kind: 'success', title: `${rule.name} muted for 24 h` }),
                                   onError: (error) =>
-                                    toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }),
+                                    toast({ kind: 'error', title: formErrorMessage(error) }),
                                 },
                               )
                             }
@@ -337,7 +337,7 @@ export default function AlertRulesPage() {
               setDeleteTarget(null);
             },
             onError: (error) => {
-              toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+              toast({ kind: 'error', title: formErrorMessage(error) });
               setDeleteTarget(null);
             },
           });

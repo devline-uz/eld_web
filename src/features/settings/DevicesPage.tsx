@@ -16,7 +16,7 @@ import { ConfirmDelete, Modal } from '@/shared/ui/Modal';
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
 import { searchEmptyState } from '@/shared/ui/copy';
 import { useToast } from '@/shared/ui/Toast';
-import { ApiError } from '@/shared/api/errors';
+import { formErrorMessage } from '@/shared/api/errors';
 import { formatRelative } from '@/shared/format/relative';
 import { orDash } from '@/shared/format/empty';
 import { client } from '@/shared/api/client';
@@ -152,7 +152,7 @@ export default function DevicesPage() {
   function handleUnpair(device: DeviceRow) {
     unpairDevice.mutate(device.id, {
       onSuccess: () => toast({ kind: 'success', ...SETTINGS_TOAST.deviceUnpaired(device.serial) }),
-      onError: (error) => toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }),
+      onError: (error) => toast({ kind: 'error', title: formErrorMessage(error) }),
     });
   }
 
@@ -320,7 +320,7 @@ export default function DevicesPage() {
                             setDiagnosticsTarget(row);
                             diagnostics.mutate(row.id, {
                               onError: (error) =>
-                                toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }),
+                                toast({ kind: 'error', title: formErrorMessage(error) }),
                             });
                           }}
                           className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle"
@@ -406,7 +406,7 @@ export default function DevicesPage() {
               setRetireTarget(null);
             },
             onError: (error) => {
-              toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+              toast({ kind: 'error', title: formErrorMessage(error) });
               setRetireTarget(null);
             },
           });

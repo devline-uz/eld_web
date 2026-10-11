@@ -197,3 +197,30 @@ describe('W-06 bulk Send message', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('W-06 bulk Send message — validation refusals', () => {
+  it('a 422 on the body goes under the textarea; one on the recipients is named in the toast', async () => {
+    server.use(
+      http.post(url(endpoints.conversations.broadcast), () =>
+        fail(422, 'VALIDATION_FAILED', 'Invalid payload', {
+          issues: [
+            { path: ['body'], code: 'too_big', message: 'String must contain at most 2000 character(s)' },
+            { path: ['driverIds'], code: 'too_big', message: 'Array must contain at most 1000 element(s)' },
+          ],
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    const { onClose } = renderModal();
+
+    await user.type(messageBox(), 'Hello');
+    await user.click(sendButton());
+
+    expect(await screen.findByText('String must contain at most 2000 character(s)')).toBeInTheDocument();
+    expect(messageBox()).toHaveAttribute('aria-invalid', 'true');
+    expect(
+      await screen.findByText('Recipients: Array must contain at most 1000 element(s).'),
+    ).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+});

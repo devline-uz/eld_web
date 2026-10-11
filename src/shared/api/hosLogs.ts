@@ -16,6 +16,7 @@ import { client } from './client';
 import { endpoints } from './endpoints';
 import { qk, qkRoot } from './queryKeys';
 import { typedCachePolicy } from './queryPolicy';
+import type { OffsetPage } from './types';
 
 /* ------------------------------------------------------------------ shared vocabulary */
 
@@ -128,6 +129,19 @@ export interface RodsCertification {
   recertificationRequired: boolean;
 }
 
+/**
+ * A violation still IN FORCE when the day opens: the driver was driving over midnight past a limit
+ * crossed on an earlier day, with no 10-hour reset. The stored row (and its `Resolve`) lives on
+ * the day the limit was crossed; this only says the driving on THIS day is part of it.
+ * Server-computed by the HOS engine (`logs/ongoing-violations.ts`), never by the panel.
+ */
+export interface OngoingViolation {
+  type: Extract<ViolationType, 'DRIVING_11' | 'SHIFT_14' | 'BREAK_30'>;
+  inForceSince: string;
+  crossedAt: string | null;
+  detail: string;
+}
+
 export interface LogDayResponse {
   driverId: string;
   date: string;
@@ -136,6 +150,8 @@ export interface LogDayResponse {
   graph: RodsGraphSegment[];
   events: LogEventView[];
   violations: HosViolation[];
+  /** Web `GET /logs/:driverId` only; absent from older servers. */
+  ongoingViolations?: OngoingViolation[];
   certification: RodsCertification;
 }
 
@@ -152,6 +168,11 @@ export interface LogEventsResponse {
   timezone: string;
   /** Includes superseded (2), proposed (3) and rejected (4) records — the audit trail. */
   events: LogEventView[];
+  /**
+   * The active duty-status record in force at 00:00 when it began on an earlier day — the status
+   * the grid draws from midnight. `null` when a record opens the day; absent from older servers.
+   */
+  carriedIn?: LogEventView | null;
 }
 
 export function useLogDay(driverId: string | undefined, date: string) {
@@ -464,5 +485,25 @@ export function useResolveViolation(driverId?: string, date?: string) {
       void queryClient.invalidateQueries({ queryKey: qk.violations() });
       void queryClient.invalidateQueries({ queryKey: qk.dashboardSummary });
     },
+  });
+}
+
+/** A `GET /violations` row: the `HosViolation` plus the W-01 display label (`event`). */
+export interface DriverOpenViolation extends HosViolation {
+  event: string;
+}
+
+/**
+ * The driver's OPEN (unresolved) violations, any day — the same `HosViolation` rows the Drivers
+ * roster counts as `openViolations` and the W-01 dashboard lists, so the three never disagree.
+ */
+export function useDriverOpenViolations(driverId: string | undefined) {
+  const params = { driverId: driverId ?? '', status: 'OPEN', limit: 50 };
+  return useQuery({
+    queryKey: qk.violations(params),
+    queryFn: ({ signal }) =>
+      client.get<OffsetPage<DriverOpenViolation>>(endpoints.violations.list, { params, signal }),
+    enabled: Boolean(driverId),
+    ...typedCachePolicy<OffsetPage<DriverOpenViolation>>('list'),
   });
 }

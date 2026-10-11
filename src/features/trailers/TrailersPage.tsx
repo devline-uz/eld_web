@@ -12,7 +12,7 @@ import { usePermission } from '@/shared/auth/usePermission';
 import { useIsOffline, OFFLINE_TOOLTIP } from '@/shared/realtime/RealtimeProvider';
 import { usePageHeader } from '@/app/layouts/Topbar';
 import { fetchTrailersExport, useTrailersPage, type TrailerRow, type TrailerStatus } from '@/shared/api/trailers';
-import { ApiError } from '@/shared/api/errors';
+import { formErrorMessage } from '@/shared/api/errors';
 import { Button } from '@/shared/ui/Button';
 import { Badge } from '@/shared/ui/Badge';
 import { Card } from '@/shared/ui/Card';
@@ -124,7 +124,7 @@ export default function TrailersPage() {
       link.click();
       URL.revokeObjectURL(link.href);
     } catch (error) {
-      toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+      toast({ kind: 'error', title: formErrorMessage(error) });
     } finally {
       setExporting(false);
     }

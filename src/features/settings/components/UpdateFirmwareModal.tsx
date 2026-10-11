@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
-import { ApiError } from '@/shared/api/errors';
+import { formErrorMessage } from '@/shared/api/errors';
 import { useUpdateFirmware, type DeviceRow } from '@/shared/api/settingsAdmin';
 import { Field, inputClass } from './formKit';
 import { SETTINGS_TOAST } from '../lib/copy';
@@ -42,8 +42,8 @@ export function UpdateFirmwareModal({
           toast({ kind: 'success', ...SETTINGS_TOAST.firmwareQueued(value, device.serial) });
           onClose();
         },
-        onError: (err) =>
-          setError(err instanceof ApiError ? err.userMessage : 'Something went wrong.'),
+        // A 422 is spelled out ("Target version: …") instead of "Check the highlighted fields".
+        onError: (err) => setError(formErrorMessage(err, [], { firmware: 'Target version' })),
       },
     );
   }

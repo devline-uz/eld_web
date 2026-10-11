@@ -293,3 +293,77 @@ describe('11.1 Create a geofence — Applies to (vehicle groups)', () => {
     expect(posted).toHaveProperty('vehicleGroupId', null);
   });
 });
+
+// Silent-failure sweep — the radius / dwell inputs had no error line, so their zod errors and any
+// server issue on them were set and shown nowhere; a 422 on an unrendered field said only "check
+// the highlighted fields".
+describe('11.1 Create a geofence — no silent validation', () => {
+  async function fillAddress(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole('button', { name: 'Address' }));
+    await user.type(screen.getByPlaceholderText('Columbus terminal'), 'Yard A');
+    await user.type(screen.getByPlaceholderText('4517 Washington Ave., Columbus, OH 43004'), '123 Main St, Columbus, OH');
+  }
+
+  it('shows a radius over the `CreateGeofenceDto` 500 mi cap under the radius input, without posting', async () => {
+    const post = vi.fn();
+    server.use(http.post(url(endpoints.geofences.create), () => (post(), ok({ id: 'geo_1' }))));
+    const user = userEvent.setup();
+    renderModal();
+    await fillAddress(user);
+    await user.type(screen.getByPlaceholderText('0.8'), '600');
+    await user.click(screen.getByRole('button', { name: 'Save geofence' }));
+
+    expect(await screen.findByText('Radius must be 500 mi or less.')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('0.8')).toHaveAttribute('aria-invalid', 'true');
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('shows a dwell time over 1,440 minutes, without posting', async () => {
+    const post = vi.fn();
+    server.use(http.post(url(endpoints.geofences.create), () => (post(), ok({ id: 'geo_1' }))));
+    const user = userEvent.setup();
+    renderModal();
+    await fillAddress(user);
+    await user.click(screen.getByLabelText('Dwell longer than'));
+    const minutes = screen.getByLabelText('Dwell minutes');
+    await user.clear(minutes);
+    await user.type(minutes, '2000');
+    await user.click(screen.getByRole('button', { name: 'Save geofence' }));
+
+    expect(await screen.findByText('Dwell time must be 1,440 minutes (24 h) or less.')).toBeInTheDocument();
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('spells out a live `details.issues` 422 on a field with no input', async () => {
+    server.use(
+      http.post(url(endpoints.geofences.create), () =>
+        fail(422, 'VALIDATION_FAILED', 'Request validation failed.', {
+          issues: [{ path: 'vehicleGroupId', code: 'invalid_string', message: 'Invalid uuid' }],
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderModal();
+    await fillAddress(user);
+    await user.click(screen.getByRole('button', { name: 'Save geofence' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Applies to: Invalid uuid.');
+  });
+
+  it('puts a server radius issue under the radius input, not in the banner', async () => {
+    server.use(
+      http.post(url(endpoints.geofences.create), () =>
+        fail(422, 'VALIDATION_FAILED', 'Request validation failed.', {
+          issues: [{ path: 'radiusMi', code: 'too_big', message: 'Number must be less than or equal to 500' }],
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderModal();
+    await fillAddress(user);
+    await user.click(screen.getByRole('button', { name: 'Save geofence' }));
+
+    expect(await screen.findByText('Number must be less than or equal to 500')).toBeInTheDocument();
+    expect(screen.queryByText(/Check the highlighted fields/)).not.toBeInTheDocument();
+  });
+});

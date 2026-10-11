@@ -8,7 +8,7 @@
 //   1. `Driving` is disabled while the chosen interval covers an automatic `D` record, and
 //   2. when the server still answers `422 DRIVING_TIME_IMMUTABLE` the refusal is shown verbatim
 //      and the request is NEVER retried or trimmed to make it pass.
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
@@ -16,7 +16,7 @@ import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
 import { TOAST_COPY } from '@/shared/ui/copy';
 import { cn } from '@/shared/ui/cn';
-import { ApiError } from '@/shared/api/errors';
+import { ApiError, formErrorMessage } from '@/shared/api/errors';
 import { LIMITS, VALIDATION_MESSAGES } from '@/shared/forms/messages';
 import * as inputFilters from '@/shared/forms/inputFilters';
 import { geocodingEnabled, PLACE_QUERY_MIN, usePlaceSearch, type Place } from '@/shared/map/geocode';
@@ -117,6 +117,12 @@ export function RequestLogEditModal({
   const [reason, setReason] = useState('');
   const [banner, setBanner] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  // The banner sits near the top of this tall `lg` modal while Send is in the footer — bring it
+  // into view when it appears, so a refusal is never below (or above) the fold.
+  const bannerRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (banner) bannerRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [banner]);
 
   const startIso = useMemo(
     () => (TIME_RE.test(startTime) ? fromZonedTime(`${date}T${startTime}`, timezone).toISOString() : null),
@@ -168,6 +174,11 @@ export function RequestLogEditModal({
       setFieldErrors({ engineHours: VALIDATION_MESSAGES.engineHours });
       return;
     }
+    // The input caps the integer part at 5 digits; 99,999.x still passes it (DTO `max(99_999)`).
+    if (engineHours && Number(engineHours) > LIMITS.engineHoursMax) {
+      setFieldErrors({ engineHours: VALIDATION_MESSAGES.engineHoursMax });
+      return;
+    }
     if (reasonTooShort) {
       setFieldErrors({ reason: VALIDATION_MESSAGES.annotation });
       return;
@@ -192,13 +203,13 @@ export function RequestLogEditModal({
           onClose();
         },
         onError: (error: Error) => {
-          if (error instanceof ApiError) {
-            // ⛔ Verbatim, once. No retry, no client-side trimming of the interval (§14.3).
-            setBanner(error.userMessage);
-            setFieldErrors(toFormFields(error.fieldErrors));
-            return;
-          }
-          setBanner('Something went wrong.');
+          // ⛔ Verbatim, once. No retry, no client-side trimming of the interval (§14.3). A 422
+          // issue goes under its own input; one this form has no input for (the status chips, a
+          // path-less refine) is spelled out in the banner instead of a bare "Check the
+          // highlighted fields" with nothing highlighted.
+          const { fields, placed } = toFormFields(error instanceof ApiError ? error.fieldErrors : {});
+          setFieldErrors(fields);
+          setBanner(formErrorMessage(error, placed, SERVER_FIELD_LABELS));
         },
         onSettled: () => {
           inFlight.current = false;
@@ -302,7 +313,7 @@ export function RequestLogEditModal({
       </div>
 
       {banner && (
-        <p role="alert" className="mt-4 rounded-md bg-danger-soft p-3 text-body text-danger">
+        <p ref={bannerRef} role="alert" className="mt-4 rounded-md bg-danger-soft p-3 text-body text-danger">
           {banner}
         </p>
       )}
@@ -495,10 +506,30 @@ const SERVER_FIELD: Record<string, string> = {
   annotation: 'reason',
 };
 
-function toFormFields(fields: Record<string, string>): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [key, message] of Object.entries(fields)) out[SERVER_FIELD[key] ?? key] = message;
-  return out;
+/** The inputs this form renders, keyed as `fieldErrors` keys them. */
+const FORM_FIELDS = new Set(['startAt', 'endAt', 'location', 'odometerMi', 'engineHours', 'reason']);
+
+/** Labels for a server issue this form has no input of its own for. */
+const SERVER_FIELD_LABELS: Record<string, string> = {
+  proposedStatus: 'Status',
+  status: 'Status',
+  proposedSpecial: 'Status',
+  originalEventId: 'Record',
+  notifyDriver: 'Notify the driver',
+};
+
+/** Server issues → `{ fields }` on this form's inputs, plus the server `placed` paths that landed. */
+function toFormFields(issues: Record<string, string>): { fields: Record<string, string>; placed: string[] } {
+  const fields: Record<string, string> = {};
+  const placed: string[] = [];
+  for (const [key, message] of Object.entries(issues)) {
+    // `location.name` / `location.lat` — every part of the location is the one Location input.
+    const field = key.startsWith('location') ? 'location' : (SERVER_FIELD[key] ?? key);
+    if (!FORM_FIELDS.has(field)) continue;
+    if (!(field in fields)) fields[field] = message;
+    placed.push(key);
+  }
+  return { fields, placed };
 }
 
 const inputClass = 'h-input w-full rounded-md border border-border bg-bg-surface px-3 text-body text-text';

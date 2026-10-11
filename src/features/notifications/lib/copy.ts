@@ -4,3 +4,6 @@
  * session, as a non-blocking warning toast, when marking a single notification read fails. */
 export const MARK_ONE_UNAVAILABLE_TITLE = 'Marking a single notification as read isn’t available yet';
 export const MARK_ONE_UNAVAILABLE_DESCRIPTION = 'Use Mark all read instead.';
+
+/** `Mark all read` used to fail with no feedback — the unread badges simply stayed. */
+export const MARK_ALL_FAILED_TITLE = 'Notifications were not marked as read';

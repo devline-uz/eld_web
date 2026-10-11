@@ -1,6 +1,6 @@
 // owner: web-dashboard-fleet — perf plan item 3 (WD-074). `GET /dashboard/summary` (permission
 // `dashboard` READ, §6.4 READ for every role) answers in one round trip what W-01 Fleet Dashboard
-// used to fire as 6 separate requests: `/live/fleet`, `/violations?window=24h`,
+// used to fire as 6 separate requests: `/live/fleet`, `/violations?status=OPEN`,
 // `/unidentified?status=PENDING`, `/notifications?unreadOnly=true&limit=1`, `/carrier` and two
 // `/vehicles?...&limit=1` counts. Response shape verified against the running dev API and mirrors
 // `backend/src/modules/dashboard/dashboard.controller.ts`'s doc comment exactly.

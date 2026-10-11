@@ -14,12 +14,13 @@ import {
   useDriver,
   useDriverHos,
   useResetDriverPassword,
+  type DriverHosResponse,
   useSendDriverVerification,
 } from '@/shared/api/drivers';
 import { useCoDriverPairings, useVehicle } from '@/shared/api/vehicles';
 import { client } from '@/shared/api/client';
 import { endpoints } from '@/shared/api/endpoints';
-import { ApiError } from '@/shared/api/errors';
+import { formErrorMessage } from '@/shared/api/errors';
 import { Avatar } from '@/shared/ui/Avatar';
 import { Badge } from '@/shared/ui/Badge';
 import { Button } from '@/shared/ui/Button';
@@ -29,6 +30,8 @@ import { HosMeter } from '@/shared/ui/HosMeter';
 import { useToast } from '@/shared/ui/Toast';
 import { ErrorState, LoadingState, ForbiddenState } from '@/shared/ui/states';
 import { formatLocal } from '@/shared/format/datetime';
+import { formatHosHours, formatRodsDateTime, hosClockNotes } from '@/shared/format/hos';
+import { useDriverOpenViolations } from '@/shared/api/hosLogs';
 import { orNone } from '@/shared/format/empty';
 import { phoneForDisplay } from '@/shared/forms/phoneNumber';
 import { qk, qkRoot } from '@/shared/api/queryKeys';
@@ -55,6 +58,100 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
       <span className="shrink-0 text-body text-text-muted">{label}</span>
       <span className="min-w-0 break-words text-right text-body-strong text-text">{value}</span>
     </div>
+  );
+}
+
+/**
+ * The four engine clocks. At 00:00 a clock says WHY: `limit exceeded` only while the driver is
+ * driving; otherwise the 10-hour break / cycle / 30-minute break the driver needs (QA: an on-duty
+ * driver with 0:00 driven today read "DRIVE 00:00 limit exceeded").
+ */
+function DriverHosMeters({ clocks }: { clocks: DriverHosResponse }) {
+  const notes = hosClockNotes(clocks);
+  return (
+    <div className="mt-3 grid grid-cols-4 gap-3">
+      <div className="rounded-md border border-border p-3.5">
+        <HosMeter
+          label="Drive left"
+          remainingSec={clocks.driveRemainingSec}
+          limitSec={clocks.driveLimitSec}
+          ofHint={`of ${formatHosHours(clocks.driveLimitSec)}`}
+          zeroNote={notes.drive}
+        />
+      </div>
+      <div className="rounded-md border border-border p-3.5">
+        <HosMeter
+          label="Shift left"
+          remainingSec={clocks.shiftRemainingSec}
+          limitSec={clocks.shiftLimitSec}
+          ofHint={`of ${formatHosHours(clocks.shiftLimitSec)}`}
+          zeroNote={notes.shift}
+        />
+      </div>
+      <div className="rounded-md border border-border p-3.5">
+        <HosMeter
+          label="Cycle left"
+          remainingSec={clocks.cycleRemainingSec}
+          limitSec={clocks.cycleLimitSec}
+          ofHint={`of ${formatHosHours(clocks.cycleLimitSec)}`}
+          zeroNote={notes.cycle}
+        />
+      </div>
+      <div className="rounded-md border border-border p-3.5">
+        <HosMeter
+          label="Break in"
+          remainingSec={clocks.breakInSec}
+          limitSec={clocks.breakLimitSec}
+          ofHint={`of ${formatHosHours(clocks.breakLimitSec)} driving`}
+          zeroNote={notes.break}
+        />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * B-6 `GET /violations?driverId&status=OPEN` — the same OPEN rows the Drivers roster counts and
+ * the dashboard lists (one source of truth), each linking to the log day it was filed on.
+ */
+function DriverOpenViolationsList({ driverId, timezone }: { driverId: string; timezone: string }) {
+  const query = useDriverOpenViolations(driverId);
+  if (query.isLoading) return <LoadingState rows={2} className="mt-3" />;
+  if (query.isError || !query.data) {
+    return (
+      <ErrorState
+        title="Could not load violations"
+        description="The violations service did not respond. Your data is safe — try again in a moment."
+        onRetry={() => void query.refetch()}
+      />
+    );
+  }
+  const items = query.data.items;
+  if (items.length === 0) {
+    return <p className="mt-3 text-body text-success">● No open violations</p>;
+  }
+  return (
+    <ul className="mt-3 flex flex-col gap-2">
+      {items.map((violation) => (
+        <li key={violation.id}>
+          <Link
+            to={`/hos-logs?${new URLSearchParams({ driverId, date: violation.logDate }).toString()}`}
+            className="flex items-start justify-between gap-3 rounded-md bg-danger-soft p-3 hover:opacity-90"
+          >
+            <span className="min-w-0">
+              <span className="block text-body-strong text-text">{violation.event}</span>
+              <span className="block text-caption text-text-muted">{violation.detail}</span>
+            </span>
+            <span className="tabular shrink-0 text-caption text-text-muted">
+              {formatRodsDateTime(violation.occurredAt, timezone)}
+            </span>
+          </Link>
+        </li>
+      ))}
+      {query.data.total > items.length && (
+        <li className="text-caption text-text-muted">{`${query.data.total - items.length} more in HOS Logs`}</li>
+      )}
+    </ul>
   );
 }
 
@@ -141,7 +238,7 @@ export default function DriverProfilePage() {
       onError: (error) =>
         toast({
           kind: 'error',
-          title: error instanceof ApiError ? error.userMessage : 'Something went wrong.',
+          title: formErrorMessage(error),
         }),
     });
   }
@@ -153,7 +250,7 @@ export default function DriverProfilePage() {
       onError: (error) =>
         toast({
           kind: 'error',
-          title: error instanceof ApiError ? error.userMessage : 'Something went wrong.',
+          title: formErrorMessage(error),
         }),
     });
   }
@@ -170,7 +267,7 @@ export default function DriverProfilePage() {
         setConfirmDeactivate(false);
         toast({
           kind: 'error',
-          title: error instanceof ApiError ? error.userMessage : 'Something went wrong.',
+          title: formErrorMessage(error),
         });
       },
     });
@@ -326,48 +423,14 @@ export default function DriverProfilePage() {
                   onRetry={() => void hosQuery.refetch()}
                 />
               ) : (
-                <div className="mt-3 grid grid-cols-4 gap-3">
-                  <div className="rounded-md border border-border p-3.5">
-                    <HosMeter
-                      label="Drive left"
-                      remainingSec={hosQuery.data.driveRemainingSec}
-                      limitSec={hosQuery.data.driveLimitSec}
-                      // Static "limit exceeded" used to label a fresh 11:00 clock as exceeded.
-                      ofHint={hosQuery.data.driveRemainingSec <= 0 ? 'limit exceeded' : 'of 11:00'}
-                    />
-                  </div>
-                  <div className="rounded-md border border-border p-3.5">
-                    <HosMeter
-                      label="Shift left"
-                      remainingSec={hosQuery.data.shiftRemainingSec}
-                      limitSec={hosQuery.data.shiftLimitSec}
-                      ofHint="of 14:00"
-                    />
-                  </div>
-                  <div className="rounded-md border border-border p-3.5">
-                    <HosMeter
-                      label="Cycle left"
-                      remainingSec={hosQuery.data.cycleRemainingSec}
-                      limitSec={hosQuery.data.cycleLimitSec}
-                      ofHint="of 70:00"
-                    />
-                  </div>
-                  <div className="rounded-md border border-border p-3.5">
-                    <HosMeter
-                      label="Break in"
-                      remainingSec={hosQuery.data.breakInSec}
-                      limitSec={hosQuery.data.breakLimitSec}
-                      ofHint="of 08:00 driving"
-                    />
-                  </div>
-                </div>
+                <DriverHosMeters clocks={hosQuery.data} />
               )}
             </Card>
 
             <Card>
               <SectionHeader
                 title="Violations & alerts"
-                subtitle="Last 8 days"
+                subtitle="Open (unresolved)"
                 action={
                   // WB-186 — the button had no handler. Per-driver violations are rendered by
                   // W-08, so `View all` opens this driver's log there, exactly like the sentence
@@ -380,11 +443,7 @@ export default function DriverProfilePage() {
                   </Button>
                 }
               />
-              {/* ⛔ GAP B-6 — no GET /violations; per-driver violations only surface inside the
-                  logs response, which HOS Logs (W-08, owned elsewhere) already renders. */}
-              <p className="mt-3 text-body text-text-muted">
-                Open HOS Logs to review violations for this driver.
-              </p>
+              <DriverOpenViolationsList driverId={driver.id} timezone={driver.homeTerminalTimezone} />
             </Card>
 
             <Card>

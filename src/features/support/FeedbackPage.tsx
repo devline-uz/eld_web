@@ -1,15 +1,19 @@
 // owner: web-settings-admin — W-25 Support · Feedback (web/tz.md §10 W-25). Perm `support`.
 // Design: web/roles and screens/admin panel/Feedback survey, satisfaction, driver comments.jpg
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Send } from 'lucide-react';
 import { Button } from '@/shared/ui/Button';
 import { Card, SectionHeader } from '@/shared/ui/Card';
 import { useToast } from '@/shared/ui/Toast';
-import { ApiError } from '@/shared/api/errors';
+import { ApiError, formErrorMessage } from '@/shared/api/errors';
 import { useSubmitFeedback } from '@/shared/api/settingsAdmin';
 import { usePermission } from '@/shared/auth/usePermission';
 import { SUPPORT_REASON } from './lib/copy';
 import { usePageHeader } from '@/app/layouts/Topbar';
+
+/** `CreateFeedbackDto.comment` is `max(1000)`. */
+const COMMENT_MAX = 1000;
+const FIELD_LABELS = { comment: 'Comment', answers: 'Answers' };
 
 const QUESTIONS: { id: string; question: string; options: string[] }[] = [
   {
@@ -52,6 +56,12 @@ export default function FeedbackPage() {
   const [contactMe, setContactMe] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The banner sits at the top of a tall form whose button is at the bottom — an error used to
+  // appear out of sight, so `Submit feedback` looked like it did nothing.
+  const errorRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (error) errorRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [error]);
 
   function handleSubmit() {
     if (!canSubmit || submitFeedback.isPending) return;
@@ -67,14 +77,12 @@ export default function FeedbackPage() {
       {
         onSuccess: () => setSubmitted(true),
         onError: (err) => {
-          if (err instanceof ApiError && err.status === 403) {
-            setError(err.userMessage);
+          // A 403 or a 422 (spelled out per field) stays on the form; anything else is a toast.
+          if (err instanceof ApiError && [400, 403, 422].includes(err.status)) {
+            setError(formErrorMessage(err, [], FIELD_LABELS));
             return;
           }
-          toast({
-            kind: 'error',
-            title: err instanceof ApiError ? err.userMessage : 'Something went wrong.',
-          });
+          toast({ kind: 'error', title: formErrorMessage(err) });
         },
       },
     );
@@ -116,6 +124,7 @@ export default function FeedbackPage() {
             <div className="flex flex-col gap-5">
               {error && (
                 <p
+                  ref={errorRef}
                   role="alert"
                   className="rounded-md bg-danger-soft px-3 py-2 text-caption text-danger"
                 >
@@ -155,6 +164,7 @@ export default function FeedbackPage() {
                 <textarea
                   value={comment}
                   onChange={(e) => setComment(e.target.value)}
+                  maxLength={COMMENT_MAX}
                   rows={3}
                   aria-label="Anything else you would like us to know?"
                   className="w-full rounded-md border border-border bg-bg-surface px-3 py-2 text-body text-text"
