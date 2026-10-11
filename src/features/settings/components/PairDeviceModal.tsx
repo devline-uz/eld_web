@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
-import { ApiError } from '@/shared/api/errors';
+import { formErrorMessage } from '@/shared/api/errors';
 import { useVehiclesPicker } from '@/shared/api/vehicles';
 import { usePairDevice, type DeviceRow } from '@/shared/api/settingsAdmin';
 import { Field, inputClass } from './formKit';
@@ -38,8 +38,8 @@ export function PairDeviceModal({ device, onClose }: { device: DeviceRow; onClos
           toast({ kind: 'success', ...SETTINGS_TOAST.devicePaired(device.serial, unitNumber) });
           onClose();
         },
-        onError: (err) =>
-          setError(err instanceof ApiError ? err.userMessage : 'Something went wrong.'),
+        // A 422 is spelled out ("Target version: …") instead of "Check the highlighted fields".
+        onError: (err) => setError(formErrorMessage(err, [], { vehicleId: 'Unit' })),
       },
     );
   }

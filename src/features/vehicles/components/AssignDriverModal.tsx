@@ -8,7 +8,7 @@ import { Avatar } from '@/shared/ui/Avatar';
 import { useToast } from '@/shared/ui/Toast';
 import { useAssignDriver, type VehicleRow } from '@/shared/api/vehicles';
 import { useDriversList } from '@/shared/api/drivers';
-import { ApiError } from '@/shared/api/errors';
+import { ApiError, formErrorMessage } from '@/shared/api/errors';
 
 export function AssignDriverModal({ vehicle, onClose }: { vehicle: VehicleRow; onClose: () => void }) {
   const { toast } = useToast();
@@ -58,7 +58,7 @@ export function AssignDriverModal({ vehicle, onClose }: { vehicle: VehicleRow; o
                       toast({ kind: 'error', title: 'You do not have permission to assign drivers.' });
                       return;
                     }
-                    toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+                    toast({ kind: 'error', title: formErrorMessage(error, [], { driverId: 'Driver', effectiveAt: 'Effective date' }) });
                   },
                 },
               );

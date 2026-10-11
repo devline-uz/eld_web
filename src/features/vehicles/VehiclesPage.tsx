@@ -26,7 +26,7 @@ import { InventoryTabs } from '@/shared/ui/InventoryTabs';
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
 import { EMPTY_STATE_COPY, TOAST_COPY, searchEmptyState } from '@/shared/ui/copy';
 import { toCsv } from '@/shared/lib/csv';
-import { ApiError } from '@/shared/api/errors';
+import { formErrorMessage } from '@/shared/api/errors';
 import { useToast } from '@/shared/ui/Toast';
 import { formatOdometer } from '@/shared/format/numbers';
 import { orUnassigned, orNotAssigned } from '@/shared/format/empty';
@@ -208,7 +208,7 @@ export default function VehiclesPage() {
       const data = await client.get(endpoints.vehicles.export);
       saveBlob(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }), 'vehicles-export.json');
     } catch (error) {
-      toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+      toast({ kind: 'error', title: formErrorMessage(error) });
     } finally {
       setExporting(false);
     }
@@ -255,7 +255,7 @@ export default function VehiclesPage() {
       });
     },
     onError: (error) => {
-      toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+      toast({ kind: 'error', title: formErrorMessage(error, [], { ids: 'Selected units', status: 'Status' }) });
     },
   });
 

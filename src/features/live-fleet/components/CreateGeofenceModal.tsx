@@ -13,7 +13,7 @@ import { TOAST_COPY } from '@/shared/ui/copy';
 import { useCreateGeofence, type GeofencePayload } from '@/shared/api/geofences';
 import { useVehicleGroups } from '@/shared/api/vehicles';
 import { geofenceSchema, type GeofenceFormValues } from '@/shared/forms/schemas';
-import { ApiError } from '@/shared/api/errors';
+import { ApiError, formErrorMessage } from '@/shared/api/errors';
 import { reverseGeocode } from '@/shared/map/geocode';
 import { rectangleCorners, type LatLon } from '@/shared/map/overlays';
 import type { GeofenceDrawMode, GeofenceMapFailure } from '@/shared/map/GeofencePickerMap';
@@ -61,6 +61,18 @@ const MAP_FAILURE_COPY: Record<GeofenceMapFailure, string> = {
     'Map failed to load — check the map API key and that this site’s address is an allowed origin for it.',
 };
 
+/** Server issue paths shown under their own input; any other is spelled out in the banner. */
+const PLACED_FIELDS = ['name', 'address', 'radiusMi', 'dwellMinutes'] as const;
+const GEOFENCE_FIELD_LABELS: Record<string, string> = {
+  centerLat: 'Map shape',
+  centerLon: 'Map shape',
+  polygon: 'Map shape',
+  radiusMeters: 'Radius',
+  category: 'Type',
+  colour: 'Colour',
+  vehicleGroupId: 'Applies to',
+};
+
 const SHAPE_NEEDS_MAP =
   'Drawing a circle, rectangle or polygon needs the map, which is not available here. Choose Address to place this geofence by street address.';
 
@@ -98,6 +110,11 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
   useEffect(() => () => geocodeAbort.current?.abort(), []);
   /** Anything the server refused that could not be mapped onto a field (§6.1 rule 6). */
   const [serverError, setServerError] = useState<string | null>(null);
+  // The banner heads this tall `lg` modal (the map sits between it and Save) — bring it into view.
+  const serverErrorRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (serverError) serverErrorRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [serverError]);
 
   const {
     register,
@@ -155,17 +172,21 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
     setServerError(null);
     if (error instanceof ApiError) {
       const fieldErrors = error.fieldErrors;
-      const known = Object.keys(fieldErrors).filter((field) => field in geofenceSchema.shape);
-      for (const field of known) {
+      // Only fields that render an error line count as placed — `setError` on `category` or
+      // `colour` used to be a no-op, and the banner then said "check the highlighted fields".
+      const placed = Object.keys(fieldErrors).filter((field) =>
+        (PLACED_FIELDS as readonly string[]).includes(field),
+      );
+      for (const field of placed) {
         setError(field as keyof GeofenceFormValues, { message: fieldErrors[field] as string });
       }
-      if (error.status === 422) {
-        if (known.length === Object.keys(fieldErrors).length && known.length > 0) return;
-        setServerError(error.userMessage);
+      if (error.status === 422 || error.status === 400) {
+        if (placed.length === Object.keys(fieldErrors).length && placed.length > 0) return;
+        setServerError(formErrorMessage(error, placed, GEOFENCE_FIELD_LABELS));
         return;
       }
     }
-    toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+    toast({ kind: 'error', title: formErrorMessage(error) });
   }
 
   // Stage 3 — a fire-and-forget mutate() clears RHF's `isSubmitting` before the request resolves
@@ -263,7 +284,7 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
     >
       <form className="flex flex-col gap-5" onSubmit={(event) => void onSave(event)}>
         {serverError && (
-          <p role="alert" className="rounded-md bg-danger-soft p-3 text-body text-danger">
+          <p ref={serverErrorRef} role="alert" className="rounded-md bg-danger-soft p-3 text-body text-danger">
             {serverError}
           </p>
         )}
@@ -424,10 +445,19 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
                 })}
                 placeholder="0.8"
                 disabled={isPending}
+                aria-invalid={Boolean(errors.radiusMi)}
+                aria-describedby={errors.radiusMi ? 'geofence-radius-error' : undefined}
                 className="h-input w-full rounded-md border border-border bg-bg-surface px-3 text-body text-text"
               />
               <span className="text-body text-text-muted">mi</span>
             </div>
+            {/* Was never rendered: `Enter a radius for the circle.` and every radius 422 were
+                set on the form and shown nowhere — Save just did nothing. */}
+            {errors.radiusMi && (
+              <span id="geofence-radius-error" role="alert" className="text-caption text-danger">
+                {errors.radiusMi.message}
+              </span>
+            )}
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-label text-text">Applies to</span>
@@ -494,6 +524,8 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
               }}
               className="h-8 w-14 rounded-md border border-border bg-bg-surface px-2 text-caption text-text disabled:bg-bg-subtle disabled:text-text-muted"
               aria-label="Dwell minutes"
+              aria-invalid={Boolean(errors.dwellMinutes)}
+              aria-describedby={errors.dwellMinutes ? 'geofence-dwell-error' : undefined}
             />
             min
           </label>
@@ -506,6 +538,11 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
             }}
           />
         </div>
+        {errors.dwellMinutes && (
+          <span id="geofence-dwell-error" role="alert" className="-mt-3 text-caption text-danger">
+            {errors.dwellMinutes.message}
+          </span>
+        )}
       </form>
     </Modal>
   );

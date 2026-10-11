@@ -122,9 +122,8 @@ describe('NewAlertRuleModal — Q-2 SMS', () => {
     await user.type(screen.getByPlaceholderText('Break required soon'), 'Speeding');
     await user.click(screen.getByRole('button', { name: 'Create rule' }));
 
-    expect(
-      await screen.findByText('Something went wrong on our side. Try again.'),
-    ).toBeInTheDocument();
+    // Twice on purpose: the toast (§13.3) and the banner inside the modal.
+    expect(await screen.findAllByText('Something went wrong on our side. Try again.')).toHaveLength(2);
   });
 
   it('closes with Cancel', async () => {

@@ -8,11 +8,11 @@ import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
 import { TOAST_COPY } from '@/shared/ui/copy';
 import { vehicleSchema, type VehicleFormValues } from '@/shared/forms/schemas';
-import { VALIDATION_MESSAGES } from '@/shared/forms/messages';
+import { LIMITS, VALIDATION_MESSAGES } from '@/shared/forms/messages';
 import { nonNegativeIntInputProps } from '@/shared/forms/nonNegativeIntInput';
 import { useCreateVehicle, useUpdateVehicle, type VehicleRow } from '@/shared/api/vehicles';
 import { useDevicesLookup } from '@/shared/api/lookups';
-import { ApiError } from '@/shared/api/errors';
+import { ApiError, formErrorMessage } from '@/shared/api/errors';
 import { conflictField } from '@/shared/api/conflicts';
 import {
   VEHICLE_CONFLICT_RULES,
@@ -64,6 +64,26 @@ const SERVER_FIELD_ALIAS: Record<string, keyof VehicleFormValues> = {
   eldSerial: 'deviceId',
   plateState: 'licenseState',
   issuingState: 'licenseState',
+  odometerMi: 'odometer',
+};
+/** Form fields that render their own error line — a server issue on any other goes to the toast. */
+const PLACED_FORM_FIELDS = [
+  'unitNumber',
+  'vin',
+  'make',
+  'model',
+  'year',
+  'licensePlate',
+  'licenseState',
+  'odometer',
+  'deviceId',
+] as const satisfies readonly (keyof VehicleFormValues)[];
+/** `CreateVehicleDto` paths with no inline error, in this form's words. */
+const VEHICLE_FIELD_LABELS: Record<string, string> = {
+  notes: 'Notes',
+  fuelType: 'Fuel type',
+  sleeperBerth: 'Sleeper berth',
+  groupId: 'Vehicle group',
 };
 
 const inputClass = 'h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text';
@@ -193,14 +213,20 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
           toast({ kind: 'error', title: error.userMessage });
           return;
         }
+        // A 400/422 issue goes under the input it names. One on a field this form shows no error
+        // for (`notes`, `fuelType`, …) used to be `setError`-ed onto nothing and the save failed in
+        // silence — those are now spelled out in the toast.
+        const placed: string[] = [];
         if (error instanceof ApiError) {
-          const fieldErrors = error.fieldErrors;
-          for (const [field, message] of Object.entries(fieldErrors)) {
-            setError((SERVER_FIELD_ALIAS[field] ?? field) as keyof VehicleFormValues, { message });
+          for (const [field, message] of Object.entries(error.fieldErrors)) {
+            const formField = SERVER_FIELD_ALIAS[field] ?? field;
+            if (!(PLACED_FORM_FIELDS as readonly string[]).includes(formField)) continue;
+            setError(formField as keyof VehicleFormValues, { message });
+            placed.push(field);
           }
-          if (Object.keys(fieldErrors).length > 0) return;
+          if (placed.length > 0 && placed.length === Object.keys(error.fieldErrors).length) return;
         }
-        toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+        toast({ kind: 'error', title: formErrorMessage(error, placed, VEHICLE_FIELD_LABELS) });
       },
     });
   }
@@ -228,15 +254,15 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
             <input {...register('unitNumber')} placeholder="e.g. 126" disabled={submitting} className={inputClass} />
           </Field>
           <Field label="ELD serial" error={errors.deviceId?.message}>
-            <input {...register('deviceId')} placeholder="PT30_1C4F" disabled={submitting} className={inputClass} />
+            <input {...register('deviceId')} placeholder="PT30_1C4F" maxLength={LIMITS.vehicleEldSerialMax} disabled={submitting} className={inputClass} />
           </Field>
         </div>
         <div className="grid grid-cols-4 gap-4">
           <Field label="Make" required error={errors.make?.message}>
-            <input {...register('make')} disabled={submitting} className={inputClass} />
+            <input {...register('make')} maxLength={LIMITS.vehicleMakeModelMax} disabled={submitting} className={inputClass} />
           </Field>
           <Field label="Model" required error={errors.model?.message}>
-            <input {...register('model')} disabled={submitting} className={inputClass} />
+            <input {...register('model')} maxLength={LIMITS.vehicleMakeModelMax} disabled={submitting} className={inputClass} />
           </Field>
           <Field label="Year" required error={errors.year?.message}>
             <input
@@ -302,6 +328,7 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             disabled={submitting}
+            maxLength={LIMITS.vehicleNotesMax}
             placeholder="Optional — visible to fleet managers only"
             rows={3}
             className="rounded-md border border-border bg-bg-surface px-3 py-2 text-body text-text"

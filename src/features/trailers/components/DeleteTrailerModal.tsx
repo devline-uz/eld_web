@@ -5,7 +5,7 @@ import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
 import { TOAST_COPY } from '@/shared/ui/copy';
 import { useDeleteTrailer, type TrailerRow } from '@/shared/api/trailers';
-import { ApiError } from '@/shared/api/errors';
+import { ApiError, formErrorMessage } from '@/shared/api/errors';
 
 export function DeleteTrailerModal({ trailer, onClose }: { trailer: TrailerRow; onClose: () => void }) {
   const { toast } = useToast();
@@ -32,11 +32,12 @@ export function DeleteTrailerModal({ trailer, onClose }: { trailer: TrailerRow; 
                 },
                 onError: (error) => {
                   // The server's own sentence (e.g. why a referenced trailer cannot go) rides under the generic title.
-                  if (error instanceof ApiError) {
-                    toast({ kind: 'error', title: error.userMessage, description: error.message !== error.userMessage ? error.message : undefined });
-                  } else {
-                    toast({ kind: 'error', title: 'Something went wrong.' });
-                  }
+                  const title = formErrorMessage(error);
+                  toast({
+                    kind: 'error',
+                    title,
+                    description: error instanceof ApiError && error.message !== error.userMessage && error.message !== title ? error.message : undefined,
+                  });
                 },
               })
             }

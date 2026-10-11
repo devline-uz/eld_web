@@ -583,3 +583,54 @@ describe('InviteUserModal — role picker states', () => {
     expect(screen.getByRole('radio', { name: /^Admin/ })).toBeInTheDocument();
   });
 });
+
+describe('InviteUserModal — server validation is never silent', () => {
+  async function fillAndSend(user: ReturnType<typeof userEvent.setup>) {
+    await rolesReady();
+    await user.type(screen.getByPlaceholderText('Anna Weiss'), 'Anna Weiss');
+    await user.type(screen.getByPlaceholderText('anna.weiss@example.com'), 'anna.weiss@example.com');
+    await user.click(screen.getByRole('button', { name: 'Send invitation' }));
+  }
+
+  it('spells out a 422 issue on a field the form does not render, labelled, in the banner', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post(url(endpoints.users.create), () =>
+        fail(422, 'VALIDATION_FAILED', 'Validation failed', {
+          issues: [
+            { path: ['email'], code: 'invalid_string', message: 'Invalid email' },
+            { path: ['terminalIds'], code: 'too_big', message: 'Array must contain at most 50 element(s)' },
+          ],
+        }),
+      ),
+    );
+    renderModal();
+    await fillAndSend(user);
+
+    expect(await screen.findByText('Invalid email')).toBeInTheDocument();
+    expect(
+      screen.getByText('Terminal access: Array must contain at most 50 element(s).'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Check the highlighted fields and try again.')).not.toBeInTheDocument();
+  });
+
+  it('refuses a name longer than the DTO allows before sending', async () => {
+    const user = userEvent.setup();
+    let posts = 0;
+    server.use(
+      http.post(url(endpoints.users.create), () => {
+        posts += 1;
+        return ok({ id: 'usr_x', emailDelivered: true });
+      }),
+    );
+    renderModal();
+    await rolesReady();
+    await user.click(screen.getByPlaceholderText('Anna Weiss'));
+    await user.paste(`${'A'.repeat(81)} Weiss`);
+    await user.type(screen.getByPlaceholderText('anna.weiss@example.com'), 'anna.weiss@example.com');
+    await user.click(screen.getByRole('button', { name: 'Send invitation' }));
+
+    expect(await screen.findByText('First name must be 80 characters or fewer.')).toBeInTheDocument();
+    expect(posts).toBe(0);
+  });
+});

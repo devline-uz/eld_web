@@ -3,7 +3,7 @@
 // POSTed, `config.secret` is the HMAC key for `X-OneBook-Signature`. `PUT /integrations/webhook`
 // replaces the whole config and `GET` returns the secret redacted, so the secret is required on
 // every save — including an edit — and the stored one is never shown.
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
@@ -16,6 +16,7 @@ import { fields } from '@/shared/forms';
 import { useUpsertIntegration, type WebhookIntegrationConfig } from '@/shared/api/settingsAdmin';
 import { Field, inputClass } from './formKit';
 import { SETTINGS_TOAST, WEBHOOK_COPY } from '../lib/copy';
+import { placeServerFieldErrors, serverErrorBanner } from '../lib/serverFieldErrors';
 
 const webhookSchema = z.object({
   url: fields.webhookUrl(),
@@ -54,6 +55,10 @@ export function WebhookConfigModal({
   const upsert = useUpsertIntegration();
   const [showSecret, setShowSecret] = useState(false);
   const [banner, setBanner] = useState<string | null>(null);
+  const bannerRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (banner) bannerRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [banner]);
   const submitting = upsert.isPending;
 
   const {
@@ -92,21 +97,15 @@ export function WebhookConfigModal({
           onClose();
         },
         onError: (error) => {
-          if (error instanceof ApiError) {
-            const unmapped: string[] = [];
-            let mapped = 0;
-            for (const [path, msg] of Object.entries(error.fieldErrors)) {
-              const field = FIELD_BY_PATH[path];
-              if (field) {
-                setError(field, { message: msg });
-                mapped += 1;
-              } else unmapped.push(msg);
-            }
-            if (unmapped.length > 0) setBanner(unmapped.join(' '));
-            if (mapped > 0 || unmapped.length > 0) return;
-          }
-          const message = error instanceof ApiError ? error.userMessage : 'Something went wrong.';
+          const placed = placeServerFieldErrors(error, FIELD_BY_PATH, (field, msg) =>
+            setError(field, { message: msg }),
+          );
+          // `null` — every issue is under its field. Unplaced issues are spelled out with their
+          // field name instead of a bare message (or the generic "Check the highlighted fields").
+          const message = serverErrorBanner(error, placed, { config: 'Configuration', enabled: 'Enabled' });
+          if (message === null) return;
           setBanner(message);
+          if (error instanceof ApiError && (error.status === 400 || error.status === 422)) return;
           toast({ kind: 'error', title: message });
         },
       },
@@ -140,7 +139,7 @@ export function WebhookConfigModal({
     >
       <form className="flex flex-col gap-4" onSubmit={handleSubmit(onSubmit)} noValidate>
         {banner && (
-          <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-body text-danger">
+          <p ref={bannerRef} role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-body text-danger">
             {banner}
           </p>
         )}

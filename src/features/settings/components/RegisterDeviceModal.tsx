@@ -7,7 +7,7 @@ import { useForm } from 'react-hook-form';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
-import { ApiError } from '@/shared/api/errors';
+import { ApiError, formErrorMessage } from '@/shared/api/errors';
 import {
   useCreateDevice,
   usePairDevice,
@@ -19,6 +19,11 @@ import {
 import { useVehiclesPicker } from '@/shared/api/vehicles';
 import { Field, inputClass, ToggleRow } from './formKit';
 import { SETTINGS_REASON } from '../lib/copy';
+import { placeServerFieldErrors, serverErrorBanner } from '../lib/serverFieldErrors';
+
+/** `CreateDeviceDto` issue path → the field this modal renders. */
+const SERVER_FIELDS = { serial: 'serial', model: 'model' } as const;
+const FIELD_LABELS = { firmware: 'Firmware', bleMacAddress: 'BLE MAC address' };
 
 import {
   deviceSchema as registerDeviceSchema,
@@ -66,13 +71,23 @@ export function RegisterDeviceModal({ onClose }: { onClose: () => void }) {
       updateDevice.mutate(
         { id: device.id, dto: { autoFirmware, shareDiagnostics } },
         {
-          onSettled: () => {
+          onSuccess: () => {
             toast({
               kind: 'success',
               title: `Device ${device.serial} registered`,
               description: paired ? 'ELD paired and the driver was notified.' : undefined,
             });
             setRegistered({ ...device, autoFirmware, shareDiagnostics });
+          },
+          // The PATCH used to share the success path — a refused policy update still read as
+          // "registered" while the device kept the server defaults. Say what did not stick.
+          onError: (error) => {
+            toast({
+              kind: 'warning',
+              title: `Device ${device.serial} registered, but its firmware and diagnostics settings were not saved`,
+              description: `${formErrorMessage(error, [], FIELD_LABELS)} Change them from the device's row menu.`,
+            });
+            setRegistered(device);
           },
         },
       );
@@ -104,7 +119,7 @@ export function RegisterDeviceModal({ onClose }: { onClose: () => void }) {
                   toast({
                     kind: 'error',
                     title: `Device ${device.serial} registered but not paired`,
-                    description: error instanceof ApiError ? error.userMessage : undefined,
+                    description: formErrorMessage(error),
                   });
                   finishPolicy(device, false);
                 },
@@ -119,10 +134,12 @@ export function RegisterDeviceModal({ onClose }: { onClose: () => void }) {
             setError('serial', { message: 'A device with this serial is already registered.' });
             return;
           }
-          toast({
-            kind: 'error',
-            title: error instanceof ApiError ? error.userMessage : 'Something went wrong.',
-          });
+          // A 422 lands on the serial / model field; anything else is spelled out in the toast.
+          const placed = placeServerFieldErrors(error, SERVER_FIELDS, (field, message) =>
+            setError(field, { message }),
+          );
+          const message = serverErrorBanner(error, placed, FIELD_LABELS);
+          if (message !== null) toast({ kind: 'error', title: message });
         },
       },
     );
@@ -166,8 +183,7 @@ export function RegisterDeviceModal({ onClose }: { onClose: () => void }) {
                   onError: (error) =>
                     toast({
                       kind: 'error',
-                      title:
-                        error instanceof ApiError ? error.userMessage : 'Something went wrong.',
+                      title: formErrorMessage(error),
                     }),
                 })
               }

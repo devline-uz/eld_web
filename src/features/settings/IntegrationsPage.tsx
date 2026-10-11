@@ -31,7 +31,7 @@ import { useToast } from '@/shared/ui/Toast';
 import { orDash } from '@/shared/format/empty';
 import { formatRelative } from '@/shared/format/relative';
 import { formatCarrier } from '@/shared/format/datetime';
-import { ApiError } from '@/shared/api/errors';
+import { formErrorMessage } from '@/shared/api/errors';
 import {
   useIntegrationsList,
   useUpsertIntegration,
@@ -147,7 +147,7 @@ export default function IntegrationsPage() {
       { provider: entry.provider, dto: { enabled: true, config: {} } },
       {
         onSuccess: () => toast({ kind: 'success', ...SETTINGS_TOAST.integrationConnected(entry.name) }),
-        onError: (error) => toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }),
+        onError: (error) => toast({ kind: 'error', title: formErrorMessage(error) }),
       },
     );
   }
@@ -156,7 +156,7 @@ export default function IntegrationsPage() {
     if (sendWebhookTest.isPending) return;
     sendWebhookTest.mutate(undefined, {
       onSuccess: () => toast({ kind: 'success', ...SETTINGS_TOAST.webhookTestQueued }),
-      onError: (error) => toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }),
+      onError: (error) => toast({ kind: 'error', title: formErrorMessage(error) }),
     });
   }
 
@@ -167,7 +167,7 @@ export default function IntegrationsPage() {
         setDisconnectTarget(null);
       },
       onError: (error) => {
-        toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+        toast({ kind: 'error', title: formErrorMessage(error) });
         setDisconnectTarget(null);
       },
     });
@@ -182,7 +182,7 @@ export default function IntegrationsPage() {
         setRevokeTarget(null);
       },
       onError: (error) => {
-        toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+        toast({ kind: 'error', title: formErrorMessage(error) });
         setRevokeTarget(null);
       },
     });

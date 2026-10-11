@@ -13,7 +13,7 @@ import { ConfirmDelete } from '@/shared/ui/Modal';
 import { useToast } from '@/shared/ui/Toast';
 import { ErrorState, LoadingState } from '@/shared/ui/states';
 import { formatLocal } from '@/shared/format/datetime';
-import { ApiError } from '@/shared/api/errors';
+import { formErrorMessage } from '@/shared/api/errors';
 import {
   useDriverDocuments,
   useUploadDriverDocument,
@@ -30,6 +30,9 @@ const TYPE_LABEL: Record<DriverDocumentType, string> = {
   MVR: 'MVR',
   OTHER: 'Other',
 };
+
+/** `CreateDriverDocumentDto.fileName` (drivers.dto.ts). */
+const FILE_NAME_MAX = 200;
 
 export function DriverDocumentsTab({ driverId }: { driverId: string }) {
   const { toast } = useToast();
@@ -53,6 +56,11 @@ export function DriverDocumentsTab({ driverId }: { driverId: string }) {
       setError('Unsupported file type — PDF, JPEG, PNG, HEIC or WebP only.');
       return;
     }
+    // `CreateDriverDocumentDto.fileName` is `max(200)` — a longer name was refused with a 422.
+    if (file.name.length > FILE_NAME_MAX) {
+      setError(`File name must be ${FILE_NAME_MAX} characters or fewer — rename the file and try again.`);
+      return;
+    }
     upload.mutate(
       { type: uploadType, file, expiresAt: expiresAt || undefined },
       {
@@ -62,7 +70,7 @@ export function DriverDocumentsTab({ driverId }: { driverId: string }) {
           if (inputRef.current) inputRef.current.value = '';
         },
         onError: (err) => {
-          const message = err instanceof ApiError ? err.userMessage : 'Something went wrong.';
+          const message = formErrorMessage(err);
           setError(message);
           toast({ kind: 'error', title: message });
         },
@@ -81,7 +89,7 @@ export function DriverDocumentsTab({ driverId }: { driverId: string }) {
         setPendingDelete(null);
         toast({
           kind: 'error',
-          title: err instanceof ApiError ? err.userMessage : 'Something went wrong.',
+          title: formErrorMessage(err),
         });
       },
     });
@@ -141,7 +149,11 @@ export function DriverDocumentsTab({ driverId }: { driverId: string }) {
               }}
             />
           </div>
-          {error && <p className="mt-2 text-body text-danger">{error}</p>}
+          {error && (
+            <p role="alert" className="mt-2 text-body text-danger">
+              {error}
+            </p>
+          )}
         </Card>
       </Can>
 

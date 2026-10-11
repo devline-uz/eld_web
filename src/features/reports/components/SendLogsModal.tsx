@@ -84,9 +84,13 @@ const FIELD_OF: Record<string, keyof SendLogsValues> = {
   driverId: 'driverId',
   recipient: 'recipient',
   outputFileComment: 'outputFileComment',
-  rangeStart: 'from',
+  // The range renders one error line, under `to` — `from` has none, so a `rangeStart` issue
+  // set there was never seen.
+  rangeStart: 'to',
   rangeEnd: 'to',
 };
+/** Issue paths that land under an input; the alert spells out only the rest. */
+const PLACED_FIELDS = Object.keys(FIELD_OF);
 
 export function SendLogsModal({ open, onClose, initial, erodsMode, eldIdentifier, timezone }: SendLogsModalProps) {
   const { toast } = useToast();
@@ -97,6 +101,11 @@ export function SendLogsModal({ open, onClose, initial, erodsMode, eldIdentifier
   // WB-146 — `isSubmitting`/`isPending` only turn true on the next render, so two clicks in the
   // same tick both reach the handler. The ref makes the submit non-reentrant.
   const inFlight = useRef(false);
+  // The alert sits above the form in this `lg` modal — bring a refusal into view.
+  const alertRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (create.isError) alertRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [create.isError]);
 
   const to = initial?.to ?? todayKey(timezone);
   const form = useForm<SendLogsValues>({
@@ -261,7 +270,9 @@ export function SendLogsModal({ open, onClose, initial, erodsMode, eldIdentifier
           </div>
         )}
 
-        <ActionAlert message={create.isError ? refusalText(create.error) : null} />
+        <div ref={alertRef}>
+          <ActionAlert message={create.isError ? refusalText(create.error, PLACED_FIELDS) : null} />
+        </div>
 
         <fieldset disabled={busy || sent} className="contents">
           <div className="grid grid-cols-2 gap-4">

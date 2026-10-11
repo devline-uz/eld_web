@@ -63,6 +63,23 @@ export const VALIDATION_MESSAGES = {
   time: 'Enter a time as HH:MM:SS.',
   timeOrder: 'End time must be after the start time.',
   engineHours: 'Enter engine hours, e.g. 1079.4.',
+  engineHoursMax: 'Engine hours cannot exceed 99,999.',
+  firstNameMax: 'First name must be 80 characters or fewer.',
+  lastNameMax: 'Last name must be 80 characters or fewer.',
+  roleNameMax: 'Role name must be 80 characters or fewer.',
+  roleDescriptionMax: 'Description must be 500 characters or fewer.',
+  vehicleMakeMax: 'Make must be 60 characters or fewer.',
+  vehicleModelMax: 'Model must be 60 characters or fewer.',
+  vehicleEldSerialMax: 'ELD serial must be 60 characters or fewer.',
+  vehicleNotesMax: 'Notes must be 500 characters or fewer.',
+  geofenceNameMax: 'Geofence name must be 120 characters or fewer.',
+  geofenceAddressMax: 'Address must be 300 characters or fewer.',
+  geofenceRadius: 'Enter the radius in miles.',
+  geofenceRadiusPositive: 'Enter a radius greater than 0.',
+  geofenceRadiusMax: 'Radius must be 500 mi or less.',
+  geofenceDwell: 'Enter the dwell time in whole minutes.',
+  geofenceDwellMin: 'Enter a dwell time of at least 1 minute.',
+  geofenceDwellMax: 'Dwell time must be 1,440 minutes (24 h) or less.',
   placePick: 'Pick a place from the suggestions so it can be located.',
   webhookUrl: 'Enter a full URL starting with https:// (or http://).',
   webhookSecret: 'Enter a signing secret, or generate one.',
@@ -103,10 +120,27 @@ export const LIMITS = {
   companyTextMax: 120,
   dotNumberMax: 8,
   mcNumberMax: 8,
-  /** 11.11 Request a log edit — odometer 3,000,000 is 7 digits; engine hours to 0.1 h. */
+  /** 11.11 Request a log edit — odometer 3,000,000 is 7 digits; engine hours to 0.1 h.
+   * `CreateEditRequestDto` / `ProposeEventDto` `engineHours` is `max(99_999)` — 5 integer digits
+   * (99,999.x still passes the input filter, so the form also checks `engineHoursMax`). */
   odometerDigits: 7,
-  engineHoursIntDigits: 6,
+  engineHoursIntDigits: 5,
   engineHoursFracDigits: 1,
+  engineHoursMax: 99_999,
+  /** CreateUserDto `firstName` / `lastName` ≤ 80; CreateRoleDto `name` ≤ 80. */
+  personNameMax: 80,
+  roleNameMax: 80,
+  /** 11.19 role description — the form keeps 200 (CreateRoleDto allows 500). */
+  roleDescriptionMax: 500,
+  /** CreateVehicleDto — `make` / `model` ≤ 60, `eldSerial` ≤ 60, `notes` ≤ 500. */
+  vehicleMakeModelMax: 60,
+  vehicleEldSerialMax: 60,
+  vehicleNotesMax: 500,
+  /** CreateGeofenceDto — `name` 1–120, `address` ≤ 300, `radiusMi` ≤ 500, `dwellMinutes` 1–1440. */
+  geofenceNameMax: 120,
+  geofenceAddressMax: 300,
+  geofenceRadiusMiMax: 500,
+  geofenceDwellMinutesMax: 1_440,
   /** Minutes / months — 3 digits is 999 at most. */
   smallCountDigits: 3,
   transferRangeDays: 8,

@@ -9,7 +9,7 @@ import { useToast } from '@/shared/ui/Toast';
 import { TOAST_COPY } from '@/shared/ui/copy';
 import { formatRelative } from '@/shared/format/relative';
 import { usePermission } from '@/shared/auth/usePermission';
-import { ApiError, errorMessage } from '@/shared/api/errors';
+import { errorMessage, formErrorMessage } from '@/shared/api/errors';
 import { useCarrier, useUpdateCarrier, type CarrierRow, type HosRuleset } from '@/shared/api/settingsAdmin';
 import { Field, inputClass, ToggleRow } from './components/formKit';
 import { CountryPhoneInput } from './components/CountryPhoneInput';
@@ -234,7 +234,7 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
           toast({ kind: 'error', title: highlighted ? errorMessage('VALIDATION_FAILED') : 'The changes were not saved.' });
           return;
         }
-        toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' });
+        toast({ kind: 'error', title: formErrorMessage(error) });
       },
     });
   }

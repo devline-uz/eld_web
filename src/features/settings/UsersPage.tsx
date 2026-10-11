@@ -19,7 +19,7 @@ import { searchEmptyState } from '@/shared/ui/copy';
 import { useToast } from '@/shared/ui/Toast';
 import { formatRelative } from '@/shared/format/relative';
 import { orDash } from '@/shared/format/empty';
-import { ApiError } from '@/shared/api/errors';
+import { formErrorMessage } from '@/shared/api/errors';
 import {
   useUsersList,
   useRolesList,
@@ -145,7 +145,7 @@ export default function UsersPage() {
         onError: (error) =>
           toast({
             kind: 'error',
-            title: error instanceof ApiError ? error.userMessage : 'Something went wrong.',
+            title: formErrorMessage(error),
           }),
       },
     );
@@ -177,7 +177,7 @@ export default function UsersPage() {
       onError: (error) =>
         toast({
           kind: 'error',
-          title: error instanceof ApiError ? error.userMessage : 'Something went wrong.',
+          title: formErrorMessage(error),
         }),
     });
   }
@@ -219,7 +219,7 @@ export default function UsersPage() {
       onError: (error) => {
         toast({
           kind: 'error',
-          title: error instanceof ApiError ? error.userMessage : 'Something went wrong.',
+          title: formErrorMessage(error),
         });
         setRevokeTarget(null);
       },

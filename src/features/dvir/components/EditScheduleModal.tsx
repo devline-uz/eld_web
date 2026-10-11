@@ -2,7 +2,7 @@
 // `PATCH /maintenance-schedules/:id` (`endpoints.maintenanceSchedules.update`), a real endpoint.
 // QA-B — without a `schedule` the same form creates one (`POST /maintenance-schedules`): the tab's
 // empty state said "Create a schedule…" while no control on the screen could.
-import { useId, useState, type KeyboardEvent } from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
@@ -10,7 +10,7 @@ import { useToast } from '@/shared/ui/Toast';
 import { TOAST_COPY } from '@/shared/ui/copy';
 import { useCreateSchedule, useUpdateSchedule, type ScheduleTableRow } from '@/shared/api/dvir';
 import { useVehiclesPicker } from '@/shared/api/vehicles';
-import { ApiError } from '@/shared/api/errors';
+import { ApiError, formErrorMessage } from '@/shared/api/errors';
 import { formatDistance, formatNumber } from '@/shared/format/numbers';
 import { formatLocal } from '@/shared/format/datetime';
 import { computeDue, overdueReasons } from '../lib/maintenanceDue';
@@ -35,6 +35,23 @@ const WHOLE_NUMBER_RE = /^\d+$/;
  */
 const INTERVAL_MI_MAX = 2_000_000;
 const INTERVAL_DAYS_MAX = 3660;
+/** `name: z.string().min(1).max(120)` in both schedule DTOs. */
+const NAME_MAX = 120;
+
+/** DTO issue paths this form shows under their own field. */
+const PLACED_FIELDS = ['vehicleId', 'name', 'intervalMi', 'intervalDays', 'lastServiceMi', 'lastServiceAt'] as const;
+type PlacedField = (typeof PLACED_FIELDS)[number];
+
+const FIELD_LABELS: Record<string, string> = {
+  vehicleId: 'Unit',
+  name: 'Name',
+  intervalMi: 'Interval (miles)',
+  intervalDays: 'Interval (days)',
+  lastServiceMi: 'Last service odometer',
+  lastServiceAt: 'Last service date',
+  enabled: 'Schedule is active',
+  scheduleType: 'Type',
+};
 
 /** Number inputs accept `-`, `+` and exponent `e`; none can form a valid whole number here. */
 function blockNonDigitKeys(e: KeyboardEvent<HTMLInputElement>) {
@@ -91,6 +108,18 @@ export function EditScheduleModal({ schedule, onClose }: { schedule?: ScheduleTa
   const [lastServiceAt, setLastServiceAt] = useState(initial.lastServiceAt ? initial.lastServiceAt.slice(0, 10) : '');
   const [enabled, setEnabled] = useState<boolean>(initial.enabled);
   const [serverError, setServerError] = useState<string | null>(null);
+  // A 422 from the server, mapped onto the field it is about; cleared as soon as that field changes.
+  const [serverFieldErrors, setServerFieldErrors] = useState<Partial<Record<PlacedField, string>>>({});
+  const clearServerError = (field: PlacedField) =>
+    setServerFieldErrors((prev) => (prev[field] ? { ...prev, [field]: undefined } : prev));
+  // The banner is the last thing in the modal — bring it into view when it appears.
+  const serverErrorRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (serverError) serverErrorRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [serverError]);
+  const nameErrorId = useId();
+  const vehicleErrorId = useId();
+  const lastServiceAtErrorId = useId();
 
   const odometerErrorId = useId();
   const intervalMiErrorId = useId();
@@ -103,10 +132,13 @@ export function EditScheduleModal({ schedule, onClose }: { schedule?: ScheduleTa
 
   // WD-115 — per-field errors; re-checked on every change, so a pasted or programmatic value
   // (`-5`, `1.5`) is caught even though the key handler blocks typing `-`/`+`/`e`.
-  const intervalMiError = wholeNumberError(intervalMi, 1, INTERVAL_MI_MAX, 'mi');
-  const intervalDaysError = wholeNumberError(intervalDays, 1, INTERVAL_DAYS_MAX, 'days');
+  const intervalMiFormatError = wholeNumberError(intervalMi, 1, INTERVAL_MI_MAX, 'mi');
+  const intervalDaysFormatError = wholeNumberError(intervalDays, 1, INTERVAL_DAYS_MAX, 'days');
   const lastServiceMiFormatError = wholeNumberError(lastServiceMi, 0, null, 'mi');
-  const numbersValid = !intervalMiError && !intervalDaysError && !lastServiceMiFormatError;
+  const numbersValid = !intervalMiFormatError && !intervalDaysFormatError && !lastServiceMiFormatError;
+  // Client-side message first; otherwise whatever the server said about that field.
+  const intervalMiError = intervalMiFormatError ?? serverFieldErrors.intervalMi ?? null;
+  const intervalDaysError = intervalDaysFormatError ?? serverFieldErrors.intervalDays ?? null;
   const lastServiceMiAhead =
     currentOdometerMi != null &&
     lastServiceMi.trim() !== '' &&
@@ -116,7 +148,9 @@ export function EditScheduleModal({ schedule, onClose }: { schedule?: ScheduleTa
     lastServiceMiFormatError ??
     (lastServiceMiAhead && currentOdometerMi != null
       ? `Can't be greater than the unit's current odometer (${formatDistance(currentOdometerMi)}).`
-      : null);
+      : null) ??
+    serverFieldErrors.lastServiceMi ??
+    null;
   const valid =
     (!isCreate || vehicleId !== '') &&
     name.trim() !== '' &&
@@ -163,8 +197,17 @@ export function EditScheduleModal({ schedule, onClose }: { schedule?: ScheduleTa
     // now sends `null`. `name` and "at least one interval" stay required (`valid`), because the
     // row cannot hold a null name or a schedule with no interval at all.
     setServerError(null);
-    const onError = (error: unknown) =>
-      setServerError(error instanceof ApiError ? error.userMessage : 'Something went wrong.');
+    // A 422 used to land as a bare generic banner — nothing on the fields. Each issue now goes on
+    // its own field; anything unplaceable (the "at least one interval" refine) is spelled out.
+    const onError = (error: unknown) => {
+      const fieldErrors = error instanceof ApiError ? error.fieldErrors : {};
+      const placed: Partial<Record<PlacedField, string>> = {};
+      for (const field of PLACED_FIELDS) {
+        if (fieldErrors[field]) placed[field] = fieldErrors[field];
+      }
+      setServerFieldErrors(placed);
+      setServerError(formErrorMessage(error, PLACED_FIELDS, FIELD_LABELS));
+    };
     // `lastServiceMi`/`lastServiceAt` are not nullable in `UpdateMaintenanceScheduleDto` — sending
     // `null` for an emptied field was answered 422, so an empty one is left out instead.
     const lastService = {
@@ -232,7 +275,16 @@ export function EditScheduleModal({ schedule, onClose }: { schedule?: ScheduleTa
             <span className="text-label text-text">
               Unit <span className="text-danger">*</span>
             </span>
-            <select value={vehicleId} onChange={(e) => setVehicleId(e.target.value)} className={inputClass}>
+            <select
+              value={vehicleId}
+              onChange={(e) => {
+                setVehicleId(e.target.value);
+                clearServerError('vehicleId');
+              }}
+              aria-invalid={serverFieldErrors.vehicleId ? true : undefined}
+              aria-describedby={serverFieldErrors.vehicleId ? vehicleErrorId : undefined}
+              className={inputClass}
+            >
               <option value="">Select a unit…</option>
               {(vehiclesQuery.data?.items ?? []).map((v) => (
                 <option key={v.id} value={v.id}>
@@ -240,13 +292,26 @@ export function EditScheduleModal({ schedule, onClose }: { schedule?: ScheduleTa
                 </option>
               ))}
             </select>
+            <FieldError id={vehicleErrorId} message={serverFieldErrors.vehicleId ?? null} />
           </label>
         )}
         <label className="flex flex-col gap-1">
           <span className="text-label text-text">
             Name <span className="text-danger">*</span>
           </span>
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Oil & filter" className={inputClass} />
+          <input
+            value={name}
+            maxLength={NAME_MAX}
+            onChange={(e) => {
+              setName(e.target.value);
+              clearServerError('name');
+            }}
+            placeholder="Oil & filter"
+            aria-invalid={serverFieldErrors.name ? true : undefined}
+            aria-describedby={serverFieldErrors.name ? nameErrorId : undefined}
+            className={inputClass}
+          />
+          <FieldError id={nameErrorId} message={serverFieldErrors.name ?? null} />
         </label>
 
         <div className="grid grid-cols-2 gap-4">
@@ -261,7 +326,10 @@ export function EditScheduleModal({ schedule, onClose }: { schedule?: ScheduleTa
                 inputMode="numeric"
                 value={intervalMi}
                 onKeyDown={blockNonDigitKeys}
-                onChange={(e) => setIntervalMi(e.target.value)}
+                onChange={(e) => {
+                  setIntervalMi(e.target.value);
+                  clearServerError('intervalMi');
+                }}
                 aria-invalid={intervalMiError ? true : undefined}
                 aria-describedby={intervalMiError ? intervalMiErrorId : undefined}
                 className={inputClass}
@@ -280,7 +348,10 @@ export function EditScheduleModal({ schedule, onClose }: { schedule?: ScheduleTa
                 inputMode="numeric"
                 value={intervalDays}
                 onKeyDown={blockNonDigitKeys}
-                onChange={(e) => setIntervalDays(e.target.value)}
+                onChange={(e) => {
+                  setIntervalDays(e.target.value);
+                  clearServerError('intervalDays');
+                }}
                 aria-invalid={intervalDaysError ? true : undefined}
                 aria-describedby={intervalDaysError ? intervalDaysErrorId : undefined}
                 className={inputClass}
@@ -301,7 +372,10 @@ export function EditScheduleModal({ schedule, onClose }: { schedule?: ScheduleTa
                 inputMode="numeric"
                 value={lastServiceMi}
                 onKeyDown={blockNonDigitKeys}
-                onChange={(e) => setLastServiceMi(e.target.value)}
+                onChange={(e) => {
+                  setLastServiceMi(e.target.value);
+                  clearServerError('lastServiceMi');
+                }}
                 aria-invalid={lastServiceMiError ? true : undefined}
                 aria-describedby={lastServiceMiError ? odometerErrorId : undefined}
                 className={inputClass}
@@ -311,7 +385,18 @@ export function EditScheduleModal({ schedule, onClose }: { schedule?: ScheduleTa
           </div>
           <label className="flex flex-col gap-1">
             <span className="text-label text-text">Last service date</span>
-            <input type="date" value={lastServiceAt} onChange={(e) => setLastServiceAt(e.target.value)} className={inputClass} />
+            <input
+              type="date"
+              value={lastServiceAt}
+              onChange={(e) => {
+                setLastServiceAt(e.target.value);
+                clearServerError('lastServiceAt');
+              }}
+              aria-invalid={serverFieldErrors.lastServiceAt ? true : undefined}
+              aria-describedby={serverFieldErrors.lastServiceAt ? lastServiceAtErrorId : undefined}
+              className={inputClass}
+            />
+            <FieldError id={lastServiceAtErrorId} message={serverFieldErrors.lastServiceAt ?? null} />
           </label>
         </div>
 
@@ -330,7 +415,7 @@ export function EditScheduleModal({ schedule, onClose }: { schedule?: ScheduleTa
           </div>
         )}
         {serverError && (
-          <p role="alert" className="rounded-md bg-danger-soft p-3 text-body text-danger">
+          <p ref={serverErrorRef} role="alert" className="rounded-md bg-danger-soft p-3 text-body text-danger">
             {serverError}
           </p>
         )}

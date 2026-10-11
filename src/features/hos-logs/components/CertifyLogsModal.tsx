@@ -5,7 +5,7 @@
 // can only be re-selected when it changed after signing (§395.8 re-certification, WB-062), and the
 // write is audited server-side. There is no realtime event for
 // certification (§7.4), so the mutation invalidates the log keys by hand.
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { formatInTimeZone } from 'date-fns-tz';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
@@ -14,7 +14,7 @@ import { Badge } from '@/shared/ui/Badge';
 import { useToast } from '@/shared/ui/Toast';
 import { TOAST_COPY } from '@/shared/ui/copy';
 import { cn } from '@/shared/ui/cn';
-import { ApiError } from '@/shared/api/errors';
+import { formErrorMessage } from '@/shared/api/errors';
 import { formatDailyTotals, timezoneAbbreviation } from '@/shared/format';
 import { useCertifyLogs, type RodsDaySummary } from '@/shared/api/hosLogs';
 
@@ -58,6 +58,12 @@ export function CertifyLogsModal({
   const { toast } = useToast();
   const mutation = useCertifyLogs(driverId);
   const [banner, setBanner] = useState<string | null>(null);
+  // The banner sits above the day list and the signature while the button is in the footer —
+  // bring it into view when it appears, so a refusal is never scrolled out of sight.
+  const bannerRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (banner) bannerRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [banner]);
   // WB-146 — same-tick guard: one click, one certification batch.
   const inFlight = useRef(false);
 
@@ -89,7 +95,7 @@ export function CertifyLogsModal({
         onClose();
       },
       onError: (error) =>
-        setBanner(error instanceof ApiError ? error.userMessage : 'Something went wrong.'),
+        setBanner(formErrorMessage(error)),
       onSettled: () => {
         inFlight.current = false;
       },
@@ -130,7 +136,7 @@ export function CertifyLogsModal({
       </div>
 
       {banner && (
-        <p role="alert" className="mt-4 rounded-md bg-danger-soft p-3 text-body text-danger">
+        <p ref={bannerRef} role="alert" className="mt-4 rounded-md bg-danger-soft p-3 text-body text-danger">
           {banner}
         </p>
       )}

@@ -5,7 +5,7 @@ import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
 import { useCalibrateOdometer, totalVehicleMiles, type VehicleRow } from '@/shared/api/vehicles';
-import { ApiError } from '@/shared/api/errors';
+import { ApiError, formErrorMessage } from '@/shared/api/errors';
 import { formatOdometer } from '@/shared/format/numbers';
 import { calibrateOdometerSchema } from '@/shared/forms/schemas';
 import { nonNegativeIntInputProps, sanitizeNonNegativeInt } from '@/shared/forms/nonNegativeIntInput';
@@ -18,13 +18,15 @@ export function CalibrateOdometerModal({ vehicle, onClose }: { vehicle: VehicleR
   const [dashOdometer, setDashOdometer] = useState<string>('');
   const [confirmedLargeDelta, setConfirmedLargeDelta] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
+  /** A server issue on `odometerMi`, shown under the input until the value changes. */
+  const [serverFieldError, setServerFieldError] = useState<string | null>(null);
   const mutation = useCalibrateOdometer(vehicle.id);
 
   const errorId = useId();
   const dashValue = Number(dashOdometer);
   const parsed = dashOdometer.trim() === '' ? null : odometerField.safeParse(dashValue);
   const valid = parsed?.success === true;
-  const fieldError = parsed && !parsed.success ? parsed.error.issues[0]?.message : undefined;
+  const fieldError = (parsed && !parsed.success ? parsed.error.issues[0]?.message : undefined) ?? serverFieldError ?? undefined;
   const newOffset = valid && vehicle.deviceOdometerMi != null ? dashValue - vehicle.deviceOdometerMi : null;
 
   // WB — the >5,000 mi guard used to fail OPEN: with no ELD reading (`deviceOdometerMi == null`,
@@ -69,8 +71,17 @@ export function CalibrateOdometerModal({ vehicle, onClose }: { vehicle: VehicleR
                     onClose();
                   },
                   onError: (error) => {
-                    // Surface the server refusal verbatim — never retry around it.
-                    setServerError(error instanceof ApiError ? error.userMessage : 'Something went wrong.');
+                    // Surface the server refusal verbatim — never retry around it. A 400/422 on
+                    // `odometerMi` goes under the input; anything else is spelled out below it.
+                    const odometerIssue =
+                      error instanceof ApiError && (error.status === 400 || error.status === 422)
+                        ? error.fieldErrors.odometerMi
+                        : undefined;
+                    if (odometerIssue) {
+                      setServerFieldError(odometerIssue);
+                      return;
+                    }
+                    setServerError(formErrorMessage(error, ['odometerMi'], { odometerMi: 'Dashboard odometer' }));
                   },
                 },
               )
@@ -114,6 +125,7 @@ export function CalibrateOdometerModal({ vehicle, onClose }: { vehicle: VehicleR
                 // Last line of defence: whatever path a value arrives by, it is clamped to >= 0.
                 setDashOdometer(sanitizeNonNegativeInt(e.target.value));
                 setServerError(null);
+                setServerFieldError(null);
               }}
               aria-invalid={fieldError ? true : undefined}
               aria-describedby={fieldError ? errorId : undefined}
@@ -149,7 +161,11 @@ export function CalibrateOdometerModal({ vehicle, onClose }: { vehicle: VehicleR
           The ELD reports a relative odometer. The offset keeps recorded distance aligned with the
           dash reading. This action is written to the audit log.
         </p>
-        {serverError && <p className="text-body text-danger">{serverError}</p>}
+        {serverError && (
+          <p role="alert" className="text-body text-danger">
+            {serverError}
+          </p>
+        )}
       </div>
     </Modal>
   );

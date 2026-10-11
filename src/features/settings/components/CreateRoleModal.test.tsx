@@ -142,6 +142,29 @@ describe('CreateRoleModal — 11.19', () => {
 
     expect(await screen.findByText('A role with this name already exists.')).toBeInTheDocument();
   });
+
+  it('accepts a 500-character description (CreateRoleDto max) and caps the textarea there', async () => {
+    const user = userEvent.setup();
+    let body: unknown = null;
+    server.use(
+      http.post(url(endpoints.roles.create), async ({ request }) => {
+        body = await request.json();
+        return ok({ id: 'rol_10' }, 201);
+      }),
+    );
+
+    renderModal();
+    const description = screen.getByLabelText('Description');
+    expect(description).toHaveAttribute('maxLength', '500');
+    await user.type(screen.getByPlaceholderText('Compliance auditor'), 'Compliance auditor');
+    await user.click(description);
+    await user.paste('d'.repeat(501));
+    expect((description as HTMLTextAreaElement).value).toHaveLength(500);
+    await user.click(screen.getByRole('button', { name: 'Create role' }));
+
+    await waitFor(() => expect(body).not.toBeNull());
+    expect((body as { description: string }).description).toBe('d'.repeat(500));
+  });
 });
 
 describe('CreateRoleModal — double submit and dirty close', () => {

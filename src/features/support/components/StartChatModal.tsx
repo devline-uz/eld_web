@@ -5,21 +5,35 @@ import { useState } from 'react';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
-import { ApiError } from '@/shared/api/errors';
+import { ApiError, formErrorMessage } from '@/shared/api/errors';
 import { useStartSupportChat } from '@/shared/api/settingsAdmin';
 import { Field, inputClass } from './formKit';
+
+/** `CreateSupportChatDto.message` is 1–2000 characters. */
+const MESSAGE_MAX = 2000;
 
 export function StartChatModal({ onClose }: { onClose: () => void }) {
   const { toast } = useToast();
   const startChat = useStartSupportChat();
   const [message, setMessage] = useState('');
   const [banner, setBanner] = useState<string | null>(null);
+  const [messageError, setMessageError] = useState<string | null>(null);
 
   const busy = startChat.isPending;
   const dirty = message.trim() !== '';
 
   function submit() {
-    if (busy || message.trim().length === 0) return;
+    if (busy) return;
+    // The button used to sit disabled on an empty message with no word on why.
+    const trimmed = message.trim();
+    if (trimmed.length === 0) {
+      setMessageError('Enter a message.');
+      return;
+    }
+    if (trimmed.length > MESSAGE_MAX) {
+      setMessageError(`Message must be ${MESSAGE_MAX} characters or fewer.`);
+      return;
+    }
     setBanner(null);
     startChat.mutate(
       { message: message.trim() },
@@ -29,8 +43,16 @@ export function StartChatModal({ onClose }: { onClose: () => void }) {
           onClose();
         },
         onError: (error) => {
-          const text = error instanceof ApiError ? error.userMessage : 'Something went wrong.';
-          setBanner(text);
+          // A 422 on `message` goes under the field; anything else is spelled out in the banner.
+          const issue =
+            error instanceof ApiError && (error.status === 400 || error.status === 422)
+              ? error.fieldErrors.message
+              : undefined;
+          if (issue) setMessageError(issue);
+          const rest =
+            error instanceof ApiError ? Object.keys(error.fieldErrors).filter((path) => path !== 'message') : [];
+          if (issue && rest.length === 0) return;
+          setBanner(formErrorMessage(error, issue ? ['message'] : [], { subject: 'Subject' }));
         },
       },
     );
@@ -47,7 +69,7 @@ export function StartChatModal({ onClose }: { onClose: () => void }) {
       footer={
         <>
           <ModalCancelButton disabled={busy} />
-          <Button variant="primary" size="lg" loading={busy} disabled={busy || message.trim().length === 0} onClick={submit}>
+          <Button variant="primary" size="lg" loading={busy} disabled={busy} onClick={submit}>
             Start chat
           </Button>
         </>
@@ -59,10 +81,14 @@ export function StartChatModal({ onClose }: { onClose: () => void }) {
             {banner}
           </p>
         )}
-        <Field label="Message" required>
+        <Field label="Message" required error={messageError ?? undefined}>
           <textarea
             value={message}
-            onChange={(e) => setMessage(e.target.value)}
+            onChange={(e) => {
+              setMessage(e.target.value);
+              setMessageError(null);
+            }}
+            maxLength={MESSAGE_MAX}
             disabled={busy}
             rows={4}
             placeholder="Describe what you need help with…"

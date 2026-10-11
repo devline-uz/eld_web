@@ -2,7 +2,7 @@
 // Fields mirror `CreateVehicleGroupDto` (`name` 1–80, `description` ≤ 300, `color` #RRGGBB) plus
 // the unit picker: create sends `vehicleIds` with the POST; edit PATCHes the details and, only when
 // the selection changed, replaces the membership with `PUT /vehicle-groups/:id/vehicles`.
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Controller, useForm } from 'react-hook-form';
 import { Search } from 'lucide-react';
@@ -15,7 +15,7 @@ import { GROUP_COLOR_OPTIONS, GroupColorDot } from '@/shared/ui/GroupColor';
 import { cn } from '@/shared/ui/cn';
 import { vehicleGroupSchema, type VehicleGroupFormValues } from '@/shared/forms/schemas';
 import { LIMITS, VALIDATION_MESSAGES } from '@/shared/forms/messages';
-import { ApiError } from '@/shared/api/errors';
+import { ApiError, formErrorMessage } from '@/shared/api/errors';
 import { useVehiclesLookup } from '@/shared/api/lookups';
 import {
   useCreateVehicleGroup,
@@ -62,6 +62,9 @@ function Field({
     </div>
   );
 }
+
+/** `CreateVehicleGroupDto` paths with no inline error, in this modal's words. */
+const VEHICLE_GROUP_FIELD_LABELS = { vehicleIds: 'Units' };
 
 const sameIds = (a: Set<string>, b: Set<string>) =>
   a.size === b.size && [...a].every((id) => b.has(id));
@@ -148,6 +151,11 @@ function VehicleGroupForm({
   const updateMutation = useUpdateVehicleGroup(group?.id ?? '');
   const membersMutation = useSetVehicleGroupVehicles(group?.id ?? '');
   const [banner, setBanner] = useState<string | null>(null);
+  // The banner heads this `lg` modal; after scrolling down the unit list it is out of view.
+  const bannerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (banner) bannerRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [banner]);
   const inFlight = useRef(false);
   const submitting =
     createMutation.isPending || updateMutation.isPending || membersMutation.isPending;
@@ -181,24 +189,28 @@ function VehicleGroupForm({
     }
     if (error instanceof ApiError) {
       const fieldErrors = error.fieldErrors;
-      let mapped = false;
+      const placed: string[] = [];
       for (const [field, message] of Object.entries(fieldErrors)) {
         if (field === 'name' || field === 'description' || field === 'color') {
           setError(field, { message });
-          mapped = true;
+          placed.push(field);
         }
       }
-      if (mapped) return;
-      // A 404 `VEHICLE_NOT_FOUND` (a unit deleted meanwhile) or an unmapped 422 lands in the modal.
-      if (error.status === 404 || error.status === 422) {
+      // Every issue is under its field — nothing left to say. A partial mapping used to return
+      // here too, dropping e.g. a `vehicleIds` issue on the floor.
+      if (placed.length > 0 && placed.length === Object.keys(fieldErrors).length) return;
+      const validation = error.status === 400 || error.status === 422;
+      if (validation && Object.keys(fieldErrors).length > placed.length) {
+        setBanner(formErrorMessage(error, placed, VEHICLE_GROUP_FIELD_LABELS));
+        return;
+      }
+      // A 404 `VEHICLE_NOT_FOUND` (a unit deleted meanwhile) or a bare 400/422 lands in the modal.
+      if (error.status === 404 || validation) {
         setBanner(error.message || error.userMessage);
         return;
       }
     }
-    toast({
-      kind: 'error',
-      title: error instanceof ApiError ? error.userMessage : 'Something went wrong.',
-    });
+    toast({ kind: 'error', title: formErrorMessage(error) });
   }
 
   async function onSubmit(values: VehicleGroupFormValues) {
@@ -257,7 +269,7 @@ function VehicleGroupForm({
         }}
       >
         {banner && (
-          <div role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-body text-danger">
+          <div ref={bannerRef} role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-body text-danger">
             {banner}
           </div>
         )}

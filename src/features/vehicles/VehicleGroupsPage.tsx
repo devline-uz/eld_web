@@ -9,7 +9,7 @@ import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
 import { useIsOffline, OFFLINE_TOOLTIP } from '@/shared/realtime/RealtimeProvider';
 import { usePageHeader } from '@/app/layouts/Topbar';
-import { ApiError } from '@/shared/api/errors';
+import { ApiError, formErrorMessage } from '@/shared/api/errors';
 import {
   useDeleteVehicleGroup,
   useVehicleGroups,
@@ -99,7 +99,7 @@ export default function VehicleGroupsPage() {
       onError: (error) => {
         toast({
           kind: 'error',
-          title: error instanceof ApiError ? error.userMessage : 'Something went wrong.',
+          title: formErrorMessage(error),
         });
       },
     });

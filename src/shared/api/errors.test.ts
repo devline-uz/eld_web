@@ -1,6 +1,6 @@
 // web/tz.md §14.3 — the code table maps one-to-one with backend/src/common/errors/codes.ts.
 import { describe, expect, it } from 'vitest';
-import { ApiError, ERROR_MESSAGES, NetworkError, errorMessage, isApiError, toUserMessage } from './errors';
+import { ApiError, ERROR_MESSAGES, NetworkError, errorMessage, formErrorMessage, isApiError, toUserMessage } from './errors';
 
 describe('§14.3 error copy', () => {
   it('uses the exact strings from the table', () => {
@@ -96,5 +96,34 @@ describe('backend Phase 13 codes (2026-09-24)', () => {
   ])('%s has English copy, never the trace-id fallback', (code) => {
     expect(ERROR_MESSAGES[code]).toBeTruthy();
     expect(errorMessage(code, 'T1')).not.toContain('Reference');
+  });
+});
+
+describe('formErrorMessage', () => {
+  const issues = (list: { path: string; message: string }[]) =>
+    new ApiError(422, { code: 'VALIDATION_FAILED', details: { issues: list.map((i) => ({ ...i, code: 'too_big' })) } });
+
+  it('spells out issues the form could not place on a field, labelled', () => {
+    const error = issues([
+      { path: 'estimatedLaborHours', message: 'Number must be less than or equal to 999' },
+      { path: 'odometerMi', message: 'Too big' },
+    ]);
+    expect(formErrorMessage(error, ['odometerMi'], { estimatedLaborHours: 'Estimated labor' })).toBe(
+      'Estimated labor: Number must be less than or equal to 999.',
+    );
+  });
+
+  it('humanizes an unlabelled path and keeps a path-less issue as is', () => {
+    expect(formErrorMessage(issues([{ path: 'driverIds', message: 'Required' }]))).toBe('Driver ids: Required.');
+    expect(formErrorMessage(issues([{ path: '', message: 'Provide exactly one of eventId or driverId.' }]))).toBe(
+      'Provide exactly one of eventId or driverId.',
+    );
+  });
+
+  it('falls back to the §14.3 copy when every issue is placed, or for other errors', () => {
+    expect(formErrorMessage(issues([{ path: 'note', message: 'Too long' }]), ['note'])).toBe(ERROR_MESSAGES.VALIDATION_FAILED);
+    expect(formErrorMessage(new ApiError(404, { code: 'NOT_FOUND' }))).toBe('Not found.');
+    expect(formErrorMessage(new NetworkError())).toBe('No connection. Check your network and try again.');
+    expect(formErrorMessage('oops')).toBe('Something went wrong.');
   });
 });

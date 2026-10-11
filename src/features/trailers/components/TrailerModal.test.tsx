@@ -200,3 +200,43 @@ describe('Import trailers', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 });
+
+// Silent-failure sweep — any 400/422 issue counted as "shown" before, so one on a field the form
+// does not render failed in complete silence.
+describe('Trailer overlays — server validation is never silent', () => {
+  const issues = (...list: Array<[string, string]>) => ({ issues: list.map(([path, message]) => ({ path, code: 'custom', message })) });
+
+  it('Add: an issue on a field the form does not render is spelled out in a toast', async () => {
+    server.use(
+      http.post(url(endpoints.trailers.create), () =>
+        fail(422, 'VALIDATION_FAILED', 'Request validation failed.', issues(['status', 'Invalid enum value'])),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<TrailerModal onClose={() => {}} />);
+    await user.type(screen.getByLabelText(/Trailer number/), 'T-5001');
+    await user.click(screen.getByRole('button', { name: 'Save trailer' }));
+    expect(await screen.findByText('Status: Invalid enum value.')).toBeInTheDocument();
+  });
+
+  it('Add: a `number` issue still lands under the input', async () => {
+    server.use(
+      http.post(url(endpoints.trailers.create), () =>
+        fail(400, 'VALIDATION_FAILED', 'Request validation failed.', issues(['number', 'Too long'])),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<TrailerModal onClose={() => {}} />);
+    await user.type(screen.getByLabelText(/Trailer number/), 'T-5001');
+    await user.click(screen.getByRole('button', { name: 'Save trailer' }));
+    const error = await screen.findByText('Too long');
+    expect(screen.getByLabelText(/Trailer number/).closest('label')).toContainElement(error);
+  });
+
+  it('Import: a header-only file says why there is nothing to import', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<ImportTrailersModal onClose={() => {}} />);
+    await user.upload(screen.getByLabelText('Trailers CSV file'), new File(['number,vin\n'], 't.csv', { type: 'text/csv' }));
+    expect(await screen.findByText(/The file has no trailer rows\./)).toBeInTheDocument();
+  });
+});

@@ -258,3 +258,34 @@ describe('W-07 Edit driver — cached duplicate pre-check', () => {
     await waitFor(() => expect(patched.body).not.toBeNull());
   });
 });
+
+describe('W-07 Edit driver — refusals are never silent', () => {
+  it('a 422 on a rendered field goes on it; one on a field the form lacks is named in the banner', async () => {
+    server.use(
+      http.patch(url(endpoints.drivers.update('drv_1')), () =>
+        fail(422, 'VALIDATION_FAILED', 'Invalid payload', {
+          issues: [
+            { path: ['firstName'], code: 'too_big', message: 'String must contain at most 80 character(s)' },
+            { path: ['hosRuleset'], code: 'invalid_enum_value', message: 'Invalid enum value' },
+          ],
+        }),
+      ),
+    );
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    renderModal({}, onClose);
+
+    await user.click(save());
+
+    expect(await screen.findByText('String must contain at most 80 character(s)')).toBeInTheDocument();
+    expect(await screen.findByRole('alert')).toHaveTextContent('HOS ruleset: Invalid enum value.');
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('caps the name and terminal inputs at the UpdateDriverDto limits', () => {
+    renderModal();
+    expect(screen.getByLabelText(/First name/)).toHaveAttribute('maxLength', '80');
+    expect(screen.getByLabelText(/Last name/)).toHaveAttribute('maxLength', '80');
+    expect(screen.getByLabelText(/^Home terminal(?! time zone)/)).toHaveAttribute('maxLength', '120');
+  });
+});

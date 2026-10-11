@@ -345,6 +345,25 @@ describe('CreateTripModal — date, distance and rate validation', () => {
     expect(await screen.findByText('Enter a distance greater than 0.')).toBeInTheDocument();
   });
 
+  it('caps the distance at the `CreateTripDto` 10,000 mi', async () => {
+    await fillAndSubmit({ pickup: `${day(1)}T08:00`, distance: '10001' });
+    expect(await screen.findByText('Distance must be 10,000 mi or less.')).toBeInTheDocument();
+  });
+
+  it('caps the rate at the `CreateTripDto` $1,000,000', async () => {
+    await fillAndSubmit({ pickup: `${day(1)}T08:00`, rate: '1000001' });
+    expect(await screen.findByText('Rate must be $1,000,000 or less.')).toBeInTheDocument();
+  });
+
+  it('limits the trip / load ID and the locations to the `CreateTripDto` lengths', () => {
+    renderModal();
+    const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('form input'));
+    const [reference, , , origin, , destination] = inputs;
+    expect(reference).toHaveAttribute('maxLength', '40');
+    expect(origin).toHaveAttribute('maxLength', '200');
+    expect(destination).toHaveAttribute('maxLength', '200');
+  });
+
   it('ignores letters, `e`, `+` and `-` in the distance', async () => {
     renderModal();
     const distance = screen.getByPlaceholderText('mi');
@@ -524,6 +543,27 @@ describe('CreateTripModal — dirty close, payload and 422 mapping', () => {
     await user.click(screen.getByRole('button', { name: 'Create trip' }));
 
     expect(await screen.findByText('Notes: Notes are limited to 500 characters.')).toBeInTheDocument();
+  });
+
+  it('names the stop a live `details.issues` 422 is about, and scrolls the banner into view', async () => {
+    renderModal();
+    const scrolled = vi.fn();
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scrolled;
+    server.use(
+      http.post(url(endpoints.trips.create), () =>
+        fail(422, 'VALIDATION_FAILED', 'Request validation failed.', {
+          issues: [{ path: 'stops.1.name', code: 'too_big', message: 'String must contain at most 200 character(s)' }],
+        }),
+      ),
+    );
+    const user = await fillValidForm();
+
+    await user.click(screen.getByRole('button', { name: 'Create trip' }));
+
+    expect(await screen.findByText('Stop 2 location: String must contain at most 200 character(s).')).toBeInTheDocument();
+    expect(scrolled).toHaveBeenCalled();
+    Element.prototype.scrollIntoView = original;
   });
 
   it('maps a 422 on `number` onto the Trip / load ID field', async () => {

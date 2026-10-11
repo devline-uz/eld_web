@@ -5,7 +5,7 @@
 // formatted as such — it is never shifted through a zone. Anything inside a RODS document (the
 // transfer range, the Appendix A file) is a driver home-terminal day and is handled by the backend.
 import { format } from 'date-fns';
-import { ApiError, ERROR_MESSAGES } from '@/shared/api/errors';
+import { ApiError, ERROR_MESSAGES, formErrorMessage } from '@/shared/api/errors';
 import { DVIR_REPORT_MAX_PAGES, type ReportRow, type ReportType, type TransferStatus } from '@/shared/api/reports';
 import { REPORT_TYPE_LABEL, fileSizeLabel, saveFile } from '@/shared/api/reportFiles';
 import { formatNumber } from '@/shared/format/numbers';
@@ -181,8 +181,38 @@ export const DVIR_WINDOW_NOTE = `Only the newest ${formatNumber(DVIR_REPORT_MAX_
  */
 const GENERIC_CODES = new Set(['VALIDATION_FAILED', 'INTERNAL_ERROR', 'NOT_FOUND', 'CONFLICT']);
 
-export function refusalText(error: unknown): string {
+/** Report / schedule / transfer DTO paths, in the words the report screens use. */
+const REPORT_FIELD_LABELS: Record<string, string> = {
+  'params.from': 'From',
+  'params.to': 'To',
+  'params.quarter': 'Quarter',
+  'params.driverId': 'Driver',
+  'params.vehicleId': 'Unit',
+  'params.window': 'Period',
+  cron: 'Frequency',
+  rangeStart: 'Range start',
+  rangeEnd: 'Range end',
+  outputFileComment: 'Output file comment',
+  driverId: 'Driver',
+};
+
+/**
+ * A 400/422 whose `details.issues` name the fields at fault: the backend's own message for a zod
+ * failure is the bare "Request validation failed." — the issues are spelled out instead
+ * (`formErrorMessage`). `placed` are the issue paths the caller already shows under an input.
+ */
+function validationText(error: ApiError, placed: readonly string[]): string | null {
+  if ((error.status !== 400 && error.status !== 422) || error.code !== 'VALIDATION_FAILED') return null;
+  const fields = Object.keys(error.fieldErrors);
+  if (fields.length === 0) return null;
+  if (fields.every((field) => placed.includes(field))) return error.userMessage;
+  return formErrorMessage(error, placed, REPORT_FIELD_LABELS);
+}
+
+export function refusalText(error: unknown, placed: readonly string[] = []): string {
   if (error instanceof ApiError) {
+    const validation = validationText(error, placed);
+    if (validation) return validation;
     if (ERROR_MESSAGES[error.code] && !GENERIC_CODES.has(error.code)) return error.userMessage;
     if (error.message && error.message !== 'Request failed') return error.message;
     return error.userMessage;

@@ -13,7 +13,7 @@ import { endpoints } from '@/shared/api/endpoints';
 import { resetSingleMarkReadAvailability } from '@/shared/api/notifications';
 import { ToastProvider } from '@/shared/ui/Toast';
 import NotificationsPanel from './NotificationsPanel';
-import { MARK_ONE_UNAVAILABLE_TITLE } from './lib/copy';
+import { MARK_ALL_FAILED_TITLE, MARK_ONE_UNAVAILABLE_TITLE } from './lib/copy';
 import { resetMarkReadNotice } from './lib/markReadNotice';
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'bypass' }));
@@ -105,5 +105,16 @@ describe('11.27 single-row mark-read (B-56)', () => {
     await user.click(rowFor('ELD disconnected'));
     await waitFor(() => expect(within(rowFor('ELD disconnected')).queryByText('Unread')).not.toBeInTheDocument());
     expect(screen.queryByText(MARK_ONE_UNAVAILABLE_TITLE)).not.toBeInTheDocument();
+  });
+});
+
+describe('11.27 Mark all read', () => {
+  it('a failed request is reported instead of silently leaving the badges', async () => {
+    server.use(http.post(url(endpoints.notifications.readAll), () => fail(500, 'INTERNAL_ERROR', 'Boom')));
+    const { user } = renderPanel();
+    await screen.findByText('ELD disconnected');
+    await user.click(screen.getByRole('button', { name: 'Mark all read' }));
+    expect(await screen.findByText(MARK_ALL_FAILED_TITLE)).toBeInTheDocument();
+    expect(screen.getByText('Something went wrong on our side. Try again.')).toBeInTheDocument();
   });
 });

@@ -2,7 +2,7 @@
 // `integrations` FULL. Same pattern as `WebhookConfigModal`: RHF + zod, 422 `details.issues`
 // (`config.<key>`) mapped under the field, anything unmapped in a banner. Connect used to send
 // `config: {}` and the backend stored the provider as CONNECTED with no credentials.
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import { Eye, EyeOff, Info } from 'lucide-react';
@@ -13,6 +13,7 @@ import { ApiError } from '@/shared/api/errors';
 import { useUpsertIntegration } from '@/shared/api/settingsAdmin';
 import { Field, inputClass } from './formKit';
 import { SETTINGS_TOAST } from '../lib/copy';
+import { placeServerFieldErrors, serverErrorBanner } from '../lib/serverFieldErrors';
 import {
   CREDENTIAL_SPECS,
   credentialSchema,
@@ -37,6 +38,10 @@ export function IntegrationCredentialsModal({
   const { toast } = useToast();
   const upsert = useUpsertIntegration();
   const [banner, setBanner] = useState<string | null>(null);
+  const bannerRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (banner) bannerRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [banner]);
   const [shown, setShown] = useState<Record<string, boolean>>({});
   const submitting = upsert.isPending;
 
@@ -67,22 +72,19 @@ export function IntegrationCredentialsModal({
           onClose();
         },
         onError: (error) => {
-          if (error instanceof ApiError) {
-            const keys = new Set(spec.fields.map((f) => f.key));
-            const unmapped: string[] = [];
-            let mapped = 0;
-            for (const [path, msg] of Object.entries(error.fieldErrors)) {
-              const key = path.startsWith('config.') ? path.slice('config.'.length) : path;
-              if (keys.has(key)) {
-                setError(key, { message: msg });
-                mapped += 1;
-              } else unmapped.push(msg);
-            }
-            if (unmapped.length > 0) setBanner(unmapped.join(' '));
-            if (mapped > 0 || unmapped.length > 0) return;
+          // `config.<key>` and a bare `<key>` both land under that credential's field.
+          const fieldsByPath: Record<string, string> = {};
+          const labels: Record<string, string> = { config: 'Configuration', enabled: 'Enabled' };
+          for (const f of spec.fields) {
+            fieldsByPath[f.key] = f.key;
+            fieldsByPath[`config.${f.key}`] = f.key;
+            labels[f.key] = f.label;
           }
-          const message = error instanceof ApiError ? error.userMessage : 'Something went wrong.';
+          const placed = placeServerFieldErrors(error, fieldsByPath, (key, msg) => setError(key, { message: msg }));
+          const message = serverErrorBanner(error, placed, labels);
+          if (message === null) return;
           setBanner(message);
+          if (error instanceof ApiError && (error.status === 400 || error.status === 422)) return;
           toast({ kind: 'error', title: message });
         },
       },
@@ -174,7 +176,7 @@ export function IntegrationCredentialsModal({
     >
       <form className="flex flex-col gap-4" onSubmit={handleSubmit(onSubmit)} noValidate>
         {banner && (
-          <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-body text-danger">
+          <p ref={bannerRef} role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-body text-danger">
             {banner}
           </p>
         )}

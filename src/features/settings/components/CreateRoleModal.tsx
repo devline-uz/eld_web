@@ -1,5 +1,5 @@
 // owner: web-settings-admin — 11.19 Create a role (web/tz.md §11.19). `roles` FULL.
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
@@ -7,11 +7,36 @@ import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
 import { ApiError } from '@/shared/api/errors';
 import { roleSchema } from '@/shared/forms/schemas';
+import { LIMITS } from '@/shared/forms/messages';
 import { useCreateRole, useUpdateRole, type RoleRow } from '@/shared/api/settingsAdmin';
 import type { PermissionKey, PermissionLevel } from '@/shared/auth/permissions';
 import { NO_PERMISSIONS } from '@/shared/auth/permissions';
 import { Field, inputClass } from './formKit';
 import { ROLE_COPY } from '../lib/copy';
+import { placeServerFieldErrors, serverErrorBanner } from '../lib/serverFieldErrors';
+
+/** `CreateRoleDto.name` is `max(80)` — carried by the shared `roleSchema`. */
+const roleFormSchema = roleSchema.pick({ name: true, description: true });
+
+/** `CreateRoleDto.key` is `^[A-Z][A-Z0-9_]*$`, 2–40 — the key is derived from the name, so it is
+ * the name field that shows a server issue about it. */
+const SERVER_FIELDS = { name: 'name', key: 'name', description: 'description' } as const;
+const FIELD_LABELS = { permissions: 'Permissions' };
+const ROLE_KEY_MAX = 40;
+
+/** `Compliance auditor` → `COMPLIANCE_AUDITOR`, always inside `CreateRoleDto.key`'s rules: a name
+ * that started with a digit, was one letter long or ran past 40 characters used to send a key the
+ * server rejected. */
+function roleKeyFor(name: string): string {
+  let key = name
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  if (!key) return 'CUSTOM_ROLE';
+  if (!/^[A-Z]/.test(key) || key.length < 2) key = `ROLE_${key}`;
+  return key.slice(0, ROLE_KEY_MAX).replace(/_+$/, '');
+}
 
 const SEGMENT_ROWS: { label: string; keys: PermissionKey[]; defaultLevel: PermissionLevel }[] = [
   { label: 'Vehicles', keys: ['vehicles', 'liveFleet'], defaultLevel: 'READ' },
@@ -63,12 +88,18 @@ export function CreateRoleModal({
     formState: { errors, isDirty },
     setError,
   } = useForm<{ name: string; description?: string }>({
-    resolver: zodResolver(roleSchema.pick({ name: true, description: true })),
+    resolver: zodResolver(roleFormSchema),
     mode: 'onBlur',
     defaultValues: { name: role?.name ?? '', description: role?.description ?? '' },
   });
 
   const submitting = createRole.isPending || updateRole.isPending;
+  // A failure the fields cannot show — inside this `lg` modal, scrolled into view when it appears.
+  const [banner, setBanner] = useState<string | null>(null);
+  const bannerRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (banner) bannerRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [banner]);
   // The permission grid and the two checkboxes live outside react-hook-form; without them a real
   // edit closed with no 11.30 confirm.
   const dirty =
@@ -120,11 +151,8 @@ export function CreateRoleModal({
     base.hosCertifyOnBehalf = base.hosCertifyOnBehalf ?? 'NONE';
     base.carrierSettings = base.carrierSettings ?? 'NONE';
 
-    const key = values.name
-      .trim()
-      .toUpperCase()
-      .replace(/[^A-Z0-9]+/g, '_')
-      .replace(/^_+|_+$/g, '');
+    const key = roleKeyFor(values.name);
+    setBanner(null);
 
     const handlers = {
       onSuccess: () => {
@@ -136,10 +164,14 @@ export function CreateRoleModal({
           setError('name', { message: 'A role with this name already exists.' });
           return;
         }
-        toast({
-          kind: 'error' as const,
-          title: error instanceof ApiError ? error.userMessage : 'Something went wrong.',
-        });
+        const placed = placeServerFieldErrors(error, SERVER_FIELDS, (field, message) =>
+          setError(field, { message }),
+        );
+        const message = serverErrorBanner(error, placed, FIELD_LABELS);
+        // `null` — every issue landed on a field; the red field is the feedback.
+        if (message === null) return;
+        setBanner(message);
+        toast({ kind: 'error' as const, title: message });
       },
     };
 
@@ -156,7 +188,7 @@ export function CreateRoleModal({
 
     createRole.mutate(
       {
-        key: key || 'CUSTOM_ROLE',
+        key,
         name: values.name,
         description: values.description,
         permissions: base,
@@ -193,6 +225,11 @@ export function CreateRoleModal({
       }
     >
       <form className="flex flex-col gap-4" onSubmit={handleSubmit(onSubmit)}>
+        {banner && (
+          <p ref={bannerRef} role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-body text-danger">
+            {banner}
+          </p>
+        )}
         <div className="grid grid-cols-2 gap-4">
           <Field label="Role name" required error={errors.name?.message}>
             <input
@@ -223,13 +260,14 @@ export function CreateRoleModal({
             </select>
           </Field>
         </div>
-        <Field label="Description">
+        <Field label="Description" error={errors.description?.message}>
           <textarea
             {...register('description')}
-            rows={2}
+            rows={4}
+            maxLength={LIMITS.roleDescriptionMax}
             placeholder="Read-only access to logs, DVIRs and reports for internal audits."
             disabled={submitting}
-            className="rounded-md border border-border bg-bg-surface px-3 py-2 text-body text-text"
+            className="min-h-20 resize-y rounded-md border border-border bg-bg-surface px-3 py-2 text-body text-text"
           />
         </Field>
 

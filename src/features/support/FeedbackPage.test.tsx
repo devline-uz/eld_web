@@ -132,3 +132,29 @@ describe('FeedbackPage — W-25', () => {
     expect(screen.queryByRole('button', { name: /driver feedback/i })).not.toBeInTheDocument();
   });
 });
+
+describe('FeedbackPage — server validation is never silent', () => {
+  it('spells out a 422 on the comment in the banner instead of a generic toast', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post(url(endpoints.support.feedback), () =>
+        fail(422, 'VALIDATION_FAILED', 'Validation failed', {
+          issues: [{ path: ['comment'], code: 'too_big', message: 'String must contain at most 1000 character(s)' }],
+        }),
+      ),
+    );
+    renderPage();
+    await user.click(screen.getByRole('button', { name: 'Very easy' }));
+    await user.click(screen.getByRole('button', { name: 'Submit feedback' }));
+
+    expect(
+      await screen.findByText('Comment: String must contain at most 1000 character(s).'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Check the highlighted fields and try again.')).not.toBeInTheDocument();
+  });
+
+  it('caps the comment at the DTO limit of 1000 characters', () => {
+    renderPage();
+    expect(screen.getByRole('textbox', { name: 'Anything else you would like us to know?' })).toHaveAttribute('maxLength', '1000');
+  });
+});

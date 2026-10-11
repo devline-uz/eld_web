@@ -2,7 +2,7 @@
 // Q-1: no password field — the invite lands by email and resolves through Google sign-in.
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { isPrivilegedRole, isSuperAdmin } from '@/shared/auth/permissions';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
@@ -12,21 +12,26 @@ import { ApiError } from '@/shared/api/errors';
 import { inviteUserSchema } from '@/shared/forms/schemas';
 import { useInviteUser, useRolesList, type RoleRow } from '@/shared/api/settingsAdmin';
 import { SETTINGS_TOAST } from '../lib/copy';
+import { placeServerFieldErrors, serverErrorBanner } from '../lib/serverFieldErrors';
 import { Field, inputClass } from './formKit';
 import type { z } from 'zod';
 
+/** `CreateUserDto` caps both names at 80 (`inviteUserSchema`). The one "Full name" input shows
+ * either half's message. */
 type InviteUserFormValues = z.infer<typeof inviteUserSchema>;
 
-/** Only these keys have a rendered error slot — anything else in a 422 goes to the banner. */
-const FORM_FIELDS = new Set<keyof InviteUserFormValues>([
-  'email',
-  'firstName',
-  'lastName',
-  'roleKey',
-]);
-
-/** Server-side field names that land on a differently named form field. */
-const FIELD_ALIASES: Record<string, keyof InviteUserFormValues> = { roleId: 'roleKey' };
+/** Server issue path → the form field with a rendered error slot (`roleId` lands on the role
+ * group). Anything else in a 422 is spelled out in the banner. */
+const SERVER_FIELDS = {
+  email: 'email',
+  firstName: 'firstName',
+  lastName: 'lastName',
+  roleId: 'roleKey',
+  roleKey: 'roleKey',
+} as const;
+const FIELD_LABELS = { terminalIds: 'Terminal access', message: 'Message', jobTitle: 'Job title' };
+/** `CreateUserDto.terminalIds` is `max(50)`. */
+const TERMINALS_MAX = 50;
 
 const NO_ROLES_MESSAGE =
   'No roles are configured. Create a role under Roles & permissions, then invite the user.';
@@ -91,6 +96,12 @@ export function InviteUserModal({ onClose }: { onClose: () => void }) {
   // WB — the modal used to show nothing at all when the invite was rejected without a mappable
   // field (rule 6: unmapped `details` and plain failures belong in a banner inside the modal).
   const [banner, setBanner] = useState<string | null>(null);
+  // The banner sits above the fields; when the body has been scrolled down to the role list or the
+  // message, it would appear out of sight — bring it into view.
+  const bannerRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (banner) bannerRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [banner]);
   const submitting = inviteMutation.isPending;
 
   // Only a Super Admin may invite ADMIN / SUPER_ADMIN users; others never see those roles.
@@ -116,6 +127,8 @@ export function InviteUserModal({ onClose }: { onClose: () => void }) {
   const roleKey = pickedRoleId ?? defaultRoleId;
   const [terminalsText, setTerminalsText] = useState('');
   const terminalIds = parseTerminalNames(terminalsText);
+  const terminalsError =
+    terminalIds.length > TERMINALS_MAX ? `Enter at most ${TERMINALS_MAX} terminals.` : undefined;
   const [message, setMessage] = useState('');
 
   const {
@@ -149,6 +162,7 @@ export function InviteUserModal({ onClose }: { onClose: () => void }) {
     // `mutate()` returns immediately, so RHF's `isSubmitting` is false again before the request
     // lands — a second click would send a second invitation. Guard on the mutation itself.
     if (inviteMutation.isPending) return;
+    if (terminalsError) return;
     setBanner(null);
     inviteMutation.mutate(
       {
@@ -177,22 +191,17 @@ export function InviteUserModal({ onClose }: { onClose: () => void }) {
             setError('email', { message: 'A user with this email already exists.' });
             return;
           }
-          if (error instanceof ApiError) {
-            const unmapped: string[] = [];
-            let mapped = 0;
-            for (const [rawField, msg] of Object.entries(error.fieldErrors)) {
-              const field = FIELD_ALIASES[rawField] ?? rawField;
-              if (FORM_FIELDS.has(field as keyof InviteUserFormValues)) {
-                setError(field as keyof InviteUserFormValues, { message: msg });
-                mapped += 1;
-              } else unmapped.push(msg);
-            }
-            if (unmapped.length > 0) setBanner(unmapped.join(' '));
-            if (mapped > 0 || unmapped.length > 0) return;
-          }
-          const message = error instanceof ApiError ? error.userMessage : 'Something went wrong.';
+          const placed = placeServerFieldErrors(error, SERVER_FIELDS, (field, msg) =>
+            setError(field, { message: msg }),
+          );
+          const message = serverErrorBanner(error, placed, FIELD_LABELS);
+          // `null` — every issue sits on its field already.
+          if (message === null) return;
           setBanner(message);
-          toast({ kind: 'error', title: message });
+          // A validation issue the fields cannot show stays in the banner; anything else is a
+          // failure worth a toast too (§13.3).
+          const validation = error instanceof ApiError && (error.status === 400 || error.status === 422);
+          if (!validation) toast({ kind: 'error', title: message });
         },
       },
     );
@@ -235,7 +244,7 @@ export function InviteUserModal({ onClose }: { onClose: () => void }) {
         }}
       >
         {banner && (
-          <p role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-body text-danger">
+          <p ref={bannerRef} role="alert" className="rounded-md bg-danger-soft px-3 py-2 text-body text-danger">
             {banner}
           </p>
         )}
@@ -369,6 +378,7 @@ export function InviteUserModal({ onClose }: { onClose: () => void }) {
         {/* B-85 (shipped 2026-09-24) — `POST /users` now takes `terminalIds`/`message`. */}
         <Field
           label="Terminal access"
+          error={terminalsError}
           hint="Stored on the user record only — it is not an access boundary yet; the user still sees every terminal's data. Leave it empty to record no scope."
         >
           <textarea

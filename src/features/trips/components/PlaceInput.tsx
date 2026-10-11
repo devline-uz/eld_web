@@ -14,6 +14,8 @@ export interface PlaceInputProps {
   inputRef?: Ref<HTMLInputElement>;
   onBlur?: FocusEventHandler<HTMLInputElement>;
   'aria-label'?: string;
+  /** `StopDto.name` is `.max(200)`. */
+  maxLength?: number;
 }
 
 export function PlaceInput({ value, onTextChange, onPick, className, name, inputRef, onBlur, ...rest }: PlaceInputProps) {

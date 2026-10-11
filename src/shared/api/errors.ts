@@ -216,3 +216,39 @@ export function toUserMessage(error: unknown): string {
   if (error instanceof NetworkError) return error.message;
   return errorMessage(undefined, '');
 }
+
+/** `estimatedLaborHours` → `Estimated labor hours`, `defectIds.0` → `Defect ids`. */
+function humanizeField(path: string): string {
+  const words = (path.split('.')[0] ?? path)
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/**
+ * The banner / toast copy for a failed form write. A 400/422 whose issues the form could not put
+ * on one of its own rendered fields (`placed`) used to surface as the bare "Check the highlighted
+ * fields and try again." with nothing highlighted — the request looked like it silently failed.
+ * Those issues are spelled out instead ("Estimated labor: Number must be less than or equal to
+ * 999."), labelled from `labels` or the humanized field path. Everything else falls back to the
+ * §14.3 copy (`toUserMessage`), or a plain "Something went wrong." for a non-API throw.
+ */
+export function formErrorMessage(
+  error: unknown,
+  placed: readonly string[] = [],
+  labels: Readonly<Record<string, string>> = {},
+): string {
+  if (error instanceof ApiError && (error.status === 422 || error.status === 400)) {
+    const unplaced = Object.entries(error.fieldErrors).filter(([field]) => !placed.includes(field));
+    if (unplaced.length > 0) {
+      return unplaced
+        .map(([field, message]) => {
+          const sentence = /[.!?]$/.test(message) ? message : `${message}.`;
+          return field ? `${labels[field] ?? humanizeField(field)}: ${sentence}` : sentence;
+        })
+        .join(' ');
+    }
+  }
+  if (error instanceof ApiError || error instanceof NetworkError) return toUserMessage(error);
+  return 'Something went wrong.';
+}

@@ -7,7 +7,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
-import { ok, url } from '@/mocks/envelope';
+import { fail, ok, url } from '@/mocks/envelope';
 import { endpoints } from '@/shared/api/endpoints';
 import { tripsActiveSliceQuery, tripsKpiQuery } from '@/shared/api/trips';
 import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/client';
@@ -223,6 +223,19 @@ describe('W-11 Dispatch & Trips', () => {
     await user.click(await screen.findByRole('button', { name: 'Auto-assign' }));
 
     expect(await screen.findByText('1 loads assigned · 1 skipped (no driver with enough hours)')).toBeInTheDocument();
+  });
+
+  it('Auto-assign names the refusal instead of a bare "Something went wrong."', async () => {
+    usePopulatedTrips();
+    server.use(http.post(url(endpoints.trips.autoAssign), () => fail(429, 'RATE_LIMITED', 'Too many requests')));
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText('TR-4821');
+    await user.click(screen.getByRole('button', { name: /Unassigned 0/ }));
+    await user.click(await screen.findByRole('button', { name: 'Auto-assign' }));
+
+    expect(await screen.findByText('Too many requests. Wait a moment and try again.')).toBeInTheDocument();
   });
 
   it('a `trip.status_changed` event on the `fleet` room patches the row immediately and invalidates the KPI/count queries so they settle correctly (WB-114)', async () => {

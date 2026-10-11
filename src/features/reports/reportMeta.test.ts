@@ -111,6 +111,25 @@ describe('refusalText — server refusals verbatim', () => {
     expect(refusalText(err)).toBe('IFTA reports are generated as CSV in this version (streaming export, TZ §15).');
   });
 
+  it('spells out a zod 422 instead of the bare "Request validation failed."', () => {
+    const err = new ApiError(422, {
+      code: 'VALIDATION_FAILED',
+      message: 'Request validation failed.',
+      details: { issues: [{ path: 'recipients.0', code: 'invalid_string', message: 'Invalid email' }, { path: 'params.from', code: 'custom', message: 'Required' }] },
+    });
+    expect(refusalText(err)).toBe('Recipients: Invalid email. From: Required.');
+  });
+
+  it('leaves out the issues the caller already shows under an input', () => {
+    const err = new ApiError(400, {
+      code: 'VALIDATION_FAILED',
+      message: 'Request validation failed.',
+      details: { issues: [{ path: 'outputFileComment', code: 'too_big', message: 'Too long' }, { path: 'method', code: 'custom', message: 'Bad method' }] },
+    });
+    expect(refusalText(err, ['outputFileComment'])).toBe('Method: Bad method.');
+    expect(refusalText(err, ['outputFileComment', 'method'])).toBe('Check the highlighted fields and try again.');
+  });
+
   it('falls back to the mapped text or a plain error message', () => {
     expect(refusalText(new ApiError(404, { code: 'NOT_FOUND' }))).toBe('Not found.');
     expect(refusalText(new Error('offline'))).toBe('offline');

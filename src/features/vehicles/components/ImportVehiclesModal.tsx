@@ -8,12 +8,14 @@ import { Badge } from '@/shared/ui/Badge';
 import { useToast } from '@/shared/ui/Toast';
 import { TOAST_COPY } from '@/shared/ui/copy';
 import { useImportVehicles, type ImportVehiclesOptions } from '@/shared/api/vehicles';
-import { ApiError } from '@/shared/api/errors';
+import { ApiError, formErrorMessage } from '@/shared/api/errors';
 import { parseCsv, toCsv } from '@/shared/lib/csv';
 import { importIssues, normalizeImportRow } from '../lib/importRows';
 
 const MAX_BYTES = 5 * 1024 * 1024;
+/** `ImportVehiclesDto.vehicles` is `.max(2000)` — a bigger file could only come back as a 422. */
 const MAX_ROWS = 2000;
+const DEFAULT_TERMINAL_MAX = 120;
 const optionClass =
   'h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text';
 
@@ -83,17 +85,28 @@ export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
       setError('File is larger than 5 MB.');
       return;
     }
-    selected.text().then((text) => {
-      const parsed = parseCsv(text);
-      if (parsed.length > MAX_ROWS) {
-        setError(`File has ${parsed.length} rows — 2,000 rows maximum.`);
-        setFile(null);
-        setRows([]);
-        return;
-      }
-      setRows(parsed);
-      setFile(selected);
-    });
+    selected
+      .text()
+      .then((text) => {
+        const parsed = parseCsv(text);
+        if (parsed.length > MAX_ROWS) {
+          setError(`File has ${parsed.length} rows — 2,000 rows maximum.`);
+          setFile(null);
+          setRows([]);
+          return;
+        }
+        // A header-only file used to leave `Import units` disabled with no word on why.
+        if (parsed.length === 0) {
+          setError('The file has no unit rows. Add one unit per row below the header.');
+          setFile(null);
+          setRows([]);
+          return;
+        }
+        setRows(parsed);
+        setFile(selected);
+      })
+      // An unreadable file used to reject into nothing — the drop zone just stayed empty.
+      .catch(() => setError('The file could not be read. Choose the CSV again.'));
   }
 
   return (
@@ -149,7 +162,7 @@ export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
                     }
                     toast({
                       kind: 'error',
-                      title: err instanceof ApiError ? err.userMessage : 'Something went wrong.',
+                      title: formErrorMessage(err, [], { 'options.defaultTerminal': 'Default terminal', vehicles: 'File' }),
                     });
                   },
                 },
@@ -250,6 +263,7 @@ export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
             <input
               value={defaultTerminal}
               onChange={(e) => setDefaultTerminal(e.target.value)}
+              maxLength={DEFAULT_TERMINAL_MAX}
               placeholder="Optional"
               className={optionClass}
             />
