@@ -86,4 +86,51 @@ describe('AssignCoachingModal', () => {
     expect(screen.getByLabelText('Note')).toHaveAttribute('aria-invalid', 'true');
     expect(posts).toBe(0);
   });
+
+  it('spells out a server 422 the form has no field for, instead of "Check the highlighted fields"', async () => {
+    server.use(
+      http.post(url(endpoints.safety.coaching), () =>
+        HttpResponse.json(
+          { statusCode: 422, code: 'VALIDATION_FAILED', message: 'Request validation failed.', details: { issues: [{ path: 'driverId', code: 'invalid_string', message: 'Invalid uuid' }] } },
+          { status: 422 },
+        ),
+      ),
+    );
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <AssignCoachingModal driver={DRIVER as never} onClose={() => {}} />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('Note'), 'Follow up');
+    await user.click(screen.getByRole('button', { name: 'Assign coaching' }));
+
+    expect(await screen.findByText('Driver: Invalid uuid.')).toBeInTheDocument();
+    expect(screen.queryByText('Check the highlighted fields and try again.')).not.toBeInTheDocument();
+  });
+
+  it('a driver with no open event to coach (404) says so', async () => {
+    server.use(
+      http.post(url(endpoints.safety.coaching), () =>
+        HttpResponse.json({ statusCode: 404, code: 'NOT_FOUND', message: 'No open safety event for this driver to coach.' }, { status: 404 }),
+      ),
+    );
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <ToastProvider>
+          <AssignCoachingModal driver={DRIVER as never} onClose={() => {}} />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Assign coaching' }));
+
+    expect(await screen.findByText('John Smith has no open safety event to coach.')).toBeInTheDocument();
+  });
 });
