@@ -38,4 +38,10 @@ describe('<HosMeter>', () => {
     render(<HosMeter label="Drive left" remainingSec={3600} limitSec={11 * 3600} />);
     expect(screen.queryByText('limit exceeded')).not.toBeInTheDocument();
   });
+
+  it('names the reason a clock ran out instead of "limit exceeded" when told to', () => {
+    render(<HosMeter label="Drive" remainingSec={0} limitSec={11 * 3600} zeroNote="10-hour break required" />);
+    expect(screen.getByText('10-hour break required')).toBeInTheDocument();
+    expect(screen.queryByText('limit exceeded')).not.toBeInTheDocument();
+  });
 });

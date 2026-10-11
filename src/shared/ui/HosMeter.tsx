@@ -16,10 +16,17 @@ export interface HosMeterProps {
   limitSec: number;
   /** e.g. `of 14:00`, `of 70:00`, `of 08:00 driving` (§5.8). */
   ofHint?: string;
+  /**
+   * What a clock at 00:00 means. A clock that has run out is not always a violation: a driver who
+   * is on duty past the 14-hour window, not driving, needs a 10-hour break — nothing was exceeded.
+   * Callers name the reason with `hosClockNotes()` (`shared/format/hos.ts`); the default stays
+   * `limit exceeded` for callers that cannot tell.
+   */
+  zeroNote?: string;
   className?: string;
 }
 
-export function HosMeter({ label, remainingSec, limitSec, ofHint, className }: HosMeterProps) {
+export function HosMeter({ label, remainingSec, limitSec, ofHint, zeroNote = 'limit exceeded', className }: HosMeterProps) {
   const tone = hosTone(remainingSec, limitSec);
   const exceeded = remainingSec <= 0;
   return (
@@ -39,7 +46,7 @@ export function HosMeter({ label, remainingSec, limitSec, ofHint, className }: H
         >
           {formatHm(remainingSec)}
         </span>
-        {exceeded && <span className="text-caption text-danger">limit exceeded</span>}
+        {exceeded && <span className="text-caption text-danger">{zeroNote}</span>}
       </div>
       <ProgressBar ratio={limitSec > 0 ? remainingSec / limitSec : 0} tone={tone} label={label} />
     </div>

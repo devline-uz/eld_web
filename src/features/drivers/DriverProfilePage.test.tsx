@@ -219,6 +219,21 @@ describe('W-07 Driver profile — Documents tab', () => {
     expect(await screen.findByText('cdl.pdf uploaded')).toBeInTheDocument();
   });
 
+  it('a file name past the CreateDriverDocumentDto limit is refused before any upload', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByRole('heading', { name: 'John Smith' });
+    await user.click(screen.getByRole('button', { name: 'Documents' }));
+    await screen.findByText('No documents uploaded.');
+
+    const file = new File(['%PDF-1.4'], `${'a'.repeat(201)}.pdf`, { type: 'application/pdf' });
+    await user.upload(document.querySelector('input[type="file"]') as HTMLInputElement, file);
+
+    expect(
+      await screen.findByText('File name must be 200 characters or fewer — rename the file and try again.'),
+    ).toBeInTheDocument();
+  });
+
   // The `usePermission` mock in this file only distinguishes "has `drivers`" (page guard) from
   // "does not" — it does not model READ vs FULL, so the upload-card / delete-button gating on
   // `<Can perm="drivers" level="FULL">` is covered by `shared/auth/Can` and the RBAC fixture

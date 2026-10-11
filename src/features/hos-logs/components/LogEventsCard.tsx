@@ -47,6 +47,12 @@ function originCell(event: LogEventView) {
 
 export interface LogEventsCardProps {
   events: LogEventView[];
+  /**
+   * The record in force at 00:00 that began on an earlier day (`GET /logs/:id/events`
+   * `carriedIn`). The grid draws its status from midnight, so the table shows it as the day's
+   * first row — never "No ELD records for this day" under a full graph.
+   */
+  carriedIn?: LogEventView | null;
   timezone: string;
   isLoading: boolean;
   isError: boolean;
@@ -62,6 +68,7 @@ export interface LogEventsCardProps {
 
 export function LogEventsCard({
   events,
+  carriedIn = null,
   timezone,
   isLoading,
   isError,
@@ -79,13 +86,13 @@ export function LogEventsCard({
   // WB-196 — `View full record` used to be a dead `#event-…` anchor; it opens the record instead.
   const [recordEvent, setRecordEvent] = useState<LogEventView | null>(null);
 
-  const visible = useMemo(
-    () =>
-      showAllRecords
-        ? events
-        : events.filter((event) => event.recordStatus === RECORD_STATUS.active),
-    [events, showAllRecords],
-  );
+  const visible = useMemo(() => {
+    const inDay = showAllRecords
+      ? events
+      : events.filter((event) => event.recordStatus === RECORD_STATUS.active);
+    return carriedIn ? [carriedIn, ...inDay] : inDay;
+  }, [events, carriedIn, showAllRecords]);
+  const carriedId = carriedIn?.id ?? null;
   const [requestedRows, setRequestedRows] = useState(EVENT_WINDOW);
   const highlightIndex = useMemo(
     () => (highlightedEventId ? visible.findIndex((event) => event.id === highlightedEventId) : -1),
@@ -112,11 +119,17 @@ export function LogEventsCard({
         // Sorting a partial window would misorder the day; rows arrive in chronological order.
         enableSorting: !windowed,
         accessorFn: (row) => row.eventDateTime,
-        cell: ({ row }) => (
-          <span className="tabular font-semibold">
-            {formatInTimeZone(new Date(row.original.eventDateTime), timezone, 'HH:mm:ss')}
-          </span>
-        ),
+        cell: ({ row }) =>
+          row.original.id === carriedId ? (
+            // Began on an earlier day: the date is part of the time, or it reads as today's.
+            <span className="tabular font-semibold text-text-muted">
+              {formatInTimeZone(new Date(row.original.eventDateTime), timezone, 'MMM d, HH:mm:ss')}
+            </span>
+          ) : (
+            <span className="tabular font-semibold">
+              {formatInTimeZone(new Date(row.original.eventDateTime), timezone, 'HH:mm:ss')}
+            </span>
+          ),
       },
       {
         id: 'status',
@@ -164,12 +177,20 @@ export function LogEventsCard({
         id: 'notes',
         header: 'NOTES',
         enableSorting: false,
-        cell: ({ row }) =>
-          row.original.annotation ??
-          row.original.comment ?? <span className="text-text-muted">{EMPTY.dash}</span>,
+        cell: ({ row }) => {
+          const note = row.original.annotation ?? row.original.comment;
+          if (row.original.id === carriedId) {
+            return (
+              <span className="text-text-muted">
+                {note ? `Carried over from the previous day · ${note}` : 'Carried over from the previous day'}
+              </span>
+            );
+          }
+          return note ?? <span className="text-text-muted">{EMPTY.dash}</span>;
+        },
       },
     ],
-    [timezone, windowed],
+    [timezone, windowed, carriedId],
   );
 
   return (
@@ -217,6 +238,7 @@ export function LogEventsCard({
                   row.recordStatus === RECORD_STATUS.rejected &&
                     'line-through text-text-muted opacity-70',
                   row.recordStatus === RECORD_STATUS.proposed && 'bg-info-soft',
+                  row.id === carriedId && 'bg-bg-subtle',
                   row.id === highlightedEventId && 'bg-primary-soft',
                 )
               }

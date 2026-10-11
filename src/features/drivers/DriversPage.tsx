@@ -20,13 +20,14 @@ import {
 } from '@/shared/api/drivers';
 import { useQueueReport } from '@/shared/api/reports';
 import { client } from '@/shared/api/client';
-import { ApiError } from '@/shared/api/errors';
+import { ApiError, NetworkError, formErrorMessage } from '@/shared/api/errors';
 import { qkRoot } from '@/shared/api/queryKeys';
 import { endpoints } from '@/shared/api/endpoints';
 import { Button } from '@/shared/ui/Button';
 import { Badge, DutyBadge } from '@/shared/ui/Badge';
 import { Avatar } from '@/shared/ui/Avatar';
 import { HosMeter } from '@/shared/ui/HosMeter';
+import { hosClockNotes } from '@/shared/format/hos';
 import { DataTable } from '@/shared/ui/DataTable';
 import { Pagination } from '@/shared/ui/Pagination';
 import { Card } from '@/shared/ui/Card';
@@ -192,7 +193,7 @@ export default function DriversPage() {
     } catch (error) {
       toast({
         kind: 'error',
-        title: error instanceof ApiError ? error.userMessage : 'Something went wrong.',
+        title: formErrorMessage(error),
       });
     } finally {
       setExporting(false);
@@ -236,15 +237,15 @@ export default function DriversPage() {
         kind: 'error',
         ...DRIVER_TOAST.rodsExportFailed(total - succeeded, total),
         description:
-          firstError instanceof ApiError
-            ? firstError.userMessage
+          firstError instanceof ApiError || firstError instanceof NetworkError
+            ? formErrorMessage(firstError)
             : DRIVER_TOAST.rodsExportFailed(total - succeeded, total).description,
       });
     },
     onError: (error) =>
       toast({
         kind: 'error',
-        title: error instanceof ApiError ? error.userMessage : 'Something went wrong.',
+        title: formErrorMessage(error),
       }),
   });
 
@@ -276,8 +277,8 @@ export default function DriversPage() {
         kind: 'error',
         ...DRIVER_TOAST.driversDeactivateFailed(total - succeeded, total),
         description:
-          firstError instanceof ApiError
-            ? firstError.userMessage
+          firstError instanceof ApiError || firstError instanceof NetworkError
+            ? formErrorMessage(firstError)
             : DRIVER_TOAST.driversDeactivateFailed(total - succeeded, total).description,
       });
     },
@@ -285,7 +286,7 @@ export default function DriversPage() {
       setDeactivateTargets(null);
       toast({
         kind: 'error',
-        title: error instanceof ApiError ? error.userMessage : 'Something went wrong.',
+        title: formErrorMessage(error),
       });
     },
   });
@@ -299,7 +300,7 @@ export default function DriversPage() {
       onError: (error) =>
         toast({
           kind: 'error',
-          title: error instanceof ApiError ? error.userMessage : 'Something went wrong.',
+          title: formErrorMessage(error),
         }),
     });
   }
@@ -355,6 +356,7 @@ export default function DriversPage() {
           label=""
           remainingSec={row.original.hos.driveRemainingSec}
           limitSec={LIMIT_SEC.drive}
+          zeroNote={hosClockNotes({ dutyStatus: row.original.dutyStatus, ...row.original.hos }).drive}
         />
       ),
     },
@@ -366,6 +368,7 @@ export default function DriversPage() {
           label=""
           remainingSec={row.original.hos.shiftRemainingSec}
           limitSec={LIMIT_SEC.shift}
+          zeroNote={hosClockNotes({ dutyStatus: row.original.dutyStatus, ...row.original.hos }).shift}
         />
       ),
     },
@@ -377,6 +380,7 @@ export default function DriversPage() {
           label=""
           remainingSec={row.original.hos.cycleRemainingSec}
           limitSec={LIMIT_SEC.cycle}
+          zeroNote={hosClockNotes({ dutyStatus: row.original.dutyStatus, ...row.original.hos }).cycle}
         />
       ),
     },
