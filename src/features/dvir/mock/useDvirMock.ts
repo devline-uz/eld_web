@@ -4,12 +4,9 @@
 // real hook first and only swaps in `./dvirMockData.ts` rows when the API has nothing to show:
 // the request failed, or it answered an empty list. Real data always wins.
 //
-// Switch — `VITE_DVIR_MOCK` in `eld_web/.env`:
-//   (unset)    on as a fallback in `vite dev`, off in production builds
-//   `fallback` on as a fallback in any build
-//   `always`   ignore the API and always show the demo rows
-//   `off`      never show demo rows
-// Vitest (`MODE === 'test'`) is always `off`, so the page's own tests see the real hooks.
+// Switch — `VITE_DEMO_FALLBACK` (see `@/shared/lib/mockMode`). Production builds are always off:
+// each export below is then the real hook itself and this demo data is tree-shaken out of the bundle.
+// With the switch off the page shows its own error / empty states.
 //
 // To remove the demo entirely: delete `src/features/dvir/mock/` and change the imports in
 // `DvirPage.tsx` and `components/DvirDrawer.tsx` back to `@/shared/api/dvir` / `@/shared/api/lookups`.
@@ -32,10 +29,8 @@ import {
 } from '@/shared/api/dvir';
 import { useVehiclesLookup as useVehiclesLookupApi } from '@/shared/api/lookups';
 import type { DriverRow, VehicleRow } from '@/shared/api/vehicles';
-import { resolveMockMode, type MockMode } from '@/shared/lib/mockMode';
+import { DEMO_FALLBACK_ENABLED, DEMO_FALLBACK_MODE } from '@/shared/lib/mockMode';
 import { buildDvirMockData, MOCK_ID_PREFIX, type DvirMockData } from './dvirMockData';
-
-export const DVIR_MOCK_MODE: MockMode = resolveMockMode(import.meta.env.VITE_DVIR_MOCK);
 
 let cached: DvirMockData | null = null;
 /** Built once per page load, so ids and timestamps stay stable across renders. */
@@ -46,8 +41,8 @@ function mockData(): DvirMockData {
 
 /** Use demo rows for one section? Never while the real request is still in flight. */
 function shouldMock(real: { isLoading: boolean; isError: boolean }, realCount: number): boolean {
-  if (DVIR_MOCK_MODE === 'off') return false;
-  if (DVIR_MOCK_MODE === 'always') return true;
+  if (DEMO_FALLBACK_MODE === 'off') return false;
+  if (DEMO_FALLBACK_MODE === 'always') return true;
   if (real.isLoading) return false;
   return real.isError || realCount === 0;
 }
@@ -66,7 +61,7 @@ const noop = () => undefined;
 
 /* --------------------------------------------------------------------- hooks */
 
-export function useRecentDvirs() {
+function useRecentDvirsDemo() {
   const real = useRecentDvirsApi();
   const mock = shouldMock(real, real.rows.length);
   const rows = useMemo(() => {
@@ -78,7 +73,7 @@ export function useRecentDvirs() {
   return { ...real, rows, page: undefined, windowFull: false, isLoading: false, isError: false, error: null };
 }
 
-export function useOpenDefects(input: OpenDefectsInput) {
+function useOpenDefectsDemo(input: OpenDefectsInput) {
   const real = useOpenDefectsApi(input);
   const mock = shouldMock(real, real.total);
   const { page, limit, search } = input;
@@ -93,7 +88,7 @@ export function useOpenDefects(input: OpenDefectsInput) {
   return { ...real, ...part, isLoading: false, isError: false };
 }
 
-export function useWorkOrdersList(params: WorkOrderListParams) {
+function useWorkOrdersListDemo(params: WorkOrderListParams) {
   const real = useWorkOrdersListApi(params);
   const mock = shouldMock(real, real.total);
   const { page = 1, limit = 10, q } = params;
@@ -107,7 +102,7 @@ export function useWorkOrdersList(params: WorkOrderListParams) {
   return { ...real, ...part, page: undefined, isLoading: false, isError: false, error: null };
 }
 
-export function useSchedulesList(input: SchedulesInput) {
+function useSchedulesListDemo(input: SchedulesInput) {
   const real = useSchedulesListApi(input);
   const mock = shouldMock(real, real.total);
   const { page, limit, search } = input;
@@ -121,7 +116,7 @@ export function useSchedulesList(input: SchedulesInput) {
   return { ...real, ...part, isLoading: false, isError: false };
 }
 
-export function useDueSchedules() {
+function useDueSchedulesDemo() {
   const real = useDueSchedulesApi();
   const mock = shouldMock(real, real.rows.length);
   const rows = useMemo(() => (mock ? mockData().schedules.filter((s) => s.due.state !== 'OK') : null), [mock]);
@@ -130,7 +125,7 @@ export function useDueSchedules() {
 }
 
 /** The `Vehicles out of service` KPI — demo units only when the real lookup has none at all. */
-export function useVehiclesLookup(): { data: { items: VehicleRow[] } | undefined; isLoading: boolean } {
+function useVehiclesLookupDemo(): { data: { items: VehicleRow[] } | undefined; isLoading: boolean } {
   const real = useVehiclesLookupApi();
   const realItems = real.data?.items;
   const mock = shouldMock({ isLoading: real.isLoading, isError: real.isError }, realItems?.length ?? 0);
@@ -141,7 +136,7 @@ export function useVehiclesLookup(): { data: { items: VehicleRow[] } | undefined
 }
 
 /** 11.15 drawer — a demo DVIR id is answered locally; any other id goes to `GET /dvir/:id`. */
-export function useDvir(id: string | undefined): {
+function useDvirDemo(id: string | undefined): {
   data: DvirDetail | undefined;
   driver: DriverRow | null;
   vehicle: VehicleRow | null;
@@ -163,3 +158,12 @@ export function useDvir(id: string | undefined): {
     refetch: noop,
   };
 }
+
+// Production: `DEMO_FALLBACK_ENABLED` is the literal `false`, so these are the real hooks.
+export const useRecentDvirs: typeof useRecentDvirsDemo = DEMO_FALLBACK_ENABLED ? useRecentDvirsDemo : useRecentDvirsApi;
+export const useOpenDefects: typeof useOpenDefectsDemo = DEMO_FALLBACK_ENABLED ? useOpenDefectsDemo : useOpenDefectsApi;
+export const useWorkOrdersList: typeof useWorkOrdersListDemo = DEMO_FALLBACK_ENABLED ? useWorkOrdersListDemo : useWorkOrdersListApi;
+export const useSchedulesList: typeof useSchedulesListDemo = DEMO_FALLBACK_ENABLED ? useSchedulesListDemo : useSchedulesListApi;
+export const useDueSchedules: typeof useDueSchedulesDemo = DEMO_FALLBACK_ENABLED ? useDueSchedulesDemo : useDueSchedulesApi;
+export const useVehiclesLookup: typeof useVehiclesLookupDemo = DEMO_FALLBACK_ENABLED ? useVehiclesLookupDemo : useVehiclesLookupApi;
+export const useDvir: typeof useDvirDemo = DEMO_FALLBACK_ENABLED ? useDvirDemo : useDvirApi;

@@ -1,7 +1,7 @@
 // owner: web-dvir-safety — W-09 DVIR & Maintenance DEMO DATA (not app logic).
 //
 // Realistic fleet records the DVIR page falls back to while the API has nothing to show (empty
-// list or a failed request). Wired in `./useDvirMock.ts`; switched by `VITE_DVIR_MOCK`
+// list or a failed request). Wired in `./useDvirMock.ts`; switched by `VITE_DEMO_FALLBACK`, never in production
 // (see that file). To remove the demo entirely: delete this `mock/` folder and point the hook
 // imports in `DvirPage.tsx` / `components/DvirDrawer.tsx` back at `@/shared/api/dvir`.
 //

@@ -1,18 +1,38 @@
-// Shared resolver for the per-screen demo-data switches (`VITE_DVIR_MOCK`, `VITE_SAFETY_MOCK`,
-// `VITE_IFTA_MOCK`).
-//   (unset)    on as a fallback in `vite dev`, off in production builds
-//   `fallback` on as a fallback in any build (also `true` / `1`)
+// The one switch for the screen-level demo-data fallbacks (DVIR & Maintenance, Safety, IFTA):
+// `VITE_DEMO_FALLBACK` in `eld_web/.env`.
+//   (unset)    `vite dev` → fallback (demo rows only while the API is empty or failing); vitest → off
+//   `fallback` demo rows while the API is empty or failing (also `true` / `1`)
 //   `always`   ignore the API and always show the demo rows
 //   `off`      never show demo rows (also `false` / `0`)
-// Vitest (`MODE === 'test'`) is always `off`.
+// PRODUCTION BUILDS ARE ALWAYS `off`, whatever the env says: `import.meta.env.PROD` is inlined as
+// `true` by `vite build`, so `DEMO_FALLBACK_MODE` folds to the literal `'off'`, every
+// `DEMO_FALLBACK_ENABLED ? demo : real` branch collapses to the real hook, and the demo-data
+// modules are tree-shaken out of the bundle. With the switch off a screen shows its own
+// ErrorState (+ Retry) on a failed request and its EmptyState on an empty answer.
 export type MockMode = 'off' | 'fallback' | 'always';
 
-/** Pass the raw env value (`import.meta.env.VITE_…_MOCK`) — read statically so Vite can inline it. */
-export function resolveMockMode(value: unknown): MockMode {
-  if (import.meta.env.MODE === 'test') return 'off';
+interface BuildEnv {
+  PROD: boolean;
+  DEV: boolean;
+  MODE: string;
+}
+
+/** Pure resolver — exported for unit tests; the app reads `DEMO_FALLBACK_MODE`. */
+export function resolveMockMode(value: unknown, env: BuildEnv = import.meta.env): MockMode {
+  if (env.PROD) return 'off';
   const raw = String(value ?? '').trim().toLowerCase();
   if (raw === 'off' || raw === 'false' || raw === '0') return 'off';
   if (raw === 'always') return 'always';
   if (raw === 'fallback' || raw === 'true' || raw === '1') return 'fallback';
-  return import.meta.env.DEV ? 'fallback' : 'off';
+  // Unset: on in `vite dev`, off under vitest so page tests see their real empty/error states.
+  return env.DEV && env.MODE !== 'test' ? 'fallback' : 'off';
 }
+
+// The `import.meta.env.PROD ?` guard must stay inline (not only inside `resolveMockMode`) so the
+// production build can constant-fold it and drop the demo modules.
+export const DEMO_FALLBACK_MODE: MockMode = import.meta.env.PROD
+  ? 'off'
+  : resolveMockMode(import.meta.env.VITE_DEMO_FALLBACK);
+
+/** `false` in every production build (a compile-time constant there). */
+export const DEMO_FALLBACK_ENABLED: boolean = DEMO_FALLBACK_MODE !== 'off';
