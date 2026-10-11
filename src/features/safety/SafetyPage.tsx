@@ -21,17 +21,19 @@ import { Pagination } from '@/shared/ui/Pagination';
 import { KpiCard, KpiRowSkeleton } from '@/shared/ui/KpiCard';
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
 import { EMPTY_STATE_COPY, searchEmptyState } from '@/shared/ui/copy';
-import { formatLocal } from '@/shared/format/datetime';
+import { formatDateRange, formatLocal } from '@/shared/format/datetime';
 import { useNowTick } from '@/shared/format/useRelativeTime';
 import { formatGForce } from '@/shared/format/numbers';
 import { orDash } from '@/shared/format/empty';
 import { toCsv } from '@/shared/lib/csv';
-import { useSafetyEventsList, useScorecard, type SafetyEventTableRow, type ScorecardTableRow } from '@/shared/api/safety';
-import { AssignCoachingModal } from './components/AssignCoachingModal';
+import { isScored, useSafetyEventsList, useScorecard, type SafetyEventTableRow, type ScorecardFleet, type ScorecardTableRow } from '@/shared/api/safety';
+import { useDriversLookup } from '@/shared/api/lookups';
+import { AssignCoachingModal, type CoachingTarget } from './components/AssignCoachingModal';
 import { SafetyFiltersDrawer, SafetyFilterChips } from './components/SafetyFiltersDrawer';
 import { parseSafetyFilters, writeSafetyFilters, matchesSafetyFilters, EMPTY_SAFETY_FILTERS, countActiveSafetyFilters, safetyEventLabel } from './lib/filters';
 // safetyMock — TEMPORARY demo fallback; delete this import and the `safetyMock` block below to remove.
-import { SAFETY_MOCK_MODE, MOCK_SAFETY_EVENTS, MOCK_SCORECARD } from './lib/mockData';
+import { MOCK_SAFETY_EVENTS, MOCK_SCORECARD, MOCK_SCORECARD_FLEET, MOCK_SCORECARD_PERIOD } from './lib/mockData';
+import { DEMO_FALLBACK_ENABLED, DEMO_FALLBACK_MODE } from '@/shared/lib/mockMode';
 
 /** Fleet-score verdict bands — the same 90 / 70 cut-offs as the driver SCORE badge. */
 const FLEET_VERDICT = {
@@ -41,6 +43,26 @@ const FLEET_VERDICT = {
 } as const;
 
 const verdictBand = (score: number): keyof typeof FLEET_VERDICT => (score >= 90 ? 'good' : score >= 70 ? 'watch' : 'below');
+
+/** SCORE pill tone — ≥90 success, 70–89 warning, <70 danger (W-10). */
+const scoreTone = (score: number): 'success' | 'warning' | 'danger' => (score >= 90 ? 'success' : score >= 70 ? 'warning' : 'danger');
+
+/** W-10 KPI chip `↑ 4 pts` (success) / `↓ 3 pts` (danger) — fleet score vs the previous 30-day
+ * period, server-computed (`fleet.trend`). Null (no comparable period) ⇒ no chip. */
+function fleetTrendChip(trend: number | null | undefined): { text: string; tone: 'success' | 'danger' | 'neutral' } | undefined {
+  if (trend == null) return undefined;
+  if (trend > 0) return { text: `↑ ${trend} pts`, tone: 'success' };
+  if (trend < 0) return { text: `↓ ${Math.abs(trend)} pts`, tone: 'danger' };
+  return { text: 'No change', tone: 'neutral' };
+}
+
+/** Period labels are calendar dates (each driver's home-terminal day), so they are rendered as
+ * dates in UTC — never shifted by the browser or carrier zone. */
+const periodLabel = (start: string | null | undefined, end: string | null | undefined): string | null =>
+  start && end ? formatDateRange(`${start}T00:00:00Z`, `${end}T00:00:00Z`, 'UTC') : null;
+
+/** "Not enough miles" rows (< `minMiles` in the period) render muted. */
+const rowTone = (row: ScorecardTableRow): string => (isScored(row) ? 'text-text' : 'text-text-muted');
 
 const EVENT_TONE: Record<string, 'danger' | 'violet' | 'warning'> = {
   HARSH_BRAKING: 'danger',
@@ -225,7 +247,16 @@ const COACHING_COLUMNS: ColumnDef<SafetyEventTableRow, unknown>[] = [
 ];
 
 const SCORECARD_COLUMNS: ColumnDef<ScorecardTableRow, unknown>[] = [
-  { id: 'rank', header: 'RANK', cell: ({ row }) => <span className="tabular-nums text-text">#{row.original.rank ?? '—'}</span> },
+  {
+    id: 'rank',
+    header: 'RANK',
+    cell: ({ row }) =>
+      isScored(row.original) && row.original.rank != null ? (
+        <span className="tabular-nums text-text">#{row.original.rank}</span>
+      ) : (
+        <span className="text-text-muted">—</span>
+      ),
+  },
   {
     id: 'driver',
     header: 'DRIVER',
@@ -235,7 +266,7 @@ const SCORECARD_COLUMNS: ColumnDef<ScorecardTableRow, unknown>[] = [
       return (
         <span className="flex items-center gap-2">
           <Avatar name={name} size="sm" />
-          <span className="text-text">{name}</span>
+          <span className={rowTone(row.original)}>{name}</span>
         </span>
       );
     },
@@ -243,19 +274,21 @@ const SCORECARD_COLUMNS: ColumnDef<ScorecardTableRow, unknown>[] = [
   {
     id: 'score',
     header: 'SCORE',
-    cell: ({ row }) => (
-      <Badge tone={row.original.score >= 90 ? 'success' : row.original.score >= 70 ? 'warning' : 'danger'}>
-        {row.original.score}
-      </Badge>
-    ),
+    // Phase 1 (backend D-133) — fewer than `minMiles` in the period ⇒ no score, no rank, no pill.
+    cell: ({ row }) =>
+      isScored(row.original) ? (
+        <Badge tone={scoreTone(row.original.score)}>{row.original.score}</Badge>
+      ) : (
+        <span className="text-caption text-text-muted">Not enough miles</span>
+      ),
   },
-  { id: 'harsh', header: 'HARSH EVENTS', meta: { numeric: true }, cell: ({ row }) => <span className="tabular-nums text-text">{orDash(row.original.harshCount, (v) => v.toLocaleString('en-US'))}</span> },
-  { id: 'speeding', header: 'SPEEDING', meta: { numeric: true }, cell: ({ row }) => <span className="tabular-nums text-text">{orDash(row.original.speedingCount, (v) => v.toLocaleString('en-US'))}</span> },
+  { id: 'harsh', header: 'HARSH EVENTS', meta: { numeric: true }, cell: ({ row }) => <span className={cn('tabular-nums', rowTone(row.original))}>{orDash(row.original.harshCount, (v) => v.toLocaleString('en-US'))}</span> },
+  { id: 'speeding', header: 'SPEEDING', meta: { numeric: true }, cell: ({ row }) => <span className={cn('tabular-nums', rowTone(row.original))}>{orDash(row.original.speedingCount, (v) => v.toLocaleString('en-US'))}</span> },
   {
     id: 'miles',
     header: 'MILES DRIVEN',
     meta: { numeric: true },
-    cell: ({ row }) => <span className="tabular-nums text-text">{orDash(row.original.milesDriven, (v) => v.toLocaleString('en-US'))}</span>,
+    cell: ({ row }) => <span className={cn('tabular-nums', rowTone(row.original))}>{orDash(row.original.milesDriven, (v) => v.toLocaleString('en-US'))}</span>,
   },
   {
     id: 'trend',
@@ -302,7 +335,9 @@ function ViewProfileCell({ driverId }: { driverId: string }) {
 export default function SafetyPage() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
-  const [coachDriver, setCoachDriver] = useState<ScorecardTableRow | null>(null);
+  // The driver the open "Assign coaching" dialog is for — an id, not a row snapshot, so the dialog
+  // always renders the driver that is selected now (it used to keep the previous driver's name).
+  const [coachingDriverId, setCoachingDriverId] = useState<string | null>(null);
   const [coachDriverId, setCoachDriverId] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filtersRevision, setFiltersRevision] = useState(0);
@@ -330,18 +365,40 @@ export default function SafetyPage() {
   const eventsQuery = useSafetyEventsList({ limit: 500 });
   const scorecardQuery = useScorecard();
   // safetyMock — while the API returns no rows (empty or failed), show demo data from
-  // `./lib/mockData` instead. Real rows always win (unless `VITE_SAFETY_MOCK=always`).
+  // `./lib/mockData` instead. Real rows always win (unless `VITE_DEMO_FALLBACK=always`).
+  // Never in production: `DEMO_FALLBACK_ENABLED` is the literal `false` there, so both flags fold to
+  // `false`, the page shows its own error / empty states, and `./lib/mockData` is tree-shaken out.
   // Remove: `const events = eventsQuery;` etc.
   const shouldMockSafety = (q: { isLoading: boolean; rows: unknown[] }) =>
-    SAFETY_MOCK_MODE === 'always' || (SAFETY_MOCK_MODE === 'fallback' && !q.isLoading && q.rows.length === 0);
-  const eventsMock = shouldMockSafety(eventsQuery);
-  const scorecardMock = shouldMockSafety(scorecardQuery);
+    DEMO_FALLBACK_MODE === 'always' || (DEMO_FALLBACK_MODE === 'fallback' && !q.isLoading && q.rows.length === 0);
+  const eventsMock = DEMO_FALLBACK_ENABLED && shouldMockSafety(eventsQuery);
+  const scorecardMock = DEMO_FALLBACK_ENABLED && shouldMockSafety(scorecardQuery);
   const events = eventsMock
     ? { ...eventsQuery, rows: MOCK_SAFETY_EVENTS, isLoading: false, isError: false }
     : eventsQuery;
   const scorecard = scorecardMock
-    ? { ...scorecardQuery, rows: MOCK_SCORECARD, isLoading: false, isError: false }
+    ? {
+        ...scorecardQuery,
+        rows: MOCK_SCORECARD,
+        fleet: MOCK_SCORECARD_FLEET as ScorecardFleet,
+        periodStart: MOCK_SCORECARD_PERIOD.periodStart as string | null,
+        periodEnd: MOCK_SCORECARD_PERIOD.periodEnd as string | null,
+        isLoading: false,
+        isError: false,
+      }
     : scorecardQuery;
+
+  // "Assign coaching" posts a real `driverId` (`AssignCoachingDto.driverId` is a uuid). The demo
+  // scorecard rows carry demo driver ids, which the server refuses with a 422 — so whenever the
+  // scorecard is the demo fallback, the picker lists the carrier's real drivers instead.
+  const driversLookup = useDriversLookup(scorecardMock);
+  const coachTargets = useMemo((): CoachingTarget[] => {
+    if (!scorecardMock) return scorecard.rows;
+    return (driversLookup.data?.items ?? [])
+      .map((d) => ({ driverId: d.id, driver: d, score: null }))
+      .sort((a, b) => `${a.driver.firstName} ${a.driver.lastName}`.localeCompare(`${b.driver.firstName} ${b.driver.lastName}`));
+  }, [scorecardMock, scorecard.rows, driversLookup.data]);
+  const coachingTarget = coachingDriverId ? coachTargets.find((t) => t.driverId === coachingDriverId) ?? null : null;
 
   const now = useNowTick();
   const last30 = now - 30 * 24 * 60 * 60 * 1000;
@@ -360,11 +417,15 @@ export default function SafetyPage() {
   const coachedNow = currentEvents.filter((e) => e.status === 'COACHED').length;
   const pendingCoaching = currentEvents.filter((e) => e.status === 'NEW').length;
 
-  const fleetScore = useMemo(() => {
-    if (scorecard.rows.length === 0) return null;
-    return Math.round(scorecard.rows.reduce((sum, r) => sum + r.score, 0) / scorecard.rows.length);
-  }, [scorecard.rows]);
-  const belowThreshold = useMemo(() => scorecard.rows.filter((r) => r.score < 70).length, [scorecard.rows]);
+  // Phase 1 (backend D-133) — the fleet score is the server's MILE-WEIGHTED mean of scored drivers
+  // ("Not enough miles" drivers excluded) with its trend vs the previous 30-day period. Never
+  // re-averaged here: a plain client mean would weight a 120-mile driver like a 12,000-mile one.
+  const fleetScore = scorecard.fleet.score;
+  const fleetChip = fleetTrendChip(scorecard.fleet.trend);
+  const belowThreshold = scorecard.fleet.belowThresholdCount;
+  const rankedCount = useMemo(() => scorecard.rows.filter((r) => isScored(r)).length, [scorecard.rows]);
+  const unrankedCount = scorecard.rows.length - rankedCount;
+  const scorecardPeriod = periodLabel(scorecard.periodStart, scorecard.periodEnd);
 
   const needle = search.trim().toLowerCase();
   const filteredEvents = useMemo(
@@ -432,7 +493,7 @@ export default function SafetyPage() {
             ...visibleScorecard.map((r) => [
               r.rank ?? '',
               r.driver ? `${r.driver.firstName} ${r.driver.lastName}` : r.driverId,
-              r.score,
+              r.score ?? 'Not enough miles',
               r.harshCount,
               r.speedingCount,
               r.milesDriven,
@@ -511,11 +572,20 @@ export default function SafetyPage() {
       {scorecard.isLoading ? (
         <LoadingState rows={2} />
       ) : fleetScore == null ? (
-        <p className="mt-3 text-body text-text-muted">No scorecards yet.</p>
+        <p className="mt-3 text-body text-text-muted">
+          {scorecard.rows.length > 0
+            ? `Not enough miles — no driver reached ${scorecard.minMiles.toLocaleString('en-US')} mi in this period.`
+            : 'No scorecards yet.'}
+        </p>
       ) : (
         <div className="mt-3 flex items-center gap-4">
           <ScoreGauge score={fleetScore} />
           <div>
+            {fleetChip && (
+              <Badge tone={fleetChip.tone} className="mb-1">
+                {fleetChip.text}
+              </Badge>
+            )}
             {/* WB-170 — the verdict used to read `Good standing` in success green at any score,
                 including the 68 the mock fleet actually scores, against this card's own 70-point
                 threshold. It is derived now, on the same bands the SCORE badge uses. */}
@@ -535,7 +605,16 @@ export default function SafetyPage() {
   const driverScorecardCard = (
     <Card padded={false}>
       <div className="flex items-start justify-between p-card pb-0">
-        <SectionHeader title="Driver scorecard" subtitle={`${scorecard.rows.length} drivers ranked`} />
+        <SectionHeader
+          title="Driver scorecard"
+          subtitle={[
+            `${rankedCount} drivers ranked`,
+            unrankedCount > 0 ? `${unrankedCount} not enough miles` : null,
+            scorecardPeriod,
+          ]
+            .filter(Boolean)
+            .join(' · ')}
+        />
         <Can perm="safety" level="FULL">
           <div className="flex items-center gap-2">
             <select
@@ -545,7 +624,7 @@ export default function SafetyPage() {
               className="h-btn rounded-md border border-border bg-bg-surface px-2 text-body text-text"
             >
               <option value="">Select driver…</option>
-              {scorecard.rows.map((r) => (
+              {coachTargets.map((r) => (
                 <option key={r.driverId} value={r.driverId}>
                   {r.driver ? `${r.driver.firstName} ${r.driver.lastName}` : r.driverId}
                 </option>
@@ -554,8 +633,8 @@ export default function SafetyPage() {
             <Button
               variant="secondary"
               iconLeft={<Users size={16} strokeWidth={1.75} />}
-              disabled={!coachDriverId}
-              onClick={() => setCoachDriver(scorecard.rows.find((r) => r.driverId === coachDriverId) ?? null)}
+              disabled={!coachTargets.some((t) => t.driverId === coachDriverId)}
+              onClick={() => setCoachingDriverId(coachDriverId)}
             >
               Assign coaching
             </Button>
@@ -633,6 +712,7 @@ export default function SafetyPage() {
                   label="Fleet safety score"
                   value={fleetScore ?? '—'}
                   hint={fleetScore == null ? 'No scorecards yet' : undefined}
+                  chip={fleetScore == null ? undefined : fleetChip}
                   icon={ShieldCheck}
                   iconTone="success"
                 />
@@ -714,7 +794,10 @@ export default function SafetyPage() {
         )}
       </div>
 
-      {coachDriver && <AssignCoachingModal driver={coachDriver} onClose={() => setCoachDriver(null)} />}
+      {/* `key` — a different driver is a fresh dialog: empty note, no previous error. */}
+      {coachingTarget && (
+        <AssignCoachingModal key={coachingTarget.driverId} driver={coachingTarget} onClose={() => setCoachingDriverId(null)} />
+      )}
       <SafetyFiltersDrawer
         key={filtersRevision}
         open={filtersOpen}

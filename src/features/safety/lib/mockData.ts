@@ -8,26 +8,20 @@
 // Timestamps are relative to page load (spread over the last ~60 days), so the 30-day window and
 // the "vs prev." KPI chips stay populated whenever the page is opened.
 //
-// Switch — `VITE_SAFETY_MOCK` in `eld_web/.env` (same modes as `VITE_DVIR_MOCK`):
-//   (unset)    on as a fallback in `vite dev`, off in production builds
-//   `fallback` on as a fallback in any build
-//   `always`   ignore the API and always show the demo rows
-//   `off`      never show demo rows
-// Never active under vitest (`MODE === 'test'`), so the page tests keep their empty states.
+// Switch — `VITE_DEMO_FALLBACK` (see `@/shared/lib/mockMode`). Production builds are always off and
+// tree-shake this module out; unset under vitest, so the page tests keep their empty/error states.
 // To remove it entirely: delete this file and the `MOCK` lines in `SafetyPage.tsx` (search for `safetyMock`).
 import type { DriverRow, VehicleRow } from '@/shared/api/vehicles';
-import { resolveMockMode, type MockMode } from '@/shared/lib/mockMode';
 import type {
   CoachingStatus,
   SafetyEventTableRow,
   SafetyEventType,
   ScorecardTableRow,
 } from '@/shared/api/safety';
-
-export const SAFETY_MOCK_MODE: MockMode = resolveMockMode(import.meta.env.VITE_SAFETY_MOCK);
+import { demoDriverScore, demoFleet, rankDemoRows, type DemoFleet } from './scoreFormula';
 
 const DAY = 24 * 60 * 60 * 1000;
-const NOW = Date.now();
+const NOW = /* @__PURE__ */ Date.now();
 
 /** ISO timestamp `days` (+ `hours`) before page load. */
 function ago(days: number, hours = 0): string {
@@ -58,7 +52,7 @@ const DRIVER_SEED: [first: string, last: string, cdlState: string, terminal: str
     ['Andre', 'Coleman', 'FL', 'Jacksonville, FL', 'America/New_York'],
   ];
 
-const MOCK_DRIVERS: DriverRow[] = DRIVER_SEED.map(
+const MOCK_DRIVERS: DriverRow[] = /* @__PURE__ */ DRIVER_SEED.map(
   ([firstName, lastName, cdlState, homeTerminalName, homeTerminalTimezone], i) => ({
     id: `mock-drv-${String(i + 1).padStart(2, '0')}`,
     username: `${firstName[0]}${lastName}`.toLowerCase(),
@@ -106,7 +100,7 @@ const VEHICLE_SEED: [make: string, model: string, year: number][] = [
   ['Freightliner', 'Cascadia', 2023],
 ];
 
-const MOCK_VEHICLES: VehicleRow[] = VEHICLE_SEED.map(([make, model, year], i) => ({
+const MOCK_VEHICLES: VehicleRow[] = /* @__PURE__ */ VEHICLE_SEED.map(([make, model, year], i) => ({
   id: `mock-veh-${String(i + 1).padStart(2, '0')}`,
   unitNumber: `T-${1040 + i * 3}`,
   vin: `1FUJHHDR${String(year).slice(2)}LM${String(482193 + i * 137).padStart(6, '0')}`.slice(
@@ -697,7 +691,7 @@ const EVENT_SEED: EventSeed[] = [
   },
 ];
 
-export const MOCK_SAFETY_EVENTS: SafetyEventTableRow[] = EVENT_SEED.map((s, i) => {
+export const MOCK_SAFETY_EVENTS: SafetyEventTableRow[] = /* @__PURE__ */ EVENT_SEED.map((s, i) => {
   const occurredAt = ago(s.days, s.hours);
   const coached = s.status === 'COACHED';
   const driver = s.d == null ? null : at(MOCK_DRIVERS, s.d);
@@ -726,45 +720,74 @@ export const MOCK_SAFETY_EVENTS: SafetyEventTableRow[] = EVENT_SEED.map((s, i) =
 });
 
 // ---- scorecard (last 30 days, ranked) ------------------------------------------------------
-// [driver index, score, harsh, speeding, miles, violations, previousScore | null]
-const SCORE_SEED: [number, number, number, number, number, number, number | null][] = [
-  [13, 97, 0, 0, 10_842, 0, 95],
-  [11, 95, 1, 0, 9_615, 0, 96],
-  [8, 93, 0, 1, 11_204, 0, 88],
-  [10, 92, 0, 0, 8_930, 0, 90],
-  [14, 90, 1, 0, 10_118, 0, null],
-  [12, 87, 1, 0, 9_402, 1, 89],
-  [1, 84, 1, 1, 10_977, 1, 84],
-  [5, 81, 0, 1, 11_560, 1, 76],
-  [9, 78, 1, 0, 9_884, 1, 81],
-  [4, 74, 1, 0, 8_212, 2, 79],
-  [6, 71, 2, 0, 10_305, 1, 65],
-  [2, 68, 0, 2, 12_041, 2, 72],
-  [7, 62, 1, 1, 11_733, 3, 66],
-  [3, 58, 1, 2, 10_496, 3, 70],
-  [0, 54, 1, 2, 12_388, 4, 61],
+// Counts per driver; score / rank / fleet follow the backend Phase 1 formula (`./scoreFormula`,
+// backend D-133), so the demo never shows a number the real job could not produce.
+// [driver index, harsh severities, speeding, seatbelt, miles, HOS violations, previousScore | null]
+const SCORE_SEED: [number, number[], number, number, number, number, number | null][] = [
+  [13, [], 0, 0, 4_210, 0, 98],
+  [11, [1], 1, 0, 3_960, 0, 96],
+  [8, [2, 1], 1, 0, 4_480, 0, 94],
+  [10, [3], 2, 0, 3_520, 0, 93],
+  [12, [3, 1], 2, 1, 3_870, 0, null],
+  [1, [3, 2], 3, 1, 4_120, 1, 90],
+  [5, [4, 2, 1], 3, 1, 3_640, 1, 84],
+  [9, [4, 3], 4, 1, 3_310, 2, 86],
+  [4, [4, 3, 2], 5, 2, 3_050, 2, 84],
+  [6, [5, 4, 3], 6, 2, 3_380, 3, 70],
+  [2, [5, 4, 3, 1], 8, 2, 2_960, 3, 80],
+  [7, [5, 4, 4, 3], 9, 3, 2_840, 4, 74],
+  [0, [5, 5, 4, 3, 2], 12, 4, 2_710, 5, 70],
+  // "Not enough miles" — under the 100 mi minimum: no score, no rank, excluded from the fleet.
+  [3, [], 1, 0, 64, 0, null],
+  [14, [], 0, 0, 0, 0, null],
 ];
 
-const PERIOD_START = isoDate(30);
-const PERIOD_END = isoDate(0);
+const PERIOD_START = /* @__PURE__ */ isoDate(30);
+const PERIOD_END = /* @__PURE__ */ isoDate(1);
 
-export const MOCK_SCORECARD: ScorecardTableRow[] = SCORE_SEED.map(
-  ([d, score, harshCount, speedingCount, milesDriven, violationCount, previousScore], i) => {
+/** The demo period, `YYYY-MM-DD` like the server's. */
+export const MOCK_SCORECARD_PERIOD = { periodStart: PERIOD_START, periodEnd: PERIOD_END };
+
+const SCORED_SEED = /* @__PURE__ */ SCORE_SEED.map(
+  ([d, harshSeverities, speedingCount, seatbeltCount, milesDriven, violationCount, previousScore]) => {
     const driver = at(MOCK_DRIVERS, d);
+    const score = demoDriverScore({ milesDriven, harshSeverities, speedingCount, seatbeltCount, violationCount });
     return {
-      id: `mock-score-${String(i + 1).padStart(2, '0')}`,
-      driverId: driver.id,
-      periodStart: PERIOD_START,
-      periodEnd: PERIOD_END,
+      driver,
+      name: `${driver.firstName} ${driver.lastName}`,
       score,
-      harshCount,
+      harshCount: harshSeverities.length,
       speedingCount,
+      seatbeltCount,
       milesDriven,
       violationCount,
-      rank: i + 1,
-      previousScore,
-      trend: previousScore == null ? null : score - previousScore,
-      driver,
+      previousScore: score == null ? null : previousScore,
     };
   },
+);
+
+export const MOCK_SCORECARD: ScorecardTableRow[] = /* @__PURE__ */ rankDemoRows(SCORED_SEED).map((r, i) => ({
+  id: `mock-score-${String(i + 1).padStart(2, '0')}`,
+  driverId: r.driver.id,
+  periodStart: PERIOD_START,
+  periodEnd: PERIOD_END,
+  score: r.score,
+  scored: r.score != null,
+  harshCount: r.harshCount,
+  speedingCount: r.speedingCount,
+  seatbeltCount: r.seatbeltCount,
+  milesDriven: r.milesDriven,
+  violationCount: r.violationCount,
+  rank: r.rank,
+  previousScore: r.previousScore,
+  trend: r.score == null || r.previousScore == null ? null : r.score - r.previousScore,
+  computedAt: ago(0, 2),
+  driver: r.driver,
+}));
+
+/** Server-shaped `fleet` block. The previous period reuses each driver's current miles as its
+ * weight (demo approximation — the server weights by the previous period's own miles). */
+export const MOCK_SCORECARD_FLEET: DemoFleet = /* @__PURE__ */ demoFleet(
+  SCORED_SEED,
+  SCORED_SEED.map((r) => ({ score: r.previousScore, milesDriven: r.milesDriven })),
 );

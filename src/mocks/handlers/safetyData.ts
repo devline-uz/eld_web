@@ -10,7 +10,7 @@ import { http } from 'msw';
 import { endpoints } from '@/shared/api/endpoints';
 import type { DriverScoreRow, SafetyEventRow } from '@/shared/api/safety';
 import { ok, serverPage, url } from '../envelope';
-import { SAFETY_EVENTS, SCORECARD, SCORECARD_PERIOD } from './mockState';
+import { SAFETY_EVENTS, SCORECARD, SCORECARD_FLEET, SCORECARD_PERIOD } from './mockState';
 
 export const safetyDataHandlers = [
   http.get(url(endpoints.safety.events), ({ request }) => {
@@ -28,10 +28,15 @@ export const safetyDataHandlers = [
   }),
 
   http.get(url(endpoints.safety.scorecard), () =>
+    // Phase 1 shape (backend D-133): latest rolling-30-day period, server-ranked rows (unscored
+    // "Not enough miles" rows last) and the server-computed mile-weighted fleet block.
     ok({
       items: SCORECARD as DriverScoreRow[],
       periodStart: SCORECARD_PERIOD.periodStart,
       periodEnd: SCORECARD_PERIOD.periodEnd,
+      computedAt: SCORECARD[0]?.computedAt ?? null,
+      minMiles: 100,
+      fleet: SCORECARD_FLEET,
     }),
   ),
 ];

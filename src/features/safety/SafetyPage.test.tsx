@@ -82,6 +82,53 @@ describe('SafetyPage', () => {
     expect(await screen.findByRole('button', { name: 'Assign coaching' })).toBeInTheDocument();
   });
 
+  // Regression — the dialog kept the previously coached driver's name and note.
+  it('opens `Assign coaching` for the driver selected now, with an empty note, and posts that driverId', async () => {
+    const user = userEvent.setup();
+    const posted: unknown[] = [];
+    const row = (driverId: string, score: number, rank: number) => ({
+      id: `sc_${driverId}`, driverId, periodStart: '2026-08-12', periodEnd: '2026-09-11', score, harshCount: 1,
+      speedingCount: 0, milesDriven: 1000, violationCount: 0, rank,
+    });
+    server.use(
+      http.get(url(endpoints.safety.scorecard), () =>
+        ok({ items: [row('drv_a', 61, 1), row('drv_b', 72, 2)], periodStart: '2026-08-12', periodEnd: '2026-09-11' }),
+      ),
+      http.get(url(endpoints.drivers.list), () =>
+        ok({
+          items: [
+            { id: 'drv_a', firstName: 'Marcus', lastName: 'Johnson' },
+            { id: 'drv_b', firstName: 'James', lastName: 'Wilson' },
+          ],
+          page: 1, limit: 200, total: 2, totalPages: 1,
+        }),
+      ),
+      http.post(url(endpoints.safety.coaching), async ({ request }) => {
+        posted.push(await request.json());
+        return ok({ id: 'evt_1', status: 'COACHED' }, 201);
+      }),
+    );
+    renderPage();
+    const picker = await screen.findByRole('combobox', { name: 'Select driver to coach' });
+    await screen.findByRole('option', { name: 'James Wilson' });
+
+    await user.selectOptions(picker, 'drv_a');
+    await user.click(screen.getByRole('button', { name: 'Assign coaching' }));
+    const first = await screen.findByRole('dialog');
+    expect(within(first).getByText('Marcus Johnson · score 61')).toBeInTheDocument();
+    await user.type(within(first).getByLabelText('Note'), 'Old note');
+    await user.click(within(first).getByRole('button', { name: 'Cancel' }));
+    await user.click(await screen.findByRole('button', { name: 'Discard' }));
+
+    await user.selectOptions(picker, 'drv_b');
+    await user.click(screen.getByRole('button', { name: 'Assign coaching' }));
+    const second = await screen.findByRole('dialog');
+    expect(within(second).getByText('James Wilson · score 72')).toBeInTheDocument();
+    expect(within(second).getByLabelText('Note')).toHaveValue('');
+    await user.click(within(second).getByRole('button', { name: 'Assign coaching' }));
+    await vi.waitFor(() => expect(posted).toEqual([{ driverId: 'drv_b' }]));
+  });
+
   // Regression — `onLimitChange` used to be `setLimit` alone, so raising `Rows per page` while on
   // page 3 kept page 3: the client-side slice ran past the end and the table body went blank.
   it('resets to page 1 when rows-per-page changes', async () => {
@@ -206,6 +253,20 @@ describe('SafetyPage', () => {
     renderPage();
     expect(await screen.findByRole('button', { name: /retry/i })).toBeInTheDocument();
   });
+
+  // Demo fallback off (vitest default, and always in production): no demo rows, the real states.
+  it('scorecard error: renders <ErrorState> with Retry on the Scorecards tab, never demo rows', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(url(endpoints.safety.scorecard), () =>
+        HttpResponse.json({ statusCode: 404, code: 'NOT_FOUND', message: 'Not found' }, { status: 404 }),
+      ),
+    );
+    renderPage();
+    await user.click(await screen.findByRole('tab', { name: /^Scorecards/ }));
+    expect(await screen.findByRole('button', { name: /retry/i })).toBeInTheDocument();
+    expect(screen.queryByText(/Marcus Johnson/)).toBeNull();
+  });
 });
 
 // WB-167…WB-170 — stage-2 fixes: the dead `View profile ›`, the export that ignored the screen,
@@ -218,6 +279,9 @@ describe('SafetyPage — stage-2 fixes', () => {
     ],
     periodStart: '2026-08-12',
     periodEnd: '2026-09-11',
+    minMiles: 100,
+    // Phase 1 (backend D-133) — the fleet block is server-computed (mile-weighted), never re-averaged.
+    fleet: { score: 68, previousScore: null, trend: null, scoredDrivers: 2, unscoredDrivers: 0, belowThresholdCount: 1, milesDriven: 7300 },
   };
 
   function useScorecardFixture() {
@@ -230,7 +294,7 @@ describe('SafetyPage — stage-2 fixes', () => {
   it('derives the fleet-score verdict instead of always claiming "Good standing"', async () => {
     useScorecardFixture();
     renderPage();
-    // Mean of 76 and 60 is 68 — below this card's own 70-point threshold.
+    // Server fleet score 68 — below this card's own 70-point threshold.
     expect(await screen.findAllByText('68')).not.toHaveLength(0);
     expect((await screen.findAllByText('Below coaching threshold')).length).toBeGreaterThan(0);
     expect(screen.queryByText('Good standing')).not.toBeInTheDocument();
@@ -319,5 +383,89 @@ describe('SafetyPage — stage-2 fixes', () => {
       URL.createObjectURL = originalCreate;
       URL.revokeObjectURL = originalRevoke;
     }
+  });
+});
+
+// Phase 1 (backend D-133) — server rank, "Not enough miles" rows, server fleet score + trend chip.
+describe('SafetyPage — Phase 1 scorecard', () => {
+  const row = (driverId: string, score: number | null, rank: number | null, milesDriven: number, trend: number | null = null) => ({
+    id: `sc_${driverId}`, driverId, periodStart: '2026-09-11', periodEnd: '2026-10-10', score, scored: score != null,
+    harshCount: 0, speedingCount: 0, seatbeltCount: 0, milesDriven, violationCount: 0, rank,
+    previousScore: trend == null || score == null ? null : score - trend, trend, computedAt: '2026-10-11T10:30:00.000Z',
+  });
+  const fleet = (score: number | null, trend: number | null) => ({
+    score, previousScore: score == null || trend == null ? null : score - trend, trend,
+    scoredDrivers: 2, unscoredDrivers: 1, belowThresholdCount: 1, milesDriven: 6064,
+  });
+
+  function useFixture(trend: number | null, items = [row('drv_a', 95, 1, 4000, 3), row('drv_b', 62, 2, 2000, -7), row('drv_c', null, null, 64)]) {
+    server.use(
+      http.get(url(endpoints.safety.scorecard), () =>
+        ok({ items, periodStart: '2026-09-11', periodEnd: '2026-10-10', computedAt: '2026-10-11T10:30:00.000Z', minMiles: 100, fleet: fleet(84, trend) }),
+      ),
+      http.get(url(endpoints.safety.events), () => ok({ items: [], page: 1, limit: 500, total: 0, totalPages: 1 })),
+      http.get(url(endpoints.drivers.list), () =>
+        ok({
+          items: [
+            { id: 'drv_a', firstName: 'Ana', lastName: 'Best' },
+            { id: 'drv_b', firstName: 'Bo', lastName: 'Second' },
+            { id: 'drv_c', firstName: 'Cy', lastName: 'Short' },
+          ],
+          page: 1, limit: 200, total: 3, totalPages: 1,
+        }),
+      ),
+    );
+  }
+
+  async function openScorecards() {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole('tab', { name: /^Scorecards/ }));
+    return screen.findByRole('table', { name: 'Driver scorecard' });
+  }
+
+  it('renders the server rank order with "Not enough miles" rows last, muted, with no rank and no score pill', async () => {
+    useFixture(4);
+    const table = await openScorecards();
+    const bodyRows = within(table).getAllByRole('row').slice(1);
+    expect(bodyRows).toHaveLength(3);
+    expect(within(bodyRows[0]!).getByText('#1')).toBeInTheDocument();
+    expect(within(bodyRows[0]!).getByText('Ana Best')).toBeInTheDocument();
+    expect(within(bodyRows[1]!).getByText('#2')).toBeInTheDocument();
+    const unscored = bodyRows[2]!;
+    expect(within(unscored).getByText('Cy Short')).toHaveClass('text-text-muted');
+    expect(within(unscored).getByText('Not enough miles')).toBeInTheDocument();
+    expect(within(unscored).queryByText(/^#/)).not.toBeInTheDocument();
+    expect(within(unscored).getAllByText('—').length).toBeGreaterThan(0);
+    expect(screen.getByText(/2 drivers ranked · 1 not enough miles · Sep 11 – Oct 10, 2026/)).toBeInTheDocument();
+  });
+
+  it('keeps unscored rows after ranked ones even when the payload arrives unsorted', async () => {
+    useFixture(4, [row('drv_c', null, null, 64), row('drv_b', 62, 2, 2000), row('drv_a', 95, 1, 4000)]);
+    const table = await openScorecards();
+    const names = within(table).getAllByRole('row').slice(1).map((r) => r.textContent ?? '');
+    expect(names[0]).toContain('Ana Best');
+    expect(names[1]).toContain('Bo Second');
+    expect(names[2]).toContain('Cy Short');
+  });
+
+  it('shows the server fleet score with an `↑ N pts` success chip on the KPI', async () => {
+    useFixture(4);
+    renderPage();
+    expect((await screen.findAllByText('↑ 4 pts')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('84').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/1 driver is below the\s+70-point coaching threshold\./).length).toBeGreaterThan(0);
+  });
+
+  it('shows a `↓ N pts` chip when the fleet score fell, and no chip without a previous period', async () => {
+    useFixture(-3);
+    const { unmount } = renderPage();
+    expect((await screen.findAllByText('↓ 3 pts')).length).toBeGreaterThan(0);
+    unmount();
+
+    useFixture(null);
+    renderPage();
+    expect((await screen.findAllByText('84')).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/pts$/)).not.toBeInTheDocument();
   });
 });
