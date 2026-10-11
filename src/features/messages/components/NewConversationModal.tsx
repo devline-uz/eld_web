@@ -13,7 +13,7 @@ import { useToast } from '@/shared/ui/Toast';
 import { useDriversList } from '@/shared/api/drivers';
 import { useCreateConversation, useBroadcastMessage } from '@/shared/api/messaging';
 import { messageSchema } from '@/shared/forms/schemas';
-import { ApiError } from '@/shared/api/errors';
+import { formErrorMessage } from '@/shared/api/errors';
 import type { z } from 'zod';
 
 type MessageFormValues = z.infer<typeof messageSchema>;
@@ -22,6 +22,9 @@ type Tab = 'DIRECT' | 'GROUP' | 'BROADCAST';
 /** `CreateConversationDto.title` is `max(200)`; a group of one driver is just a direct chat. */
 const GROUP_TITLE_MAX = 200;
 const GROUP_MIN_DRIVERS = 2;
+
+/** Server issue paths → the labels this form uses, for a 422 spelled out in the error toast. */
+const FIELD_LABELS = { driverIds: 'Drivers', title: 'Group name', body: 'Message' };
 
 export function NewConversationModal({
   onClose,
@@ -37,6 +40,9 @@ export function NewConversationModal({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [groupTitle, setGroupTitle] = useState('');
   const [groupTitleTouched, setGroupTitleTouched] = useState(false);
+  // Set by a submit attempt on an incomplete form — the button used to be disabled with no word
+  // on why, so `Create group` with no drivers picked looked like it silently did nothing.
+  const [attempted, setAttempted] = useState(false);
 
   // QA fix — an INACTIVE driver has no app session to receive messages (`?status=ACTIVE`).
   const driversQuery = useDriversList({ q: query || undefined, limit: 50, status: 'ACTIVE' });
@@ -57,7 +63,10 @@ export function NewConversationModal({
   }
 
   function handleStartConversation() {
-    if (!driverId) return;
+    if (!driverId) {
+      setAttempted(true);
+      return;
+    }
     createConversation.mutate(
       { type: 'DIRECT', driverIds: [driverId] },
       {
@@ -66,7 +75,7 @@ export function NewConversationModal({
           onClose();
           toast({ kind: 'success', title: 'Conversation started' });
         },
-        onError: (error) => toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }),
+        onError: (error) => toast({ kind: 'error', title: formErrorMessage(error, [], FIELD_LABELS) }),
       },
     );
   }
@@ -80,7 +89,10 @@ export function NewConversationModal({
 
   function handleCreateGroup() {
     setGroupTitleTouched(true);
-    if (groupTitleError || selectedIds.length < GROUP_MIN_DRIVERS) return;
+    if (groupTitleError || selectedIds.length < GROUP_MIN_DRIVERS) {
+      setAttempted(true);
+      return;
+    }
     createConversation.mutate(
       { type: 'GROUP', title: trimmedGroupTitle, driverIds: selectedIds },
       {
@@ -89,13 +101,16 @@ export function NewConversationModal({
           onClose();
           toast({ kind: 'success', title: 'Group created' });
         },
-        onError: (error) => toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }),
+        onError: (error) => toast({ kind: 'error', title: formErrorMessage(error, [], FIELD_LABELS) }),
       },
     );
   }
 
   function handleBroadcast(values: MessageFormValues) {
-    if (selectedIds.length === 0) return;
+    if (selectedIds.length === 0) {
+      setAttempted(true);
+      return;
+    }
     broadcast.mutate(
       { body: values.body, driverIds: selectedIds },
       {
@@ -103,17 +118,35 @@ export function NewConversationModal({
           toast({ kind: 'success', title: `Broadcast sent to ${result.sent} driver${result.sent === 1 ? '' : 's'}` });
           onClose();
         },
-        onError: (error) => toast({ kind: 'error', title: error instanceof ApiError ? error.userMessage : 'Something went wrong.' }),
+        onError: (error) => toast({ kind: 'error', title: formErrorMessage(error, [], FIELD_LABELS) }),
       },
     );
   }
 
-  const canSubmit =
+  // The button stays clickable; an incomplete form says what is missing instead of doing nothing.
+  const recipientsError =
     tab === 'DIRECT'
-      ? Boolean(driverId)
+      ? driverId
+        ? null
+        : 'Select a driver.'
       : tab === 'GROUP'
-        ? !groupTitleError && selectedIds.length >= GROUP_MIN_DRIVERS
-        : selectedIds.length > 0;
+        ? selectedIds.length >= GROUP_MIN_DRIVERS
+          ? null
+          : `Select at least ${GROUP_MIN_DRIVERS} drivers.`
+        : selectedIds.length > 0
+          ? null
+          : 'Select at least one driver.';
+  const showRecipientsError = attempted && recipientsError !== null;
+  // Broadcast also validates the message body (react-hook-form) on submit.
+  const onSubmitClick =
+    tab === 'DIRECT'
+      ? handleStartConversation
+      : tab === 'GROUP'
+        ? handleCreateGroup
+        : () => {
+            if (selectedIds.length === 0) setAttempted(true);
+            void handleSubmit(handleBroadcast)();
+          };
   // WB-165 — a typed broadcast or a picked recipient is unsaved work: closing now raises the
   // 11.30 discard confirm instead of dropping it, and `Cancel` goes through the same route.
   const isDirty = Boolean(driverId) || selectedIds.length > 0 || bodyDirty || groupTitle.trim().length > 0;
@@ -133,8 +166,7 @@ export function NewConversationModal({
             variant="primary"
             size="lg"
             loading={submitting}
-            disabled={!canSubmit}
-            onClick={tab === 'DIRECT' ? handleStartConversation : tab === 'GROUP' ? handleCreateGroup : handleSubmit(handleBroadcast)}
+            onClick={onSubmitClick}
           >
             {tab === 'DIRECT' ? 'Start conversation' : tab === 'GROUP' ? 'Create group' : 'Send broadcast'}
           </Button>
@@ -154,7 +186,10 @@ export function NewConversationModal({
               key={value}
               type="button"
               aria-pressed={tab === value}
-              onClick={() => setTab(value)}
+              onClick={() => {
+                setTab(value);
+                setAttempted(false);
+              }}
               className={tab === value ? 'bg-bg-inverse px-3 text-body-strong text-text-inverse' : 'bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'}
             >
               {label}
@@ -183,6 +218,12 @@ export function NewConversationModal({
         {tab === 'GROUP' && (
           <p className="text-caption text-text-muted">
             {selectedIds.length} selected · pick at least {GROUP_MIN_DRIVERS} drivers
+          </p>
+        )}
+
+        {showRecipientsError && (
+          <p role="alert" className="text-caption text-danger">
+            {recipientsError}
           </p>
         )}
 

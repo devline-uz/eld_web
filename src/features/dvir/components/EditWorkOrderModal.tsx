@@ -1,22 +1,25 @@
 // owner: web-dvir-safety — WB-074 · W-09 Work orders tab, `…` `Edit`. `maintenance` FULL.
 // The vehicle and attached defects are not editable here — only the fields `CreateWorkOrderModal`
 // also collects (`PATCH /work-orders/:id`, `endpoints.workOrders.update`, a real endpoint).
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
 import { TOAST_COPY } from '@/shared/ui/copy';
 import { useUpdateWorkOrder, type WorkOrderPriority, type WorkOrderTableRow } from '@/shared/api/dvir';
-import { ApiError } from '@/shared/api/errors';
+import { ApiError, formErrorMessage } from '@/shared/api/errors';
 import {
   blockCostKeys,
   blockOdometerKeys,
   dueDateToIso,
   getCostError,
+  getLaborHoursError,
   getOdometerError,
   isoToDueDate,
   sanitizeCost,
   sanitizeOdometer,
+  WORK_ORDER_FIELD_LABELS,
+  WORK_ORDER_LIMITS,
 } from '../lib/workOrderFieldGuards';
 
 const PRIORITIES: { value: WorkOrderPriority; label: string }[] = [
@@ -27,6 +30,10 @@ const PRIORITIES: { value: WorkOrderPriority; label: string }[] = [
 ];
 
 const inputClass = 'h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text';
+
+/** `UpdateWorkOrderDto` issue paths this form shows under their own field. */
+const PLACED_FIELDS = ['costUsd', 'odometerMi', 'estimatedLaborHours'] as const;
+type PlacedField = (typeof PLACED_FIELDS)[number];
 
 export function EditWorkOrderModal({ workOrder, onClose }: { workOrder: WorkOrderTableRow; onClose: () => void }) {
   const { toast } = useToast();
@@ -47,10 +54,20 @@ export function EditWorkOrderModal({ workOrder, onClose }: { workOrder: WorkOrde
   const [notifyDriver, setNotifyDriver] = useState(workOrder.notifyDriver ?? true);
   const [blockDispatchAssignment, setBlockDispatchAssignment] = useState(workOrder.blockDispatchAssignment ?? true);
   const [serverError, setServerError] = useState<string | null>(null);
+  // A 422 from the server, mapped onto the field it is about; cleared as soon as that field changes.
+  const [serverFieldErrors, setServerFieldErrors] = useState<Partial<Record<PlacedField, string>>>({});
+  const clearServerError = (field: PlacedField) =>
+    setServerFieldErrors((prev) => (prev[field] ? { ...prev, [field]: undefined } : prev));
+  const serverErrorRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (serverError) serverErrorRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [serverError]);
 
-  const costError = getCostError(cost, 'Parts cost');
-  const odometerError = getOdometerError(odometer);
-  const valid = title.trim() !== '' && !costError && !odometerError;
+  const costError = getCostError(cost, 'Parts cost') ?? serverFieldErrors.costUsd;
+  const odometerError = getOdometerError(odometer) ?? serverFieldErrors.odometerMi;
+  const laborHoursError = getLaborHoursError(estimatedLaborHours) ?? serverFieldErrors.estimatedLaborHours;
+  const valid =
+    title.trim() !== '' && !getCostError(cost, 'Parts cost') && !getOdometerError(odometer) && !getLaborHoursError(estimatedLaborHours);
   // WB-150 — plain state, so `isDirty` compares against the row the modal opened with.
   const isDirty =
     title !== workOrder.title ||
@@ -91,7 +108,15 @@ export function EditWorkOrderModal({ workOrder, onClose }: { workOrder: WorkOrde
           toast({ kind: 'success', ...TOAST_COPY.workOrderUpdated(workOrder.number) });
           onClose();
         },
-        onError: (error) => setServerError(error instanceof ApiError ? error.userMessage : 'Something went wrong.'),
+        onError: (error) => {
+          const fieldErrors = error instanceof ApiError ? error.fieldErrors : {};
+          const placed: Partial<Record<PlacedField, string>> = {};
+          for (const field of PLACED_FIELDS) {
+            if (fieldErrors[field]) placed[field] = fieldErrors[field];
+          }
+          setServerFieldErrors(placed);
+          setServerError(formErrorMessage(error, PLACED_FIELDS, WORK_ORDER_FIELD_LABELS));
+        },
       },
     );
   }
@@ -118,13 +143,19 @@ export function EditWorkOrderModal({ workOrder, onClose }: { workOrder: WorkOrde
           <span className="text-label text-text">
             Title <span className="text-danger">*</span>
           </span>
-          <input value={title} onChange={(e) => setTitle(e.target.value)} className={inputClass} />
+          <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={WORK_ORDER_LIMITS.title} className={inputClass} />
         </label>
 
         <div className="grid grid-cols-3 gap-4">
           <label className="flex flex-col gap-1">
             <span className="text-label text-text">Assign to</span>
-            <input value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder="Mike Rowan · Shop A" className={inputClass} />
+            <input
+              value={vendor}
+              onChange={(e) => setVendor(e.target.value)}
+              maxLength={WORK_ORDER_LIMITS.vendor}
+              placeholder="Mike Rowan · Shop A"
+              className={inputClass}
+            />
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-label text-text">
@@ -151,11 +182,15 @@ export function EditWorkOrderModal({ workOrder, onClose }: { workOrder: WorkOrde
               <input
                 type="number"
                 min={0}
+                max={WORK_ORDER_LIMITS.costUsd}
                 step="0.01"
                 inputMode="decimal"
                 value={cost}
                 onKeyDown={blockCostKeys}
-                onChange={(e) => setCost(sanitizeCost(e.target.value))}
+                onChange={(e) => {
+                  setCost(sanitizeCost(e.target.value));
+                  clearServerError('costUsd');
+                }}
                 aria-invalid={costError ? true : undefined}
                 aria-describedby={costError ? 'wo-edit-cost-error' : undefined}
                 className={inputClass}
@@ -174,11 +209,15 @@ export function EditWorkOrderModal({ workOrder, onClose }: { workOrder: WorkOrde
               <input
                 type="number"
                 min={0}
+                max={WORK_ORDER_LIMITS.odometerMi}
                 step="1"
                 inputMode="numeric"
                 value={odometer}
                 onKeyDown={blockOdometerKeys}
-                onChange={(e) => setOdometer(sanitizeOdometer(e.target.value))}
+                onChange={(e) => {
+                  setOdometer(sanitizeOdometer(e.target.value));
+                  clearServerError('odometerMi');
+                }}
                 aria-invalid={odometerError ? true : undefined}
                 aria-describedby={odometerError ? 'wo-edit-odometer-error' : undefined}
                 className={inputClass}
@@ -194,9 +233,28 @@ export function EditWorkOrderModal({ workOrder, onClose }: { workOrder: WorkOrde
           <label className="flex flex-col gap-1">
             <span className="text-label text-text">Estimated labor</span>
             <div className="flex items-center gap-2">
-              <input type="number" min="0" step="0.1" value={estimatedLaborHours} onChange={(e) => setEstimatedLaborHours(e.target.value)} className={inputClass} />
+              <input
+                type="number"
+                min="0"
+                max={WORK_ORDER_LIMITS.estimatedLaborHours}
+                step="0.1"
+                value={estimatedLaborHours}
+                onKeyDown={blockCostKeys}
+                onChange={(e) => {
+                  setEstimatedLaborHours(sanitizeCost(e.target.value));
+                  clearServerError('estimatedLaborHours');
+                }}
+                aria-invalid={laborHoursError ? true : undefined}
+                aria-describedby={laborHoursError ? 'wo-edit-labor-hours-error' : undefined}
+                className={inputClass}
+              />
               <span className="text-body text-text-muted">h</span>
             </div>
+            {laborHoursError && (
+              <span id="wo-edit-labor-hours-error" role="alert" className="text-caption text-danger">
+                {laborHoursError}
+              </span>
+            )}
           </label>
         </div>
 
@@ -205,6 +263,7 @@ export function EditWorkOrderModal({ workOrder, onClose }: { workOrder: WorkOrde
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
+            maxLength={WORK_ORDER_LIMITS.description}
             rows={3}
             className="rounded-md border border-border bg-bg-surface px-3 py-2 text-body text-text"
           />
@@ -226,7 +285,7 @@ export function EditWorkOrderModal({ workOrder, onClose }: { workOrder: WorkOrde
         </div>
 
         {serverError && (
-          <p role="alert" className="rounded-md bg-danger-soft p-3 text-body text-danger">
+          <p ref={serverErrorRef} role="alert" className="rounded-md bg-danger-soft p-3 text-body text-danger">
             {serverError}
           </p>
         )}

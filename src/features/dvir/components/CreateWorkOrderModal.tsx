@@ -1,5 +1,5 @@
 // owner: web-dvir-safety — 11.16 Create work order (web/tz.md §11.16). `maintenance` FULL, `lg`.
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { Select } from '@/shared/ui/Select';
@@ -7,7 +7,7 @@ import { SeverityBadge } from '@/shared/ui/Badge';
 import { useToast } from '@/shared/ui/Toast';
 import { useDefectsList, useCreateWorkOrder, type WorkOrderPriority } from '@/shared/api/dvir';
 import { useVehiclesPicker } from '@/shared/api/vehicles';
-import { ApiError } from '@/shared/api/errors';
+import { ApiError, formErrorMessage } from '@/shared/api/errors';
 import { formatLocal } from '@/shared/format/datetime';
 import {
   blockCostKeys,
@@ -15,9 +15,12 @@ import {
   dueDateToIso,
   getCostError,
   getDueDateError,
+  getLaborHoursError,
   getOdometerError,
   sanitizeCost,
   sanitizeOdometer,
+  WORK_ORDER_FIELD_LABELS,
+  WORK_ORDER_LIMITS,
 } from '../lib/workOrderFieldGuards';
 
 const PRIORITIES: { value: WorkOrderPriority; label: string }[] = [
@@ -28,6 +31,10 @@ const PRIORITIES: { value: WorkOrderPriority; label: string }[] = [
 ];
 
 const inputClass = 'h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text';
+
+/** `CreateWorkOrderDto` issue paths this form shows under their own field. */
+const PLACED_FIELDS = ['title', 'vendor', 'dueAt', 'costUsd', 'odometerMi', 'estimatedLaborHours', 'description'] as const;
+type PlacedField = (typeof PLACED_FIELDS)[number];
 
 export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: string; onClose: () => void }) {
   const { toast } = useToast();
@@ -51,6 +58,15 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
   const [notifyDriver, setNotifyDriver] = useState(true);
   const [blockDispatchAssignment, setBlockDispatchAssignment] = useState(true);
   const [serverError, setServerError] = useState<string | null>(null);
+  // A 422 from the server, mapped onto the field it is about; cleared as soon as that field changes.
+  const [serverFieldErrors, setServerFieldErrors] = useState<Partial<Record<PlacedField, string>>>({});
+  const clearServerError = (field: PlacedField) =>
+    setServerFieldErrors((prev) => (prev[field] ? { ...prev, [field]: undefined } : prev));
+  // The banner sits below the fold of this `lg` modal — bring it into view when it appears.
+  const serverErrorRef = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    if (serverError) serverErrorRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [serverError]);
 
   const vehicle = useMemo(
     () => vehiclesQuery.data?.items.find((v) => v.id === selectedVehicleId) ?? null,
@@ -59,10 +75,20 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
 
   const partsCostError = getCostError(partsCost, 'Estimated parts cost');
   const odometerError = getOdometerError(odometer);
+  const laborHoursError = getLaborHoursError(estimatedLaborHours);
   // Not an HOS screen, so "today" is the browser's local date — the same zone the date picker uses.
   const today = formatLocal(new Date(), 'yyyy-MM-dd');
   const dueDateError = getDueDateError(dueDate, today);
-  const valid = selectedVehicleId !== '' && title.trim() !== '' && !partsCostError && !odometerError && !dueDateError;
+  const valid =
+    selectedVehicleId !== '' && title.trim() !== '' && !partsCostError && !odometerError && !laborHoursError && !dueDateError;
+  // Client-side message first; otherwise whatever the server said about that field.
+  const titleFieldError = serverFieldErrors.title;
+  const vendorFieldError = serverFieldErrors.vendor;
+  const dueDateFieldError = dueDateError ?? serverFieldErrors.dueAt;
+  const partsCostFieldError = partsCostError ?? serverFieldErrors.costUsd;
+  const odometerFieldError = odometerError ?? serverFieldErrors.odometerMi;
+  const laborHoursFieldError = laborHoursError ?? serverFieldErrors.estimatedLaborHours;
+  const descriptionFieldError = serverFieldErrors.description;
   // WB-150 — plain state, so `isDirty` compares against what the modal opened with; a freshly
   // opened form (unit pre-selected from the row action, `Normal` priority) is never dirty.
   const isDirty =
@@ -118,7 +144,17 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
           toast({ kind: 'success', title: `Work order ${wo.number} created`, description: 'The unit and any attached defects were updated.' });
           onClose();
         },
-        onError: (error) => setServerError(error instanceof ApiError ? error.userMessage : 'Something went wrong.'),
+        onError: (error) => {
+          // A 422 used to land as a bare banner below the fold — nothing on the fields, nothing in
+          // view. Each issue now goes on its own field; anything unplaceable is spelled out.
+          const fieldErrors = error instanceof ApiError ? error.fieldErrors : {};
+          const placed: Partial<Record<PlacedField, string>> = {};
+          for (const field of PLACED_FIELDS) {
+            if (fieldErrors[field]) placed[field] = fieldErrors[field];
+          }
+          setServerFieldErrors(placed);
+          setServerError(formErrorMessage(error, PLACED_FIELDS, WORK_ORDER_FIELD_LABELS));
+        },
       },
     );
   }
@@ -192,13 +228,45 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
           <span className="text-label text-text">
             Title <span className="text-danger">*</span>
           </span>
-          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Brake repair" className={inputClass} />
+          <input
+            value={title}
+            onChange={(e) => {
+              setTitle(e.target.value);
+              clearServerError('title');
+            }}
+            maxLength={WORK_ORDER_LIMITS.title}
+            placeholder="e.g. Brake repair"
+            aria-invalid={titleFieldError ? true : undefined}
+            aria-describedby={titleFieldError ? 'wo-title-error' : undefined}
+            className={inputClass}
+          />
+          {titleFieldError && (
+            <span id="wo-title-error" role="alert" className="text-caption text-danger">
+              {titleFieldError}
+            </span>
+          )}
         </label>
 
         <div className="grid grid-cols-3 gap-4">
           <label className="flex flex-col gap-1">
             <span className="text-label text-text">Assign to</span>
-            <input value={vendor} onChange={(e) => setVendor(e.target.value)} placeholder="Mike Rowan · Shop A" className={inputClass} />
+            <input
+              value={vendor}
+              onChange={(e) => {
+                setVendor(e.target.value);
+                clearServerError('vendor');
+              }}
+              maxLength={WORK_ORDER_LIMITS.vendor}
+              placeholder="Mike Rowan · Shop A"
+              aria-invalid={vendorFieldError ? true : undefined}
+              aria-describedby={vendorFieldError ? 'wo-vendor-error' : undefined}
+              className={inputClass}
+            />
+            {vendorFieldError && (
+              <span id="wo-vendor-error" role="alert" className="text-caption text-danger">
+                {vendorFieldError}
+              </span>
+            )}
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-label text-text">
@@ -218,14 +286,17 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
               type="date"
               min={today}
               value={dueDate}
-              onChange={(e) => setDueDate(e.target.value)}
-              aria-invalid={dueDateError ? true : undefined}
-              aria-describedby={dueDateError ? 'wo-due-date-error' : undefined}
+              onChange={(e) => {
+                setDueDate(e.target.value);
+                clearServerError('dueAt');
+              }}
+              aria-invalid={dueDateFieldError ? true : undefined}
+              aria-describedby={dueDateFieldError ? 'wo-due-date-error' : undefined}
               className={inputClass}
             />
-            {dueDateError && (
+            {dueDateFieldError && (
               <span id="wo-due-date-error" role="alert" className="text-caption text-danger">
-                {dueDateError}
+                {dueDateFieldError}
               </span>
             )}
           </label>
@@ -238,20 +309,24 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
               <input
                 type="number"
                 min={0}
+                max={WORK_ORDER_LIMITS.costUsd}
                 step="0.01"
                 inputMode="decimal"
                 value={partsCost}
                 onKeyDown={blockCostKeys}
-                onChange={(e) => setPartsCost(sanitizeCost(e.target.value))}
-                aria-invalid={partsCostError ? true : undefined}
-                aria-describedby={partsCostError ? 'wo-parts-cost-error' : undefined}
+                onChange={(e) => {
+                  setPartsCost(sanitizeCost(e.target.value));
+                  clearServerError('costUsd');
+                }}
+                aria-invalid={partsCostFieldError ? true : undefined}
+                aria-describedby={partsCostFieldError ? 'wo-parts-cost-error' : undefined}
                 className={inputClass}
               />
               <span className="text-body text-text-muted">USD</span>
             </div>
-            {partsCostError && (
+            {partsCostFieldError && (
               <span id="wo-parts-cost-error" role="alert" className="text-caption text-danger">
-                {partsCostError}
+                {partsCostFieldError}
               </span>
             )}
           </label>
@@ -261,29 +336,52 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
               <input
                 type="number"
                 min={0}
+                max={WORK_ORDER_LIMITS.odometerMi}
                 step="1"
                 inputMode="numeric"
                 value={odometer}
                 onKeyDown={blockOdometerKeys}
-                onChange={(e) => setOdometer(sanitizeOdometer(e.target.value))}
-                aria-invalid={odometerError ? true : undefined}
-                aria-describedby={odometerError ? 'wo-odometer-error' : undefined}
+                onChange={(e) => {
+                  setOdometer(sanitizeOdometer(e.target.value));
+                  clearServerError('odometerMi');
+                }}
+                aria-invalid={odometerFieldError ? true : undefined}
+                aria-describedby={odometerFieldError ? 'wo-odometer-error' : undefined}
                 className={inputClass}
               />
               <span className="text-body text-text-muted">mi</span>
             </div>
-            {odometerError && (
+            {odometerFieldError && (
               <span id="wo-odometer-error" role="alert" className="text-caption text-danger">
-                {odometerError}
+                {odometerFieldError}
               </span>
             )}
           </label>
           <label className="flex flex-col gap-1">
             <span className="text-label text-text">Estimated labor</span>
             <div className="flex items-center gap-2">
-              <input type="number" min="0" step="0.1" value={estimatedLaborHours} onChange={(e) => setEstimatedLaborHours(e.target.value)} className={inputClass} />
+              <input
+                type="number"
+                min="0"
+                max={WORK_ORDER_LIMITS.estimatedLaborHours}
+                step="0.1"
+                value={estimatedLaborHours}
+                onKeyDown={blockCostKeys}
+                onChange={(e) => {
+                  setEstimatedLaborHours(sanitizeCost(e.target.value));
+                  clearServerError('estimatedLaborHours');
+                }}
+                aria-invalid={laborHoursFieldError ? true : undefined}
+                aria-describedby={laborHoursFieldError ? 'wo-labor-hours-error' : undefined}
+                className={inputClass}
+              />
               <span className="text-body text-text-muted">h</span>
             </div>
+            {laborHoursFieldError && (
+              <span id="wo-labor-hours-error" role="alert" className="text-caption text-danger">
+                {laborHoursFieldError}
+              </span>
+            )}
           </label>
         </div>
 
@@ -291,10 +389,21 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
           <span className="text-label text-text">Work to perform</span>
           <textarea
             value={description}
-            onChange={(e) => setDescription(e.target.value)}
+            onChange={(e) => {
+              setDescription(e.target.value);
+              clearServerError('description');
+            }}
+            maxLength={WORK_ORDER_LIMITS.description}
             rows={3}
+            aria-invalid={descriptionFieldError ? true : undefined}
+            aria-describedby={descriptionFieldError ? 'wo-description-error' : undefined}
             className="rounded-md border border-border bg-bg-surface px-3 py-2 text-body text-text"
           />
+          {descriptionFieldError && (
+            <span id="wo-description-error" role="alert" className="text-caption text-danger">
+              {descriptionFieldError}
+            </span>
+          )}
         </label>
 
         <div className="flex flex-col gap-2">
@@ -313,7 +422,7 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
         </div>
 
         {serverError && (
-          <p role="alert" className="rounded-md bg-danger-soft p-3 text-body text-danger">
+          <p ref={serverErrorRef} role="alert" className="rounded-md bg-danger-soft p-3 text-body text-danger">
             {serverError}
           </p>
         )}
