@@ -1,7 +1,7 @@
 // owner: web-reports-transfer — W-12 IFTA DEMO DATA (not app logic).
 //
 // A small US fleet the IFTA page falls back to while `GET /reports/ifta/summary` has nothing to
-// show (empty rows or a failed request). Wired in `./useIftaMock.ts`; switched by `VITE_IFTA_MOCK`
+// show (empty rows or a failed request). Wired in `./useIftaMock.ts`; switched by `VITE_DEMO_FALLBACK`, never in production
 // (see that file). To remove the demo entirely: delete this `mock/` folder and point the hook
 // imports in `IftaReportPage.tsx` back at `@/shared/api/reports` / `@/shared/api/vehicles`.
 //
@@ -51,7 +51,7 @@ const STATES: Record<string, StateProfile> = {
 };
 
 /** `GET /reports/ifta/jurisdictions` fallback — every state the demo fleet drives, name order. */
-export const MOCK_IFTA_JURISDICTIONS: IftaJurisdictionOption[] = Object.entries(STATES)
+export const MOCK_IFTA_JURISDICTIONS: IftaJurisdictionOption[] = /* @__PURE__ */ Object.entries(STATES)
   .map(([code, s]) => ({ code, name: s.name, country: 'US' as const }))
   .sort((a, b) => a.name.localeCompare(b.name));
 
@@ -99,7 +99,7 @@ const UNIT_SEED: [unit: string, group: number, lane: keyof typeof LANES, miles: 
   ['T-321', 2, 'mwSouth', 27_600, 6.8],
 ];
 
-const UNITS: MockUnit[] = UNIT_SEED.map(([unitNumber, group, lane, quarterMiles, mpg]) => ({
+const UNITS: MockUnit[] = /* @__PURE__ */ UNIT_SEED.map(([unitNumber, group, lane, quarterMiles, mpg]) => ({
   unitNumber,
   groupId: GROUP_SEED[group]![0],
   lane: LANES[lane]!,
@@ -108,7 +108,7 @@ const UNITS: MockUnit[] = UNIT_SEED.map(([unitNumber, group, lane, quarterMiles,
 }));
 
 /** `GET /vehicle-groups` fallback — the demo fleet's three groups. */
-export const MOCK_VEHICLE_GROUPS: VehicleGroupRow[] = GROUP_SEED.map(([id, name, description, color]) => ({
+export const MOCK_VEHICLE_GROUPS: VehicleGroupRow[] = /* @__PURE__ */ GROUP_SEED.map(([id, name, description, color]) => ({
   id,
   name,
   description,
@@ -165,7 +165,7 @@ interface Leg {
   state: string;
   miles: number;
   taxableMiles: number;
-  /** Gallons burned driving this leg (for the row MPG). */
+  /** Gallons burned driving this leg (scales the quarter's purchases to what was burned). */
   burnedGal: number;
   /** Gallons bought in this state. */
   fuelGal: number;
@@ -199,7 +199,6 @@ function unitLegs(unit: MockUnit, quarter: string): Leg[] {
 interface Totals {
   miles: number;
   taxableMiles: number;
-  burnedGal: number;
   fuelGal: number;
 }
 
@@ -208,15 +207,19 @@ function aggregate(units: MockUnit[], quarter: string): Map<string, Totals> {
   const byState = new Map<string, Totals>();
   for (const unit of units) {
     for (const leg of unitLegs(unit, quarter)) {
-      const t = byState.get(leg.state) ?? { miles: 0, taxableMiles: 0, burnedGal: 0, fuelGal: 0 };
+      const t = byState.get(leg.state) ?? { miles: 0, taxableMiles: 0, fuelGal: 0 };
       t.miles += leg.miles;
       t.taxableMiles += leg.taxableMiles;
-      t.burnedGal += leg.burnedGal;
       t.fuelGal += leg.fuelGal;
       byState.set(leg.state, t);
     }
   }
   return byState;
+}
+
+/** Miles ÷ gallons, one decimal; `null` (rendered `—`) when no fuel was bought. */
+function mpgOf(miles: number, gallons: number): number | null {
+  return gallons > 0 ? round1(miles / gallons) : null;
 }
 
 function fleetMpgOf(byState: Map<string, Totals>): number | null {
@@ -259,8 +262,8 @@ export function buildIftaMockSummary(filters: IftaFilters): IftaSummary {
         totalMiles,
         taxableMiles,
         fuelGal,
-        // Miles per gallon burned in the state (fuel bought there is skewed by tax-driven fueling).
-        mpg: t.burnedGal > 0 ? round1(t.miles / t.burnedGal) : null,
+        // The row's own TOTAL MILES ÷ FUEL — the same two numbers shown beside it.
+        mpg: mpgOf(totalMiles, fuelGal),
         taxDueUsd: round2((taxableGal - fuelGal) * STATES[state]!.rate),
       };
     })
@@ -273,6 +276,9 @@ export function buildIftaMockSummary(filters: IftaFilters): IftaSummary {
   const fuelGal = rows.reduce((s, r) => s + (r.fuelGal ?? 0), 0);
   const taxDueUsd = round2(rows.reduce((s, r) => s + (r.taxDueUsd ?? 0), 0));
   const mpg = fleetMpg === null ? null : round1(fleetMpg);
+  // Total row: sum(miles) ÷ sum(fuel) over the rows actually shown (honours `jurisdiction`).
+  // The KPI keeps the fleet-wide MPG — the divisor IFTA uses for taxable gallons.
+  const totalsMpg = mpgOf(totalMiles, fuelGal);
 
   return {
     quarter,
@@ -287,6 +293,6 @@ export function buildIftaMockSummary(filters: IftaFilters): IftaSummary {
       fleetMpgPrev: fleetMpgPrev === null ? null : round1(fleetMpgPrev),
     },
     rows,
-    totals: { totalMiles, taxableMiles, fuelGal, mpg, taxDueUsd: rows.length ? taxDueUsd : null },
+    totals: { totalMiles, taxableMiles, fuelGal, mpg: totalsMpg, taxDueUsd: rows.length ? taxDueUsd : null },
   };
 }
