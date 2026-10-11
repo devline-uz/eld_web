@@ -18,8 +18,8 @@ export type RoomName =
   | `user:${string}`
   | `conversation:${string}`;
 
-/** §7.3 — the nine events the web panel handles (the backend emits eleven; the other two are
- * `DRIVER_ONLY_REALTIME_EVENTS`). */
+/** §7.3 — the events the web panel handles (the backend also emits the
+ * `DRIVER_ONLY_REALTIME_EVENTS`, which the panel never handles). */
 export interface RealtimeEventPayloads {
   /** room: `user:{id}` (or `driver:{id}`) */
   'notification.new': {
@@ -33,8 +33,11 @@ export interface RealtimeEventPayloads {
       [key: string]: unknown;
     };
   };
-  /** room: `conversation:{id}` */
+  /** rooms: `conversation:{id}` + every participant's identity room (`user:{id}` / `driver:{id}`),
+   * as ONE multi-room push — a socket in several of them still gets it once. Dedupe on `message.id`
+   * anyway (messaging.service.ts `sendMessage`). */
   'message.new': {
+    conversationId?: string;
     message: {
       id: string;
       conversationId: string;
@@ -44,6 +47,21 @@ export interface RealtimeEventPayloads {
       createdAt?: string;
       [key: string]: unknown;
     };
+  };
+  /** rooms: each participant's identity room — a conversation the caller is in was just created
+   * (office user, broadcast, or a driver starting a thread from the app). `conversation` is the raw
+   * row when the server has it; `message` is the first message or null. */
+  'conversation.new': {
+    conversationId: string;
+    conversation?: { id: string; [key: string]: unknown };
+    message: { id: string; conversationId: string; [key: string]: unknown } | null;
+  };
+  /** room: the reader's own identity room — the caller read a conversation in another tab/device. */
+  'conversation.read': {
+    conversationId: string;
+    lastReadAt: string;
+    userId?: string;
+    driverId?: string;
   };
   /** room: `fleet` */
   'trip.status_changed': {
@@ -92,6 +110,8 @@ export type RealtimeEventName = keyof RealtimeEventPayloads;
 export const REALTIME_EVENTS = [
   'notification.new',
   'message.new',
+  'conversation.new',
+  'conversation.read',
   'trip.status_changed',
   'safety.event_created',
   'geofence.transition',

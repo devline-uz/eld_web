@@ -10,6 +10,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
 import { ok, url } from '@/mocks/envelope';
 import { endpoints } from '@/shared/api/endpoints';
+import { qk } from '@/shared/api/queryKeys';
 import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/client';
 import { ToastProvider } from '@/shared/ui/Toast';
 import * as RealtimeProviderModule from '@/shared/realtime/RealtimeProvider';
@@ -46,6 +47,9 @@ function LocationProbe() {
   return <output data-testid="location">{`${location.pathname}${location.search}`}</output>;
 }
 
+/** The QueryClient of the latest `renderPage` — for asserting cache patches the UI does not show. */
+let lastQueryClient: QueryClient;
+
 function renderPage(socket: ReturnType<typeof fakeSocket> | null = null, initialEntries: string[] = ['/messages']) {
   vi.spyOn(RealtimeProviderModule, 'useRealtime').mockReturnValue({
     getSocket: () => socket as never,
@@ -53,6 +57,7 @@ function renderPage(socket: ReturnType<typeof fakeSocket> | null = null, initial
     isOffline: false,
   });
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  lastQueryClient = queryClient;
   return render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
@@ -320,6 +325,139 @@ describe('W-16 Messages', () => {
     expect(screen.getByLabelText('Unread')).toBeInTheDocument();
   });
 
+  describe('live chat via the identity room (`user:{id}`)', () => {
+    const SECOND_DRIVER = { ...DRIVER, id: 'drv_2', username: 'maryjones', firstName: 'Mary', lastName: 'Jones', email: 'mary@example.com' };
+    const SECOND_CONVERSATION = {
+      ...CONVERSATION,
+      id: 'cnv_2',
+      lastMessageAt: '2026-09-13T10:00:00.000Z',
+      participants: [
+        { id: 'cp_3', conversationId: 'cnv_2', userId: 'usr_1', driverId: null, lastReadAt: null, mutedUntil: null },
+        { id: 'cp_4', conversationId: 'cnv_2', userId: null, driverId: 'drv_2', lastReadAt: null, mutedUntil: null },
+      ],
+    };
+    const readRow = (c: typeof CONVERSATION) => ({
+      ...c,
+      unreadCount: 0,
+      participants: c.participants.map((p) => ({ ...p, lastReadAt: '2026-09-14T00:00:00.000Z' })),
+    });
+    function driverMessage(id: string, conversationId: string, body: string) {
+      return {
+        conversationId,
+        message: {
+          id,
+          conversationId,
+          senderUserId: null,
+          senderDriverId: 'drv_2',
+          senderId: 'drv_2',
+          senderType: 'DRIVER',
+          body,
+          attachmentId: null,
+          clientId: null,
+          sentAt: new Date().toISOString(),
+          deliveredAt: null,
+          readAt: null,
+        },
+      };
+    }
+
+    /** The list grows to include `cnv_2` once `includeSecond()` is called (a thread created elsewhere). */
+    function useGrowingList() {
+      let second = false;
+      let listCalls = 0;
+      server.use(
+        http.get(url(endpoints.conversations.list), () => {
+          listCalls += 1;
+          return ok({ items: second ? [readRow(CONVERSATION), { ...SECOND_CONVERSATION, unreadCount: 1 }] : [readRow(CONVERSATION)] });
+        }),
+        http.get(url(endpoints.drivers.list), () =>
+          ok({ items: [DRIVER, SECOND_DRIVER], page: 1, limit: 500, total: 2, totalPages: 1 }),
+        ),
+      );
+      return {
+        includeSecond: () => {
+          second = true;
+        },
+        listCalls: () => listCalls,
+      };
+    }
+
+    it('a `message.new` for a conversation not in the list pulls the new thread in without a reload', async () => {
+      const list = useGrowingList();
+      const socket = fakeSocket();
+      renderPage(socket);
+      await screen.findByText('John Smith');
+      expect(screen.queryByText('Mary Jones')).not.toBeInTheDocument();
+
+      list.includeSecond();
+      socket.trigger('message.new', driverMessage('msg_20', 'cnv_2', 'New thread from the cab.'));
+
+      expect(await screen.findByText('Mary Jones')).toBeInTheDocument();
+    });
+
+    it('`conversation.new` adds a thread another user / the driver app created', async () => {
+      const list = useGrowingList();
+      const socket = fakeSocket();
+      renderPage(socket);
+      await screen.findByText('John Smith');
+
+      list.includeSecond();
+      socket.trigger('conversation.new', { conversationId: 'cnv_2', message: null });
+
+      expect(await screen.findByText('Mary Jones')).toBeInTheDocument();
+    });
+
+    it('`conversation.new` for an already-listed thread does not refetch the list', async () => {
+      const list = useGrowingList();
+      const socket = fakeSocket();
+      renderPage(socket);
+      await screen.findByText('John Smith');
+      const before = list.listCalls();
+
+      socket.trigger('conversation.new', { conversationId: 'cnv_1', message: null });
+
+      await new Promise((r) => setTimeout(r, 50));
+      expect(list.listCalls()).toBe(before);
+    });
+
+    it('a duplicate `message.new` (same id) never counts unread twice', async () => {
+      server.use(
+        http.get(url(endpoints.conversations.list), () => ok({ items: [readRow(CONVERSATION)] })),
+        http.get(url(endpoints.drivers.list), () => ok({ items: [DRIVER], page: 1, limit: 500, total: 1, totalPages: 1 })),
+      );
+      const socket = fakeSocket();
+      renderPage(socket);
+      await screen.findByText('John Smith');
+
+      const push = driverMessage('msg_30', 'cnv_1', 'Fuel stop.');
+      socket.trigger('message.new', push);
+      socket.trigger('message.new', push);
+
+      expect(await screen.findByText('Fuel stop.')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Unread 1' })).toBeInTheDocument();
+      const cached = lastQueryClient.getQueryData<{ items: Array<{ id: string; unreadCount?: number }> }>(qk.conversations());
+      expect(cached?.items.find((c) => c.id === 'cnv_1')?.unreadCount).toBe(1);
+    });
+
+    it('`conversation.read` from another tab of the same user clears the unread badge', async () => {
+      server.use(
+        http.get(url(endpoints.conversations.list), () => ok({ items: [{ ...CONVERSATION, unreadCount: 2 }] })),
+        http.get(url(endpoints.drivers.list), () => ok({ items: [DRIVER], page: 1, limit: 500, total: 1, totalPages: 1 })),
+      );
+      const socket = fakeSocket();
+      renderPage(socket);
+      await screen.findByText('John Smith');
+      expect(screen.getByRole('button', { name: 'Unread 1' })).toBeInTheDocument();
+
+      // Someone else's read receipt is ignored.
+      socket.trigger('conversation.read', { conversationId: 'cnv_1', lastReadAt: new Date().toISOString(), userId: 'usr_other' });
+      expect(screen.getByRole('button', { name: 'Unread 1' })).toBeInTheDocument();
+
+      socket.trigger('conversation.read', { conversationId: 'cnv_1', lastReadAt: new Date().toISOString(), userId: 'usr_1' });
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Unread 0' })).toBeInTheDocument());
+    });
+  });
+
   it('marks a failed send with a red-border/Retry state, never left looking delivered (WB-116)', async () => {
     usePopulatedConversations();
     let attempts = 0;
@@ -364,6 +502,32 @@ describe('W-16 Messages', () => {
     await waitFor(() => expect(screen.queryByText('Not delivered.')).not.toBeInTheDocument());
     expect(attempts).toBe(2);
     expect(screen.getByText('Delivering late')).toBeInTheDocument();
+  });
+
+  it('a refused send says why in the toast, not only "Could not send the message."', async () => {
+    usePopulatedConversations();
+    server.use(
+      http.post(url(endpoints.conversations.sendMessage(':id')), () =>
+        HttpResponse.json(
+          {
+            statusCode: 422,
+            code: 'VALIDATION_FAILED',
+            message: 'Request validation failed.',
+            details: { issues: [{ path: ['clientId'], code: 'too_big', message: 'String must contain at most 100 character(s)' }] },
+          },
+          { status: 422 },
+        ),
+      ),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByText('John Smith'));
+    await screen.findByText('On schedule.');
+    await user.type(screen.getByPlaceholderText('Write a message to John Smith…'), 'Delivering late{Enter}');
+
+    expect(await screen.findByText('Could not send the message.')).toBeInTheDocument();
+    expect(screen.getByText('Client id: String must contain at most 100 character(s).')).toBeInTheDocument();
   });
 
   it('clears the unread dot and the Unread segment count on opening a conversation (WB-117)', async () => {
