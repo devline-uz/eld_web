@@ -38,6 +38,13 @@ export interface CarrierRow {
   eldIdentifier?: string | null;
   eldRegistrationId?: string | null;
   erodsMode: 'TEST' | 'PRODUCTION';
+  /** pt30_pt40/tz.md §9.3 — Test PT30/40 (virtual ELD) switch. */
+  virtualEldEnabled?: boolean;
+  /** `false` when the environment forbids virtual ELDs (`VIRTUAL_ELD_ALLOWED=false`) — the web hides the card. */
+  virtualEldAvailable?: boolean;
+  virtualEldUpdatedAt?: string | null;
+  /** Optional display name of who flipped the switch — not in the §9.3 contract (backend-gaps.md). */
+  virtualEldUpdatedBy?: string | { name?: string; fullName?: string; email?: string } | null;
 }
 
 export function useCarrier() {

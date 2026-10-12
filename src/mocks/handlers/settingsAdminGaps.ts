@@ -58,6 +58,13 @@ export const settingsAdminHandlers = [
         dotNumber: 'Enter a valid USDOT number.',
       });
     }
+    if (dto.virtualEldEnabled === true) {
+      if (CARRIER.virtualEldAvailable === false) return fail(409, 'VIRTUAL_ELD_NOT_ALLOWED', 'Virtual ELD is not allowed here.');
+      if (CARRIER.erodsMode === 'PRODUCTION') {
+        return fail(409, 'VIRTUAL_ELD_REQUIRES_TEST_ERODS', 'Virtual ELD requires eRODS TEST mode.');
+      }
+    }
+    if (dto.virtualEldEnabled !== undefined) CARRIER.virtualEldUpdatedAt = new Date().toISOString();
     Object.assign(CARRIER, dto);
     return ok(CARRIER);
   }),

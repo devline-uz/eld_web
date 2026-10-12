@@ -98,7 +98,23 @@ export const SETTINGS_TOAST = {
 } as const;
 
 /** Reasons shown next to controls this feature deliberately disables (never a dead control). */
+/** pt30_pt40/tz.md §10.1 — Test PT30/40 mode card (English, like the rest of Settings, WD-118). */
+export const VIRTUAL_ELD_COPY = {
+  title: 'Test PT30/40 mode (Emulator)',
+  description: 'When on, drivers can connect to the PT Emulator app (virtual PT30/PT40). For testing only.',
+  statusOff: 'Off',
+  statusOn: (when: string | null, who: string | null): string =>
+    `On${when && who ? ` · enabled by ${who} on ${when}` : when ? ` · enabled on ${when}` : who ? ` · enabled by ${who}` : ''}`,
+  confirmTitle: 'Turn on test mode?',
+  confirmBody:
+    'Records from virtual devices are stored in the same tables as real logs. eRODS cannot be switched to PRODUCTION while test mode is on.',
+  confirmLabel: 'Turn on',
+  requiresTestErods: 'Set eRODS mode to TEST first.',
+} as const;
+
 export const SETTINGS_REASON = {
+  /** pt30_pt40/tz.md §10.1 — read-only roles see the switch disabled. */
+  virtualEldReadOnly: 'Only a role that can edit carrier settings can change test mode.',
   /** Only a SUPER_ADMIN may manage ADMIN / SUPER_ADMIN users and the ADMIN role. */
   superAdminOnly: SUPER_ADMIN_ONLY_REASON,
   /** B-85 — `POST /users` has no terminal-scope field. */

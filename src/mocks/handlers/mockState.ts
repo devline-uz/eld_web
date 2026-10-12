@@ -175,6 +175,7 @@ function seedDevices(): DeviceRow[] {
       firmwareOutdated: i % 6 === 0,
       lastHeartbeatAt: paired ? ago((i % 40) * 60_000) : daysAgo(3 + i),
       storedEventsCount: i % 5,
+      isVirtual: n === 3,
     };
   });
 }
@@ -228,6 +229,9 @@ function seedCarrier(): CarrierRow {
     eldIdentifier: 'OBK001',
     eldRegistrationId: null,
     erodsMode: 'PRODUCTION',
+    virtualEldEnabled: false,
+    virtualEldAvailable: true,
+    virtualEldUpdatedAt: null,
   };
 }
 

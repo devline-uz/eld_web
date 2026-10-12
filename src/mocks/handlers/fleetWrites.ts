@@ -462,9 +462,12 @@ export const fleetWriteHandlers = [
   /* ---------------------------------------------------------------- devices, trailers, geofences */
   // One box per unit (minus a few spares), so the Vehicles table's ELD SERIAL column and W-20 ELD
   // devices describe the same fleet instead of the single generated example row.
-  http.get(url(endpoints.devices.list), ({ request }) =>
-    ok(serverPage<DeviceRow>(DEVICES, request, ['serial', 'model'])),
-  ),
+  http.get(url(endpoints.devices.list), ({ request }) => {
+    // pt30_pt40/tz.md §9.3 — `?virtual=true|false` filters on `isVirtual`.
+    const virtual = new URL(request.url).searchParams.get('virtual');
+    const source = virtual === null ? DEVICES : DEVICES.filter((d) => Boolean(d.isVirtual) === (virtual === 'true'));
+    return ok(serverPage<DeviceRow>(source, request, ['serial', 'model']));
+  }),
   http.get(url(endpoints.devices.detail(':id')), ({ params }) => {
     const device = DEVICES.find((d) => d.id === String(params.id));
     return device ? ok(device) : NOT_FOUND('Device');

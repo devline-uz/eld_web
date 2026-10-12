@@ -167,14 +167,14 @@ describe('DevicesPage — W-20', () => {
     expect(screen.queryByText('PT30_A86E')).not.toBeInTheDocument();
     expect(screen.getByText('PT40_9F21')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /^all/i }));
+    await user.click(screen.getByRole('button', { name: /^all \d+/i }));
     await user.type(screen.getByPlaceholderText('Search serial or unit…'), 'A86E');
     // Search is layered over the DataTable's own rows (client-side, unlike segment) — the row
     // stays because DevicesPage doesn't currently filter rows by the search box beyond passing it
     // to the server; assert the input at least accepts the value without throwing.
     expect(screen.getByPlaceholderText('Search serial or unit…')).toHaveValue('A86E');
 
-    await user.click(screen.getByRole('button', { name: /^all/i }));
+    await user.click(screen.getByRole('button', { name: /^all \d+/i }));
     const targetRow = (await screen.findByText('PT30_A86E')).closest('tr')!;
     await user.click(within(targetRow).getByRole('button', { name: 'Row actions' }));
     await user.click(screen.getByText('Retire device'));
@@ -377,5 +377,35 @@ describe('WB-273 export icon', () => {
     const button = screen.getByRole('button', { name: /^export$/i });
     expect(button.querySelector('svg.lucide-upload')).not.toBeNull();
     expect(button.querySelector('svg.lucide-download')).toBeNull();
+  });
+});
+
+describe('DevicesPage — Test PT30/40 (pt30_pt40/tz.md §10.1)', () => {
+  it('shows a TEST badge on virtual devices and filters Real/Test server-side', async () => {
+    const user = userEvent.setup();
+    const seen: Array<string | null> = [];
+    server.use(
+      http.get(url(endpoints.devices.list), ({ request }) => {
+        const virtual = new URL(request.url).searchParams.get('virtual');
+        seen.push(virtual);
+        const rows = [
+          { ...DEVICE, id: 'd_real', serial: 'PT30_REAL', isVirtual: false },
+          { ...DEVICE, id: 'd_virt', serial: 'VPT30_AB12', isVirtual: true },
+        ].filter((d) => virtual === null || String(d.isVirtual) === virtual);
+        return ok({ items: rows, page: 1, limit: 25, total: rows.length, totalPages: 1 });
+      }),
+    );
+    renderPage();
+    const virtualRow = (await screen.findByText('VPT30_AB12')).closest('tr') as HTMLElement;
+    expect(within(virtualRow).getByText('TEST')).toBeInTheDocument();
+    const realRow = screen.getByText('PT30_REAL').closest('tr') as HTMLElement;
+    expect(within(realRow).queryByText('TEST')).toBeNull();
+
+    const group = screen.getByRole('group', { name: 'Device kind' });
+    await user.click(within(group).getByRole('button', { name: 'Test' }));
+    await waitFor(() => expect(seen).toContain('true'));
+    await waitFor(() => expect(screen.queryByText('PT30_REAL')).toBeNull());
+    await user.click(within(group).getByRole('button', { name: 'Real' }));
+    await waitFor(() => expect(seen).toContain('false'));
   });
 });
