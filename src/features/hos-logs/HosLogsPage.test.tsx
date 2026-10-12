@@ -943,6 +943,36 @@ describe('overlay controls actually drive the payload', () => {
   });
 });
 
+describe('BUG-002 — a stuck duty status', () => {
+  it('`Available hours` shows `ELD connection lost` instead of four 00:00 clocks', async () => {
+    server.use(
+      http.get(url(endpoints.drivers.hos(DRIVER_ID)), () =>
+        ok({
+          driveRemainingSec: 0,
+          shiftRemainingSec: 0,
+          cycleRemainingSec: 0,
+          breakInSec: 0,
+          onDutySince: '2026-10-08T08:28:00.000Z',
+          cycleLimitSec: 252000,
+          shiftLimitSec: 50400,
+          driveLimitSec: 39600,
+          breakLimitSec: 28800,
+          dutyStatus: 'DRIVING',
+          statusSince: '2026-10-08T08:28:00.000Z',
+          computedAt: '2026-10-12T12:00:00.000Z',
+          isStale: true,
+          staleSince: '2026-10-09T00:28:00.000Z',
+        }),
+      ),
+    );
+    renderPage();
+    const badge = await screen.findByText('ELD connection lost');
+    const card = badge.closest('[role="status"]') as HTMLElement;
+    expect(within(card).getByText(/Driving for 99h 32m with no duty-status change/)).toBeInTheDocument();
+    expect(within(card).queryByText('limit exceeded')).not.toBeInTheDocument();
+  });
+});
+
 describe('audited fixes WB-061 … WB-073', () => {
   it('WB-061 · a resolved violation is muted with a `Resolved` badge and no `Resolve` action', async () => {
     server.use(
@@ -952,6 +982,8 @@ describe('audited fixes WB-061 … WB-073', () => {
           violations: [{ ...dayPayload.violations[0]!, status: 'RESOLVED', resolutionNote: 'Reviewed.' }],
         }),
       ),
+      // BUG-003 — the driver-wide active list agrees: nothing open on any day.
+      http.get(url(endpoints.violations.list), () => ok({ items: [], total: 0, page: 1, limit: 50, totalPages: 1 })),
     );
     renderPage();
     expect(await screen.findByText('Resolved')).toBeInTheDocument();
