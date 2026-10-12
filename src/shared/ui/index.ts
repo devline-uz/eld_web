@@ -10,6 +10,7 @@ export * from './KpiCard';
 export * from './Avatar';
 export * from './ProgressBar';
 export * from './HosMeter';
+export * from './EldStale';
 export * from './ProgressCard';
 export * from './copy';
 export * from './states';

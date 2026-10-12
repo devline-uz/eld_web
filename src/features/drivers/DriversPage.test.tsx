@@ -98,6 +98,47 @@ describe('W-06 Drivers', () => {
     ).toBeInTheDocument();
   });
 
+  // BUG-001 — the column header showed a hardcoded `· 11H` while an adverse-driving row used 13 h.
+  it('BUG-001 · the HOS column headers come from the rows\' own limits, not a hardcoded 11H', async () => {
+    const base = { driveLimitSec: 11 * 3600, shiftLimitSec: 14 * 3600, cycleLimitSec: 70 * 3600 };
+    server.use(
+      http.get(url(endpoints.drivers.roster), () =>
+        ok({
+          items: [
+            { ...rosterEntry('drv_a', 'Ada', 'DRIVING'), limits: base },
+            { ...rosterEntry('drv_b', 'Bob', 'DRIVING'), limits: { ...base, cycleLimitSec: 60 * 3600 } },
+          ],
+          page: 1,
+          limit: 10,
+          total: 2,
+          totalPages: 1,
+        }),
+      ),
+    );
+    renderPage();
+    expect(await screen.findByRole('columnheader', { name: 'DRIVE LEFT · 11H' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'SHIFT LEFT · 14H' })).toBeInTheDocument();
+    // 70/8 and 60/7 rows on one page: no single cycle limit to print.
+    expect(screen.getByRole('columnheader', { name: 'CYCLE LEFT' })).toBeInTheDocument();
+  });
+
+  it('BUG-001 · an adverse-invoked page of 13 h drivers says 13H', async () => {
+    server.use(
+      http.get(url(endpoints.drivers.roster), () =>
+        ok({
+          items: [{ ...rosterEntry('drv_a', 'Ada', 'DRIVING'), limits: { driveLimitSec: 13 * 3600, shiftLimitSec: 16 * 3600, cycleLimitSec: 70 * 3600 } }],
+          page: 1,
+          limit: 10,
+          total: 1,
+          totalPages: 1,
+        }),
+      ),
+    );
+    renderPage();
+    expect(await screen.findByRole('columnheader', { name: 'DRIVE LEFT · 13H' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'SHIFT LEFT · 16H' })).toBeInTheDocument();
+  });
+
   it('renders a roster row with HOS meters, unit and violations from the B-1 shape', async () => {
     renderPage();
 
@@ -649,5 +690,32 @@ describe('W-06 Drivers', () => {
     expect(sentTo).toHaveLength(2);
     expect(screen.queryByRole('dialog', { name: 'Send message' })).not.toBeInTheDocument();
     expect(screen.queryByText('2 drivers selected')).not.toBeInTheDocument();
+  });
+});
+
+describe('BUG-002 — a stuck duty status', () => {
+  it('shows `ELD connection lost` and dashes instead of 00:00 limit-exceeded clocks', async () => {
+    server.use(
+      http.get(url(endpoints.drivers.roster), () =>
+        ok({
+          items: [
+            {
+              ...rosterEntry('drv_s', 'William', 'DRIVING'),
+              hos: { driveRemainingSec: 0, shiftRemainingSec: 0, cycleRemainingSec: 0 },
+              isStale: true,
+              staleSince: '2026-10-09T00:28:00.000Z',
+            },
+          ],
+          page: 1,
+          limit: 10,
+          total: 1,
+          totalPages: 1,
+        }),
+      ),
+    );
+    renderPage();
+    expect(await screen.findByText('ELD connection lost')).toBeInTheDocument();
+    expect(screen.queryByText('00:00')).not.toBeInTheDocument();
+    expect(screen.queryByText('limit exceeded')).not.toBeInTheDocument();
   });
 });

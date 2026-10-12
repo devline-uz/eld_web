@@ -7,6 +7,8 @@ export const EVENT_OPTIONS: { value: string; label: string; minutesLabel?: strin
   { value: 'hos.break_due', label: '30-minute break is due', minutesLabel: 'within (minutes)' },
   { value: 'hos.violation', label: 'HOS violation recorded' },
   { value: 'device.offline', label: 'ELD stopped reporting', minutesLabel: 'for (minutes)' },
+  // BUG-002 — the backend's default `default_eld_status_stale` rule (a duty status stuck open).
+  { value: 'alert.eld_status_stale', label: 'ELD connection lost' },
   {
     value: 'unidentified.created',
     label: 'Unassigned driving detected',

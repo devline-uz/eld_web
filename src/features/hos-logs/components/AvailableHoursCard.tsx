@@ -7,6 +7,7 @@
 // the card renders <ErrorState> in place (web/backend-gaps.md).
 import { Card, SectionHeader } from '@/shared/ui/Card';
 import { HosMeter } from '@/shared/ui/HosMeter';
+import { EldStaleNotice } from '@/shared/ui/EldStale';
 import { ErrorState, LoadingState } from '@/shared/ui/states';
 import { formatHosHours, hosClockNotes } from '@/shared/format';
 import { useDriverHos, type DriverHosResponse } from '@/shared/api/drivers';
@@ -64,6 +65,9 @@ export function AvailableHoursCard({ driverId }: { driverId: string }) {
             description="The hours-of-service clocks did not respond. Your data is safe — try again in a moment."
             onRetry={() => void query.refetch()}
           />
+        ) : query.data.isStale ? (
+          // BUG-002 — a status stuck open for days is a lost ELD, not four clocks at 00:00.
+          <EldStaleNotice dutyStatus={query.data.dutyStatus} statusSince={query.data.statusSince} computedAt={query.data.computedAt} />
         ) : (
           <AvailableHoursMeters clocks={query.data} />
         )}

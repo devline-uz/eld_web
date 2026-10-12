@@ -69,9 +69,16 @@ export interface DriverRosterEntry {
   dutyStatus: 'DRIVING' | 'ON_DUTY' | 'SLEEPER' | 'OFF_DUTY';
   unit: { id: string; unitNumber: string } | null;
   hos: { driveRemainingSec: number; shiftRemainingSec: number; cycleRemainingSec: number };
+  /** BUG-001 — the driver's ruleset limits today (adverse +2 h only on an invoked day). Optional
+   * so a backend that predates the field still renders against the 70/8 property defaults. */
+  limits?: { driveLimitSec: number; shiftLimitSec: number; cycleLimitSec: number };
   openViolations: number;
   /** B-31 shipped — `null` when the driver has no email on file, else the real verified state. */
   emailVerified: boolean | null;
+  /** BUG-002 — the current status ran past its plausible maximum (ELD connection lost); `hos` is
+   * frozen at `staleSince`. Optional: absent on an older backend means "not stale". */
+  isStale?: boolean;
+  staleSince?: string | null;
 }
 
 export interface DriverRosterResponse {
@@ -181,6 +188,9 @@ export interface DriverHosResponse {
   dutyStatus: DriverRosterEntry['dutyStatus'];
   statusSince: string;
   computedAt: string;
+  /** BUG-002 — see `DriverRosterEntry.isStale`; the clocks are as of `staleSince`. */
+  isStale?: boolean;
+  staleSince?: string | null;
 }
 
 /** One B-2 query — shared by `useDriverHos` and `useDriversHosClocks` so both read and write the

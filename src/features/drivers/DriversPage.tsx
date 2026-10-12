@@ -27,6 +27,7 @@ import { Button } from '@/shared/ui/Button';
 import { Badge, DutyBadge } from '@/shared/ui/Badge';
 import { Avatar } from '@/shared/ui/Avatar';
 import { HosMeter } from '@/shared/ui/HosMeter';
+import { EldStaleBadge, ELD_STALE_LABEL } from '@/shared/ui/EldStale';
 import { hosClockNotes } from '@/shared/format/hos';
 import { DataTable } from '@/shared/ui/DataTable';
 import { Pagination } from '@/shared/ui/Pagination';
@@ -53,6 +54,27 @@ import { tripsHrefForDriver } from './lib/links';
 
 type Segment = 'ALL' | 'ON_DUTY' | 'OFF_DUTY' | 'VIOLATIONS';
 const LIMIT_SEC = { drive: 39600, shift: 50400, cycle: 252000 };
+
+/** BUG-001 — each row's own ruleset limits (adverse +2 h only on an invoked day); 70/8 property if absent. */
+function rowLimits(entry: DriverRosterEntry): NonNullable<DriverRosterEntry['limits']> {
+  return entry.limits ?? { driveLimitSec: LIMIT_SEC.drive, shiftLimitSec: LIMIT_SEC.shift, cycleLimitSec: LIMIT_SEC.cycle };
+}
+
+/** BUG-001 — `DRIVE LEFT · 11H` only when every row on screen shares that limit; mixed rulesets drop the suffix. */
+function limitHeader(label: string, rows: DriverRosterEntry[], key: keyof NonNullable<DriverRosterEntry['limits']>): string {
+  const limits = new Set(rows.map((r) => rowLimits(r)[key]));
+  const [sec] = [...limits];
+  return limits.size === 1 && sec !== undefined ? `${label} · ${Math.round(sec / 3600)}H` : label;
+}
+
+/** BUG-002 — a stale status (ELD connection lost) has no meaningful clock: a dash, never 00:00. */
+function StaleClock() {
+  return (
+    <span className="tabular text-text-muted" title={`${ELD_STALE_LABEL} — clocks paused`}>
+      —
+    </span>
+  );
+}
 
 /** `?page=abc` is `NaN` and `?page=0` / `?page=-3` are pages no server can answer — both reached
  * `GET /drivers/roster` verbatim and rendered a `NaN–NaN of 58` footer. Anything that is not a
@@ -340,7 +362,10 @@ export default function DriversPage() {
       id: 'status',
       header: 'STATUS',
       cell: ({ row }) => (
-        <DutyBadge status={row.original.dutyStatus} className="whitespace-nowrap" />
+        <span className="flex flex-wrap items-center gap-1">
+          <DutyBadge status={row.original.dutyStatus} className="whitespace-nowrap" />
+          {row.original.isStale && <EldStaleBadge className="whitespace-nowrap" />}
+        </span>
       ),
     },
     {
@@ -350,39 +375,48 @@ export default function DriversPage() {
     },
     {
       id: 'driveLeft',
-      header: 'DRIVE LEFT · 11H',
-      cell: ({ row }) => (
-        <HosMeter
-          label=""
-          remainingSec={row.original.hos.driveRemainingSec}
-          limitSec={LIMIT_SEC.drive}
-          zeroNote={hosClockNotes({ dutyStatus: row.original.dutyStatus, ...row.original.hos }).drive}
-        />
-      ),
+      header: limitHeader('DRIVE LEFT', pageRows, 'driveLimitSec'),
+      cell: ({ row }) =>
+        row.original.isStale ? (
+          <StaleClock />
+        ) : (
+          <HosMeter
+            label=""
+            remainingSec={row.original.hos.driveRemainingSec}
+            limitSec={rowLimits(row.original).driveLimitSec}
+            zeroNote={hosClockNotes({ dutyStatus: row.original.dutyStatus, ...row.original.hos }).drive}
+          />
+        ),
     },
     {
       id: 'shiftLeft',
-      header: 'SHIFT LEFT · 14H',
-      cell: ({ row }) => (
-        <HosMeter
-          label=""
-          remainingSec={row.original.hos.shiftRemainingSec}
-          limitSec={LIMIT_SEC.shift}
-          zeroNote={hosClockNotes({ dutyStatus: row.original.dutyStatus, ...row.original.hos }).shift}
-        />
-      ),
+      header: limitHeader('SHIFT LEFT', pageRows, 'shiftLimitSec'),
+      cell: ({ row }) =>
+        row.original.isStale ? (
+          <StaleClock />
+        ) : (
+          <HosMeter
+            label=""
+            remainingSec={row.original.hos.shiftRemainingSec}
+            limitSec={rowLimits(row.original).shiftLimitSec}
+            zeroNote={hosClockNotes({ dutyStatus: row.original.dutyStatus, ...row.original.hos }).shift}
+          />
+        ),
     },
     {
       id: 'cycleLeft',
-      header: 'CYCLE LEFT · 70H',
-      cell: ({ row }) => (
-        <HosMeter
-          label=""
-          remainingSec={row.original.hos.cycleRemainingSec}
-          limitSec={LIMIT_SEC.cycle}
-          zeroNote={hosClockNotes({ dutyStatus: row.original.dutyStatus, ...row.original.hos }).cycle}
-        />
-      ),
+      header: limitHeader('CYCLE LEFT', pageRows, 'cycleLimitSec'),
+      cell: ({ row }) =>
+        row.original.isStale ? (
+          <StaleClock />
+        ) : (
+          <HosMeter
+            label=""
+            remainingSec={row.original.hos.cycleRemainingSec}
+            limitSec={rowLimits(row.original).cycleLimitSec}
+            zeroNote={hosClockNotes({ dutyStatus: row.original.dutyStatus, ...row.original.hos }).cycle}
+          />
+        ),
     },
     {
       id: 'violations',
