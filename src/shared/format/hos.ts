@@ -99,8 +99,9 @@ export const HOS_ZERO_NOTE = {
   exceeded: 'limit exceeded',
   /** 11 h of driving used up or the 14-hour window closed — §395.3(a)(1) 10 h off resets both. */
   tenHourBreak: '10-hour break required',
-  /** 70/8 (60/7) used up — hours come back at recap or after a 34-hour restart (§395.3(c)). */
-  cycle: 'cycle limit reached',
+  /** 70/8 (60/7) used up while NOT driving — not a violation (UI-002): hours come back at recap or
+   * after a 34-hour restart (§395.3(c)). */
+  cycle: 'cycle exhausted',
   /** 8 h of driving since the last 30-minute interruption (§395.3(a)(3)(ii)). */
   thirtyMinuteBreak: '30-minute break required',
 } as const;

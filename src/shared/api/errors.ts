@@ -210,6 +210,47 @@ export function isApiError(error: unknown): error is ApiError {
   return error instanceof ApiError;
 }
 
+/**
+ * `POST /vehicles/:id/assign-driver` refusals in words a dispatcher can act on. The generic
+ * `CONFLICT` copy ("That value is already in use.") misread every 409 here: the server's own
+ * sentence names the real reason (inactive unit, inactive / terminated driver, unit already
+ * taken), and a 404 `DRIVER_NOT_FOUND` now also means "deleted". Anything else → `formErrorMessage`.
+ */
+export function assignDriverErrorMessage(error: unknown, labels: Readonly<Record<string, string>> = {}): string {
+  if (error instanceof ApiError) {
+    if (error.status === 409 && error.code === 'VEHICLE_OUT_OF_SERVICE') {
+      return 'This unit is out of service. Close the critical defect before assigning a driver.';
+    }
+    if (error.status === 409 && error.code === 'CONFLICT' && error.message && error.message !== 'Request failed') return error.message;
+    if (error.status === 404 && error.code === 'DRIVER_NOT_FOUND') return 'This driver was deleted or no longer exists. Pick another driver.';
+    if (error.status === 404 && error.code === 'VEHICLE_NOT_FOUND') return 'This unit was deleted or no longer exists.';
+  }
+  return formErrorMessage(error, [], labels);
+}
+
+/** One open trip named by a BE-013 refusal (`details.openTrips`). */
+export interface OpenTripRef {
+  id: string;
+  number: string;
+  status: string;
+}
+
+/**
+ * BE-013 — `DELETE /drivers/:id` and `DELETE /vehicles/:id` refuse with `409 CONFLICT` while the
+ * driver / unit still has open trips, naming them in `details.openTrips` (max 20). Returns those
+ * trips, or null for any other error, so the caller can list them instead of a generic toast.
+ */
+export function openTripsOf(error: unknown): OpenTripRef[] | null {
+  if (!(error instanceof ApiError) || error.status !== 409) return null;
+  const raw = error.details.openTrips;
+  if (!Array.isArray(raw)) return null;
+  const trips = raw.filter(
+    (t): t is OpenTripRef =>
+      t !== null && typeof t === 'object' && typeof (t as OpenTripRef).id === 'string' && typeof (t as OpenTripRef).number === 'string',
+  );
+  return trips.length > 0 ? trips : null;
+}
+
 /** The message a toast or banner shows for any thrown value. */
 export function toUserMessage(error: unknown): string {
   if (error instanceof ApiError) return error.userMessage;

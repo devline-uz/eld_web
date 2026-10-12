@@ -65,6 +65,10 @@ export const VALIDATION_MESSAGES = {
   engineHours: 'Enter engine hours, e.g. 1079.4.',
   engineHoursMax: 'Engine hours cannot exceed 99,999.',
   firstNameMax: 'First name must be 80 characters or fewer.',
+  /** QA FE-012 — letters, spaces, hyphens, apostrophes and periods only. */
+  personName: 'Use letters, spaces, hyphens, apostrophes or periods only.',
+  plateState: 'Use a US state or Canadian province code (e.g. OH, ON).',
+  plateStateRequired: 'Enter the issuing state for this plate.',
   lastNameMax: 'Last name must be 80 characters or fewer.',
   roleNameMax: 'Role name must be 80 characters or fewer.',
   roleDescriptionMax: 'Description must be 500 characters or fewer.',

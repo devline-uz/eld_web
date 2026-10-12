@@ -18,6 +18,7 @@ import {
   useUpdateDriver,
   useDeactivateDriver,
   useImportDrivers,
+  useDriverRosterCounts,
 } from './drivers';
 
 function wrapper() {
@@ -38,6 +39,32 @@ afterAll(() => server.close());
 beforeEach(() => {
   setAuthBridge({ getAccessToken: () => 'test-token' });
   setAccessToken('test-token');
+});
+
+describe('UI-015 useDriverRosterCounts', () => {
+  it('the unfiltered header reads the roster summary (global), not the loaded rows', async () => {
+    server.use(
+      http.get(url(endpoints.drivers.roster), () =>
+        ok({ items: [], page: 1, limit: 200, total: 0, totalPages: 1, summary: { total: 115, withActiveViolations: 7 } }),
+      ),
+    );
+    const { result } = renderHook(() => useDriverRosterCounts(), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.all).toBe(115);
+    expect(result.current.violations).toBe(7);
+  });
+
+  it('a filtered count ignores the global summary', async () => {
+    server.use(
+      http.get(url(endpoints.drivers.roster), () =>
+        ok({ items: [], page: 1, limit: 200, total: 3, totalPages: 1, summary: { total: 115, withActiveViolations: 7 } }),
+      ),
+    );
+    const { result } = renderHook(() => useDriverRosterCounts({ q: 'smith' }), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.all).toBe(3);
+    expect(result.current.violations).toBe(0);
+  });
 });
 
 describe('read hooks', () => {

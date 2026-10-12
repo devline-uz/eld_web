@@ -4,17 +4,22 @@ import { describe, expect, it } from 'vitest';
 import { allocatePercents } from './allocatePercents';
 
 describe('allocatePercents (WB-118)', () => {
-  it('sums to exactly 100 for the classic thirds case', () => {
-    const result = allocatePercents([1, 1, 1], 3);
-    expect(result.reduce((a, b) => a + b, 0)).toBe(100);
-    // largest-remainder gives the extra point to the first equal-fraction segment, deterministically
-    expect(result).toEqual([34, 33, 33]);
+  it('FE-010: equal counts get equal percentages, even when that means not summing to 100', () => {
+    // thirds cannot be split equally into 100 integer points — each rounds on its own
+    expect(allocatePercents([1, 1, 1], 3)).toEqual([33, 33, 33]);
+    expect(allocatePercents([1, 1, 1, 3], 6)).toEqual([17, 17, 17, 50]);
+  });
+
+  it('FE-010: gives the leftover points to a whole group of equal counts', () => {
+    // 28.57 ×2 and 42.86: floors 28/28/42 = 98, the two equal segments take the 2 points together
+    expect(allocatePercents([2, 2, 3], 7)).toEqual([29, 29, 42]);
+    // 2/2/1/1/1 of 7: the equal pair (.57) takes both points; the three 14.29s stay equal
+    expect(allocatePercents([2, 1, 2, 1, 1], 7)).toEqual([29, 14, 29, 14, 14]);
   });
 
   it('sums to exactly 100 across a range of random-ish splits', () => {
     const cases: Array<[number[], number]> = [
       [[7, 5, 3, 1], 16],
-      [[2, 2, 2, 2, 1], 9],
       [[10, 0, 0, 0], 10],
       [[1, 2, 3], 6],
       [[97, 1, 1, 1], 100],

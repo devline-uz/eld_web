@@ -113,7 +113,18 @@ const GENERATED_ROSTER_ENTRIES: DriverRosterEntry[] = Array.from({ length: 53 },
 
 /** Exported so `mockState.ts` can widen the same 58 identities into full `/drivers` rows — one
  * driver id never means two different people across the mock (mock-layer audit, 2026-09-23). */
-export const ROSTER_ENTRIES: DriverRosterEntry[] = [...NAMED_ROSTER_ENTRIES, ...GENERATED_ROSTER_ENTRIES];
+export const ROSTER_ENTRIES: DriverRosterEntry[] = [...NAMED_ROSTER_ENTRIES, ...GENERATED_ROSTER_ENTRIES].map((entry, i) => ({
+  ...entry,
+  // UI-005 — most drivers run the carrier's 70 h / 8 day property ruleset; every 10th (from the
+  // 4th) runs 60 h / 7 day, so the roster's cycle column is exercised with both.
+  driver: { ...entry.driver, hosRuleset: i % 10 === 3 ? 'US_60_7_PROPERTY' : 'US_70_8_PROPERTY' },
+}));
+
+/** UI-015 — backend roster `summary`: over EVERY driver, filters / search / page ignored. */
+const rosterSummary = () => ({
+  total: ROSTER_ENTRIES.length,
+  withActiveViolations: ROSTER_ENTRIES.filter((e) => e.openViolations > 0).length,
+});
 
 const HOS_RIGHT_NOW = {
   driveRemainingSec: 0,
@@ -128,6 +139,7 @@ const HOS_RIGHT_NOW = {
   dutyStatus: 'DRIVING',
   statusSince: '2026-09-12T18:00:00.000Z',
   computedAt: '2026-09-12T20:00:00.000Z',
+  hosRuleset: 'US_70_8_PROPERTY',
 };
 
 const VEHICLE_ACTIVITIES: { items: VehicleActivityItem[] } = {
@@ -248,6 +260,7 @@ export const vehiclesDriversGapHandlers = [
       limit,
       total,
       totalPages: Math.max(1, Math.ceil(total / limit)),
+      summary: rosterSummary(),
     };
     return ok(response);
   }),

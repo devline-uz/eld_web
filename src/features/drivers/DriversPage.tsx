@@ -3,6 +3,7 @@
 //
 // B-1 `GET /drivers/roster` shipped 2026-09-14 (server-paginated, server filters per B-55).
 import { useEffect, useMemo, useState } from 'react';
+import { useDebouncedValue } from '@/shared/hooks/useDebouncedValue';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { ColumnDef } from '@tanstack/react-table';
@@ -107,6 +108,29 @@ export default function DriversPage() {
 
   const filters = useMemo(() => parseDriverFilters(params), [params]);
 
+  // QA FE-003 — the box owns its text; the URL (and the roster request) follow 250 ms after the
+  // last keystroke. Driving the input straight from `?q=` dropped characters on fast typing and
+  // fired two requests per key.
+  const [searchInput, setSearchInput] = useState(q);
+  const debouncedSearch = useDebouncedValue(searchInput, 250);
+  useEffect(() => {
+    const next = debouncedSearch.trim();
+    if (next === q) return;
+    setParam('q', next || null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only a settled keystroke writes the URL
+  }, [debouncedSearch]);
+  // A `q` this box did not write (back button, a Clear elsewhere) replaces the typed text; the
+  // box's own debounced write lands equal to `debouncedSearch` and leaves the text alone.
+  const [syncedQ, setSyncedQ] = useState(q);
+  if (syncedQ !== q) {
+    setSyncedQ(q);
+    if (q !== debouncedSearch.trim()) setSearchInput(q);
+  }
+  function clearSearch() {
+    setSearchInput('');
+    setParam('q', null);
+  }
+
   // WB-103 — the duty-status `status` field, every exemption but `eldExempt`, and the ON_DUTY /
   // OFF_DUTY segment tabs have no server param on `GET /drivers/roster` (extends B-55,
   // web/backend-gaps.md): the server-filtered page cannot answer them. `VIOLATIONS` reuses the
@@ -155,7 +179,18 @@ export default function DriversPage() {
   // server-filtered roster, not the ~10 rows of the current server page. Counting `entries` put
   // `All 10 | On duty 8 | Off duty 2` under a `115 drivers` headline that was itself half
   // page-scoped (`total` for the first number, the page for the other two).
-  const counts = useDriverRosterCounts(serverFilters);
+  // QA UI-006 — the tabs count the roster the search/drawer filters describe, independent of the
+  // selected tab (clicking `Violations 1` must not turn `All` into 1); the page header counts
+  // the whole fleet and never moves with a search or a tab.
+  const chipFilters = useMemo(
+    () => ({
+      ...serverFilters,
+      hasOpenViolation: (filters.violationsOnly ? 'true' : undefined) as 'true' | undefined,
+    }),
+    [serverFilters, filters.violationsOnly],
+  );
+  const counts = useDriverRosterCounts(chipFilters);
+  const fleetCounts = useDriverRosterCounts();
 
   // Server mode: the roster page and its `total`/`totalPages` already describe the whole
   // server-filtered roster. Window mode: `filtered` is every match inside the reference-cached
@@ -457,7 +492,10 @@ export default function DriversPage() {
   const isError = useWindow ? windowQuery.isError : rosterQuery.isError;
   const refetch = () => (useWindow ? windowQuery.refetch() : rosterQuery.refetch());
 
-  usePageHeader({ title: 'Drivers', subtitle: `${counts.all} drivers · ${counts.onDuty} on duty · ${counts.violations} with active violations` });
+  usePageHeader({
+    title: 'Drivers',
+    subtitle: `${fleetCounts.all} ${fleetCounts.all === 1 ? 'driver' : 'drivers'} · ${fleetCounts.onDuty} on duty · ${fleetCounts.violations} with active violations`,
+  });
 
   return (
     <div className="flex flex-col gap-4 xl:max-h-content-h">
@@ -466,20 +504,20 @@ export default function DriversPage() {
           <div className="flex h-input items-center gap-2 rounded-md border border-border bg-bg-surface px-3">
             <Search size={16} strokeWidth={1.75} className="text-text-muted" />
             <input
-              value={q}
+              value={searchInput}
               aria-label="Search drivers"
-              onChange={(e) => setParam('q', e.target.value || null)}
+              onChange={(e) => setSearchInput(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === 'Escape' && q) setParam('q', null);
+                if (e.key === 'Escape' && searchInput) clearSearch();
               }}
               placeholder="Search driver, username…"
               className="w-56 bg-transparent text-body outline-none"
             />
-            {q && (
+            {searchInput && (
               <button
                 type="button"
                 aria-label="Clear search"
-                onClick={() => setParam('q', null)}
+                onClick={clearSearch}
                 className="flex size-5 items-center justify-center rounded-md text-text-muted hover:bg-bg-subtle hover:text-text"
               >
                 <X size={14} strokeWidth={1.75} />
@@ -573,7 +611,7 @@ export default function DriversPage() {
               actions={[
                 {
                   label: q ? 'Clear search' : 'Clear filters',
-                  onClick: () => (q ? setParam('q', null) : applyFilters(EMPTY_DRIVER_FILTERS)),
+                  onClick: () => (q ? clearSearch() : applyFilters(EMPTY_DRIVER_FILTERS)),
                 },
               ]}
             />

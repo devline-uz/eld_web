@@ -100,7 +100,8 @@ describe('hosClockNotes — a clock at 00:00 names its reason', () => {
 
   it('names the cycle when it is what stops driving — a 10-hour break would not help', () => {
     const notes = hosClockNotes({ dutyStatus: 'OFF_DUTY', cycleRemainingSec: 0 });
-    expect(notes.drive).toBe('cycle limit reached');
-    expect(notes.cycle).toBe('cycle limit reached');
+    // UI-002 — on duty / off duty with the cycle used up is "cycle exhausted", not a violation.
+    expect(notes.drive).toBe('cycle exhausted');
+    expect(notes.cycle).toBe('cycle exhausted');
   });
 });

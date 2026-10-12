@@ -60,6 +60,21 @@ describe('LogEventsCard windowing', () => {
     expect(eventWindowSize(2000, 4000, -1)).toBe(2000);
   });
 
+  it('FE-013: View all events lifts the window and scrolls the list into view, even when already showing all records', async () => {
+    const scroll = vi.fn();
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scroll;
+    try {
+      renderCard(2000);
+      expect(bodyRows()).toHaveLength(EVENT_WINDOW);
+      await userEvent.setup().click(screen.getByRole('button', { name: 'View all events' }));
+      expect(bodyRows()).toHaveLength(2000);
+      expect(scroll).toHaveBeenCalled();
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+
   it('renders every row at or below the threshold', () => {
     renderCard(40);
     expect(bodyRows()).toHaveLength(40);

@@ -20,6 +20,8 @@ export const DATE_FORMATS = {
   dateTime: 'MMM dd, HH:mm',
   /** `Sep 10, 15:42:08` */
   dateTimeSeconds: 'MMM dd, HH:mm:ss',
+  /** `Sep 10, 2025, 05:12` — `dateTime` for an instant outside the current year. */
+  dateTimeYear: 'MMM dd, yyyy, HH:mm',
   /** `Wed, Sep 10, 2025` */
   longDate: 'EEE, MMM d, yyyy',
   /** `Sep 11, 2025` */
@@ -64,6 +66,14 @@ export function formatInTz(
  */
 export function formatLocal(value: DateInput, format: DateFormatName | string = 'dateTime'): string {
   return formatInTz(value, BROWSER_TIMEZONE(), format);
+}
+
+/** `Sep 10, 05:12` this year, `Sep 10, 2025, 05:12` any other year — a bare `MMM dd` on a date
+ * from another year reads as this year's (QA UI-018). Browser zone, like `formatLocal`. */
+export function formatLocalDateTime(value: DateInput, now: Date = new Date()): string {
+  const zone = BROWSER_TIMEZONE();
+  const sameYear = formatInTz(value, zone, 'yyyy') === formatInTz(now, zone, 'yyyy');
+  return formatInTz(value, zone, sameYear ? 'dateTime' : 'dateTimeYear');
 }
 
 /** Company context — dashboard subtitle, audit log, report ranges, tickets (`carrier.timezone`). */

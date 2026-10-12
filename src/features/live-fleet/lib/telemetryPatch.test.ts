@@ -21,6 +21,10 @@ const unit = (vehicleId: string): LiveFleetUnit => ({
   shiftEndsAt: null,
   eldSerial: null,
   bleState: null,
+  recordStatus: 'ACTIVE',
+  connectivity: 'ONLINE',
+  isStale: false,
+  staleSince: null,
 });
 const FLEET: LiveFleetResponse = { items: [unit('v1'), unit('v2')], generatedAt: '2026-09-30T00:00:00Z' };
 const frame = (extra: Record<string, unknown>) => ({ vehicleId: 'v1', count: 1, ...extra }) as TelemetryPointPayload;

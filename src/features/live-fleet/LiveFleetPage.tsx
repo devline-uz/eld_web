@@ -34,7 +34,7 @@ import { useThrottledInvalidate, useThrottledPatch } from '@/shared/realtime/use
 import { useVirtualRows } from '@/shared/ui/virtualRows';
 // Direct file imports, not the `@/shared/ui` barrel (web/decisions.md WD-021).
 import { Button } from '@/shared/ui/Button';
-import { DutyBadge } from '@/shared/ui/Badge';
+import { LiveUnitBadge, LiveUnitNote } from '@/shared/ui/LiveUnitStatus';
 import { EMPTY_STATE_COPY } from '@/shared/ui/copy';
 import { EmptyState, ErrorState } from '@/shared/ui/states';
 import { formatSpeed, formatOdometer } from '@/shared/format/numbers';
@@ -43,6 +43,9 @@ import { useCountdown, useCountdownFromSeconds, formatCountdown } from '@/shared
 import { CreateGeofenceModal } from './components/CreateGeofenceModal';
 import { messagesHref } from '@/shared/lib/messagesHref';
 import { VIEW_LOGS_NO_DRIVER } from './lib/copy';
+import { matchesUnitSearch } from './lib/unitSearch';
+import { useVehicleMap } from '@/shared/api/lookups';
+import { searchEmptyState } from '@/shared/ui/copy';
 import {
   applyUnitPatches,
   fleetHasUnit,
@@ -55,8 +58,8 @@ const FleetMap = lazy(() => import('@/shared/map/FleetMap'));
 
 type Layer = MapLayer;
 
-const TRAFFIC_UNCONFIGURED_TITLE =
-  'Traffic is not configured for this environment (set VITE_TRAFFIC_TILES_URL to a traffic tile URL).';
+/** UI-017 — user-facing; the env-var setup note lives in `.env.example`, not in a tooltip. */
+const TRAFFIC_UNCONFIGURED_TITLE = 'Traffic layer not available';
 
 type Segment = 'ALL' | 'DRIVING' | 'IDLE';
 
@@ -105,11 +108,13 @@ export const UnitListRow = memo(function UnitListRow({
   onSelect: (vehicleId: string) => void;
 }) {
   const lastSeen = useRelativeTime(unit.lastSeenAt, 'short');
-  const offline = unit.dutyStatus === 'ELD_OFFLINE';
+  // UI-003 — a stale unit's speed is not live either.
+  const offline = unit.dutyStatus === 'ELD_OFFLINE' || unit.isStale;
   return (
     <button
       type="button"
       data-unit-id={unit.vehicleId}
+      data-stale={unit.isStale || undefined}
       aria-current={selected || undefined}
       onClick={() => onSelect(unit.vehicleId)}
       className={`flex w-full flex-col gap-0.5 border-l-2 px-4 py-3 text-left ${
@@ -119,7 +124,7 @@ export const UnitListRow = memo(function UnitListRow({
       <span className="flex items-center justify-between">
         <span className="flex items-center gap-2">
           <span className="text-body-strong text-text">Unit {unit.unitNumber}</span>
-          <DutyBadge status={unit.dutyStatus} />
+          <LiveUnitBadge unit={unit} />
         </span>
         <span className="tabular-nums text-body-strong text-text">
           {offline ? '—' : formatSpeed(unit.speedMph)}
@@ -130,6 +135,7 @@ export const UnitListRow = memo(function UnitListRow({
         <span className="tabular-nums text-caption text-text-muted">{lastSeen}</span>
       </span>
       <span className="truncate text-caption text-text-muted">{unit.locationLabel ?? '—'}</span>
+      <LiveUnitNote unit={unit} />
     </button>
   );
 });
@@ -264,8 +270,9 @@ function DetailCard({
       <dl className="mt-3 flex flex-col gap-2 text-body">
         <div className="flex justify-between">
           <dt className="text-text-muted">Duty status</dt>
-          <dd>
-            <DutyBadge status={unit.dutyStatus} />
+          <dd className="flex flex-col items-end gap-0.5">
+            <LiveUnitBadge unit={unit} />
+            <LiveUnitNote unit={unit} />
           </dd>
         </div>
         <div className="flex justify-between">
@@ -292,9 +299,13 @@ function DetailCard({
         </div>
         <div className="flex justify-between">
           <dt className="text-text-muted">ELD</dt>
-          <dd className={`font-semibold ${unit.bleState === 'CONNECTED' ? 'text-success' : 'text-danger'}`}>
-            {unit.eldSerial ?? '—'} · {unit.bleState === 'CONNECTED' ? 'Connected' : 'Disconnected'}
-          </dd>
+          {unit.connectivity === 'NO_DEVICE' ? (
+            <dd className="font-semibold text-text-muted">No device</dd>
+          ) : (
+            <dd className={`font-semibold ${unit.bleState === 'CONNECTED' ? 'text-success' : 'text-danger'}`}>
+              {unit.eldSerial ?? '—'} · {unit.bleState === 'CONNECTED' ? 'Connected' : 'Disconnected'}
+            </dd>
+          )}
         </div>
       </dl>
       <div className="mt-4 flex gap-2">
@@ -388,18 +399,28 @@ export default function LiveFleetPage() {
     return tripsToGeoJSON(tripsQuery.rows, positions);
   }, [tripsQuery.rows, units]);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return units.filter((u) => {
-      if (segment === 'DRIVING' && u.dutyStatus !== 'DRIVING') return false;
-      if (segment === 'IDLE' && u.dutyStatus !== 'IDLE') return false;
-      if (!q) return true;
-      return (
-        u.unitNumber.toLowerCase().includes(q) ||
-        (u.driverName ?? '').toLowerCase().includes(q)
-      );
-    });
-  }, [units, query, segment]);
+  // Plates are not on `GET /live/fleet`; the session-cached vehicle lookup supplies them, fetched
+  // only once someone actually searches (QA FE-006).
+  const searching = query.trim().length > 0;
+  const { map: vehicleById } = useVehicleMap(searching);
+  // Search first, then the segment — the chip counts describe the search result, so `Driving 3`
+  // is never shown over a list that only has one match (QA FE-006).
+  const searchMatches = useMemo(
+    () =>
+      searching
+        ? units.filter((u) => matchesUnitSearch(u, query, vehicleById.get(u.vehicleId)?.licensePlate))
+        : units,
+    [units, query, searching, vehicleById],
+  );
+  const filtered = useMemo(
+    () =>
+      searchMatches.filter((u) => {
+        if (segment === 'DRIVING') return u.dutyStatus === 'DRIVING';
+        if (segment === 'IDLE') return u.dutyStatus === 'IDLE';
+        return true;
+      }),
+    [searchMatches, segment],
+  );
 
   // Memoized so FleetMap gets the same array until the filtered units change (WB-256).
   const mapUnits = useMemo(
@@ -410,6 +431,7 @@ export default function LiveFleetPage() {
         lon: u.lon,
         dutyStatus: u.dutyStatus,
         headingDeg: u.headingDeg,
+        stale: u.isStale,
       })),
     [filtered],
   );
@@ -419,10 +441,10 @@ export default function LiveFleetPage() {
   const selected = units.find((u) => u.vehicleId === selectedId) ?? null;
   const { drivingCount, idleCount } = useMemo(
     () => ({
-      drivingCount: units.filter((u) => u.dutyStatus === 'DRIVING').length,
-      idleCount: units.filter((u) => u.dutyStatus === 'IDLE').length,
+      drivingCount: searchMatches.filter((u) => u.dutyStatus === 'DRIVING').length,
+      idleCount: searchMatches.filter((u) => u.dutyStatus === 'IDLE').length,
     }),
-    [units],
+    [searchMatches],
   );
 
   function toggleLayer(layer: Layer) {
@@ -458,7 +480,7 @@ export default function LiveFleetPage() {
           <div className="mt-3 flex gap-2">
             {(
               [
-                ['ALL', `All ${units.length}`],
+                ['ALL', `All ${searchMatches.length}`],
                 ['DRIVING', `Driving ${drivingCount}`],
                 ['IDLE', `Idle ${idleCount}`],
               ] as [Segment, string][]
@@ -487,6 +509,22 @@ export default function LiveFleetPage() {
           ) : fleet.isError ? (
             <div className="p-4">
               <ErrorState title="Could not load the fleet" onRetry={() => void fleet.refetch()} />
+            </div>
+          ) : filtered.length === 0 && units.length > 0 ? (
+            // Units are reporting — the search/segment just matches none of them (QA FE-006).
+            <div className="p-4">
+              {searching ? (
+                <EmptyState
+                  {...searchEmptyState(query.trim())}
+                  description="Check the spelling or try a unit number, driver or plate."
+                  actions={[{ label: 'Clear search', onClick: () => setQuery('') }]}
+                />
+              ) : (
+                <EmptyState
+                  title={segment === 'IDLE' ? 'No idle units right now' : 'No units driving right now'}
+                  actions={[{ label: 'Show all units', onClick: () => setSegment('ALL') }]}
+                />
+              )}
             </div>
           ) : filtered.length === 0 ? (
             <div className="p-4">

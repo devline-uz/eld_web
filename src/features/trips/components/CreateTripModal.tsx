@@ -12,7 +12,7 @@ import { AlertTriangle } from 'lucide-react';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { Select, type SelectOption } from '@/shared/ui/Select';
-import type { Place } from '@/shared/map/geocode';
+import { geocodingEnabled, type Place } from '@/shared/map/geocode';
 import { PlaceInput } from './PlaceInput';
 import { RoutePreview } from './RoutePreview';
 import type { RouteStop } from '../lib/useTripRoute';
@@ -42,8 +42,10 @@ import { useTrailersPage } from '@/shared/api/trailers';
 import { tripSchema } from '@/shared/forms/schemas';
 import { requiredString } from '@/shared/forms/fields';
 import { ApiError, formErrorMessage } from '@/shared/api/errors';
+import { assignmentError } from '../lib/assignmentErrors';
 import { formatHosHours } from '@/shared/format/hos';
 import {
+  PICK_PLACE_MESSAGE,
   TRAILER_LOOKUP_ERROR,
   TRIP_FIELD_NOT_CLEARABLE,
   TRIP_NOT_EDITABLE,
@@ -75,6 +77,8 @@ const TRIP_LIMITS = {
   intermediateStops: 48,
   distanceMi: 10_000,
   rateUsd: 1_000_000,
+  /** QA FE-012 — a realistic gross load (the DTO's INT4 cap is 1,000,000). */
+  weightLbs: 200_000,
 } as const;
 
 /** Parses a local `datetime-local` value, or `null` if that calendar date doesn't exist. */
@@ -173,6 +177,7 @@ function buildTripSchema(original?: OriginalWindows) {
       .number({ invalid_type_error: 'Enter a whole number.' })
       .int('Enter a whole number.')
       .min(0)
+      .max(TRIP_LIMITS.weightLbs, 'Weight must be 200,000 lbs or less.')
       .optional(),
     // Miles — fractional miles are allowed, optional like the design; B-73 (shipped) saves it.
     distanceMi: z
@@ -404,6 +409,8 @@ export function CreateTripModal({
   // extra stops are collected here and sent between the pickup and the delivery.
   const [intermediateStops, setIntermediateStops] = useState<IntermediateStop[]>([]);
   const nextStopKey = useRef(1);
+  /** QA FE-004 — set on the click, cleared when the request settles (same tick as the click). */
+  const submitInFlight = useRef(false);
   /** `1…N` — the position picker every intermediate stop shows. */
   const stopOrderOptions: SelectOption[] = useMemo(
     () =>
@@ -581,12 +588,25 @@ export function CreateTripModal({
   );
   const unitOptions: PickerOption[] = useMemo(
     () =>
-      (vehiclesQuery.data?.items ?? []).map((v) => ({
-        id: v.id,
-        name: `#${v.unitNumber}`,
-        context: [v.make, v.model].filter(Boolean).join(' '),
-      })),
-    [vehiclesQuery.data],
+      // QA UI-010 — every unit is listed with its status; an inactive or out-of-service unit
+      // cannot be dispatched, so it is shown but not pickable.
+      (vehiclesQuery.data?.items ?? []).map((v) => {
+        const unavailable = v.status === 'OUT_OF_SERVICE' || v.status === 'INACTIVE';
+        return {
+          id: v.id,
+          name: `#${v.unitNumber}`,
+          context: [v.make, v.model].filter(Boolean).join(' '),
+          ...(unavailable
+            ? {
+                hosSummary: v.status === 'OUT_OF_SERVICE' ? 'Out of service' : 'Inactive',
+                hosTone: v.status === 'OUT_OF_SERVICE' ? ('danger' as const) : ('warning' as const),
+                // Editing never re-assigns the unit, and the trip's own unit stays selectable.
+                disabled: v.id !== vehicleId,
+              }
+            : {}),
+        };
+      }),
+    [vehiclesQuery.data, vehicleId],
   );
   const trailerOptions: PickerOption[] = useMemo(
     () =>
@@ -614,6 +634,14 @@ export function CreateTripModal({
 
   const estimatedDriveSec =
     Number(estimatedDriveHours) > 0 ? Math.round(Number(estimatedDriveHours) * 3600) : 0;
+  // QA UI-010 — a driver with no drive, shift or cycle time left cannot legally drive at all.
+  const driverOutOfHours =
+    !driverHos.isLoading &&
+    !driverHos.isError &&
+    Boolean(driverHos.data) &&
+    (driverHos.data!.driveRemainingSec <= 0 ||
+      driverHos.data!.shiftRemainingSec <= 0 ||
+      driverHos.data!.cycleRemainingSec <= 0);
   const showHosWarning =
     !driverHos.isLoading &&
     !driverHos.isError &&
@@ -622,8 +650,22 @@ export function CreateTripModal({
 
   function onSubmit(values: CreateTripValues, draft: boolean) {
     // mutate() returns immediately, so RHF's isSubmitting never covered the request — guard on the
-    // mutation itself or a double click creates two trips.
-    if (createMutation.isPending || assignmentBlocked) return;
+    // mutation itself or a double click creates two trips. `isPending` only flips on the next
+    // render, so two clicks in the same tick both passed it (QA FE-004): a same-tick ref too.
+    if (submitInFlight.current || createMutation.isPending || assignmentBlocked) return;
+    // With a geocoder configured, pickup and delivery must be picked places (coordinates), not
+    // free text. Without one (`VITE_MAP_API_KEY` unset) free text stays the only option.
+    if (geocodingEnabled) {
+      const unplaced = (
+        [
+          ['origin', originCoords],
+          ['destination', destinationCoords],
+        ] as const
+      ).filter(([, coords]) => !validCoords(coords));
+      for (const [field] of unplaced) setError(field, { message: PICK_PLACE_MESSAGE });
+      if (unplaced.length > 0) return;
+    }
+    submitInFlight.current = true;
     setBanner(null);
     setPendingIntent(draft ? 'draft' : 'create');
     const plannedStartAt = toIso(values.scheduledStart);
@@ -680,7 +722,10 @@ export function CreateTripModal({
           });
           onClose();
         },
-        onSettled: () => setPendingIntent(null),
+        onSettled: () => {
+          submitInFlight.current = false;
+          setPendingIntent(null);
+        },
         onError: (error) => {
           // 409 — the unit already has a live trip in this range: say which one, next to the
           // Unit field (and point at the pickup window), in the dispatcher's own time zone.
@@ -698,6 +743,13 @@ export function CreateTripModal({
             return;
           }
           if (applyServerFieldErrors(error)) return;
+          // 404/409/422 with no field `details` — the picked driver/unit/trailer is gone,
+          // deactivated or out of service: under that picker, not a generic banner.
+          const assignment = assignmentError(error);
+          if (assignment) {
+            setError(assignment.field, { message: assignment.message }, { shouldFocus: true });
+            return;
+          }
           showGenericError(error);
         },
       },
@@ -738,7 +790,7 @@ export function CreateTripModal({
 
   /** Edit mode — `PATCH /trips/:id` with only the editable fields that differ from the trip. */
   function onSubmitEdit(values: CreateTripValues) {
-    if (!trip || !original || updateMutation.isPending) return;
+    if (!trip || !original || submitInFlight.current || updateMutation.isPending) return;
     setBanner(null);
     const patch: UpdateTripPayload = {};
     let blocked = false;
@@ -789,7 +841,11 @@ export function CreateTripModal({
       return;
     }
 
+    submitInFlight.current = true;
     updateMutation.mutate(patch, {
+      onSettled: () => {
+        submitInFlight.current = false;
+      },
       onSuccess: () => {
         toast({ kind: 'success', title: tripUpdatedToast(trip.number) });
         onClose();
@@ -858,7 +914,7 @@ export function CreateTripModal({
               size="lg"
               disabled={submitting || savingDraft}
               loading={savingDraft}
-              onClick={handleSubmit((values) => onSubmit(values, true))}
+              onClick={(e) => void handleSubmit((values) => onSubmit(values, true))(e)}
             >
               Save as draft
             </Button>
@@ -879,9 +935,9 @@ export function CreateTripModal({
       <form
         id="create-trip-form"
         noValidate
-        onSubmit={handleSubmit((values) =>
-          editing ? onSubmitEdit(values) : onSubmit(values, false),
-        )}
+        onSubmit={(e) =>
+          void handleSubmit((values) => (editing ? onSubmitEdit(values) : onSubmit(values, false)))(e)
+        }
         className="flex flex-col gap-4"
       >
         {banner && (
@@ -1115,7 +1171,13 @@ export function CreateTripModal({
                   }
                   placeholder="Select a driver"
                 />
-                {driverId && (
+                {driverId && driverOutOfHours && (
+                  <span role="alert" className="flex items-center gap-1 text-caption text-warning">
+                    <AlertTriangle size={12} strokeWidth={1.75} aria-hidden="true" />
+                    Out of hours — no driving time available now.
+                  </span>
+                )}
+                {driverId && !driverOutOfHours && (
                   <span className="text-caption text-text-muted">
                     {driverHos.isLoading
                       ? 'Loading drive time…'

@@ -180,6 +180,9 @@ export default function ActivityReportPage() {
   const groupRows = groupSummary.data?.items ?? [];
   const shown = byGroup ? groupRows.length : rows.length;
   const itemLabel = byGroup ? 'groups' : 'drivers';
+  // UI-015 — the summary is aggregated from DailyLog: a driver with no log in the range is not a
+  // row, so the count is "drivers with logs in period", not the carrier's driver headcount.
+  const countLabel = byGroup ? 'groups' : 'drivers with logs in period';
   const total = summary.data?.total ?? 0;
   const totalPages = summary.data?.totalPages ?? 1;
   // The server can answer a page that no longer exists (drivers deactivated, the range narrowed
@@ -192,7 +195,7 @@ export default function ActivityReportPage() {
       ? Math.round((kpis.onDutySec / (kpis.drivingSec + kpis.onDutySec)) * 100)
       : null;
 
-  useDynamicSubtitle(`${rangeLabel(from, to)} · ${formatNumber(total)} ${itemLabel} · duty totals and distance`);
+  useDynamicSubtitle(`${rangeLabel(from, to)} · ${formatNumber(total)} ${countLabel} · duty totals and distance`);
 
   const columns = useMemo<ColumnDef<ActivitySummaryItem, unknown>[]>(
     () => [
@@ -366,7 +369,7 @@ export default function ActivityReportPage() {
             subtitle="Totals are calculated from certified and uncertified logs"
             action={
               !summary.isLoading && !summary.isError ? (
-                <Badge tone="neutral" className="tabular-nums">{`${formatNumber(total)} ${itemLabel} · showing ${shown}`}</Badge>
+                <Badge tone="neutral" className="tabular-nums">{`${formatNumber(total)} ${countLabel} · showing ${shown}`}</Badge>
               ) : undefined
             }
           />

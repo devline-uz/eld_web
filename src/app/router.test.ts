@@ -66,3 +66,12 @@ describe('buildRoutes — permission-less route swaps in <ForbiddenPage> (§9, �
     );
   });
 });
+
+describe('buildRoutes — FE-005 every screen has an errorElement inside the shell', () => {
+  it('each shell child route and the shell itself carry an errorElement', () => {
+    const routes = buildRoutes({ ...NO_PERMISSIONS, vehicles: 'FULL' }, 'ADMIN');
+    const shell = routes[1]!.children![0]!;
+    expect(shell.errorElement).toBeTruthy();
+    for (const child of shell.children ?? []) expect(child.errorElement).toBeTruthy();
+  });
+});

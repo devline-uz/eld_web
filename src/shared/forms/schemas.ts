@@ -3,21 +3,34 @@
 import { z } from 'zod';
 import * as f from './fields';
 import { LIMITS, VALIDATION_MESSAGES as M } from './messages';
+import { PLATE_JURISDICTIONS } from './usStates';
 
 /** 11.2 · Add vehicle — `CreateVehicleDto`: `make` / `model` ≤ 60, `eldSerial` ≤ 60, `notes` ≤ 500. */
-export const vehicleSchema = z.object({
-  unitNumber: f.unitNumber(),
-  vin: f.vin(),
-  make: f.requiredString().max(LIMITS.vehicleMakeModelMax, M.vehicleMakeMax),
-  model: f.requiredString().max(LIMITS.vehicleMakeModelMax, M.vehicleModelMax),
-  year: f.vehicleYear(),
-  licensePlate: z.string().trim().max(20).optional(),
-  licenseState: z.string().trim().length(2, 'Use the 2-letter state or province code.').optional(),
-  odometer: f.odometer().optional(),
-  /** The `ELD serial` input — sent as `eldSerial`. */
-  deviceId: z.string().trim().max(LIMITS.vehicleEldSerialMax, M.vehicleEldSerialMax).optional(),
-  notes: z.string().trim().max(LIMITS.vehicleNotesMax, M.vehicleNotesMax).optional(),
-});
+export const vehicleSchema = z
+  .object({
+    unitNumber: f.unitNumber(),
+    vin: f.vin(),
+    make: f.requiredString().max(LIMITS.vehicleMakeModelMax, M.vehicleMakeMax),
+    model: f.requiredString().max(LIMITS.vehicleMakeModelMax, M.vehicleModelMax),
+    year: f.vehicleYear(),
+    licensePlate: z.string().trim().max(20).optional(),
+    /** US state, DC or Canadian province, upper-cased (QA FE-012: any two letters used to pass). */
+    licenseState: z
+      .string()
+      .trim()
+      .toUpperCase()
+      .refine((v) => PLATE_JURISDICTIONS.has(v), M.plateState)
+      .optional(),
+    odometer: f.odometer().optional(),
+    /** The `ELD serial` input — sent as `eldSerial`. */
+    deviceId: z.string().trim().max(LIMITS.vehicleEldSerialMax, M.vehicleEldSerialMax).optional(),
+    notes: z.string().trim().max(LIMITS.vehicleNotesMax, M.vehicleNotesMax).optional(),
+  })
+  // A plate means nothing without the jurisdiction that issued it.
+  .refine((v) => !v.licensePlate || Boolean(v.licenseState), {
+    path: ['licenseState'],
+    message: M.plateStateRequired,
+  });
 export type VehicleFormValues = z.infer<typeof vehicleSchema>;
 
 /** Add / Edit trailer — mirrors `CreateTrailerDto` (`number` 1–40, `vin` optional) + `status`. */
@@ -158,8 +171,8 @@ export const tripSchema = z.object({
  * both names at 80. */
 export const inviteUserSchema = z.object({
   email: f.email(),
-  firstName: f.requiredString().max(LIMITS.personNameMax, M.firstNameMax),
-  lastName: f.requiredString().max(LIMITS.personNameMax, M.lastNameMax),
+  firstName: f.personName().max(LIMITS.personNameMax, M.firstNameMax),
+  lastName: f.personName().max(LIMITS.personNameMax, M.lastNameMax),
   roleKey: f.requiredString(),
 });
 

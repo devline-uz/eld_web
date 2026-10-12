@@ -111,6 +111,14 @@ export function LogEventsCard({
     row?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }, [highlightedEventId, visible]);
 
+  /** QA FE-013 — with "Show superseded…" already ticked the button did nothing visible. It now
+   * also lifts the row window (every event, not the first page) and brings the list into view. */
+  function viewAll() {
+    onViewAll();
+    setRequestedRows(Number.POSITIVE_INFINITY);
+    bodyRef.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+  }
+
   const columns = useMemo<ColumnDef<LogEventView, unknown>[]>(
     () => [
       {
@@ -200,7 +208,7 @@ export function LogEventsCard({
           title="Log events"
           subtitle={`${events.filter((event) => event.recordStatus === RECORD_STATUS.active).length} events today · ${pendingEditCount} driver edit${pendingEditCount === 1 ? '' : 's'} pending review`}
           action={
-            <Button variant="secondary" onClick={onViewAll} data-print-hide="">
+            <Button variant="secondary" onClick={viewAll} data-print-hide="">
               <ChevronRight size={16} strokeWidth={1.75} />
               View all events
             </Button>

@@ -19,6 +19,11 @@ const PLACE_NAME_RE = /^\p{L}[\p{L} .'-]*$/u;
 export const requiredString = (message: string = M.required) =>
   z.string({ required_error: message }).trim().min(1, message);
 
+/** A first/last name: trimmed, non-empty, letters (any script), spaces, `-`, `'`/`’` and `.` —
+ * digits and symbols such as `<>@#` are refused (QA FE-012). */
+const PERSON_NAME_RE = /^\p{L}[\p{L}\p{M} .'’-]*$/u;
+export const personName = () => requiredString().regex(PERSON_NAME_RE, M.personName);
+
 /** RFC-lite — the backend does the authoritative check. */
 export const email = () => requiredString(M.email).regex(EMAIL_RE, M.email);
 

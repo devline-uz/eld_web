@@ -3,8 +3,12 @@ import { describe, expect, it } from 'vitest';
 import {
   EMPTY_VEHICLE_FILTERS,
   countActiveVehicleFilters,
+  badgeVehicleStatus,
   effectiveVehicleStatus,
   matchesVehicleFilters,
+  parseVehicleSort,
+  sortVehicleRows,
+  vehicleSortParam,
   parseVehicleFilters,
   writeVehicleFilters,
   type VehicleFilters,
@@ -157,5 +161,33 @@ describe('matchesVehicleFilters', () => {
     const filters = { ...EMPTY_VEHICLE_FILTERS, firmwareOutdatedOnly: true };
     expect(matchesVehicleFilters(row({ firmwareOutdated: false }), undefined, filters)).toBe(false);
     expect(matchesVehicleFilters(row({ firmwareOutdated: true }), undefined, filters)).toBe(true);
+  });
+});
+
+describe('UI-007 / UI-019 · sort and status helpers', () => {
+  it('parses only sortable column ids and maps makeModel to the API make field', () => {
+    expect(parseVehicleSort('unitNumber:desc')).toEqual({ id: 'unitNumber', desc: true });
+    expect(parseVehicleSort('year:asc')).toBeNull();
+    expect(parseVehicleSort('vin:sideways')).toBeNull();
+    expect(parseVehicleSort(null)).toBeNull();
+    expect(vehicleSortParam({ id: 'makeModel', desc: false })).toBe('make:asc');
+    expect(vehicleSortParam(null)).toBeUndefined();
+  });
+
+  it('sorts window rows in memory the same way (numeric-aware)', () => {
+    const rows = [row({ id: 'a', unitNumber: '#110' }), row({ id: 'b', unitNumber: '#12' }), row({ id: 'c', unitNumber: '#9' })];
+    expect(sortVehicleRows(rows, { id: 'unitNumber', desc: false }).map((r) => r.id)).toEqual(['c', 'b', 'a']);
+    expect(sortVehicleRows(rows, { id: 'unitNumber', desc: true }).map((r) => r.id)).toEqual(['a', 'b', 'c']);
+    expect(sortVehicleRows(rows, null)).toBe(rows);
+  });
+
+  it('the status filter matches the badge the table draws, incl. Active and Out of service', () => {
+    expect(badgeVehicleStatus(row({ status: 'OUT_OF_SERVICE' }), 'DRIVING')).toBe('OUT_OF_SERVICE');
+    expect(badgeVehicleStatus(row(), undefined)).toBe('ACTIVE');
+    expect(badgeVehicleStatus(row(), 'IDLE')).toBe('IDLE');
+    const only = (status: VehicleFilters['status']) => ({ ...EMPTY_VEHICLE_FILTERS, status });
+    expect(matchesVehicleFilters(row(), undefined, only(['ACTIVE']))).toBe(true);
+    expect(matchesVehicleFilters(row({ status: 'OUT_OF_SERVICE' }), undefined, only(['OUT_OF_SERVICE']))).toBe(true);
+    expect(matchesVehicleFilters(row(), 'DRIVING', only(['ACTIVE']))).toBe(false);
   });
 });

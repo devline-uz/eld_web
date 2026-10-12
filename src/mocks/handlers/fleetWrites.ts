@@ -28,6 +28,39 @@ const VEHICLE_Q_FIELDS = ['unitNumber', 'vin', 'make', 'model', 'licensePlate'];
 const DRIVER_Q_FIELDS = ['firstName', 'lastName', 'username', 'cdlNumber', 'email'];
 
 /** A soft-deleted unit answers 404 on every `/vehicles/:id…` path, as a missing one does. */
+/** UI-004 — backend `VehiclesRepository.countByStatus` (soft-deleted excluded). */
+function vehicleStatusCounts() {
+  const live = liveVehicles();
+  return {
+    ACTIVE: live.filter((v) => v.status === 'ACTIVE').length,
+    INACTIVE: live.filter((v) => v.status === 'INACTIVE').length,
+    OUT_OF_SERVICE: live.filter((v) => v.status === 'OUT_OF_SERVICE').length,
+    total: live.length,
+  };
+}
+
+/** UI-012 — backend `effectiveConnection`: stored CONNECTED and heard from within 30 min. */
+const ELD_OFFLINE_AFTER_MS = 30 * 60 * 1000;
+const DEVICE_LONG_OFFLINE_MS = 24 * 60 * 60 * 1000;
+const lastHeard = (d: DeviceRow): number | null => {
+  const seen = d.lastSeenAt ?? d.lastHeartbeatAt;
+  return seen ? Date.parse(seen) : null;
+};
+function effectiveConnection(d: DeviceRow, now: number): 'CONNECTED' | 'DISCONNECTED' {
+  const seen = lastHeard(d);
+  return d.bleState === 'CONNECTED' && seen !== null && now - seen <= ELD_OFFLINE_AFTER_MS ? 'CONNECTED' : 'DISCONNECTED';
+}
+/** UI-012 — backend `DevicesService.connectionCounts` (RETIRED excluded, filters ignored). */
+function deviceConnectionCounts(now: number) {
+  const inventory = DEVICES.filter((d) => d.status !== 'RETIRED');
+  const connected = inventory.filter((d) => effectiveConnection(d, now) === 'CONNECTED').length;
+  const offlineOver24h = inventory.filter((d) => {
+    const seen = lastHeard(d);
+    return seen === null || now - seen > DEVICE_LONG_OFFLINE_MS;
+  }).length;
+  return { total: inventory.length, connected, disconnected: inventory.length - connected, offlineOver24h };
+}
+
 const findVehicle = (id: string): VehicleRow | undefined => liveVehicles().find((v) => v.id === id);
 /** Non-deleted trailers — a soft-deleted one answers 404 and frees its number. */
 const liveTrailers = (): TrailerRow[] => TRAILERS.filter((t) => !t.deletedAt);
@@ -144,8 +177,9 @@ export const fleetWriteHandlers = [
   ),
 
   /* ---------------------------------------------------------------- vehicles */
+  // UI-004 — `statusCounts` is fleet-wide: list filters never narrow it.
   http.get(url(endpoints.vehicles.list), ({ request }) =>
-    ok(serverPage<VehicleRow>(liveVehicles(), request, VEHICLE_Q_FIELDS)),
+    ok({ ...serverPage<VehicleRow>(liveVehicles(), request, VEHICLE_Q_FIELDS), statusCounts: vehicleStatusCounts() }),
   ),
   http.get(url(endpoints.vehicles.detail(':id')), ({ params }) => {
     const vehicle = findVehicle(String(params.id));
@@ -462,9 +496,17 @@ export const fleetWriteHandlers = [
   /* ---------------------------------------------------------------- devices, trailers, geofences */
   // One box per unit (minus a few spares), so the Vehicles table's ELD SERIAL column and W-20 ELD
   // devices describe the same fleet instead of the single generated example row.
-  http.get(url(endpoints.devices.list), ({ request }) =>
-    ok(serverPage<DeviceRow>(DEVICES, request, ['serial', 'model'])),
-  ),
+  // UI-012 — `connection` is the effective link; `connectionCounts` covers the whole inventory.
+  http.get(url(endpoints.devices.list), ({ request }) => {
+    const now = Date.now();
+    const page = serverPage<DeviceRow>(DEVICES, request, ['serial', 'model']);
+    return ok({
+      ...page,
+      items: page.items.map((d) => ({ ...d, connection: effectiveConnection(d, now) })),
+      connectionCounts: deviceConnectionCounts(now),
+    });
+  }),
+  http.get(url(endpoints.devices.counts), () => ok(deviceConnectionCounts(Date.now()))),
   http.get(url(endpoints.devices.detail(':id')), ({ params }) => {
     const device = DEVICES.find((d) => d.id === String(params.id));
     return device ? ok(device) : NOT_FOUND('Device');

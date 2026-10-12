@@ -8,6 +8,20 @@ import { compactParams, pagePolicy, type PageQueryOptions } from './paging';
 import { withoutDeletedVehicles } from './deletedVehicles';
 import type { VehicleRow } from './vehicles';
 
+/** UI-004 — `GET /vehicles` `statusCounts`: record-status counts over the whole fleet (list
+ * filters ignored, soft-deleted excluded). Optional: an older backend omits it. */
+export interface VehicleStatusCounts {
+  ACTIVE: number;
+  INACTIVE: number;
+  OUT_OF_SERVICE: number;
+  total: number;
+}
+
+/** Read `statusCounts` off a `GET /vehicles` page (absent on a backend that predates UI-004). */
+export function statusCountsOf(page: unknown): VehicleStatusCounts | undefined {
+  return (page as { statusCounts?: VehicleStatusCounts } | undefined)?.statusCounts;
+}
+
 /** `total` of a status slice via `limit: 1` — the same keys the Dashboard KPI tiles use. */
 export const vehiclesCountQuery = (status?: 'ACTIVE' | 'INACTIVE' | 'OUT_OF_SERVICE'): PageQueryOptions<VehicleRow> => ({
   queryKey: qk.vehicles(compactParams({ status, limit: 1 })),

@@ -3,7 +3,7 @@
 // DRIVING_TIME_IMMUTABLE refusal.
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http } from 'msw';
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -1194,10 +1194,13 @@ describe('audited fixes WB-061 … WB-073', () => {
   });
 
   it('WB-071 · the cycle label follows `cycleLimitSec`', async () => {
-    expect(cycleRuleLabel(undefined)).toBe('Property-carrying');
-    expect(cycleRuleLabel(70 * 3600)).toBe('Property-carrying · 70 hr / 8 day');
-    expect(cycleRuleLabel(60 * 3600)).toBe('Property-carrying · 60 hr / 7 day');
-    expect(cycleRuleLabel(34 * 3600)).toBe('Property-carrying · 34:00 cycle');
+    expect(cycleRuleLabel(undefined)).toBeUndefined();
+    expect(cycleRuleLabel(70 * 3600)).toBe('70 hr / 8 day');
+    expect(cycleRuleLabel(60 * 3600)).toBe('60 hr / 7 day');
+    expect(cycleRuleLabel(34 * 3600)).toBe('34:00 cycle');
+    // UI-005 — the driver's ruleset wins over the limit and names passenger rules too.
+    expect(cycleRuleLabel(70 * 3600, 'US_70_8_PROPERTY')).toBe('Property-carrying · 70 hr / 8 day');
+    expect(cycleRuleLabel(60 * 3600, 'US_60_7_PASSENGER')).toBe('Passenger-carrying · 60 hr / 7 day');
     server.use(
       http.get(url(endpoints.drivers.hos(DRIVER_ID)), () =>
         ok({
@@ -1205,11 +1208,13 @@ describe('audited fixes WB-061 … WB-073', () => {
           onDutySince: null, cycleLimitSec: 60 * 3600, shiftLimitSec: 14 * 3600, driveLimitSec: 11 * 3600,
           breakLimitSec: 8 * 3600, dutyStatus: 'ON_DUTY', statusSince: '2026-09-10T12:00:00.000Z',
           computedAt: '2026-09-10T12:00:00.000Z',
+          hosRuleset: 'US_60_7_PASSENGER',
         }),
       ),
     );
     renderPage();
-    expect(await screen.findByText('Property-carrying · 60 hr / 7 day')).toBeInTheDocument();
+    // UI-005 — the card names the driver's own ruleset, passenger-carrying included.
+    expect(await screen.findByText('Passenger-carrying · 60 hr / 7 day')).toBeInTheDocument();
     expect(screen.queryByText('Property-carrying · 70 hr / 8 day')).not.toBeInTheDocument();
   });
 
@@ -1340,5 +1345,25 @@ describe('W-08 · stage-2 dead controls', () => {
       reason: 'Yard move at terminal.',
     });
     expect(sent!.location).not.toHaveProperty('lat');
+  });
+});
+
+describe('QA FE-013 · the calendar opens a date picker', () => {
+  it('the calendar button opens the native picker, and a picked date moves the log day', async () => {
+    const showPicker = vi.fn();
+    const original = HTMLInputElement.prototype.showPicker;
+    HTMLInputElement.prototype.showPicker = showPicker;
+    try {
+      renderAt(`/hos-logs?driverId=${DRIVER_ID}&date=${DATE}`);
+      const button = await screen.findByRole('button', { name: /^Pick a date/ });
+      await userEvent.setup().click(button);
+      expect(showPicker).toHaveBeenCalled();
+      const input = screen.getByLabelText('Log date');
+      expect(input).toHaveValue(DATE);
+      fireEvent.change(input, { target: { value: '2026-01-05' } });
+      expect(currentLocation()).toContain('date=2026-01-05');
+    } finally {
+      HTMLInputElement.prototype.showPicker = original;
+    }
   });
 });

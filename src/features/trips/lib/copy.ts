@@ -31,6 +31,8 @@ export const scheduleConflictField = (c: TripScheduleConflict): 'vehicleId' | 'd
 export const scheduleConflictWindowHint = (c: TripScheduleConflict): string => `Overlaps trip ${c.number} on this ${c.resource === 'vehicle' ? 'unit' : c.resource}.`;
 
 /** 409 `CONFLICT` on `POST /trips` — shown under the "Trip / load ID" input. */
+/** QA FE-008 — a typed address with no coordinates saved a trip whose route could never be drawn. */
+export const PICK_PLACE_MESSAGE = 'Choose a place from the suggestions so the route can be drawn.';
 export const TRIP_NUMBER_TAKEN = 'A trip with this ID already exists.';
 
 /* ------------------------------------------------------------------- Edit / Delete trip */

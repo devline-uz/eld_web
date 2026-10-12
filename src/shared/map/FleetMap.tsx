@@ -24,12 +24,17 @@ const STYLE_URL: string = import.meta.env.VITE_MAP_STYLE_URL ?? '';
 
 maplibregl.setWorkerUrl(maplibreWorkerUrl);
 
+/** UI-003 — opacity of a stale unit's marker. */
+const STALE_MARKER_OPACITY = 0.45;
+
 export interface MapUnitFeature {
   id: string;
   lat: number;
   lon: number;
   dutyStatus: DutyStatus;
   headingDeg?: number | null;
+  /** UI-003 — the duty status is not live (`isStale`); the marker is drawn dimmed. */
+  stale?: boolean;
 }
 
 export interface FleetMapProps {
@@ -45,6 +50,8 @@ export interface FleetMapProps {
   geofences?: FeatureCollection;
   /** `tripsToGeoJSON()` output — drawn as lines + stop dots while `Trips` is on. */
   trips?: FeatureCollection;
+  /** Small embedded preview (Dashboard card): the wheel scrolls the page, never zooms the map. */
+  preview?: boolean;
 }
 
 const SOURCE_ID = 'fleet-units';
@@ -86,7 +93,9 @@ const DUTY_TOKEN: Record<DutyStatus, string> = {
   OFF_DUTY: '--color-neutral',
   YARD_MOVE: '--color-danger',
   PERSONAL_CONVEYANCE: '--color-neutral',
-  ELD_OFFLINE: '--color-danger',
+  // Slate grey, not danger: an offline ELD is "no data", and red made it indistinguishable from
+  // On-duty/Yard move on the map (QA FE-009). Darker than the Off-duty/Inactive `--color-neutral`.
+  ELD_OFFLINE: '--color-text-muted',
   IDLE: '--color-warning',
   INACTIVE: '--color-neutral',
 };
@@ -165,8 +174,22 @@ function drawMarkerImageData(color: string): ImageData {
   return ctx.getImageData(0, 0, size, size);
 }
 
-/** Rendered instead of the map when `VITE_MAP_STYLE_URL` is unset — no blank box, no crash. */
-export function MapUnavailable({ className }: { className?: string }) {
+export type MapUnavailableReason = 'not-configured' | 'failed';
+
+const UNAVAILABLE_COPY: Record<MapUnavailableReason, string> = {
+  'not-configured': 'No map style is configured for this environment.',
+  failed: 'The map could not be loaded. Check your connection and reload the page.',
+};
+
+/** Rendered instead of the map when `VITE_MAP_STYLE_URL` is unset, or when the style itself never
+ * loaded — no blank box, no crash. A failed tile after the style loaded is NOT a reason (FE-001). */
+export function MapUnavailable({
+  className,
+  reason = 'not-configured',
+}: {
+  className?: string;
+  reason?: MapUnavailableReason;
+}) {
   return (
     <div
       role="status"
@@ -177,10 +200,7 @@ export function MapUnavailable({ className }: { className?: string }) {
     >
       <MapPin size={24} strokeWidth={1.75} className="text-text-muted" aria-hidden="true" />
       <p className="text-body-strong text-text">Map preview unavailable</p>
-      <p className="max-w-64 text-card-sub text-text-muted">
-        No map style is configured for this environment (VITE_MAP_STYLE_URL). Unit data is still
-        live in the list below.
-      </p>
+      <p className="max-w-64 text-card-sub text-text-muted">{UNAVAILABLE_COPY[reason]}</p>
     </div>
   );
 }
@@ -206,7 +226,7 @@ function validUnits(units: MapUnitFeature[]): MapUnitFeature[] {
  * same signature draw the same markers, so the source is not re-uploaded (WB-256). Headings the
  * tracker derives from movement only change when a position does, which this already covers. */
 function unitsSignature(units: MapUnitFeature[]): string {
-  return units.map((u) => `${u.id}|${u.lat}|${u.lon}|${u.dutyStatus}|${u.headingDeg ?? ''}`).join(';');
+  return units.map((u) => `${u.id}|${u.lat}|${u.lon}|${u.dutyStatus}|${u.headingDeg ?? ''}|${u.stale ? 1 : 0}`).join(';');
 }
 
 /** `headings` is the tracker's resolved heading per unit id (reported `headingDeg`, else derived
@@ -230,6 +250,7 @@ function toFeatureCollection(
           icon: `marker-${u.dutyStatus}`,
           heading: heading ?? 0,
           hasHeading: heading !== null,
+          stale: u.stale === true,
         },
       };
     }),
@@ -479,6 +500,8 @@ function installLayers(map: maplibregl.Map, state: OverlayState) {
       'icon-rotation-alignment': 'map',
       'icon-pitch-alignment': 'map',
     },
+    // UI-003 — a stale unit (no live duty status) is dimmed, not hidden.
+    paint: { 'icon-opacity': ['case', ['get', 'stale'], STALE_MARKER_OPACITY, 1] },
   });
   map.addLayer({
     id: FLASH_LAYER,
@@ -504,6 +527,7 @@ export default function FleetMap({
   layers = DEFAULT_LAYERS,
   geofences = EMPTY_COLLECTION,
   trips = EMPTY_COLLECTION,
+  preview = false,
 }: FleetMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -555,15 +579,31 @@ export default function FleetMap({
       zoom: DEFAULT_US_ZOOM,
       // Compact (collapsed) control: shows the style's own attribution plus per-source ones (HERE traffic).
       attributionControl: { compact: true },
+      // Preview card: the wheel scrolls the page past the map instead of zooming it (FE-011).
+      ...(preview ? { scrollZoom: false } : {}),
     });
     mapRef.current = map;
 
-    map.on('error', () => setLoadError(true));
+    // Only a style that never loads means "no map" (same rule as GeofencePickerMap). A failed
+    // tile, glyph or sprite (403/500) after the style is in leaves a usable, if patchy, map — it
+    // is logged, never allowed to swap the whole map for the fallback (QA FE-001).
+    let styleLoaded = false;
+    map.on('error', (event: maplibregl.ErrorEvent) => {
+      if (styleLoaded) {
+        console.warn('[FleetMap] map resource failed to load', event?.error);
+        return;
+      }
+      console.error('[FleetMap] map style failed to load', event?.error);
+      setLoadError(true);
+    });
 
     // `style.load` fires for the first style and again after any `setStyle()` swap, which wipes
     // every source/layer — re-installing there keeps the overlays alive across style reloads.
     // `installLayers` is idempotent, so its second run from `load` below is a no-op.
-    map.on('style.load', () => installLayers(map, overlayRef.current));
+    map.on('style.load', () => {
+      styleLoaded = true;
+      installLayers(map, overlayRef.current);
+    });
 
     // Layer-bound listeners live on the map, not the style, so they are registered exactly once.
     map.on('click', UNCLUSTERED_LAYER, (e) => {
@@ -578,6 +618,7 @@ export default function FleetMap({
     });
 
     map.on('load', () => {
+      styleLoaded = true;
       installLayers(map, overlayRef.current);
 
       // The container can still be mid-layout (0×0, or its final flex size not yet settled) at
@@ -672,7 +713,7 @@ export default function FleetMap({
   }, [selectedId, ready, selectedLon, selectedLat]);
 
   if (!HAS_STYLE || loadError) {
-    return <MapUnavailable className={className} />;
+    return <MapUnavailable className={className} reason={HAS_STYLE ? 'failed' : 'not-configured'} />;
   }
 
   return <div ref={containerRef} className={className ?? 'h-full w-full rounded-md'} />;

@@ -8,13 +8,15 @@ import { Avatar } from '@/shared/ui/Avatar';
 import { useToast } from '@/shared/ui/Toast';
 import { useAssignDriver, type VehicleRow } from '@/shared/api/vehicles';
 import { useDriversList } from '@/shared/api/drivers';
-import { ApiError, formErrorMessage } from '@/shared/api/errors';
+import { ApiError, assignDriverErrorMessage } from '@/shared/api/errors';
 
 export function AssignDriverModal({ vehicle, onClose }: { vehicle: VehicleRow; onClose: () => void }) {
   const { toast } = useToast();
   const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [notify, setNotify] = useState(true);
+  // A refusal stays in the modal (role="alert") next to the pick, instead of a toast that vanishes.
+  const [assignError, setAssignError] = useState<string | null>(null);
   const outOfService = vehicle.status === 'OUT_OF_SERVICE';
 
   // QA fix — only ACTIVE drivers can be assigned; the server filters (`?status=ACTIVE`).
@@ -46,6 +48,7 @@ export function AssignDriverModal({ vehicle, onClose }: { vehicle: VehicleRow; o
             loading={mutation.isPending}
             onClick={() => {
               if (!selectedId) return;
+              setAssignError(null);
               mutation.mutate(
                 { driverId: selectedId, notify },
                 {
@@ -58,7 +61,7 @@ export function AssignDriverModal({ vehicle, onClose }: { vehicle: VehicleRow; o
                       toast({ kind: 'error', title: 'You do not have permission to assign drivers.' });
                       return;
                     }
-                    toast({ kind: 'error', title: formErrorMessage(error, [], { driverId: 'Driver', effectiveAt: 'Effective date' }) });
+                    setAssignError(assignDriverErrorMessage(error, { driverId: 'Driver', effectiveAt: 'Effective date' }));
                   },
                 },
               );
@@ -76,6 +79,11 @@ export function AssignDriverModal({ vehicle, onClose }: { vehicle: VehicleRow; o
         </p>
       ) : (
         <div className="flex flex-col gap-3">
+          {assignError && (
+            <p role="alert" className="rounded-md bg-danger-soft p-3 text-body text-danger">
+              {assignError}
+            </p>
+          )}
           <div className="flex h-input items-center gap-2 rounded-md border border-border px-3">
             <Search size={16} strokeWidth={1.75} className="text-text-muted" />
             <input
@@ -94,7 +102,10 @@ export function AssignDriverModal({ vehicle, onClose }: { vehicle: VehicleRow; o
                 <li key={driver.id}>
                   <button
                     type="button"
-                    onClick={() => setSelectedId(driver.id)}
+                    onClick={() => {
+                      setSelectedId(driver.id);
+                      setAssignError(null);
+                    }}
                     aria-pressed={selectedId === driver.id}
                     className={`flex w-full items-center gap-3 rounded-md border p-2 text-left ${
                       selectedId === driver.id ? 'border-primary bg-primary-soft' : 'border-transparent hover:bg-bg-subtle'

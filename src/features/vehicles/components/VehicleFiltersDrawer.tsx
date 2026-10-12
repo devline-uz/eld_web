@@ -13,6 +13,8 @@ import {
 } from '../lib/filters';
 
 const STATUS_LABEL: Record<VehicleStatusFilter, string> = {
+  ACTIVE: 'Active',
+  OUT_OF_SERVICE: 'Out of service',
   DRIVING: 'Driving',
   IDLE: 'Idle',
   OFF_DUTY: 'Off duty',

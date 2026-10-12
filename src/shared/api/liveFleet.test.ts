@@ -23,6 +23,10 @@ function unit(overrides: Partial<LiveFleetUnit>): LiveFleetUnit {
     shiftEndsAt: null,
     eldSerial: null,
     bleState: null,
+    recordStatus: 'ACTIVE',
+    connectivity: 'ONLINE',
+    isStale: false,
+    staleSince: null,
     ...overrides,
   };
 }

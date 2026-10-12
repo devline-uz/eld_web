@@ -58,7 +58,7 @@ class FakeMap {
   resize = vi.fn();
   getCanvas = vi.fn(() => ({ style: { cursor: '' } }));
 
-  constructor() {
+  constructor(public options?: Record<string, unknown>) {
     FakeMap.instances.push(this);
   }
 
@@ -249,10 +249,34 @@ describe('FleetMap — GeoJSON source + symbol layer (style configured)', () => 
   });
 
   it('falls back to MapUnavailable when the style errors after mounting', () => {
-    const { getByText } = render(<FleetMap units={UNITS} />);
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { getByText, queryByText } = render(<FleetMap units={UNITS} />);
     const map = FakeMap.instances[0]!;
-    act(() => map.fire('error'));
+    act(() => map.fire('error', { error: new Error('style 404') }));
     expect(getByText('Map preview unavailable')).toBeInTheDocument();
+    // a failed load is not "not configured", and the Dashboard has no "list below" (FE-001)
+    expect(getByText(/The map could not be loaded/)).toBeInTheDocument();
+    expect(queryByText(/VITE_MAP_STYLE_URL|list below/)).not.toBeInTheDocument();
+    errorSpy.mockRestore();
+  });
+
+  it('FE-001: a tile error after the style loaded is logged and keeps the map', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { queryByText } = render(<FleetMap units={UNITS} />);
+    const map = FakeMap.instances[0]!;
+    act(() => map.fire('style.load'));
+    act(() => map.fire('load'));
+    act(() => map.fire('error', { error: new Error('tile 403') }));
+    expect(queryByText('Map preview unavailable')).not.toBeInTheDocument();
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it('FE-011: the preview map does not capture the scroll wheel; the full map still zooms', () => {
+    render(<FleetMap units={UNITS} preview />);
+    expect(FakeMap.instances[0]!.options?.scrollZoom).toBe(false);
+    render(<FleetMap units={UNITS} />);
+    expect(FakeMap.instances[1]!.options?.scrollZoom).toBeUndefined();
   });
 
   it('shows only the Vehicles layers by default and toggles visibility from the `layers` prop', () => {
@@ -477,6 +501,8 @@ describe('FleetMap — GeoJSON source + symbol layer (style configured)', () => 
       const root = document.documentElement.style;
       root.setProperty('--color-success', 'green');
       root.setProperty('--color-violet', 'purple');
+      root.setProperty('--color-danger', 'red');
+      root.setProperty('--color-text-muted', 'slategray');
       fake2dContext.filled.length = 0;
       try {
         render(<FleetMap units={UNITS} />);
@@ -486,12 +512,16 @@ describe('FleetMap — GeoJSON source + symbol layer (style configured)', () => 
         expect(map.images.has('marker-SLEEPER')).toBe(true);
         expect(fake2dContext.filled).toContain('green');
         expect(fake2dContext.filled).toContain('purple');
+        // FE-009: ELD offline is slate grey, not the On-duty/Yard-move danger red
+        expect(fake2dContext.filled).toContain('slategray');
         // drawn as a polygon path, not the old circle
         expect(fake2dContext.lineTo).toHaveBeenCalled();
         expect(fake2dContext.arc).not.toHaveBeenCalled();
       } finally {
         root.removeProperty('--color-success');
         root.removeProperty('--color-violet');
+        root.removeProperty('--color-danger');
+        root.removeProperty('--color-text-muted');
       }
     });
   });

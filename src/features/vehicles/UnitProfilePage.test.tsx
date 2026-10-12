@@ -10,7 +10,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useSearchParams } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
-import { ok, url } from '@/mocks/envelope';
+import { fail, ok, url } from '@/mocks/envelope';
 import { endpoints } from '@/shared/api/endpoints';
 import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/client';
 import { ToastProvider } from '@/shared/ui/Toast';
@@ -120,6 +120,44 @@ describe('W-04 Unit profile — four states', () => {
   });
 
   // WB-161 / WB-163 — the header's dead `New work order` button and the `?driverId=` navigation.
+  // UI-003 — the BLE badge is the EFFECTIVE link, "Updated" is the unit's own last signal, and a
+  // speed older than 30 min is not shown as the truck's speed now.
+  function useUnitSignals(device: Record<string, unknown>, telemetryAgoMs: number) {
+    const time = new Date(Date.now() - telemetryAgoMs).toISOString();
+    server.use(
+      http.get(url(endpoints.vehicles.detail('veh_1')), () => ok(VEHICLE)),
+      http.get(url(endpoints.vehicles.activities('veh_1')), () => ok({ items: [] })),
+      http.get(url(endpoints.devices.list), () =>
+        ok({
+          items: [{ id: 'dev_1', serial: 'PT30_A86E', model: 'PT30', status: 'ASSIGNED', vehicleId: 'veh_1', firmwareVersion: null, firmwareOutdated: false, lastHeartbeatAt: null, ...device }],
+          page: 1,
+          limit: 5,
+          total: 1,
+          totalPages: 1,
+        }),
+      ),
+      http.get(url(endpoints.vehicles.telemetry('veh_1')), () =>
+        ok({ items: [{ time, vehicleId: 'veh_1', driverId: null, latitude: 40, longitude: -83, speedMph: 58, headingDeg: 90, odometerMi: null, engineHours: null, idleHours: null, engineOn: true, rpm: null, fuelPct: null, defPct: null }] }),
+      ),
+    );
+  }
+
+  it('UI-003: a silent box that still stores CONNECTED is not "BLE connected"; old telemetry hides the speed', async () => {
+    useUnitSignals({ bleState: 'CONNECTED', connection: 'DISCONNECTED', lastSeenAt: new Date(Date.now() - 4 * 24 * 3_600_000).toISOString() }, 2.5 * 3_600_000);
+    renderPage();
+    expect(await screen.findByText('Updated 2 h')).toBeInTheDocument();
+    expect(screen.queryByText('BLE connected')).not.toBeInTheDocument();
+    expect(screen.queryByText('58 mph')).not.toBeInTheDocument();
+  });
+
+  it('UI-003: a live box reads "BLE connected" and a fresh point shows its speed', async () => {
+    useUnitSignals({ bleState: 'CONNECTED', connection: 'CONNECTED', lastSeenAt: new Date().toISOString() }, 5 * 60_000);
+    renderPage();
+    expect(await screen.findByText('58 mph')).toBeInTheDocument();
+    expect(screen.getByText('BLE connected')).toBeInTheDocument();
+    expect(screen.getByText('Updated just now')).toBeInTheDocument();
+  });
+
   it('"Track on map" opens Live fleet with this unit selected (stage 3)', async () => {
     server.use(
       http.get(url(endpoints.vehicles.detail('veh_1')), () => ok(VEHICLE)),
@@ -275,6 +313,34 @@ describe('W-04 Unit profile — cancelling the delete modal stays on the unit', 
 
     expect(screen.queryByText('Vehicles list screen')).not.toBeInTheDocument();
     expect(await screen.findByText('Unit #101')).toBeInTheDocument();
+  });
+
+  it('BE-013: a 409 naming open trips lists them in the modal and does not navigate away', async () => {
+    const user = userEvent.setup();
+    useVehicle();
+    server.use(
+      http.delete(url(endpoints.vehicles.remove('veh_1')), () =>
+        fail(409, 'CONFLICT', 'This unit still has open trips (TRP-1001, TRP-1002). Reassign or cancel them first.', {
+          openTrips: [
+            { id: 'trp_1', number: 'TRP-1001', status: 'ASSIGNED' },
+            { id: 'trp_2', number: 'TRP-1002', status: 'IN_PROGRESS' },
+          ],
+        }),
+      ),
+    );
+    renderPage();
+    await screen.findByText('Unit #101');
+
+    await user.click(screen.getByRole('button', { name: 'More' }));
+    await user.click(await screen.findByText('Delete unit'));
+    await user.type(await screen.findByPlaceholderText('UNIT-101'), 'UNIT-101');
+    await user.click(screen.getByRole('button', { name: 'Delete unit' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Unit #101 still has open trips');
+    expect(alert).toHaveTextContent('TRP-1001 · Assigned');
+    expect(alert).toHaveTextContent('TRP-1002 · In progress');
+    expect(screen.queryByText('Vehicles list screen')).not.toBeInTheDocument();
   });
 
   it('a confirmed delete still navigates back to the vehicles list', async () => {

@@ -6,7 +6,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
-import { ok, url } from '@/mocks/envelope';
+import { fail, ok, url } from '@/mocks/envelope';
 import { endpoints } from '@/shared/api/endpoints';
 import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/client';
 import { ToastProvider } from '@/shared/ui/Toast';
@@ -71,6 +71,51 @@ describe('AssignLoadModal — 11.4 load variant', () => {
 
     expect(await screen.findByText('Load LD-9912 assigned')).toBeInTheDocument();
     expect(posts).toEqual([{ driverId: 'drv_1', notify: true }]);
+  });
+
+  describe('BE-001 — a driver / unit refusal lands where it belongs, not in a toast', () => {
+    async function assignWith(status: number, code: string, message: string, details: Record<string, unknown>) {
+      server.use(
+        http.get(url(endpoints.drivers.list), () =>
+          ok({
+            items: [{ id: 'drv_1', username: 'jsmith', firstName: 'John', lastName: 'Smith', status: 'ACTIVE', homeTerminalName: 'Columbus, OH' }],
+            page: 1,
+            limit: 25,
+            total: 1,
+            totalPages: 1,
+          }),
+        ),
+        http.post(url(endpoints.trips.assign(':id')), () => fail(status, code, message, details)),
+      );
+      const user = userEvent.setup();
+      renderModal();
+      await user.click(await screen.findByText('John Smith'));
+      await user.click(screen.getByRole('button', { name: 'Assign driver' }));
+      return user;
+    }
+
+    it('422 DRIVER_NOT_FOUND (deleted driver) is shown under the driver list, which is marked invalid', async () => {
+      await assignWith(422, 'DRIVER_NOT_FOUND', 'This driver has been deleted and cannot be assigned.', {
+        driverId: 'This driver has been deleted and cannot be assigned.',
+      });
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent('This driver has been deleted and cannot be assigned.');
+      expect(screen.getByRole('radiogroup', { name: 'Driver' })).toHaveAttribute('aria-invalid', 'true');
+      expect(screen.getByRole('radiogroup', { name: 'Driver' })).toHaveAccessibleDescription('This driver has been deleted and cannot be assigned.');
+    });
+
+    it('409 VEHICLE_OUT_OF_SERVICE names the unit', async () => {
+      await assignWith(409, 'VEHICLE_OUT_OF_SERVICE', 'This unit is out of service and cannot be assigned a trip.', {
+        vehicleId: 'This unit is out of service and cannot be assigned a trip.',
+      });
+      expect(await screen.findByRole('alert')).toHaveTextContent('Unit: This unit is out of service and cannot be assigned a trip.');
+    });
+
+    it('a 404 with no details maps by its code onto the driver list', async () => {
+      await assignWith(404, 'DRIVER_NOT_FOUND', 'Driver not found.', {});
+      await screen.findByRole('alert');
+      expect(screen.getByRole('radiogroup', { name: 'Driver' })).toHaveAttribute('aria-invalid', 'true');
+    });
   });
 
   it('QA fix — lists ACTIVE drivers only (`?status=ACTIVE`)', async () => {

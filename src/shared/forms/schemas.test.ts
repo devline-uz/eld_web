@@ -193,6 +193,43 @@ describe('form schemas', () => {
     );
   });
 
+  it('FE-012: the issuing state must be a US state, DC or Canadian province, and a plate needs one', () => {
+    const base = { unitNumber: '#101', vin: '1FUJA6CV88LW12345', make: 'Freightliner', model: 'Cascadia', year: 2021 };
+    const parsed = vehicleSchema.safeParse({ ...base, licensePlate: 'ABC-123', licenseState: 'oh' });
+    expect(parsed.success && parsed.data.licenseState).toBe('OH');
+    for (const code of ['DC', 'ON', 'QC', 'YT']) {
+      expect(vehicleSchema.safeParse({ ...base, licensePlate: 'X1', licenseState: code }).success).toBe(true);
+    }
+    expect(vehicleSchema.safeParse({ ...base, licensePlate: 'X1', licenseState: 'ZZ' }).success).toBe(false);
+    expect(vehicleSchema.safeParse({ ...base, licenseState: 'XX' }).success).toBe(false);
+    const noState = vehicleSchema.safeParse({ ...base, licensePlate: 'ABC-123' });
+    expect(noState.success).toBe(false);
+    expect(noState.error?.issues[0]).toMatchObject({ path: ['licenseState'], message: M.plateStateRequired });
+    expect(vehicleSchema.safeParse(base).success).toBe(true);
+  });
+
+  it('FE-012: driver names take letters, spaces, hyphens, apostrophes and periods only', () => {
+    const base = {
+      email: 'marcus.webb@universal-logistics.example',
+      username: 'marcus.webb',
+      password: 'Onebook2026',
+      cdlNumber: 'OH-4471982',
+      cdlState: 'OH',
+      notifyByEmail: true,
+    };
+    for (const [firstName, lastName] of [
+      ["Mary-Jane", "O'Connor"],
+      ['J. R.', 'Smith Jr.'],
+      ['José', 'Müller'],
+    ]) {
+      expect(driverSchema.safeParse({ ...base, firstName, lastName }).success).toBe(true);
+    }
+    for (const bad of ['   ', 'Marcus1', '<script>', 'Ma@rk', '-Mark']) {
+      expect(driverSchema.safeParse({ ...base, firstName: bad, lastName: 'Webb' }).success).toBe(false);
+    }
+    expect(driverSchema.parse({ ...base, firstName: '  Marcus ', lastName: 'Webb' }).firstName).toBe('Marcus');
+  });
+
   it('bounds the vehicle year to 1970 through the current year', () => {
     const base = { unitNumber: '#101', vin: '1FUJA6CV88LW12345', make: 'Freightliner', model: 'Cascadia' };
     const currentYear = new Date().getFullYear();

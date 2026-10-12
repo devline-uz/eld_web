@@ -11,7 +11,7 @@ import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
 import { useIsOffline, OFFLINE_TOOLTIP } from '@/shared/realtime/RealtimeProvider';
 import { usePageHeader } from '@/app/layouts/Topbar';
-import { useLiveFleet } from '@/shared/api/liveFleet';
+import { useLiveFleet, type LiveConnectivity } from '@/shared/api/liveFleet';
 import { useVehiclesList, useVehicleCounts, useBulkVehicleStatus, joinVehicles, totalVehicleMiles, type VehicleTableRow } from '@/shared/api/vehicles';
 import { useVehiclesLookup } from '@/shared/api/lookups';
 import { client } from '@/shared/api/client';
@@ -37,9 +37,28 @@ import { CalibrateOdometerModal } from './components/CalibrateOdometerModal';
 import { ImportVehiclesModal } from './components/ImportVehiclesModal';
 import { VehicleFiltersDrawer, VehicleFilterChips } from './components/VehicleFiltersDrawer';
 import { MULTI_ASSIGN_REASON, NO_DRIVER_LOGS_REASON } from './lib/copy';
-import { parseVehicleFilters, writeVehicleFilters, matchesVehicleFilters, EMPTY_VEHICLE_FILTERS, countActiveVehicleFilters } from './lib/filters';
+import {
+  parseVehicleFilters,
+  writeVehicleFilters,
+  matchesVehicleFilters,
+  EMPTY_VEHICLE_FILTERS,
+  countActiveVehicleFilters,
+  parseVehicleSort,
+  sortVehicleRows,
+  vehicleSortParam,
+  VEHICLE_SORT_FIELDS,
+} from './lib/filters';
 
 type Segment = 'ALL' | 'ACTIVE' | 'INACTIVE' | 'UNASSIGNED';
+const SEGMENT_LABEL: Record<Segment, string> = { ALL: 'All', ACTIVE: 'Active', INACTIVE: 'Inactive', UNASSIGNED: 'Unassigned' };
+const SEGMENT_NOUN: Record<Segment, string> = { ALL: '', ACTIVE: 'active', INACTIVE: 'inactive', UNASSIGNED: 'unassigned' };
+
+/** UI-004 — the secondary line under the STATUS badge: what the unit's ELD link says. */
+const CONNECTIVITY_NOTE: Record<LiveConnectivity, string | undefined> = {
+  NO_DEVICE: 'No device',
+  ELD_OFFLINE: 'ELD offline',
+  ONLINE: undefined,
+};
 
 function useDebounced<T>(value: T, ms: number): T {
   const [debounced, setDebounced] = useState(value);
@@ -85,6 +104,10 @@ export default function VehiclesPage() {
 
   const filters = useMemo(() => parseVehicleFilters(params), [params]);
   const activeFilterCount = countActiveVehicleFilters(filters);
+  // QA UI-007 — sorting is the server's (`GET /vehicles?sort=`), so it orders the whole fleet, not
+  // just the 10 rows of the current page. Kept in the URL like the other list params.
+  const sort = useMemo(() => parseVehicleSort(params.get('sort')), [params]);
+  const sorting = useMemo(() => (sort ? [sort] : []), [sort]);
 
   // WD-073 — one `GET /vehicles` page per render. `q` and `status` are real `VehicleListQueryDto`
   // params; the UNASSIGNED segment (a driver-side join) and the 11.23 drawer groups (B-54) have
@@ -92,11 +115,18 @@ export default function VehiclesPage() {
   // reference-cached fleet window and filter in memory.
   const useWindow = segment === 'UNASSIGNED' || activeFilterCount > 0;
   const liveFleet = useLiveFleet();
+  // UI-004 — the live snapshot per unit. The STATUS column's headline is the RECORD status
+  // (`vehicle.status`); the live duty only refines an ACTIVE unit with a driver on it, and the
+  // ELD link (`connectivity`) is a secondary line — never a reason to repaint the record status.
+  const liveByVehicle = useMemo(
+    () => new Map((liveFleet.data?.items ?? []).map((unit) => [unit.vehicleId, unit])),
+    [liveFleet.data],
+  );
   const dutyByVehicle = useMemo(() => {
     const map = new Map<string, DutyStatus>();
-    // `/live/fleet` says INACTIVE for a unit with no ELD paired and nobody signed in (no live
-    // data at all) — that is not the unit's record status, so it must not paint a freshly added
-    // ACTIVE unit "Inactive". Inactive on this screen comes only from `vehicle.status`.
+    // `/live/fleet` says INACTIVE for a unit with no ELD paired and nobody signed in, and for an
+    // OUT_OF_SERVICE / INACTIVE record — neither is a duty status, so the drawer's duty filter and
+    // the badge only see real driver-duty values.
     for (const unit of liveFleet.data?.items ?? []) {
       if (unit.dutyStatus !== 'INACTIVE') map.set(unit.vehicleId, unit.dutyStatus);
     }
@@ -109,6 +139,7 @@ export default function VehiclesPage() {
       limit,
       q: debouncedSearch.trim() || undefined,
       status: segment === 'ACTIVE' || segment === 'INACTIVE' ? segment : undefined,
+      sort: vehicleSortParam(sort),
     },
     useWindow,
     filter: (rows) => {
@@ -125,7 +156,10 @@ export default function VehiclesPage() {
             (r.licensePlate ?? '').toLowerCase().includes(needle),
         );
       }
-      return out.filter((r) => matchesVehicleFilters(r, dutyByVehicle.get(r.id), filters));
+      return sortVehicleRows(
+        out.filter((r) => matchesVehicleFilters(r, dutyByVehicle.get(r.id), filters)),
+        sort,
+      );
     },
   });
   const counts = useVehicleCounts();
@@ -263,24 +297,33 @@ export default function VehiclesPage() {
     {
       accessorKey: 'unitNumber',
       header: 'UNIT #',
+      meta: { width: '9%' },
       cell: ({ row }) => <span className="tabular-nums font-semibold text-text">{row.original.unitNumber}</span>,
     },
     {
       id: 'status',
       header: 'STATUS',
+      accessorFn: (row) => row.status,
+      meta: { width: '13%' },
       cell: ({ row }) => {
         const duty = dutyByVehicle.get(row.original.id);
-        if (row.original.status === 'OUT_OF_SERVICE') return <Badge tone="danger" dot>Out of service</Badge>;
-        if (row.original.status === 'INACTIVE') return <DutyBadge status="INACTIVE" />;
+        const live = liveByVehicle.get(row.original.id);
+        const link = live ? CONNECTIVITY_NOTE[live.connectivity] : undefined;
+        const note = link ? <span className="block text-caption text-text-muted">{link}</span> : null;
+        if (row.original.status === 'OUT_OF_SERVICE') return <span className="flex flex-col items-start gap-0.5"><Badge tone="danger" dot>Out of service</Badge>{note}</span>;
+        if (row.original.status === 'INACTIVE') return <span className="flex flex-col items-start gap-0.5"><DutyBadge status="INACTIVE" />{note}</span>;
         // WD-073 — `/live/fleet` is the slowest call on this screen (~2 s server-side); the table
         // no longer waits for it. The duty badge fills in when the snapshot lands.
-        if (!duty && liveFleet.isLoading) return <span aria-label="Loading status" className="inline-block h-5 w-16 animate-pulse rounded-full bg-bg-subtle" />;
-        return duty ? <DutyBadge status={duty} /> : <Badge tone="success" dot>Active</Badge>;
+        if (!live && liveFleet.isLoading) return <span aria-label="Loading status" className="inline-block h-5 w-16 animate-pulse rounded-full bg-bg-subtle" />;
+        // An ELD_OFFLINE "duty" is the link, not the driver's status — it reads as the note below.
+        const headline = duty && duty !== 'ELD_OFFLINE' ? <DutyBadge status={duty} /> : <Badge tone="success" dot>Active</Badge>;
+        return <span className="flex flex-col items-start gap-0.5">{headline}{note}</span>;
       },
     },
     {
       id: 'driver',
       header: 'DRIVER',
+      meta: { width: '17%' },
       cell: ({ row }) => {
         const driver = row.original.driver;
         if (!driver) return <span className="text-text-muted">{orUnassigned(null)}</span>;
@@ -288,7 +331,7 @@ export default function VehiclesPage() {
         return (
           <span className="flex items-center gap-2">
             <Avatar name={name} size="sm" />
-            <span className="text-text">{name}</span>
+            <span className="truncate text-text">{name}</span>
           </span>
         );
       },
@@ -296,17 +339,28 @@ export default function VehiclesPage() {
     {
       id: 'makeModel',
       header: 'MAKE & MODEL',
+      accessorFn: (row) => row.make,
+      meta: { width: '14%' },
       cell: ({ row }) => <span className="text-text">{[row.original.make, row.original.model].filter(Boolean).join(' ') || '—'}</span>,
     },
-    { accessorKey: 'year', header: 'YEAR', cell: ({ row }) => <span className="tabular-nums">{row.original.year ?? '—'}</span> },
+    {
+      accessorKey: 'year',
+      header: 'YEAR',
+      // No `year` in the API's sortable fields — sorting one page in memory misled (UI-007).
+      enableSorting: false,
+      meta: { width: '7%' },
+      cell: ({ row }) => <span className="tabular-nums">{row.original.year ?? '—'}</span>,
+    },
     {
       accessorKey: 'vin',
       header: 'VIN',
+      meta: { width: '17%' },
       cell: ({ row }) => <span className="text-text-secondary">{row.original.vin}</span>,
     },
     {
       id: 'eldSerial',
       header: 'ELD SERIAL',
+      meta: { width: '11%' },
       cell: ({ row }) => (
         <span className={row.original.eldDeviceStatus && row.original.eldDeviceStatus !== 'ASSIGNED' ? 'text-text-muted' : 'text-text'}>
           {orNotAssigned(row.original.eldSerial)}
@@ -316,6 +370,7 @@ export default function VehiclesPage() {
     {
       id: 'odometer',
       header: 'ODOMETER',
+      meta: { width: '12%' },
       // §4.3 — the displayed odometer is the ECU reading plus the calibration offset when the
       // device reports one, never the raw stored `odometerMi`: otherwise a successful
       // `Calibrate odometer` never changed the number in this column.
@@ -327,7 +382,10 @@ export default function VehiclesPage() {
 
   const isLoading = allVehicles.isLoading;
 
-  usePageHeader({ title: 'Vehicles', subtitle: `${counts.all} units · ${counts.active} active · ${counts.inactive} inactive` });
+  usePageHeader({
+    title: 'Vehicles',
+    subtitle: `${counts.all} units · ${counts.active} active · ${counts.inactive} inactive · ${counts.outOfService} out of service`,
+  });
 
   return (
     <div className="flex flex-col gap-4 xl:max-h-content-h">
@@ -424,20 +482,46 @@ export default function VehiclesPage() {
         ) : allVehicles.isError ? (
           <ErrorState onRetry={() => allVehicles.refetch()} />
         ) : total === 0 ? (
-          debouncedSearch || activeFilterCount > 0 ? (
+          debouncedSearch || activeFilterCount > 0 || segment !== 'ALL' ? (
+            // QA UI-019 — the search was rarely the only thing narrowing the list: say which
+            // filters/tab are on, and offer to clear each.
             <EmptyState
               {...searchEmptyState(debouncedSearch || 'these filters')}
+              title={
+                debouncedSearch
+                  ? `Nothing matches "${debouncedSearch}"${activeFilterCount > 0 || segment !== 'ALL' ? ' with the current filters' : ''}`
+                  : segment !== 'ALL' && activeFilterCount === 0
+                    ? `No ${SEGMENT_NOUN[segment]} units`
+                    : 'No units match these filters'
+              }
+              description={
+                [
+                  segment !== 'ALL' ? `Tab: ${SEGMENT_LABEL[segment]}` : null,
+                  activeFilterCount > 0 ? `${activeFilterCount} filter${activeFilterCount === 1 ? '' : 's'} applied` : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ') || 'Check the spelling or try a unit number, VIN or plate.'
+              }
               actions={[
-                {
-                  label: debouncedSearch ? 'Clear search' : 'Clear filters',
-                  // Clearing the box without deleting `q` left the search in the URL, so a
-                  // reload brought the empty result straight back.
-                  onClick: () => {
-                    if (!debouncedSearch) return applyFilters(EMPTY_VEHICLE_FILTERS);
-                    setSearchInput('');
-                    setParam('q', null);
-                  },
-                },
+                ...(segment !== 'ALL'
+                  ? [{ label: 'Show all units', variant: 'secondary' as const, onClick: () => setParam('segment', null) }]
+                  : []),
+                ...(activeFilterCount > 0
+                  ? [{ label: 'Clear filters', variant: 'secondary' as const, onClick: () => applyFilters(EMPTY_VEHICLE_FILTERS) }]
+                  : []),
+                ...(debouncedSearch
+                  ? [
+                      {
+                        label: 'Clear search',
+                        // Clearing the box without deleting `q` left the search in the URL, so a
+                        // reload brought the empty result straight back.
+                        onClick: () => {
+                          setSearchInput('');
+                          setParam('q', null);
+                        },
+                      },
+                    ]
+                  : []),
               ]}
             />
           ) : (
@@ -468,6 +552,12 @@ export default function VehiclesPage() {
                 selection={selection}
                 onSelectionChange={setSelection}
                 onRowClick={(row) => navigate(`/vehicles/${row.id}`)}
+                className="table-fixed"
+                sorting={sorting}
+                onSortingChange={(next) => {
+                  const first = next[0];
+                  setParam('sort', first && first.id in VEHICLE_SORT_FIELDS ? `${first.id}:${first.desc ? 'desc' : 'asc'}` : null);
+                }}
                 rowActions={
                   canFull
                     ? (row) => (

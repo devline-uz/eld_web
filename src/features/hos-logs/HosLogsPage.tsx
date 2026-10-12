@@ -190,6 +190,7 @@ export default function HosLogsPage() {
 
   const dateLabel = formatInTimeZone(fromZonedTime(`${date}T12:00:00`, timezone), timezone, 'EEE, MMM d, yyyy');
   const isFuture = date >= todayKey;
+  const datePickerRef = useRef<HTMLInputElement | null>(null);
 
   const driverOptions: PickerOption[] = drivers.map((candidate) => ({
     id: candidate.id,
@@ -261,8 +262,38 @@ export default function HosLogsPage() {
             >
               <ChevronLeft size={16} strokeWidth={1.75} />
             </button>
-            <Calendar size={16} strokeWidth={1.75} className="text-text-muted" />
-            <span className="tabular text-body font-medium text-text">{dateLabel}</span>
+            {/* QA FE-013 — the calendar was decorative; it now opens the native date picker. */}
+            <span className="relative flex items-center">
+              <button
+                type="button"
+                aria-label={`Pick a date, ${dateLabel}`}
+                onClick={() => {
+                  const input = datePickerRef.current;
+                  if (!input) return;
+                  try {
+                    input.showPicker();
+                  } catch {
+                    input.focus();
+                  }
+                }}
+                className="flex h-8 items-center gap-2 rounded-md px-1 hover:bg-bg-subtle"
+              >
+                <Calendar size={16} strokeWidth={1.75} className="text-text-muted" aria-hidden="true" />
+                <span className="tabular text-body font-medium text-text">{dateLabel}</span>
+              </button>
+              <input
+                ref={datePickerRef}
+                type="date"
+                aria-label="Log date"
+                tabIndex={-1}
+                value={date}
+                max={todayKey}
+                onChange={(event) => {
+                  if (event.target.value) setParam({ date: event.target.value });
+                }}
+                className="pointer-events-none absolute bottom-0 left-0 size-px opacity-0"
+              />
+            </span>
             <button
               type="button"
               aria-label="Next day"

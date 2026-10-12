@@ -55,3 +55,9 @@ export const US_STATES: readonly string[] = [
   'WI',
   'WY',
 ];
+
+/** Canada Post codes for the 13 provinces and territories. */
+export const CA_PROVINCES: readonly string[] = ['AB', 'BC', 'MB', 'NB', 'NL', 'NS', 'NT', 'NU', 'ON', 'PE', 'QC', 'SK', 'YT'];
+
+/** Every plate-issuing jurisdiction the vehicle form accepts — US states + DC + Canada (QA FE-012). */
+export const PLATE_JURISDICTIONS: ReadonlySet<string> = new Set([...US_STATES, ...CA_PROVINCES]);

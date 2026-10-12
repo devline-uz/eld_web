@@ -145,6 +145,36 @@ describe('DevicesPage — W-20', () => {
     expect(await screen.findByText('Device PT30_1C4F registered')).toBeInTheDocument();
   });
 
+  it('UI-012: KPIs come from the fleet-wide connectionCounts and each row from its effective `connection`', async () => {
+    const silent = { ...DEVICE, id: 'dev_2', serial: 'PT30_SILENT', bleState: 'CONNECTED', connection: 'DISCONNECTED' };
+    server.use(
+      http.get(url(endpoints.devices.list), () =>
+        ok({
+          items: [{ ...DEVICE, connection: 'CONNECTED' }, silent],
+          page: 1,
+          limit: 25,
+          total: 2,
+          totalPages: 1,
+          connectionCounts: { total: 40, connected: 31, disconnected: 9, offlineOver24h: 4 },
+        }),
+      ),
+    );
+    renderPage();
+
+    const silentRow = (await screen.findByText('PT30_SILENT')).closest('tr')!;
+    // Stored CONNECTED, but silent > 30 min — the row says Disconnected.
+    expect(within(silentRow).getByText('Disconnected')).toBeInTheDocument();
+    expect(within(screen.getByText('PT30_A86E').closest('tr')!).getByText('Connected')).toBeInTheDocument();
+
+    const connectedKpi = screen.getByText('Connected now').closest('div')!.parentElement!;
+    expect(connectedKpi).toHaveTextContent('31');
+    expect(connectedKpi).toHaveTextContent('78%');
+    expect(screen.getByText('Disconnected > 24 h').closest('div')!.parentElement!).toHaveTextContent('4');
+    expect(screen.getByRole('button', { name: 'All 40' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Connected 31' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Disconnected 9' })).toBeInTheDocument();
+  });
+
   it('filters by segment and search text, and retires a device', async () => {
     const user = userEvent.setup();
     const secondDevice = { ...DEVICE, id: 'dev_2', serial: 'PT40_9F21', bleState: 'DISCONNECTED', vehicleId: null };

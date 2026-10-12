@@ -25,7 +25,7 @@ import { useToast } from '@/shared/ui/Toast';
 import { ApiError, formErrorMessage } from '@/shared/api/errors';
 import { formatLocal } from '@/shared/format/datetime';
 import { useNowTick } from '@/shared/format/useRelativeTime';
-import { formatOdometer } from '@/shared/format/numbers';
+import { formatMoney, formatOdometer } from '@/shared/format/numbers';
 import { orDash, orNone, orUnassigned } from '@/shared/format/empty';
 import {
   useCloseWorkOrder,
@@ -57,6 +57,8 @@ import { CreateWorkOrderModal } from './components/CreateWorkOrderModal';
 import { EditWorkOrderModal } from './components/EditWorkOrderModal';
 import { EditScheduleModal } from './components/EditScheduleModal';
 import { scheduleIntervalLabel, scheduleNextDueLabel } from './lib/scheduleLabels';
+import { maintenanceDueLabel } from './lib/maintenanceDue';
+
 import { ResolveDefectModal } from './components/ResolveDefectModal';
 import { blockOdometerKeys, getOdometerError, sanitizeOdometer } from './lib/workOrderFieldGuards';
 import { DvirFiltersDrawer, DvirFilterChips } from './components/DvirFiltersDrawer';
@@ -68,6 +70,11 @@ import {
   EMPTY_DVIR_FILTERS,
   countActiveDvirFilters,
 } from './lib/filters';
+import { formatEnumLabel } from '@/shared/format/enumLabel';
+
+/** UI-011 — sort key for the maintenance card: what is left (negative = overdue by). */
+const remaining = (s: { due: { milesRemaining: number | null; daysRemaining: number | null } }) =>
+  s.due.milesRemaining ?? s.due.daysRemaining ?? 0;
 
 type Tab = 'dvirs' | 'defects' | 'workOrders' | 'schedules';
 
@@ -284,14 +291,41 @@ export default function DvirPage() {
     [recentDvirsWindow, filters],
   );
 
-  const upcomingSchedules = useMemo(
-    () =>
-      overdue.rows
-        .filter((s) => s.due.state !== 'OK')
-        .sort((a, b) => (a.due.milesRemaining ?? a.due.daysRemaining ?? 0) - (b.due.milesRemaining ?? b.due.daysRemaining ?? 0))
-        .slice(0, 6),
+  // UI-011 — OVERDUE is its own list (most overdue first), never mixed into "Upcoming", which is
+  // DUE_SOON only (soonest first).
+  const overdueSchedules = useMemo(
+    () => overdue.rows.filter((s) => s.due.state === 'OVERDUE').sort((a, b) => remaining(a) - remaining(b)).slice(0, 6),
     [overdue.rows],
   );
+  const upcomingSchedules = useMemo(
+    () => overdue.rows.filter((s) => s.due.state === 'DUE_SOON').sort((a, b) => remaining(a) - remaining(b)).slice(0, 6),
+    [overdue.rows],
+  );
+
+  function renderScheduleDue(s: (typeof overdue.rows)[number]) {
+    const isOverdue = s.due.state === 'OVERDUE';
+    const ratio = isOverdue
+      ? 1
+      : s.intervalMi && s.due.milesRemaining != null
+        ? Math.max(0, s.due.milesRemaining) / s.intervalMi
+        : s.intervalDays && s.due.daysRemaining != null
+          ? Math.max(0, s.due.daysRemaining) / s.intervalDays
+          : 0;
+    const tone = isOverdue ? 'danger' : 'warning';
+    const dueLabel = maintenanceDueLabel(s.due, formatOdometer);
+    return (
+      <div key={s.id} className="flex flex-col gap-1.5 rounded-md border border-border p-3">
+        <span className="text-body-strong text-text">
+          🔧 Unit {s.vehicle?.unitNumber ?? '—'} · {s.name}
+        </span>
+        <span className="tabular-nums text-caption text-text-muted">
+          <span className={isOverdue ? 'font-semibold text-danger' : undefined}>{dueLabel}</span> ·{' '}
+          {orDash(s.nextDueAt ?? s.nextDueMi, () => (s.nextDueAt ? formatLocal(s.nextDueAt, 'monthDay') : `${s.nextDueMi} mi`))}
+        </span>
+        <ProgressBar ratio={ratio} tone={tone} thick label={`Unit ${s.vehicle?.unitNumber ?? '—'} ${s.name} — ${dueLabel}`} />
+      </div>
+    );
+  }
 
   // There is no server-side export on any of these four lists, so the file is what the active
   // tab is showing. Stage 3 — it used to be a raw JSON dump with no toast and no error path; it is
@@ -576,35 +610,23 @@ export default function DvirPage() {
             <div className="flex flex-col gap-3 p-card">
               {overdue.isLoading ? (
                 <LoadingState rows={3} />
-              ) : upcomingSchedules.length === 0 ? (
+              ) : upcomingSchedules.length === 0 && overdueSchedules.length === 0 ? (
                 <p className="text-body text-text-muted">No services due in the next 30 days.</p>
               ) : (
-                upcomingSchedules.map((s) => {
-                  const ratio =
-                    s.intervalMi && s.due.milesRemaining != null
-                      ? Math.max(0, s.due.milesRemaining) / s.intervalMi
-                      : s.intervalDays && s.due.daysRemaining != null
-                        ? Math.max(0, s.due.daysRemaining) / s.intervalDays
-                        : 0;
-                  const tone = s.due.state === 'OVERDUE' ? 'danger' : s.due.state === 'DUE_SOON' ? 'warning' : 'success';
-                  const dueLabel =
-                    s.due.milesRemaining != null
-                      ? `Due in ${formatOdometer(Math.abs(s.due.milesRemaining))} mi`
-                      : s.due.daysRemaining != null
-                        ? `Due in ${Math.abs(s.due.daysRemaining)} d`
-                        : 'Due';
-                  return (
-                    <div key={s.id} className="flex flex-col gap-1.5 rounded-md border border-border p-3">
-                      <span className="text-body-strong text-text">
-                        🔧 Unit {s.vehicle?.unitNumber ?? '—'} · {s.name}
-                      </span>
-                      <span className="tabular-nums text-caption text-text-muted">
-                        {dueLabel} · {orDash(s.nextDueAt ?? s.nextDueMi, () => (s.nextDueAt ? formatLocal(s.nextDueAt, 'monthDay') : `${s.nextDueMi} mi`))}
-                      </span>
-                      <ProgressBar ratio={ratio} tone={tone} thick label={`Unit ${s.vehicle?.unitNumber ?? '—'} ${s.name} — ${dueLabel}`} />
-                    </div>
-                  );
-                })
+                <>
+                  {overdueSchedules.length > 0 && (
+                    <section aria-label="Overdue maintenance" className="flex flex-col gap-3">
+                      <span className="text-caption font-semibold uppercase text-danger">Overdue</span>
+                      {overdueSchedules.map((s) => renderScheduleDue(s))}
+                    </section>
+                  )}
+                  {upcomingSchedules.length > 0 && (
+                    <section aria-label="Upcoming maintenance" className="flex flex-col gap-3">
+                      {overdueSchedules.length > 0 && <span className="text-caption font-semibold uppercase text-text-muted">Upcoming</span>}
+                      {upcomingSchedules.map((s) => renderScheduleDue(s))}
+                    </section>
+                  )}
+                </>
               )}
             </div>
           </Card>
@@ -740,7 +762,7 @@ function AssignedToCell({ defect }: { defect: DefectTableRow }) {
             onError: (error) => toast({ kind: 'error', title: formErrorMessage(error, [], { assigneeId: 'Assignee' }) }),
           });
         }}
-        aria-label={`Assign defect ${defect.category}`}
+        aria-label={`Assign defect ${formatEnumLabel(defect.category)}`}
         className="h-8 rounded-md border border-border bg-bg-surface px-2 text-body text-text"
       />
     </span>
@@ -784,7 +806,7 @@ function OpenDefectsTable({
             header: 'REPORTED',
             cell: ({ row }) => <span className="tabular-nums text-text-muted">{formatLocal(row.original.createdAt, 'dateTime')}</span>,
           },
-          { id: 'component', header: 'COMPONENT', cell: ({ row }) => <span className="text-text">{row.original.category}</span> },
+          { id: 'component', header: 'COMPONENT', cell: ({ row }) => <span className="text-text">{formatEnumLabel(row.original.category)}</span> },
           {
             id: 'severity',
             header: 'SEVERITY',
@@ -896,13 +918,13 @@ function WorkOrdersTab({ search, onRows }: { search: string; onRows: (rows: Work
                 { id: 'number', header: 'NUMBER', cell: ({ row }) => <span className="tabular-nums font-semibold text-text">{row.original.number}</span> },
                 { id: 'unit', header: 'UNIT', cell: ({ row }) => <span className="text-text">{row.original.vehicle?.unitNumber ?? '—'}</span> },
                 { id: 'title', header: 'TITLE', cell: ({ row }) => <span className="text-text">{row.original.title}</span> },
-                { id: 'priority', header: 'PRIORITY', cell: ({ row }) => <Badge tone={row.original.priority === 'URGENT' || row.original.priority === 'HIGH' ? 'danger' : 'neutral'}>{row.original.priority}</Badge> },
+                { id: 'priority', header: 'PRIORITY', cell: ({ row }) => <Badge tone={row.original.priority === 'URGENT' || row.original.priority === 'HIGH' ? 'danger' : 'neutral'}>{formatEnumLabel(row.original.priority)}</Badge> },
                 {
                   id: 'status',
                   header: 'STATUS',
                   cell: ({ row }) => (
                     <Badge tone={row.original.status === 'DONE' ? 'success' : row.original.status === 'CANCELLED' ? 'neutral' : row.original.status === 'IN_PROGRESS' ? 'info' : 'warning'}>
-                      {row.original.status}
+                      {formatEnumLabel(row.original.status)}
                     </Badge>
                   ),
                 },
@@ -911,7 +933,7 @@ function WorkOrdersTab({ search, onRows }: { search: string; onRows: (rows: Work
                   id: 'cost',
                   header: 'COST',
                   meta: { numeric: true },
-                  cell: ({ row }) => <span className="tabular-nums text-text">{orDash(toNum(row.original.costUsd), (v) => `$${v.toFixed(2)}`)}</span>,
+                  cell: ({ row }) => <span className="tabular-nums text-text">{orDash(toNum(row.original.costUsd), formatMoney)}</span>,
                 },
                 {
                   id: 'due',

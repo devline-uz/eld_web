@@ -175,6 +175,33 @@ function seedDevices(): DeviceRow[] {
       firmwareOutdated: i % 6 === 0,
       lastHeartbeatAt: paired ? ago((i % 40) * 60_000) : daysAgo(3 + i),
       storedEventsCount: i % 5,
+      // The PT30 info/config fields `GET /devices` documents (openapi.json) — without them the
+      // contract test rejected this handler as drifted from the API.
+      firmware: i % 6 === 0 ? 'L107' : 'L108',
+      productName: model,
+      bleFirmware: '1.4.2',
+      imei: null,
+      reportedVin: paired ? `1FUJGLDR7CLBP${String(8800 + n).padStart(4, '0')}` : '',
+      sdkVersion: '6.11.1',
+      appPlatform: 'ANDROID',
+      connectionType: 'BLE',
+      busType: 'J1939',
+      lastInfoAt: paired ? ago((i % 40) * 60_000) : daysAgo(3 + i),
+      periodicConnectedSec: 30,
+      periodicNoBleSec: 30,
+      periodicDisconnectedMin: 30,
+      harshAccelMg: 0,
+      harshBrakeMg: 450,
+      harshCornerMg: 0,
+      systemVars: {
+        PERIODIC_EVENT_GAP: 30,
+        PERIODIC_EVENT_GAP_NOBLE: 30,
+        EVENTS_STORED: i % 5,
+        DRIVING_ACCL: 0,
+        DRIVING_BRAKING: 450,
+        DRIVING_CORNERING: 0,
+        HSI_MODE: 1,
+      },
     };
   });
 }

@@ -122,6 +122,44 @@ describe('11.8 Add driver (Q-3)', () => {
     expect(body.homeTerminalTimezone).toBe('America/Chicago');
   });
 
+  it('UI-005 — the HOS ruleset defaults to "Company default" and is then left out of the POST', async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    server.use(
+      http.get(url(endpoints.vehicles.list), () => ok({ items: [], page: 1, limit: 500, total: 0, totalPages: 1 })),
+      http.post(url(endpoints.drivers.create), async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>);
+        return ok({ id: 'drv_new', username: 'kwatson', status: 'ACTIVE' });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<AddDriverModal onClose={() => {}} />);
+
+    const select = screen.getByLabelText('HOS ruleset');
+    expect(select).toHaveValue('');
+    expect(screen.getByRole('option', { name: 'Company default' })).toBeInTheDocument();
+    await fillRequiredFields(user);
+    await user.click(screen.getByRole('button', { name: 'Save driver' }));
+    await waitFor(() => expect(bodies).toHaveLength(1));
+    expect(bodies[0]).not.toHaveProperty('hosRuleset');
+  });
+
+  it('UI-005 — a chosen HOS ruleset is sent', async () => {
+    let body: Record<string, unknown> = {};
+    server.use(
+      http.get(url(endpoints.vehicles.list), () => ok({ items: [], page: 1, limit: 500, total: 0, totalPages: 1 })),
+      http.post(url(endpoints.drivers.create), async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>;
+        return ok({ id: 'drv_new', username: 'kwatson', status: 'ACTIVE' });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<AddDriverModal onClose={() => {}} />);
+    await fillRequiredFields(user);
+    await user.selectOptions(screen.getByLabelText('HOS ruleset'), 'US_60_7_PASSENGER');
+    await user.click(screen.getByRole('button', { name: 'Save driver' }));
+    await waitFor(() => expect(body.hosRuleset).toBe('US_60_7_PASSENGER'));
+  });
+
   it('no terminal is hardcoded and the zone is optional — an empty zone falls back to the carrier', async () => {
     let body: Record<string, unknown> | null = null;
     server.use(

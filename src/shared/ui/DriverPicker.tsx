@@ -13,6 +13,8 @@ export interface PickerOption {
   context: string;
   hosSummary?: string;
   hosTone?: 'success' | 'warning' | 'danger';
+  /** Listed (with `hosSummary` saying why) but not pickable — e.g. an out-of-service unit. */
+  disabled?: boolean;
 }
 
 export interface PickerProps {
@@ -93,11 +95,12 @@ function Picker({ value, options, onSelect, onSearch, placeholder, triggerVarian
               <li key={option.id}>
                 <button
                   type="button"
+                  disabled={option.disabled}
                   onClick={() => {
                     onSelect(option);
                     setOpen(false);
                   }}
-                  className="flex w-full items-center gap-2 rounded-md p-2 text-left hover:bg-bg-subtle"
+                  className="flex w-full items-center gap-2 rounded-md p-2 text-left hover:bg-bg-subtle disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent"
                 >
                   <Avatar name={option.name} size="sm" />
                   <span className="flex-1">

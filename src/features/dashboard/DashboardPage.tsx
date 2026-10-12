@@ -11,7 +11,7 @@ import { endpoints } from '@/shared/api/endpoints';
 import { qk } from '@/shared/api/queryKeys';
 import { typedCachePolicy } from '@/shared/api/queryPolicy';
 import type { OffsetPage } from '@/shared/api/types';
-import { ApiError } from '@/shared/api/errors';
+import { ApiError, NetworkError } from '@/shared/api/errors';
 import { hasPosition, type LiveFleetUnit } from '@/shared/api/liveFleet';
 import { useDashboardSummary } from '@/shared/api/dashboardSummary';
 import { usePermission } from '@/shared/auth/usePermission';
@@ -43,6 +43,15 @@ import { LazyOnVisible } from '@/shared/ui/LazyOnVisible';
 /** Same box as `DashboardMapPreview`'s wrapper, so the swap from placeholder to map never shifts. */
 const MAP_PLACEHOLDER = <div className="h-map-preview animate-pulse rounded-md bg-bg-subtle xl:mt-1 xl:h-map-preview-xl" />;
 
+
+/** Card error copy by cause (QA FE-002): a 401/403/4xx is not "the telematics service did not
+ * respond" — only a 5xx or a missing response is. */
+const SERVICE_DOWN_COPY = 'The telematics service did not respond. Your data is safe — try again in a moment.';
+function loadErrorCopy(error: unknown): string {
+  if (error instanceof NetworkError) return error.message;
+  if (error instanceof ApiError && error.status < 500) return error.userMessage;
+  return SERVICE_DOWN_COPY;
+}
 
 const MENU_ITEM_CLASS = 'cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle';
 
@@ -130,7 +139,8 @@ export default function DashboardPage() {
   const counts = summary.data?.liveFleet.counts;
   const onDutyCount = counts?.onDuty ?? 0;
   // QA-B — the live feed has one row per unit; a unit with no driver is not a driver, so the
-  // "N drivers" subtitle no longer disagrees with the donut's own total.
+  // subtitle no longer disagrees with the donut's own total. UI-015 — that is the number of
+  // units with a driver signed in, not the carrier's driver headcount: it reads "assigned drivers".
   const driverCount = units.filter((u) => u.driverId).length;
   const movingCount = counts?.moving ?? 0;
   const idleCount = counts?.idle ?? 0;
@@ -141,6 +151,7 @@ export default function DashboardPage() {
   const kpiLoading = summary.isLoading;
   const activeVehicles = summary.data?.vehicles.active;
   const totalVehicles = summary.data?.vehicles.total;
+  const outOfServiceVehicles = summary.data?.vehicles.outOfService ?? 0;
   const violationItems = violations.data?.items ?? [];
   const unidentifiedTotal = summary.data?.unidentified.total;
 
@@ -204,7 +215,11 @@ export default function DashboardPage() {
           <KpiCard
             label="Active vehicles"
             value={summary.isError ? '—' : formatNumber(activeVehicles)}
-            hint={summary.isError ? undefined : `of ${formatNumber(totalVehicles)}`}
+            hint={
+              summary.isError
+                ? undefined
+                : `of ${formatNumber(totalVehicles)}${outOfServiceVehicles > 0 ? ` · ${formatNumber(outOfServiceVehicles)} out of service` : ''}`
+            }
             icon={Truck}
             iconTone="info"
           />
@@ -262,6 +277,7 @@ export default function DashboardPage() {
             ) : summary.isError ? (
               <ErrorState
                 title="Could not load the fleet"
+                description={loadErrorCopy(summary.error)}
                 onRetry={() => void summary.refetch()}
               />
             ) : units.length === 0 ? (
@@ -269,7 +285,8 @@ export default function DashboardPage() {
             ) : (
               // WB-257 — MapLibre (the lazy map chunk) is only requested once the card nears the
               // viewport; the placeholder holds the map's exact box until then (no CLS).
-              <LazyOnVisible placeholder={MAP_PLACEHOLDER}>
+              // `fallbackMs`: a dashboard opened in a background tab never intersects — mount anyway.
+              <LazyOnVisible placeholder={MAP_PLACEHOLDER} fallbackMs={1000}>
                 <Suspense fallback={MAP_PLACEHOLDER}>
                   <LazyDashboardMap units={units.filter(hasPosition)} />
                 </Suspense>
@@ -281,13 +298,17 @@ export default function DashboardPage() {
         <Card>
           <SectionHeader
             title="Duty status · now"
-            subtitle={summary.isError ? undefined : `${driverCount} drivers · ${onDutyCount} on duty`}
+            subtitle={summary.isError ? undefined : `${driverCount} assigned drivers · ${onDutyCount} on duty`}
           />
           <div className="mt-4">
             {summary.isLoading ? (
               <div className="h-40 animate-pulse rounded-md bg-bg-subtle" />
             ) : summary.isError ? (
-              <ErrorState title="Could not load duty status" onRetry={() => void summary.refetch()} />
+              <ErrorState
+                title="Could not load duty status"
+                description={loadErrorCopy(summary.error)}
+                onRetry={() => void summary.refetch()}
+              />
             ) : (
               <DutyDonut units={units} onSegmentClick={(status) => navigate(`/drivers?status=${status}`)} />
             )}
@@ -312,11 +333,7 @@ export default function DashboardPage() {
           <div className="p-card">
             <ErrorState
               title="Could not load violations"
-              description={
-                violations.error instanceof ApiError
-                  ? violations.error.userMessage
-                  : 'The telematics service did not respond. Your data is safe — try again in a moment.'
-              }
+              description={loadErrorCopy(violations.error)}
               onRetry={() => void violations.refetch()}
             />
           </div>

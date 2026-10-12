@@ -186,6 +186,34 @@ describe('W-11 Dispatch & Trips', () => {
     expect(screen.getByText('Late')).toBeInTheDocument();
   });
 
+  it('FE-007: an ASSIGNED trip with a future pickup is Scheduled/Upcoming, not Active; no deliveries reads —', async () => {
+    const future = new Date(Date.now() + 3 * 86_400_000).toISOString();
+    const upcoming = { ...TRIP, id: 'trp_9', number: 'TR-9000', status: 'ASSIGNED', plannedStartAt: future, startedAt: null, etaAt: null, onTime: null };
+    server.use(
+      http.get(url(endpoints.trips.list), ({ request }) => {
+        const status = new URL(request.url).searchParams.get('status');
+        const items = status === 'ASSIGNED' ? [upcoming] : [];
+        return ok({ items, page: 1, limit: 25, total: items.length, totalPages: 1 });
+      }),
+      http.get(url(endpoints.drivers.list), () => ok({ items: [DRIVER], page: 1, limit: 500, total: 1, totalPages: 1 })),
+      http.get(url(endpoints.vehicles.list), () => ok({ items: [VEHICLE], page: 1, limit: 500, total: 1, totalPages: 1 })),
+      http.get(url(endpoints.trips.unassignedLoads), () => ok({ items: [] })),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    expect(await screen.findByRole('button', { name: 'Scheduled 1' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Active 0' })).toBeInTheDocument();
+    // no delivered trip in the window: a dash, not "0% · last 0 deliveries"
+    expect(screen.getByText('no deliveries yet')).toBeInTheDocument();
+    expect(screen.queryByText('0%')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Scheduled 1' }));
+    expect(await screen.findByText('TR-9000')).toBeInTheDocument();
+    expect(screen.getByText('Upcoming')).toBeInTheDocument();
+    // UI-018 — the status badge never wraps; the trip ID is not styled as a dead link
+    expect(screen.getByText('Upcoming').className).toContain('whitespace-nowrap');
+    expect(screen.getByText('TR-9000').className).not.toContain('text-primary');
+  });
+
   it('selecting a trip updates the route timeline card', async () => {
     usePopulatedTrips();
     const user = userEvent.setup();

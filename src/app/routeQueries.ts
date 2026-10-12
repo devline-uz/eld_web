@@ -24,9 +24,8 @@ export const ROUTE_QUERIES: Partial<Record<string, (queryClient: QueryClient) =>
   },
   '/vehicles': (qc) => {
     void qc.prefetchQuery(vehiclesPageQuery(VEHICLES_DEFAULT_PAGE));
+    // UI-004 — the unfiltered count page carries `statusCounts`; no per-status count requests.
     void qc.prefetchQuery(vehiclesCountQuery());
-    void qc.prefetchQuery(vehiclesCountQuery('ACTIVE'));
-    void qc.prefetchQuery(vehiclesCountQuery('INACTIVE'));
     void qc.prefetchQuery(driversLookupQuery());
     void qc.prefetchQuery(devicesLookupQuery());
   },

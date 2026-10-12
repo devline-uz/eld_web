@@ -16,6 +16,7 @@ import { RequireAuth } from './guards';
 import { AccountLayout } from './layouts/AccountLayout';
 import { AppShell } from './layouts/AppShell';
 import { AuthLayout } from './layouts/AuthLayout';
+import { RouteError } from './layouts/RouteError';
 import { SettingsLayout } from './layouts/SettingsLayout';
 import type { RouteHandle } from './layouts/Topbar';
 import { SETTINGS_NAV, firstPermittedSettingsRoute } from './navigation';
@@ -235,9 +236,11 @@ function toRouteObject(
 
   // Permission-less route: the lazy feature element is dropped entirely, never imported.
   const element = blocked ? <ForbiddenPage /> : def.element;
+  // FE-005 — a crash or a failed chunk stays inside the shell's <Outlet>, with Retry.
+  const errorElement = <RouteError />;
   return def.index
-    ? { index: true, element, handle: def.handle }
-    : { path: def.path, element, handle: def.handle };
+    ? { index: true, element, errorElement, handle: def.handle }
+    : { path: def.path, element, errorElement, handle: def.handle };
 }
 
 export function buildRoutes(permissions: PermissionMap, role: Role | null): RouteObject[] {
@@ -245,20 +248,25 @@ export function buildRoutes(permissions: PermissionMap, role: Role | null): Rout
     {
       path: '/sign-in',
       element: <AuthLayout />,
+      errorElement: <RouteError fullPage />,
       children: [{ index: true, element: <SignInPage /> }],
     },
     {
       element: <RequireAuth />, // 1
+      errorElement: <RouteError fullPage />,
       children: [
         {
           path: '/',
           element: <AppShell />,
+          // The shell itself failed — nothing to keep, so a full-page fallback with Retry.
+          errorElement: <RouteError fullPage />,
           children: [
             // 2 — can(perm), applied per route in toRouteObject()
             ...SHELL_ROUTES.map((def) => toRouteObject(def, permissions, role)),
             {
               path: 'settings',
               element: <SettingsLayout />,
+              errorElement: <RouteError />,
               handle: { title: 'Settings' } satisfies RouteHandle,
               children: [
                 {
@@ -271,10 +279,11 @@ export function buildRoutes(permissions: PermissionMap, role: Role | null): Rout
             {
               path: 'account',
               element: <AccountLayout />,
+              errorElement: <RouteError />,
               handle: { title: 'My profile' } satisfies RouteHandle,
               children: [{ index: true, element: <AccountPage /> }],
             },
-            { path: '*', element: <NotFoundPage />, handle: { title: 'Page not found' } },
+            { path: '*', element: <NotFoundPage />, errorElement: <RouteError />, handle: { title: 'Page not found' } },
           ],
         },
       ],

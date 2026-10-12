@@ -86,7 +86,7 @@ describe('W-13 Reports · Activity report', () => {
       expect(screen.getByRole('columnheader', { name: header })).toBeInTheDocument();
     }
     expect(screen.getByText('Totals are calculated from certified and uncertified logs')).toBeInTheDocument();
-    expect(screen.getByText('2 drivers · showing 2')).toBeInTheDocument();
+    expect(screen.getByText('2 drivers with logs in period · showing 2')).toBeInTheDocument();
     expect(ranges).toEqual([]);
     server.events.removeAllListeners('request:start');
   });
@@ -104,7 +104,7 @@ describe('W-13 Reports · Activity report', () => {
     renderPage(<ActivityReportPage />, ROUTE);
     await screen.findByRole('row', { name: /John Smith/ });
     expect(requests[0]).toEqual({ from: '2026-09-01', to: '2026-09-12', page: '1', limit: '10', sort: 'name:asc', status: 'ACTIVE' });
-    expect(screen.getByText('25 drivers · showing 2')).toBeInTheDocument();
+    expect(screen.getByText('25 drivers with logs in period · showing 2')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: '2' }));
     await waitFor(() => expect(requests.at(-1)).toMatchObject({ page: '2', limit: '10' }));
   });
@@ -154,7 +154,7 @@ describe('W-13 Reports · Activity report', () => {
     renderPage(<ActivityReportPage />, `${ROUTE}&terminal=Dayton%2C+OH`);
     expect(await screen.findByRole('row', { name: /William Bond/ })).toBeInTheDocument();
     expect(screen.queryByRole('row', { name: /John Smith/ })).toBeNull();
-    expect(screen.getByText('1 drivers · showing 1')).toBeInTheDocument();
+    expect(screen.getByText('1 drivers with logs in period · showing 1')).toBeInTheDocument();
     expect(terminal).toBe('Dayton, OH');
   });
 
@@ -171,7 +171,7 @@ describe('W-13 Reports · Activity report', () => {
     );
     renderPage(<ActivityReportPage />, `${ROUTE}&terminal=Dayton%2C+OH`);
     expect(await screen.findByRole('row', { name: /John Smith/ })).toBeInTheDocument();
-    expect(screen.getByText('1 drivers · showing 1')).toBeInTheDocument();
+    expect(screen.getByText('1 drivers with logs in period · showing 1')).toBeInTheDocument();
   });
 
   it('states that the terminal filter does not reach the exported file (WB-097)', async () => {

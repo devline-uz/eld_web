@@ -7,6 +7,7 @@ import type { LiveFleetUnit } from '@/shared/api/liveFleet';
 
 const renders = vi.hoisted(() => ({ count: 0 }));
 vi.mock('@/shared/format/useRelativeTime', () => ({
+  useNowTick: () => 0,
   useRelativeTime: () => {
     renders.count += 1;
     return '1 min';
@@ -33,6 +34,10 @@ const unit = (vehicleId: string): LiveFleetUnit => ({
   shiftEndsAt: null,
   eldSerial: null,
   bleState: null,
+  recordStatus: 'ACTIVE',
+  connectivity: 'ONLINE',
+  isStale: false,
+  staleSince: null,
 });
 
 const UNITS = [unit('#1'), unit('#2'), unit('#3')];

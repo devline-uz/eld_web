@@ -9,6 +9,7 @@ import { useDriversHosClocks, useDriversList, type DriverHosCell } from '@/share
 import { formatHosHours } from '@/shared/format/hos';
 import { useAssignTrip, blocksAssignment, type TripRow } from '@/shared/api/trips';
 import { formErrorMessage } from '@/shared/api/errors';
+import { assignmentFieldError, type AssignmentField } from '../lib/assignmentErrors';
 
 /** `AssignTripDto` issue paths → the words this modal uses, for a 400/422 spelled out in the toast. */
 const ASSIGN_FIELD_LABELS = { driverId: 'Driver', vehicleId: 'Unit', trailerId: 'Trailer' };
@@ -20,6 +21,9 @@ export function AssignLoadModal({ load, onClose }: { load: TripRow; onClose: () 
   // B-74 (shipped) — `POST /trips/:id/assign` now takes `notify` (server default `true`); starts
   // checked so an untouched submit keeps the previous (only) behaviour.
   const [notify, setNotify] = useState(true);
+  // BE-001 — a driver / unit refusal (404 deleted, 409 inactive / out of service / schedule
+  // conflict, 422 not found) is shown where it belongs, like 11.2 Create trip — not as a toast.
+  const [fieldError, setFieldError] = useState<{ field: AssignmentField; message: string } | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
   // QA fix — an INACTIVE driver cannot take a load; the server filters (`?status=ACTIVE`).
@@ -55,6 +59,7 @@ export function AssignLoadModal({ load, onClose }: { load: TripRow; onClose: () 
             onClick={() => {
               // `mutate()` returns immediately — without this a double click assigns twice.
               if (!selectedId || mutation.isPending) return;
+              setFieldError(null);
               mutation.mutate(
                 { driverId: selectedId, notify },
                 {
@@ -63,6 +68,11 @@ export function AssignLoadModal({ load, onClose }: { load: TripRow; onClose: () 
                     onClose();
                   },
                   onError: (error) => {
+                    const placed = assignmentFieldError(error);
+                    if (placed) {
+                      setFieldError(placed);
+                      return;
+                    }
                     toast({ kind: 'error', title: formErrorMessage(error, [], ASSIGN_FIELD_LABELS) });
                   },
                 },
@@ -100,7 +110,19 @@ export function AssignLoadModal({ load, onClose }: { load: TripRow; onClose: () 
         {driversQuery.isLoading && <p className="p-2 text-body text-text-muted">Loading drivers…</p>}
         {/* A native radio group (shared `name`) inside labels: arrow keys move the selection and
             there is no interactive element nested in another (the old row was a radio in a button). */}
-        <div ref={listRef} role="radiogroup" aria-label="Driver" className="flex max-h-80 flex-col gap-1 overflow-y-auto">
+        {fieldError && fieldError.field !== 'driverId' && (
+          <p role="alert" className="rounded-md bg-danger-soft p-3 text-body text-danger">
+            {ASSIGN_FIELD_LABELS[fieldError.field]}: {fieldError.message}
+          </p>
+        )}
+        <div
+          ref={listRef}
+          role="radiogroup"
+          aria-label="Driver"
+          aria-invalid={fieldError?.field === 'driverId' || undefined}
+          aria-describedby={fieldError?.field === 'driverId' ? `assign-load-${load.id}-driver-error` : undefined}
+          className="flex max-h-80 flex-col gap-1 overflow-y-auto"
+        >
           {(driversQuery.data?.items ?? []).map((driver) => {
             const name = [driver.firstName, driver.lastName].filter(Boolean).join(' ') || driver.username || 'Unnamed driver';
             const checked = selectedId === driver.id;
@@ -116,7 +138,10 @@ export function AssignLoadModal({ load, onClose }: { load: TripRow; onClose: () 
                   name={`assign-load-${load.id}-driver`}
                   value={driver.id}
                   checked={checked}
-                  onChange={() => setSelectedId(driver.id)}
+                  onChange={() => {
+                    setSelectedId(driver.id);
+                    setFieldError(null);
+                  }}
                   aria-label={name}
                 />
                 <Avatar name={name} size="sm" />
@@ -133,6 +158,11 @@ export function AssignLoadModal({ load, onClose }: { load: TripRow; onClose: () 
             );
           })}
         </div>
+        {fieldError?.field === 'driverId' && (
+          <p id={`assign-load-${load.id}-driver-error`} role="alert" className="text-caption text-danger">
+            {fieldError.message}
+          </p>
+        )}
         {!driversQuery.isLoading && (driversQuery.data?.items.length ?? 0) === 0 && (
           <p className="p-2 text-body text-text-muted">No drivers match this search.</p>
         )}

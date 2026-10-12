@@ -78,6 +78,35 @@ const phoneInput = () => screen.getByLabelText(/Phone number/) as HTMLInputEleme
 const licenceInput = () => screen.getByLabelText(/Driver licence number/) as HTMLInputElement;
 const save = () => screen.getByRole('button', { name: 'Save changes' });
 
+describe('UI-005 Edit driver — HOS ruleset', () => {
+  it('shows the driver\'s ruleset and leaves it out of the PATCH when untouched', async () => {
+    const patched = capturePatch();
+    const user = userEvent.setup();
+    renderModal({ hosRuleset: 'US_60_7_PROPERTY' });
+    expect(screen.getByLabelText('HOS ruleset')).toHaveValue('US_60_7_PROPERTY');
+    await user.clear(screen.getByLabelText(/First name/));
+    await user.type(screen.getByLabelText(/First name/), 'Johnny');
+    await user.click(save());
+    await waitFor(() => expect(patched.body).not.toBeNull());
+    expect(patched.body).not.toHaveProperty('hosRuleset');
+  });
+
+  it('sends a changed ruleset', async () => {
+    const patched = capturePatch();
+    const user = userEvent.setup();
+    renderModal({ hosRuleset: 'US_70_8_PROPERTY' });
+    await user.selectOptions(screen.getByLabelText('HOS ruleset'), 'US_70_8_PASSENGER');
+    await user.click(save());
+    await waitFor(() => expect(patched.body?.hosRuleset).toBe('US_70_8_PASSENGER'));
+  });
+
+  it('a row without a ruleset offers "Company default" and sends nothing for it', async () => {
+    renderModal({ hosRuleset: undefined });
+    expect(screen.getByLabelText('HOS ruleset')).toHaveValue('');
+    expect(screen.getByRole('option', { name: 'Company default' })).toBeInTheDocument();
+  });
+});
+
 describe('W-07 Edit driver — phone', () => {
   it('loads a legacy stored phone formatted, without making the form dirty', async () => {
     const onClose = vi.fn();

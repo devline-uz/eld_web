@@ -11,7 +11,7 @@
 import type { TripDisplayStatus, TripTableRow } from '@/shared/api/trips';
 import { isRealCalendarDate } from './periodRange';
 
-export const TRIP_STATUS_OPTIONS: TripDisplayStatus[] = ['On time', 'Late', 'Loading', 'Delivered', 'Cancelled', 'Planned'];
+export const TRIP_STATUS_OPTIONS: TripDisplayStatus[] = ['On time', 'Late', 'Loading', 'Upcoming', 'Delivered', 'Cancelled', 'Planned'];
 
 export interface TripFilters {
   status: TripDisplayStatus[];

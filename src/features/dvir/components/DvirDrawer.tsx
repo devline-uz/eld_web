@@ -24,6 +24,7 @@ import { formErrorMessage } from '@/shared/api/errors';
 import { printDvir } from '../lib/printDvir';
 // DEMO DATA — answers `mock-*` DVIR ids locally (`VITE_DEMO_FALLBACK`, never in production). Remove: import `useDvir` from `@/shared/api/dvir` again.
 import { useDvir } from '../mock/useDvirMock';
+import { formatEnumLabel } from '@/shared/format/enumLabel';
 
 const DVIR_TYPE_LABEL: Record<string, string> = {
   PRE_TRIP: 'Pre-trip',
@@ -264,7 +265,7 @@ export function DvirDrawer({
                 {dvir.defects.map((d) => (
                   <div key={d.id} className="rounded-md border border-border p-3">
                     <div className="flex items-center justify-between">
-                      <span className="text-body-strong text-text">{d.category}</span>
+                      <span className="text-body-strong text-text">{formatEnumLabel(d.category)}</span>
                       <SeverityBadge severity={d.severity} />
                     </div>
                     <p className="mt-1 text-body text-text-secondary">{d.description}</p>

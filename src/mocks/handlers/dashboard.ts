@@ -17,7 +17,8 @@ function liveFleetCounts() {
   return {
     total: units.length,
     onDuty: units.filter((u) => DUTY_ON_STATUSES.includes(u.dutyStatus)).length,
-    moving: units.filter((u) => u.dutyStatus === 'DRIVING').length,
+    // UI-003 — a stale unit is never "moving" (backend dashboard.service.ts).
+    moving: units.filter((u) => u.dutyStatus === 'DRIVING' && !u.isStale).length,
     idle: units.filter((u) => u.dutyStatus === 'IDLE').length,
     offline: units.filter((u) => u.dutyStatus === 'ELD_OFFLINE').length,
   };
@@ -42,6 +43,9 @@ export const dashboardHandlers = [
       vehicles: {
         active: liveVehicles().filter((v) => v.status === 'ACTIVE').length,
         total: liveVehicles().length,
+        // UI-004 — fleet-wide record-status counts.
+        inactive: liveVehicles().filter((v) => v.status === 'INACTIVE').length,
+        outOfService: liveVehicles().filter((v) => v.status === 'OUT_OF_SERVICE').length,
       },
       generatedAt: now,
     });

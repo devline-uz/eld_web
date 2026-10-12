@@ -15,7 +15,8 @@ import { typedCachePolicy } from './queryPolicy';
 import { useDevicesLookup, useDriversLookup, useVehiclesLookup, vehiclesLookupQuery } from './lookups';
 import { compactParams, pagePolicy, usePagedQuery, type PageQueryOptions } from './paging';
 import type { OffsetPage } from './types';
-import { vehiclesCountQuery } from './vehicleCounts';
+import { vehiclesCountQuery, statusCountsOf } from './vehicleCounts';
+import type { HosRuleset } from './carrier';
 import { markVehicleDeleted, withoutDeletedVehicles } from './deletedVehicles';
 
 /** The real, raw `Vehicle` row (backend/prisma/schema.prisma `model Vehicle`). */
@@ -159,6 +160,8 @@ export function useDeleteVehicleGroup() {
 export interface DriverRow {
   id: string;
   username: string;
+  /** UI-005 — the raw `Driver` row's ruleset (every driver has one; omitted on create → carrier's). */
+  hosRuleset?: HosRuleset;
   firstName: string;
   lastName: string;
   email: string | null;
@@ -315,13 +318,14 @@ export function useVehiclesList({ params, useWindow, filter }: VehiclesListInput
   };
 }
 
-/** Segment counters `All · Active · Inactive · Unassigned` without loading the fleet: three
- * `limit: 1` totals (cached 60 s, shared with the Dashboard tiles) plus the drivers lookup —
- * a unit is "unassigned" when no driver row points at it, exactly the DRIVER column's rule. */
+/** Segment counters `All · Active · Inactive · Unassigned` + the header's out-of-service count
+ * without loading the fleet. UI-004 — one `limit: 1` page (cached, shared with the sidebar) whose
+ * `statusCounts` carries ACTIVE / INACTIVE / OUT_OF_SERVICE for the whole fleet; the three
+ * per-status `limit: 1` count requests it replaces are gone. A unit is "unassigned" when no
+ * driver row points at it, exactly the DRIVER column's rule. */
 export function useVehicleCounts() {
   const all = useQuery(vehiclesCountQuery());
-  const active = useQuery(vehiclesCountQuery('ACTIVE'));
-  const inactive = useQuery(vehiclesCountQuery('INACTIVE'));
+  const statusCounts = statusCountsOf(all.data);
   const drivers = useDriversLookup();
   const assigned = useMemo(
     () => new Set((drivers.data?.items ?? []).map((d) => d.assignedVehicleId).filter(Boolean)).size,
@@ -330,10 +334,11 @@ export function useVehicleCounts() {
   const total = all.data?.total ?? 0;
   return {
     all: total,
-    active: active.data?.total ?? 0,
-    inactive: inactive.data?.total ?? 0,
+    active: statusCounts?.ACTIVE ?? 0,
+    inactive: statusCounts?.INACTIVE ?? 0,
+    outOfService: statusCounts?.OUT_OF_SERVICE ?? 0,
     unassigned: drivers.data ? Math.max(0, total - assigned) : 0,
-    isLoading: all.isLoading || active.isLoading || inactive.isLoading,
+    isLoading: all.isLoading,
   };
 }
 
@@ -660,6 +665,20 @@ export interface VehicleDeviceRow {
   firmwareVersion: string | null;
   firmwareOutdated: boolean;
   lastHeartbeatAt: string | null;
+  /** What `GET /devices` actually sends (Prisma `Device`); `lastHeartbeatAt` is example-only. */
+  lastSeenAt?: string | null;
+  /** UI-012 — the EFFECTIVE link (stored CONNECTED and heard from within 30 min). */
+  connection?: 'CONNECTED' | 'DISCONNECTED';
+}
+
+/** UI-003 — a telemetry fix older than this says nothing about the truck's current speed (the
+ * backend's `SPEED_FRESH_MS`, the same line as Live Fleet's ELD_OFFLINE). */
+export const TELEMETRY_FRESH_MS = 30 * 60 * 1000;
+
+/** UI-012 — a device's effective link: `connection` when the backend sends it, else (an older
+ * backend) the stored `bleState`. Used by W-04's BLE badge and W-20's rows. */
+export function deviceConnection(device: { connection?: 'CONNECTED' | 'DISCONNECTED'; bleState: string }): 'CONNECTED' | 'DISCONNECTED' {
+  return device.connection ?? (device.bleState === 'CONNECTED' ? 'CONNECTED' : 'DISCONNECTED');
 }
 
 export function useDevicesForVehicle(vehicleId: string | undefined, enabled = true) {

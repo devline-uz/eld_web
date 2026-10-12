@@ -197,7 +197,24 @@ export interface DeviceRow {
   /** B-88 (shipped 2026-09-24). */
   autoFirmware?: boolean;
   shareDiagnostics?: boolean;
+  /** UI-012 — the EFFECTIVE link: CONNECTED only when the stored `bleState` is CONNECTED and the
+   * device was heard from within 30 min. Optional: an older backend omits it (fall back to
+   * `bleState`, see `vehicles.ts#deviceConnection`). */
+  connection?: DeviceConnection;
 }
+
+export type DeviceConnection = 'CONNECTED' | 'DISCONNECTED';
+
+/** UI-012 — `GET /devices` `connectionCounts` / `GET /devices/counts`: over the whole inventory
+ * (RETIRED excluded; list filters ignored). */
+export interface DeviceConnectionCounts {
+  total: number;
+  connected: number;
+  disconnected: number;
+  offlineOver24h: number;
+}
+
+export type DeviceListResponse = OffsetPage<DeviceRow> & { connectionCounts?: DeviceConnectionCounts };
 
 export interface DeviceListParams {
   [key: string]: string | number | undefined;
@@ -213,8 +230,8 @@ export interface DeviceListParams {
 export function useDevicesList(params: DeviceListParams = {}) {
   return useQuery({
     queryKey: qk.devices(params),
-    queryFn: ({ signal }) => client.get<OffsetPage<DeviceRow>>(endpoints.devices.list, { params, signal }),
-    ...typedCachePolicy<OffsetPage<DeviceRow>>('list'),
+    queryFn: ({ signal }) => client.get<DeviceListResponse>(endpoints.devices.list, { params, signal }),
+    ...typedCachePolicy<DeviceListResponse>('list'),
   });
 }
 

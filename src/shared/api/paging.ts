@@ -76,13 +76,22 @@ export function usePagedQuery<T>(input: PagedQueryInput<T>): PagedQueryResult<T>
   const { useWindow, filter } = input;
   const windowRows = useMemo(() => windowQuery.data?.items ?? [], [windowQuery.data]);
   const filtered = useMemo(() => (useWindow ? filter(windowRows) : []), [useWindow, windowRows, filter]);
+  // QA FE-014 — `items` is a stable array between renders (same page, same data), so consumers'
+  // `useMemo`/effects keyed on it do not re-run on every parent render.
+  const windowTotalPages = Math.max(1, Math.ceil(filtered.length / input.limit));
+  const windowPage = Math.min(input.page, windowTotalPages);
+  const windowItems = useMemo(
+    () => filtered.slice((windowPage - 1) * input.limit, windowPage * input.limit),
+    [filtered, windowPage, input.limit],
+  );
+  const serverItems = useMemo(() => serverQuery.data?.items ?? [], [serverQuery.data]);
 
   if (input.useWindow) {
     const total = filtered.length;
-    const totalPages = Math.max(1, Math.ceil(total / input.limit));
-    const page = Math.min(input.page, totalPages);
+    const totalPages = windowTotalPages;
+    const page = windowPage;
     return {
-      items: filtered.slice((page - 1) * input.limit, page * input.limit),
+      items: windowItems,
       total,
       totalPages,
       page,
@@ -100,7 +109,7 @@ export function usePagedQuery<T>(input: PagedQueryInput<T>): PagedQueryResult<T>
 
   const data = serverQuery.data;
   return {
-    items: data?.items ?? [],
+    items: serverItems,
     total: data?.total ?? 0,
     totalPages: data?.totalPages ?? 1,
     page: data?.page ?? input.page,
