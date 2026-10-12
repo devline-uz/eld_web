@@ -58,4 +58,12 @@ describe('ViolationsCard — violations continuing from an earlier day', () => {
     expect(screen.getByText('● No violations today')).toBeInTheDocument();
     expect(screen.getByText('0 open')).toBeInTheDocument();
   });
+
+  // BUG-003 — the roster said "1 with active violations" while this card said "0 open".
+  it('names the open violations filed on other days, the count the roster and dashboard show', () => {
+    render(
+      <ViolationsCard driverId="drv-1" date="2026-10-10" timezone="America/New_York" violations={[filed]} openTotal={3} />,
+    );
+    expect(screen.getByText('1 open · 2 open on other days')).toBeInTheDocument();
+  });
 });

@@ -28,6 +28,7 @@ import { useDriversList } from '@/shared/api/drivers';
 import { useVehiclesPicker } from '@/shared/api/vehicles';
 import {
   RECORD_STATUS,
+  useDriverOpenViolations,
   useLogDay,
   useLogEvents,
   useLogRange,
@@ -81,6 +82,9 @@ export default function HosLogsPage() {
   const date = validDayKey(params.get('date'), todayKey);
 
   const dayQuery = useLogDay(driverId || undefined, date);
+  // BUG-003 — the driver's active violations on ANY day (`GET /violations`, the same backend
+  // definition the dashboard and the Drivers roster count), so the card can reconcile with them.
+  const openViolationsQuery = useDriverOpenViolations(driverId || undefined);
   const eventsQuery = useLogEvents(driverId || undefined, date);
   const rangeQuery = useLogRange(driverId || undefined, shiftDay(date, -7), date);
   // WB-057 — the window is the driver's RODS day ± one day, built from `rodsDayStart` (the helper
@@ -401,6 +405,7 @@ export default function HosLogsPage() {
               timezone={timezone}
               violations={day?.violations ?? []}
               ongoing={day?.ongoingViolations ?? []}
+              openTotal={openViolationsQuery.data?.total}
             />
             <CertificationCard
               days={rangeQuery.data?.days ?? []}

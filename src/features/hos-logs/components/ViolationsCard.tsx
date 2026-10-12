@@ -26,6 +26,7 @@ export function ViolationsCard({
   timezone,
   violations,
   ongoing = [],
+  openTotal,
 }: {
   driverId: string;
   date: string;
@@ -37,15 +38,25 @@ export function ViolationsCard({
    * day of the crossing — listed, never counted as new open ones and never resolved from here.
    */
   ongoing?: OngoingViolation[];
+  /**
+   * BUG-003 — the driver's active (OPEN) violations on every day (`GET /violations`), the count the
+   * dashboard and the Drivers roster show. The ones not filed on this day are named in the subtitle.
+   */
+  openTotal?: number;
 }) {
   const [resolving, setResolving] = useState<HosViolation | null>(null);
   const open = violations.filter((violation) => violation.status === 'OPEN');
   // A type already filed on this day is not repeated as "continuing".
   const filedTypes = new Set(violations.map((violation) => violation.type));
   const continuing = ongoing.filter((violation) => !filedTypes.has(violation.type));
-  const subtitle = continuing.length
-    ? `${open.length} open · ${continuing.length} continuing from an earlier day`
-    : `${open.length} open`;
+  const otherDays = openTotal !== undefined ? Math.max(0, openTotal - open.length) : 0;
+  const subtitle = [
+    `${open.length} open`,
+    continuing.length ? `${continuing.length} continuing from an earlier day` : null,
+    otherDays ? `${otherDays} open on other days` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
   return (
     <Card>
