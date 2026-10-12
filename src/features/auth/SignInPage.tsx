@@ -224,7 +224,9 @@ export default function SignInPage() {
         <Button
           variant="secondary"
           size="lg"
-          className="mt-5 w-full"
+          // Header → first control is 40px: the dev form owns it (DeveloperSignIn `mt-10`);
+          // without the form, Google is the first control and takes the same gap.
+          className={IS_DEV_AUTH ? 'mt-5 w-full' : 'mt-10 w-full'}
           loading={busy === 'google'}
           iconLeft={<GoogleLogo />}
           onClick={() => void onGoogle()}
