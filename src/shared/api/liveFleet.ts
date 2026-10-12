@@ -1,5 +1,5 @@
 // B-3 `GET /live/fleet` (shipped 2026-09-14) — identical to backend `live-fleet.mapper.ts`
-// `LiveFleetResponse` (17 fields per unit + `generatedAt`), wrapped in the global `{ data }`
+// `LiveFleetResponse` (21 fields per unit + `generatedAt`), wrapped in the global `{ data }`
 // envelope that `client.ts` unwraps.
 // Both W-01 Fleet Dashboard and W-02 Live Fleet import from here — never from each other
 // (features/* never imports another features/*).
@@ -28,7 +28,19 @@ export interface LiveFleetUnit {
   shiftEndsAt: string | null;
   eldSerial: string | null;
   bleState: 'CONNECTED' | 'DISCONNECTED' | null;
+  /** UI-004 — the stored `Vehicle.status`. OUT_OF_SERVICE / INACTIVE units read `dutyStatus: 'INACTIVE'`. */
+  recordStatus: LiveRecordStatus;
+  /** UI-004 — NO_DEVICE (no ELD paired), ELD_OFFLINE (silent > 30 min) or ONLINE. */
+  connectivity: LiveConnectivity;
+  /** UI-003 — the duty status is not live (past its plausibility cap, or a D/ON unit whose ELD
+   * went silent); `dutyStatus` then reads ELD_OFFLINE. */
+  isStale: boolean;
+  /** UI-003 — the cap instant or the last signal heard; null when unknown / not stale. */
+  staleSince: string | null;
 }
+
+export type LiveRecordStatus = 'ACTIVE' | 'INACTIVE' | 'OUT_OF_SERVICE';
+export type LiveConnectivity = 'NO_DEVICE' | 'ELD_OFFLINE' | 'ONLINE';
 
 export interface LiveFleetResponse {
   items: LiveFleetUnit[];

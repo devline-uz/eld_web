@@ -40,7 +40,7 @@ import { EMPTY_STATE_COPY, searchEmptyState } from '@/shared/ui/copy';
 import { useToast } from '@/shared/ui/Toast';
 import { ConfirmDelete } from '@/shared/ui/Modal';
 import { formErrorMessage } from '@/shared/api/errors';
-import { formatLocal } from '@/shared/format/datetime';
+import { formatLocal, formatLocalDateTime } from '@/shared/format/datetime';
 import { formatWeight } from '@/shared/format/numbers';
 import { orDash } from '@/shared/format/empty';
 import { CreateTripModal } from './components/CreateTripModal';
@@ -261,7 +261,9 @@ export default function TripsPage() {
     {
       accessorKey: 'number',
       header: 'TRIP',
-      cell: ({ row }) => <span className="font-semibold text-primary">{row.original.number}</span>,
+      // Plain text, not link-blue: the ID opens nothing on its own — the row click selects the trip
+      // for the route panel (QA UI-018).
+      cell: ({ row }) => <span className="whitespace-nowrap font-semibold text-text">{row.original.number}</span>,
     },
     {
       id: 'driverUnit',
@@ -313,7 +315,7 @@ export default function TripsPage() {
       header: 'START DATE',
       cell: ({ row }) => {
         const at = row.original.startedAt ?? row.original.plannedStartAt;
-        return <span className="tabular-nums text-text">{at ? formatLocal(at, 'dateTime') : '—'}</span>;
+        return <span className="whitespace-nowrap tabular-nums text-text">{at ? formatLocalDateTime(at) : '—'}</span>;
       },
     },
     {
@@ -321,7 +323,7 @@ export default function TripsPage() {
       header: 'END DATE',
       cell: ({ row }) => {
         const at = row.original.completedAt ?? row.original.plannedEndAt;
-        return <span className="tabular-nums text-text">{at ? formatLocal(at, 'dateTime') : '—'}</span>;
+        return <span className="whitespace-nowrap tabular-nums text-text">{at ? formatLocalDateTime(at) : '—'}</span>;
       },
     },
     {
@@ -330,8 +332,20 @@ export default function TripsPage() {
       cell: ({ row }) => {
         const status = row.original.displayStatus;
         const tone =
-          status === 'Late' ? 'danger' : status === 'Loading' || status === 'Draft' ? 'warning' : status === 'Cancelled' ? 'neutral' : 'success';
-        return <Badge tone={tone}>{status}</Badge>;
+          status === 'Late'
+            ? 'danger'
+            : status === 'Loading' || status === 'Draft'
+              ? 'warning'
+              : status === 'Cancelled'
+                ? 'neutral'
+                : status === 'Upcoming'
+                  ? 'info'
+                  : 'success';
+        return (
+          <Badge tone={tone} className="whitespace-nowrap">
+            {status}
+          </Badge>
+        );
       },
     },
   ];
@@ -387,7 +401,7 @@ export default function TripsPage() {
       header: 'PICKUP WINDOW',
       cell: ({ row }) =>
         row.original.plannedStartAt ? (
-          <span className="tabular-nums text-text-secondary">{formatLocal(row.original.plannedStartAt, 'dateTime')}</span>
+          <span className="tabular-nums text-text-secondary">{formatLocalDateTime(row.original.plannedStartAt)}</span>
         ) : (
           <span className="text-text-muted">—</span>
         ),
@@ -412,7 +426,7 @@ export default function TripsPage() {
 
   const isLoading = trips.isKpiLoading || unassigned.isLoading;
 
-  usePageHeader({ title: 'Dispatch & Trips', subtitle: `${counts.active} active trips · ${counts.unassignedCount} unassigned loads · on-time ${counts.onTimePct}%` });
+  usePageHeader({ title: 'Dispatch & Trips', subtitle: `${counts.active} active trips · ${counts.unassignedCount} unassigned loads · on-time ${counts.onTimePct === null ? '—' : `${counts.onTimePct}%`}` });
 
   return (
     <div className="flex flex-col gap-4 xl:max-h-content-h">
@@ -474,7 +488,17 @@ export default function TripsPage() {
           <KpiRowSkeleton />
         ) : (
           <div className="grid grid-cols-4 gap-card-gap">
-            <KpiCard label="On-time delivery" value={`${counts.onTimePct}%`} icon={MapPin} iconTone="success" hint={`last ${trips.kpis.onTimeWindow} deliveries`} />
+            <KpiCard
+              label="On-time delivery"
+              value={counts.onTimePct === null ? '—' : `${counts.onTimePct}%`}
+              icon={MapPin}
+              iconTone="success"
+              hint={
+                trips.kpis.onTimeWindow === 0
+                  ? 'no deliveries yet'
+                  : `last ${trips.kpis.onTimeWindow} ${trips.kpis.onTimeWindow === 1 ? 'delivery' : 'deliveries'}`
+              }
+            />
             <KpiCard label="Active trips" value={counts.active} icon={MapPin} iconTone="info" chip={{ text: `${arrivingToday} arriving today`, tone: 'info' }} />
             <KpiCard label="Running late" value={counts.lateCount} icon={MapPin} iconTone="warning" hint={avgLateHint} />
             <KpiCard label="Unassigned loads" value={counts.unassignedCount} icon={Users} iconTone="warning" hint="needs driver" />

@@ -4,12 +4,14 @@ import { endpoints } from '@/shared/api/endpoints';
 import { fixture } from '../fixtures.generated';
 import { ok, url, serverPage } from '../envelope';
 import type { GeofenceRow } from '@/shared/api/geofences';
+import type { LiveFleetResponse } from '@/shared/api/liveFleet';
 
 /**
- * B-3 `GET /live/fleet` (shipped 2026-09-14) — same 17 fields + `generatedAt` as backend
- * `live-fleet.mapper.ts`; validated against openapi.json by the contract suite.
+ * B-3 `GET /live/fleet` (shipped 2026-09-14) — same 21 fields + `generatedAt` as backend
+ * `live-fleet.mapper.ts` (UI-003/UI-004 added recordStatus, connectivity, isStale, staleSince);
+ * validated against openapi.json by the contract suite.
  */
-export const LIVE_FLEET = {
+export const LIVE_FLEET: LiveFleetResponse = {
   items: [
     {
       vehicleId: 'veh_1',
@@ -30,6 +32,10 @@ export const LIVE_FLEET = {
       shiftEndsAt: '2026-09-12T15:59:34.000Z',
       eldSerial: 'PT30_A86E',
       bleState: 'CONNECTED',
+      recordStatus: 'ACTIVE',
+      connectivity: 'ONLINE',
+      isStale: false,
+      staleSince: null,
     },
     {
       vehicleId: 'veh_2',
@@ -50,6 +56,10 @@ export const LIVE_FLEET = {
       shiftEndsAt: '2026-09-12T21:10:00.000Z',
       eldSerial: 'PT30_11B2',
       bleState: 'CONNECTED',
+      recordStatus: 'ACTIVE',
+      connectivity: 'ONLINE',
+      isStale: false,
+      staleSince: null,
     },
     {
       vehicleId: 'veh_3',
@@ -70,6 +80,10 @@ export const LIVE_FLEET = {
       shiftEndsAt: '2026-09-13T05:20:00.000Z',
       eldSerial: 'PT30_7C10',
       bleState: 'CONNECTED',
+      recordStatus: 'ACTIVE',
+      connectivity: 'ONLINE',
+      isStale: false,
+      staleSince: null,
     },
     {
       vehicleId: 'veh_4',
@@ -90,6 +104,10 @@ export const LIVE_FLEET = {
       shiftEndsAt: null,
       eldSerial: 'PT30_9931',
       bleState: 'DISCONNECTED',
+      recordStatus: 'ACTIVE',
+      connectivity: 'ELD_OFFLINE',
+      isStale: false,
+      staleSince: null,
     },
     {
       // drv_6 / veh_6 match the generated roster row in vehiclesDriversGaps.ts (James Johnson · #106).
@@ -111,6 +129,10 @@ export const LIVE_FLEET = {
       shiftEndsAt: '2026-09-12T23:30:00.000Z',
       eldSerial: 'PT30_4C27',
       bleState: 'CONNECTED',
+      recordStatus: 'ACTIVE',
+      connectivity: 'ONLINE',
+      isStale: false,
+      staleSince: null,
     },
   ],
   generatedAt: '2026-09-12T15:39:10.000Z',

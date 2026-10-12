@@ -67,9 +67,10 @@ export const formatPercent = (value: Num): string =>
 export const formatWeight = (value: Num): string =>
   isFiniteNumber(value) ? `${formatNumber(value)} lbs` : EMPTY.dash;
 
-/** `$2,184.30` — right-aligned by the table, always two decimals. */
+/** `$2,184.30` / `-$66.80` — right-aligned by the table, always two decimals; the sign goes
+ * before the currency symbol, never `$-66.80` (QA UI-020). */
 export const formatMoney = (value: Num): string =>
-  isFiniteNumber(value) ? `$${formatNumber(value, 2)}` : EMPTY.dash;
+  isFiniteNumber(value) ? `${value < 0 ? '-' : ''}$${formatNumber(Math.abs(value), 2)}` : EMPTY.dash;
 
 /** `-0.42 g` / `0.38 g` — signed, two decimals. */
 export const formatGForce = (value: Num): string =>

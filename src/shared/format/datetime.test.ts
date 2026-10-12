@@ -8,6 +8,7 @@ import {
   formatDueBy,
   formatInTz,
   formatLocal,
+  formatLocalDateTime,
   timezoneAbbreviation,
 } from './datetime';
 
@@ -161,5 +162,14 @@ describe('three timezones — driver home terminal vs carrier vs browser', () =>
     expect(formatDateRange('2026-03-06T05:00:00Z', '2026-03-10T04:00:00Z', COLUMBUS)).toBe(
       'Mar 06 – Mar 10, 2026',
     );
+  });
+});
+
+describe('formatLocalDateTime (QA UI-018)', () => {
+  it('omits the year for the current year and shows it for any other year', () => {
+    const now = new Date('2026-06-15T12:00:00Z');
+    expect(formatLocalDateTime('2026-06-10T12:00:00Z', now)).not.toMatch(/2026/);
+    expect(formatLocalDateTime('2025-06-10T12:00:00Z', now)).toMatch(/^Jun \d{2}, 2025, \d{2}:\d{2}$/);
+    expect(formatLocalDateTime(null, now)).toBe('—');
   });
 });

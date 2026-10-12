@@ -3,6 +3,8 @@
 // itself stays a thin renderer and can meet the < 50 ms budget on a full day of records.
 import { formatInTimeZone } from 'date-fns-tz';
 import { formatHosHours, formatMinutes } from '@/shared/format';
+import { hosRulesetLabel } from '@/shared/lib/hosRuleset';
+import type { HosRuleset } from '@/shared/api/carrier';
 import type {
   HosViolation,
   RodsDutyStatus,
@@ -499,13 +501,11 @@ export function validDayKey(raw: string | null, todayKey: string): string {
 }
 
 /**
- * WB-071 — the rule set is read off the response's `cycleLimitSec` (§395.3(b): 60 h / 7 days or
- * 70 h / 8 days), never hardcoded. An unrecognised limit prints its hours without inventing a
- * day count; until the clocks load, no rule is claimed.
+ * WB-071 / UI-005 — the rule set is the driver's `hosRuleset` (from `GET /drivers/:id/hos`), never
+ * hardcoded. A backend that predates it falls back to the response's `cycleLimitSec` (§395.3(b):
+ * 60 h / 7 days or 70 h / 8 days) without claiming property- vs passenger-carrying; until the
+ * clocks load, no rule is claimed.
  */
-export function cycleRuleLabel(cycleLimitSec: number | undefined): string {
-  if (cycleLimitSec === undefined) return 'Property-carrying';
-  if (cycleLimitSec === 70 * 3600) return 'Property-carrying · 70 hr / 8 day';
-  if (cycleLimitSec === 60 * 3600) return 'Property-carrying · 60 hr / 7 day';
-  return `Property-carrying · ${formatHosHours(cycleLimitSec)} cycle`;
+export function cycleRuleLabel(cycleLimitSec: number | undefined, hosRuleset?: HosRuleset | null): string | undefined {
+  return hosRulesetLabel(hosRuleset, cycleLimitSec);
 }

@@ -1,5 +1,6 @@
 import { ProgressBar, hosTone } from './ProgressBar';
 import { cn } from './cn';
+import { HOS_ZERO_NOTE } from '../format/hos';
 
 // owner: web-design-system — §5.8. Drivers table and the Available hours card.
 
@@ -46,7 +47,11 @@ export function HosMeter({ label, remainingSec, limitSec, ofHint, zeroNote = 'li
         >
           {formatHm(remainingSec)}
         </span>
-        {exceeded && <span className="text-caption text-danger">{zeroNote}</span>}
+        {/* UI-002 — only `limit exceeded` (a driving overrun) is a violation in the danger tone; a
+            clock run out off the wheel ("cycle exhausted", "10-hour break required") is a warning. */}
+        {exceeded && (
+          <span className={cn('text-caption', zeroNote === HOS_ZERO_NOTE.exceeded ? 'text-danger' : 'text-warning')}>{zeroNote}</span>
+        )}
       </div>
       <ProgressBar ratio={limitSec > 0 ? remainingSec / limitSec : 0} tone={tone} label={label} />
     </div>

@@ -27,6 +27,8 @@ const NULLABLE = {
   liveUnit: new Set([
     'driverId', 'driverName', 'driverPhone', 'speedMph', 'headingDeg', 'odometerMi', 'lat', 'lon',
     'locationLabel', 'lastSeenAt', 'driveRemainingSec', 'shiftEndsAt', 'eldSerial', 'bleState',
+    // UI-003 — `string | null`: null whenever the unit is live (`isStale: false`).
+    'staleSince',
   ]),
 };
 
@@ -58,7 +60,8 @@ describe('GET /api/drivers/{id}/hos (B-2)', () => {
 describe('GET /api/live/fleet (B-3)', () => {
   it('matches the documented snapshot; nulls only where the backend declares them', async () => {
     const fleet = await client.get<LiveFleetResponse>(endpoints.live.fleet);
-    const populated = fleet.items.filter((u) => nullKeys(u).length === 0);
+    // `staleSince` is null on every live unit and documented as null, so it never disqualifies one.
+    const populated = fleet.items.filter((u) => nullKeys(u).filter((k) => k !== 'staleSince').length === 0);
     assertMatchesOpenApi('GET', '/api/live/fleet', { ...fleet, items: populated });
     expect(populated.length).toBeGreaterThan(0);
     for (const unit of fleet.items) {

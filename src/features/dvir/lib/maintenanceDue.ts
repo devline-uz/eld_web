@@ -67,3 +67,23 @@ function addDays(date: Date, days: number): Date {
 function diffDays(future: Date, now: Date): number {
   return Math.ceil((future.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
 }
+
+/**
+ * UI-011 — the W-09 "Upcoming maintenance" line for one schedule's server `due` block. Overdue is
+ * never folded into "Due in" with `Math.abs` (a −48,699 mi overdue service read "Due in 48,699 mi"):
+ * it reads "Overdue by 48,699 mi" on whichever interval tripped, in the danger tone.
+ */
+export function maintenanceDueLabel(
+  due: { state: DueState; milesRemaining: number | null; daysRemaining: number | null },
+  formatMiles: (mi: number) => string,
+): string {
+  const { milesRemaining: mi, daysRemaining: days } = due;
+  if (due.state === 'OVERDUE') {
+    if (mi !== null && mi <= 0) return mi === 0 ? 'Due now' : `Overdue by ${formatMiles(-mi)} mi`;
+    if (days !== null && days <= 0) return days === 0 ? 'Due today' : `Overdue by ${-days} d`;
+    return 'Overdue';
+  }
+  if (mi !== null) return `Due in ${formatMiles(mi)} mi`;
+  if (days !== null) return `Due in ${days} d`;
+  return 'Due';
+}

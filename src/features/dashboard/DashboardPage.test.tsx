@@ -7,7 +7,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
-import { ok, url } from '@/mocks/envelope';
+import { fail, ok, url } from '@/mocks/envelope';
 import { endpoints } from '@/shared/api/endpoints';
 import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/client';
 import { ToastProvider } from '@/shared/ui/Toast';
@@ -67,7 +67,7 @@ interface SummaryOverrides {
   liveFleet?: { items: unknown[]; generatedAt?: string };
   violations?: { items: unknown[]; total: number };
   unidentified?: { total: number; totalDurationSec: number };
-  vehicles?: { active: number; total: number };
+  vehicles?: { active: number; total: number; inactive?: number; outOfService?: number };
 }
 
 const DUTY_ON = new Set(['DRIVING', 'ON_DUTY', 'SLEEPER']);
@@ -183,6 +183,30 @@ describe('W-01 Fleet Dashboard', () => {
     expect(screen.getByText('Live fleet')).toBeInTheDocument();
   });
 
+  it('UI-015/UI-004: the duty card counts ASSIGNED drivers and the vehicles KPI names out-of-service units', async () => {
+    server.use(
+      http.get(url(endpoints.dashboard.summary), () =>
+        ok(
+          buildSummary({
+            liveFleet: {
+              items: [
+                { vehicleId: 'v1', unitNumber: '#101', driverId: 'd1', dutyStatus: 'DRIVING', lat: 40, lon: -83 },
+                { vehicleId: 'v2', unitNumber: '#102', driverId: 'd2', dutyStatus: 'ON_DUTY', lat: 40.1, lon: -83.1 },
+                { vehicleId: 'v3', unitNumber: '#103', driverId: null, dutyStatus: 'INACTIVE', lat: null, lon: null },
+              ],
+            },
+            vehicles: { active: 40, total: 45, inactive: 3, outOfService: 2 },
+          }),
+        ),
+      ),
+      violationsPage([]),
+    );
+    renderPage();
+
+    expect(await screen.findByText('2 assigned drivers · 2 on duty', {}, { timeout: 8000 })).toBeInTheDocument();
+    expect(screen.getByText('of 45 · 2 out of service')).toBeInTheDocument();
+  });
+
   it("shows an in-card error state when GET /dashboard/summary fails without leaving the page blank", async () => {
     server.use(
       http.get(url(endpoints.dashboard.summary), () => new Response(null, { status: 404 })),
@@ -195,6 +219,20 @@ describe('W-01 Fleet Dashboard', () => {
     expect(await screen.findByText('Could not load violations', {}, { timeout: 8000 })).toBeInTheDocument();
     // the KPI row still renders its labels (values fall back to "—") — the page is not blank.
     expect(screen.getByText('Active vehicles')).toBeInTheDocument();
+  });
+
+  it('FE-002: card error copy follows the error status — a 403 is not "the service did not respond"', async () => {
+    server.use(
+      http.get(url(endpoints.dashboard.summary), () => fail(403, 'FORBIDDEN', 'Forbidden.')),
+      http.get(url(endpoints.violations.list), () => fail(503, 'SERVICE_UNAVAILABLE', 'Down.')),
+    );
+    renderPage();
+    expect(await screen.findByText('Could not load the fleet', {}, { timeout: 8000 })).toBeInTheDocument();
+    expect(screen.getAllByText('You do not have access to this.').length).toBeGreaterThanOrEqual(2);
+    expect(
+      await screen.findByText(/The telematics service did not respond/, {}, { timeout: 8000 }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText(/The telematics service did not respond/)).toHaveLength(1);
   });
 
   it('renders a violation row with its unit, driver and the FULL-only row menu, and navigates to HOS logs on click', async () => {

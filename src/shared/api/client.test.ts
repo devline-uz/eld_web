@@ -103,9 +103,10 @@ describe('rule 2 · single-flight refresh on 401 TOKEN_EXPIRED', () => {
     expect(results).toHaveLength(3);
   });
 
-  it('does not refresh twice for the same request', async () => {
+  it('does not refresh twice for the same request, and signs out when the replay is still rejected', async () => {
     let refreshes = 0;
-    setAuthBridge({ getAccessToken: () => 'expired', getRefreshToken: () => 'r' });
+    const onSignOut = vi.fn();
+    setAuthBridge({ getAccessToken: () => 'expired', getRefreshToken: () => 'r', onSignOut });
     server.use(
       http.post(url(endpoints.auth.refresh), () => {
         refreshes += 1;
@@ -116,9 +117,49 @@ describe('rule 2 · single-flight refresh on 401 TOKEN_EXPIRED', () => {
 
     await expect(client.get(endpoints.vehicles.list)).rejects.toBeInstanceOf(ApiError);
     expect(refreshes).toBe(1);
+    expect(onSignOut).toHaveBeenCalledWith('expired');
   });
 
-  it('leaves a 401 that is not TOKEN_EXPIRED alone', async () => {
+  it.each(['TOKEN_INVALID', 'UNAUTHORIZED'])(
+    'FE-002: a %s 401 on an authenticated request refreshes once and replays',
+    async (code) => {
+      let accessToken = 'stale';
+      let refreshes = 0;
+      setAuthBridge({
+        getAccessToken: () => accessToken,
+        getRefreshToken: () => 'r',
+        onTokens: ({ accessToken: next }) => {
+          accessToken = next;
+        },
+      });
+      server.use(
+        http.post(url(endpoints.auth.refresh), () => {
+          refreshes += 1;
+          return ok({ accessToken: 'fresh' });
+        }),
+        http.get(VEHICLES, ({ request }) =>
+          request.headers.get('authorization') === 'Bearer fresh'
+            ? ok({ items: [], page: 1, limit: 25, total: 0, totalPages: 0 })
+            : fail(401, code, 'Invalid token.'),
+        ),
+      );
+      await expect(client.get(endpoints.vehicles.list)).resolves.toMatchObject({ total: 0 });
+      expect(refreshes).toBe(1);
+    },
+  );
+
+  it('FE-002: a TOKEN_INVALID that survives the refresh signs out with reason expired', async () => {
+    const onSignOut = vi.fn();
+    setAuthBridge({ getAccessToken: () => 'bad', getRefreshToken: () => 'r', onSignOut });
+    server.use(
+      http.post(url(endpoints.auth.refresh), () => ok({ accessToken: 'still-bad' })),
+      http.get(VEHICLES, () => fail(401, 'TOKEN_INVALID', 'Invalid token.')),
+    );
+    await expect(client.get(endpoints.vehicles.list)).rejects.toMatchObject({ status: 401 });
+    expect(onSignOut).toHaveBeenCalledWith('expired');
+  });
+
+  it('leaves a non-expired 401 on a request that carried no token alone', async () => {
     let refreshes = 0;
     server.use(
       http.post(url(endpoints.auth.refresh), () => {
@@ -180,7 +221,7 @@ describe('WB-086 · client.blob() obeys rules 2 and 7 like every other verb', ()
 
   it('refreshes only once for the same download', async () => {
     let refreshes = 0;
-    setAuthBridge({ getAccessToken: () => 'expired', getRefreshToken: () => 'r' });
+    setAuthBridge({ getAccessToken: () => 'expired', getRefreshToken: () => 'r', onSignOut: vi.fn() });
     server.use(
       http.post(url(endpoints.auth.refresh), () => {
         refreshes += 1;

@@ -272,6 +272,8 @@ export const endpoints = {
     remove: (id: string) => `/devices/${id}`,
     import: '/devices/import',
     export: '/devices/export',
+    /** UI-012 — fleet-wide connection counts (same object as `GET /devices` `connectionCounts`). */
+    counts: '/devices/counts',
     pair: (id: string) => `/devices/${id}/pair`,
     unpair: (id: string) => `/devices/${id}/unpair`,
     firmware: (id: string) => `/devices/${id}/firmware`,

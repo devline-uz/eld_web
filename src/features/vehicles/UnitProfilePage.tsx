@@ -19,6 +19,8 @@ import {
   useVehicleTelemetry,
   useCoDriverPairings,
   totalVehicleMiles,
+  TELEMETRY_FRESH_MS,
+  deviceConnection,
 } from '@/shared/api/vehicles';
 import { useDriversLookup } from '@/shared/api/lookups';
 import { qk, qkRoot } from '@/shared/api/queryKeys';
@@ -28,7 +30,7 @@ import { Card, SectionHeader } from '@/shared/ui/Card';
 import { ErrorState, LoadingState, ForbiddenState } from '@/shared/ui/states';
 import { formatOdometer, formatEngineHoursLong } from '@/shared/format/numbers';
 import { formatLocal } from '@/shared/format/datetime';
-import { useRelativeTime } from '@/shared/format/useRelativeTime';
+import { useNowTick, useRelativeTime } from '@/shared/format/useRelativeTime';
 import { NO_DRIVER_LOGS_REASON } from './lib/copy';
 import { AddVehicleModal } from './components/AddVehicleModal';
 import { AssignDriverModal } from './components/AssignDriverModal';
@@ -63,6 +65,15 @@ function TelemetryCell({ label, value, danger }: { label: string; value: string;
       <span className={`text-card-title font-semibold tabular-nums ${danger ? 'text-danger' : 'text-text'}`}>{value}</span>
     </div>
   );
+}
+
+/** The later of two optional ISO instants (null when neither parses). */
+function latestOf(a: string | null | undefined, b: string | null | undefined): string | null {
+  const ta = a ? Date.parse(a) : NaN;
+  const tb = b ? Date.parse(b) : NaN;
+  if (Number.isNaN(ta)) return Number.isNaN(tb) ? null : (b as string);
+  if (Number.isNaN(tb)) return a as string;
+  return ta >= tb ? (a as string) : (b as string);
 }
 
 export default function UnitProfilePage() {
@@ -115,7 +126,13 @@ export default function UnitProfilePage() {
   const [calibrateOpen, setCalibrateOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
-  const updatedAgo = useRelativeTime(vehicleQuery.dataUpdatedAt ? new Date(vehicleQuery.dataUpdatedAt).toISOString() : null, 'short');
+  // UI-003 — "Updated …" is when the unit last said something (newest telemetry point, else the
+  // ELD's last contact), never when the browser last refetched the vehicle record.
+  const latestTelemetry = telemetryQuery.data?.items[0] ?? null;
+  const pairedDevice = deviceQuery.data?.items[0] ?? null;
+  const lastSignalAt = latestOf(latestTelemetry?.time, pairedDevice?.lastSeenAt ?? pairedDevice?.lastHeartbeatAt);
+  const updatedAgo = useRelativeTime(lastSignalAt, 'short');
+  const now = useNowTick();
 
   if (!can('vehicles')) return <ForbiddenState screenName="Unit profile" />;
   if (vehicleQuery.isLoading) return <LoadingState rows={8} />;
@@ -151,7 +168,9 @@ export default function UnitProfilePage() {
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-page-title text-text">Unit {vehicle.unitNumber}</h2>
                 {vehicle.status === 'OUT_OF_SERVICE' && <Badge tone="danger" dot>Out of service</Badge>}
-                {device?.bleState === 'CONNECTED' && <Badge tone="info" dot>BLE connected</Badge>}
+                {/* UI-003 — the EFFECTIVE link (`connection`: stored CONNECTED and heard from within
+                    30 min), not the raw `bleState` a silent box keeps reporting. */}
+                {device && deviceConnection(device) === 'CONNECTED' && <Badge tone="info" dot>BLE connected</Badge>}
                 {activeDtcCount > 0 && <Badge tone="warning" dot>{activeDtcCount} active DTCs</Badge>}
               </div>
               <p className="mt-1 text-body text-text-muted">
@@ -233,10 +252,11 @@ export default function UnitProfilePage() {
             <Card>
               <SectionHeader
                 title="Live status"
-                subtitle={vehicleQuery.dataUpdatedAt ? `Updated ${updatedAgo}` : undefined}
+                subtitle={lastSignalAt ? `Updated ${updatedAgo}` : undefined}
                 action={
                   <div className="flex items-center gap-2">
-                    {telemetry?.speedMph != null && (
+                    {/* UI-003 — a speed older than 30 min is not the truck's speed now. */}
+                    {telemetry?.speedMph != null && now - Date.parse(telemetry.time) <= TELEMETRY_FRESH_MS && (
                       <Badge tone={telemetry.speedMph > 0 ? 'success' : 'neutral'} dot>
                         {Math.round(telemetry.speedMph)} mph
                       </Badge>

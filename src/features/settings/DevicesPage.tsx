@@ -21,7 +21,7 @@ import { formatRelative } from '@/shared/format/relative';
 import { orDash } from '@/shared/format/empty';
 import { client } from '@/shared/api/client';
 import { endpoints } from '@/shared/api/endpoints';
-import { useVehiclesPicker } from '@/shared/api/vehicles';
+import { useVehiclesPicker, deviceConnection } from '@/shared/api/vehicles';
 import { useDriversLookup } from '@/shared/api/lookups';
 import {
   useDevicesList,
@@ -55,6 +55,13 @@ const BLE_LABEL: Record<BleState, string> = {
 
 /** `GET /devices` sends `lastSeenAt`; `lastHeartbeatAt` is only in the Swagger example. A device
  * that has never connected reads `Never`, not `Not assigned`. */
+/** UI-012 — the fallback for `connectionCounts.offlineOver24h`: never heard from, or silent > 24 h. */
+const DEVICE_LONG_OFFLINE_MS = 24 * 60 * 60 * 1000;
+function isSilentOver24h(device: DeviceRow): boolean {
+  const seen = device.lastSeenAt ?? device.lastHeartbeatAt;
+  return !seen || Date.now() - Date.parse(seen) > DEVICE_LONG_OFFLINE_MS;
+}
+
 function lastSync(device: DeviceRow): string {
   const seen = device.lastHeartbeatAt ?? device.lastSeenAt ?? null;
   return seen ? formatRelative(seen) : 'Never';
@@ -114,15 +121,21 @@ export default function DevicesPage() {
 
   const rows = useMemo(() => devicesQuery.data?.items ?? [], [devicesQuery.data]);
 
-  const connected = rows.filter((d) => d.bleState === 'CONNECTED').length;
-  const disconnected = rows.filter((d) => d.bleState === 'DISCONNECTED').length;
+  // UI-012 — the KPIs and segment counters are fleet-wide (`connectionCounts`, RETIRED excluded,
+  // filters ignored) and "connected" is the EFFECTIVE link (`connection`: stored CONNECTED and
+  // heard from within 30 min). Only a backend that predates them falls back to this page's rows.
+  const connectionCounts = devicesQuery.data?.connectionCounts;
+  const pageConnected = rows.filter((d) => deviceConnection(d) === 'CONNECTED').length;
+  const total = connectionCounts?.total ?? devicesQuery.data?.total ?? rows.length;
+  const connected = connectionCounts?.connected ?? pageConnected;
+  const disconnected = connectionCounts?.disconnected ?? rows.length - pageConnected;
+  const offlineOver24h = connectionCounts?.offlineOver24h ?? rows.filter((d) => isSilentOver24h(d)).length;
   const outdated = rows.filter((d) => d.firmwareOutdated).length;
   const unassigned = rows.filter((d) => d.vehicleId === null).length;
-  const total = devicesQuery.data?.total ?? rows.length;
 
   const filteredBySegment = useMemo(() => {
-    if (segment === 'CONNECTED') return rows.filter((d) => d.bleState === 'CONNECTED');
-    if (segment === 'DISCONNECTED') return rows.filter((d) => d.bleState === 'DISCONNECTED');
+    if (segment === 'CONNECTED') return rows.filter((d) => deviceConnection(d) === 'CONNECTED');
+    if (segment === 'DISCONNECTED') return rows.filter((d) => deviceConnection(d) === 'DISCONNECTED');
     // QA-B — `Unassigned` used to fall through to every row.
     if (segment === 'UNASSIGNED') return rows.filter((d) => d.vehicleId === null);
     return rows;
@@ -202,7 +215,12 @@ export default function DevicesPage() {
     {
       id: 'bleState',
       header: 'BLE STATE',
-      cell: ({ row }) => <Badge tone={BLE_TONE[row.original.bleState]}>{BLE_LABEL[row.original.bleState]}</Badge>,
+      cell: ({ row }) => {
+        // UI-012 — the effective link: a box whose stored state still says CONNECTED but has been
+        // silent for > 30 min reads Disconnected. An out-of-range box keeps its own label.
+        const state: BleState = deviceConnection(row.original) === 'CONNECTED' ? 'CONNECTED' : row.original.bleState === 'OUT_OF_RANGE' ? 'OUT_OF_RANGE' : 'DISCONNECTED';
+        return <Badge tone={BLE_TONE[state]}>{BLE_LABEL[state]}</Badge>;
+      },
     },
     {
       id: 'queued',
@@ -233,7 +251,7 @@ export default function DevicesPage() {
 
       <div className="grid grid-cols-3 gap-4">
         <KpiCard label="Connected now" value={connected} chip={{ text: total ? `${Math.round((connected / total) * 100)}%` : '0%', tone: 'success' }} icon={Wifi} iconTone="success" />
-        <KpiCard label="Disconnected > 24 h" value={disconnected} chip={{ text: 'needs action', tone: 'danger' }} icon={WifiOff} iconTone="danger" />
+        <KpiCard label="Disconnected > 24 h" value={offlineOver24h} chip={{ text: 'needs action', tone: 'danger' }} icon={WifiOff} iconTone="danger" />
         <KpiCard label="Firmware out of date" value={outdated} chip={{ text: 'update from the row menu', tone: 'info' }} icon={RefreshCw} iconTone="info" />
       </div>
 

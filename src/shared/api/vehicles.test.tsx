@@ -24,6 +24,8 @@ import {
   useAssignDriver,
   useCalibrateOdometer,
   useImportVehicles,
+  useVehicleCounts,
+  deviceConnection,
 } from './vehicles';
 
 function wrapper() {
@@ -53,6 +55,33 @@ describe('totalVehicleMiles', () => {
 
   it('returns device + offset once a device reading exists (§4.3)', () => {
     expect(totalVehicleMiles({ odometerMi: 1000, deviceOdometerMi: 981109, odometerOffsetMi: 12480 })).toBe(993589);
+  });
+});
+
+describe('UI-004 useVehicleCounts', () => {
+  it('reads ACTIVE / INACTIVE / OUT_OF_SERVICE from one page\'s statusCounts — no per-status requests', async () => {
+    const statuses: Array<string | null> = [];
+    server.use(
+      http.get(url(endpoints.vehicles.list), ({ request }) => {
+        statuses.push(new URL(request.url).searchParams.get('status'));
+        return ok({ items: [], page: 1, limit: 1, total: 45, totalPages: 45, statusCounts: { ACTIVE: 40, INACTIVE: 3, OUT_OF_SERVICE: 2, total: 45 } });
+      }),
+    );
+    const { result } = renderHook(() => useVehicleCounts(), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current).toMatchObject({ all: 45, active: 40, inactive: 3, outOfService: 2 });
+    expect(statuses).toEqual([null]);
+  });
+});
+
+describe('UI-012 deviceConnection', () => {
+  it('prefers the effective `connection` over the stored bleState', () => {
+    expect(deviceConnection({ connection: 'DISCONNECTED', bleState: 'CONNECTED' })).toBe('DISCONNECTED');
+    expect(deviceConnection({ connection: 'CONNECTED', bleState: 'OUT_OF_RANGE' })).toBe('CONNECTED');
+  });
+  it('falls back to bleState on a backend that predates `connection`', () => {
+    expect(deviceConnection({ bleState: 'CONNECTED' })).toBe('CONNECTED');
+    expect(deviceConnection({ bleState: 'OUT_OF_RANGE' })).toBe('DISCONNECTED');
   });
 });
 

@@ -16,6 +16,7 @@ import { useCarrierTransferConfig } from '@/shared/api/reports';
 import { usePermission } from '@/shared/auth/usePermission';
 import { formatCarrier, timezoneAbbreviation } from '@/shared/format/datetime';
 import { blockCostKeys, getCostError, sanitizeCost } from '../lib/workOrderFieldGuards';
+import { formatEnumLabel } from '@/shared/format/enumLabel';
 
 /**
  * WB-137 — the `reported …` stamp is company context (§8.3), so it renders in `carrier.timezone`
@@ -164,7 +165,7 @@ export function ResolveDefectModal({ defect, onClose }: { defect: DefectTableRow
       onClose={onClose}
       isDirty={isDirty}
       title="Resolve defect"
-      subtitle={`Unit ${defect.vehicle?.unitNumber ?? '—'} · ${defect.category} · reported ${formatCarrier(defect.createdAt, carrierTz, 'dateTime')} ${timezoneAbbreviation(carrierTz, defect.createdAt)}`}
+      subtitle={`Unit ${defect.vehicle?.unitNumber ?? '—'} · ${formatEnumLabel(defect.category)} · reported ${formatCarrier(defect.createdAt, carrierTz, 'dateTime')} ${timezoneAbbreviation(carrierTz, defect.createdAt)}`}
       size="md"
       footer={
         <div className="flex w-full items-center justify-between gap-3">
@@ -182,7 +183,7 @@ export function ResolveDefectModal({ defect, onClose }: { defect: DefectTableRow
       <div className="flex flex-col gap-4">
         <div className="rounded-md bg-danger-soft p-3">
           <div className="flex items-center justify-between">
-            <span className="text-body-strong text-text">{defect.category}</span>
+            <span className="text-body-strong text-text">{formatEnumLabel(defect.category)}</span>
             <span className="flex items-center gap-1">
               <SeverityBadge severity={defect.severity} />
               {defect.outOfService && <span className="text-caption text-danger">· out of service</span>}

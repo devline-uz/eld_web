@@ -66,18 +66,21 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
   'POST /api/auth/password/reset': {
     "success": true
   },
+  'POST /api/auth/driver/password/forgot': {
+    "success": true
+  },
+  'POST /api/auth/driver/password/reset': {
+    "success": true
+  },
   'POST /api/auth/email/verify': {
     "success": true
   },
   'GET /api/auth/me': {
-    "id": "usr_1",
-    "type": "user",
-    "role": "ADMIN",
-    "permissions": {},
-    "fullName": "Sarah Chen",
-    "email": "sarah.chen@universal-logistics.com",
-    "avatarUrl": null,
-    "carrierName": "Universal Logistics Inc.",
+    "id": "drv_1",
+    "type": "driver",
+    "username": "johnsmith",
+    "fullName": "John Smith",
+    "email": "john@example.com",
     "homeTerminalTimezone": "America/New_York"
   },
   'GET /api/carrier': {
@@ -110,7 +113,8 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     {
       "key": "ADMIN",
       "isSystem": true,
-      "permissions": {}
+      "permissions": {},
+      "userCount": 1
     }
   ],
   'POST /api/roles': {
@@ -344,7 +348,8 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
           "allowPersonalConveyance": true,
           "allowYardMove": true,
           "shortHaulException": false,
-          "splitSleeperEnabled": false
+          "splitSleeperEnabled": false,
+          "hosRuleset": "US_70_8_PROPERTY"
         },
         "dutyStatus": "DRIVING",
         "unit": {
@@ -363,7 +368,11 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "page": 1,
     "limit": 25,
     "total": 1,
-    "totalPages": 1
+    "totalPages": 1,
+    "summary": {
+      "total": 57,
+      "withActiveViolations": 3
+    }
   },
   'GET /api/drivers/{id}/hos': {
     "driveRemainingSec": 16200,
@@ -377,7 +386,8 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "breakLimitSec": 28800,
     "dutyStatus": "DRIVING",
     "statusSince": "2026-09-12T18:00:00.000Z",
-    "computedAt": "2026-09-12T20:00:00.000Z"
+    "computedAt": "2026-09-12T20:00:00.000Z",
+    "hosRuleset": "US_70_8_PROPERTY"
   },
   'GET /api/drivers/{id}': {
     "id": "drv_1",
@@ -506,8 +516,8 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
         "createdAt": "2026-09-10T15:44:00.000Z",
         "fileName": "SMITH38018.csv",
         "outputFileComment": "ROADSIDE INSPECTION 2026-09-10",
-        "rangeStart": "2026-09-03",
-        "rangeEnd": "2026-09-10"
+        "rangeStart": "2026-09-03T00:00:00.000Z",
+        "rangeEnd": "2026-09-10T00:00:00.000Z"
       }
     ],
     "total": 1,
@@ -523,8 +533,8 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "createdAt": "2026-09-10T15:44:02.000Z",
     "fileName": "SMITH38018.csv",
     "outputFileComment": "ROADSIDE INSPECTION 2026-09-10",
-    "rangeStart": "2026-09-03",
-    "rangeEnd": "2026-09-10",
+    "rangeStart": "2026-09-03T00:00:00.000Z",
+    "rangeEnd": "2026-09-10T00:00:00.000Z",
     "warnings": [
       "ERODS_TEST_MODE"
     ],
@@ -545,7 +555,13 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "page": 1,
     "limit": 25,
     "total": 1,
-    "totalPages": 1
+    "totalPages": 1,
+    "statusCounts": {
+      "ACTIVE": 40,
+      "INACTIVE": 3,
+      "OUT_OF_SERVICE": 2,
+      "total": 45
+    }
   },
   'POST /api/vehicles': {
     "id": "veh_9",
@@ -675,10 +691,14 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
         "id": "trl_1",
         "number": "T-4471",
         "vin": "1JJV532W7YL123456",
-        "licensePlate": "TRL-9921",
-        "licenseState": "OH"
+        "status": "ACTIVE",
+        "deletedAt": null
       }
-    ]
+    ],
+    "page": 1,
+    "limit": 25,
+    "total": 1,
+    "totalPages": 1
   },
   'POST /api/trailers': {
     "id": "trl_9",
@@ -706,7 +726,9 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
   'PATCH /api/trailers/{id}': {
     "id": "trl_1",
     "number": "T-4471",
-    "licensePlate": "TRL-9922"
+    "vin": "1JJV532W7YL123456",
+    "status": "ACTIVE",
+    "deletedAt": null
   },
   'DELETE /api/trailers/{id}': {
     "success": true
@@ -927,38 +949,145 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "enabled": false,
     "status": "DISCONNECTED"
   },
+  'GET /api/mobile/app-config': {
+    "minSupportedVersion": "1.0.0",
+    "latestVersion": "1.0.3",
+    "storeUrl": "https://play.google.com/store/apps/details?id=com.onebook.eld_mobile",
+    "userManualUrl": null,
+    "privacyPolicyUrl": "https://onebook.example/privacy",
+    "termsUrl": null,
+    "minPt30Firmware": null,
+    "recommendedPt30Firmware": null,
+    "updateRequired": false,
+    "updateAvailable": true
+  },
+  'GET /api/mobile/legal/{kind}': {
+    "version": "2026-10",
+    "url": "https://onebook.example/privacy",
+    "html": null
+  },
   'GET /api/mobile/bootstrap': {
-    "serverTime": "2026-09-11T15:41:00.000Z",
-    "hosEngineVersion": "1.0.1",
+    "serverTime": "2026-10-08T15:41:00.000Z",
+    "hosEngineVersion": "1.0.3",
     "driver": {
       "id": "drv_1",
+      "username": "johnsmith",
       "firstName": "John",
       "lastName": "Smith",
       "cdlNumber": "W8569238",
-      "cdlState": "KY"
+      "cdlState": "KY",
+      "email": "john@example.com",
+      "phone": "+15025550100",
+      "exemptDriverStatus": false,
+      "status": "ACTIVE",
+      "homeTerminalName": "Columbus Terminal",
+      "homeTerminalTimezone": "America/New_York",
+      "hosRuleset": "US_70_8_PROPERTY",
+      "exceptions": {
+        "allowPersonalConveyance": true,
+        "allowYardMove": true,
+        "adverseDrivingEnabled": false,
+        "shortHaulException": false,
+        "splitSleeperEnabled": true,
+        "eldExempt": false,
+        "eldExemptReason": null
+      },
+      "lastSyncAt": "2026-10-08T15:30:00.000Z"
     },
     "vehicle": {
       "id": "veh_1",
-      "unitNumber": "4821"
+      "unitNumber": "4821",
+      "vin": "1FUJA6CV71LM12345",
+      "make": "Freightliner",
+      "model": "Cascadia",
+      "year": 2021,
+      "sleeperBerth": true,
+      "status": "ACTIVE",
+      "odometerMi": 84213
     },
     "device": {
       "id": "dev_1",
       "serial": "PT30-001",
-      "bleState": "CONNECTED"
+      "model": "PT30",
+      "firmware": "2.4.1",
+      "status": "ASSIGNED",
+      "bleState": "CONNECTED",
+      "bleMacAddress": "A4:C1:38:5E:A8:6E",
+      "pairedAt": "2026-09-01T12:00:00.000Z",
+      "periodicConnectedSec": 30,
+      "periodicDisconnectedMin": 30
+    },
+    "coDriver": null,
+    "availableVehicles": [
+      {
+        "id": "veh_2",
+        "unitNumber": "104",
+        "make": "Volvo",
+        "model": "VNL",
+        "deviceSerial": null
+      }
+    ],
+    "carrier": {
+      "name": "Acme Freight",
+      "dotNumber": "1234567",
+      "timezone": "America/New_York",
+      "hosRuleset": "US_70_8_PROPERTY",
+      "distanceUnit": "MILES",
+      "allowPersonalConveyance": true,
+      "allowYardMove": true,
+      "eldIdentifier": "OBK001",
+      "mainOfficeAddress": "1 Main St, Columbus, OH 43004",
+      "eldProvider": "OneBook ELD",
+      "eldRegistrationId": "AB12",
+      "erodsMode": "TEST"
     },
     "hos": {
+      "computedAt": "2026-10-08T15:41:00.000Z",
+      "timezone": "America/New_York",
       "state": {
         "currentStatus": "ON",
-        "driveRemainingSec": 39600
+        "driveRemainingSec": 39600,
+        "shiftRemainingSec": 48600,
+        "breakRemainingSec": 28800,
+        "cycleRemainingSec": 230400,
+        "dailyTotals": {
+          "off": 50400,
+          "sb": 0,
+          "drive": 0,
+          "on": 1860
+        },
+        "violations": [],
+        "statusSince": "2026-10-08T15:10:00.000Z",
+        "nextBreakDueAt": null,
+        "shiftEndsAt": "2026-10-09T05:10:00.000Z",
+        "cycleRecapAt": null,
+        "restartAvailableAt": null
       }
     },
     "inspectionPacket": {
+      "driverId": "drv_1",
+      "timezone": "America/New_York",
+      "generatedAt": "2026-10-08T15:41:00.000Z",
       "days": []
     },
     "syncConfig": {
       "batchMaxChanges": 500,
-      "batchMaxBytes": 1048576
-    }
+      "batchMaxBytes": 1048576,
+      "onlineIntervalSec": 60,
+      "onlineBatchThreshold": 50,
+      "offlineBackoffSec": [
+        30,
+        60,
+        300,
+        900,
+        1800
+      ],
+      "localEventRetentionDays": 30,
+      "localInspectionRetentionDays": 8,
+      "syncBacklogWarnDays": 30,
+      "syncBacklogWarnBytes": 209715200
+    },
+    "appUpdate": null
   },
   'POST /api/mobile/sync': {
     "accepted": [
@@ -967,37 +1096,64 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "rejected": [
       {
         "clientId": "uuid3",
-        "code": "DRIVING_TIME_IMMUTABLE"
+        "code": "DRIVING_TIME_IMMUTABLE",
+        "message": "Driving time can never be hand-entered."
+      },
+      {
+        "clientId": "uuid4",
+        "code": "SYNC_DELEGATION_NOT_ALLOWED"
       }
     ],
-    "serverChanges": [],
+    "serverChanges": [
+      {
+        "id": "9102",
+        "eventType": 1,
+        "eventCode": 3,
+        "eventDateTime": "2026-09-11T15:00:00.000Z",
+        "recordStatus": 1,
+        "recordOrigin": 1,
+        "annotation": null,
+        "supersedesId": null
+      }
+    ],
     "serverTime": "2026-09-11T15:41:00.000Z",
-    "hosEngineVersion": "1.0.1",
+    "hosEngineVersion": "1.0.3",
     "nextSyncAfterSec": 60
   },
   'POST /api/mobile/duty-status': {
-    "id": "evt_9101",
-    "status": "ON",
+    "id": "9101",
+    "driverId": "drv_1",
+    "status": "OFF",
+    "specialCondition": "PC",
+    "locationName": "Columbus, OH",
     "startAt": "2026-09-11T15:41:00.000Z",
+    "endAt": null,
     "recordOrigin": 2,
     "recordStatus": 1,
-    "applied": true
+    "applied": true,
+    "recertificationRequired": true
   },
   'POST /api/mobile/signature': {
-    "signatureImageId": "sig_9c2a",
-    "attachmentId": null,
-    "key": "signatures/drv_1/sig_9c2a.png",
+    "signatureImageId": "9c2a0f4e-0000-4000-8000-000000000031",
+    "attachmentId": "9c2a0f4e-0000-4000-8000-000000000031",
+    "key": "invoices/drv_1/9c2a0f4e-0000-4000-8000-000000000031.pdf",
     "sha256": "a1b2...",
-    "sizeBytes": 4821
+    "sizeBytes": 182044
   },
   'POST /api/mobile/dvir': {
     "id": "dvir_1",
+    "driverId": "drv_1",
     "vehicleId": "veh_1",
+    "trailerId": null,
+    "trailerNumber": "X53-1188",
     "type": "PRE_TRIP",
+    "submittedAt": "2026-10-08T12:00:00.000Z",
     "vehicleCondition": "DEFECTS_FOUND",
     "defectCount": 1,
     "photoCount": 2,
     "outOfService": false,
+    "signatureImageId": "sig_9c2a",
+    "mechanicSignatureImageId": null,
     "applied": true
   },
   'GET /api/mobile/available-vehicles': [
@@ -1009,6 +1165,10 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
       "deviceSerial": "PT30-1004"
     }
   ],
+  'POST /api/mobile/release-vehicle': {
+    "released": true,
+    "vehicleId": "veh_1"
+  },
   'POST /api/mobile/select-vehicle': {
     "id": "veh_1",
     "unitNumber": "104",
@@ -1018,7 +1178,30 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "year": 2021,
     "sleeperBerth": true,
     "status": "ACTIVE",
-    "odometerMi": 84213
+    "odometerMi": 84213,
+    "device": {
+      "id": "dev_1",
+      "serial": "PT30-1004",
+      "model": "PT30"
+    }
+  },
+  'GET /api/mobile/co-driver': {
+    "pairingId": "pair_1",
+    "startedAt": "2026-10-08T08:00:00.000Z",
+    "coDriver": {
+      "id": "drv_2",
+      "firstName": "Jane",
+      "lastName": "Doe",
+      "username": "jdoe"
+    },
+    "trip": {
+      "shippingDocuments": [
+        "BOL-2201"
+      ],
+      "trailerNumbers": [
+        "TR-1"
+      ]
+    }
   },
   'POST /api/mobile/co-driver/switch': {
     "accessToken": "eyJ...",
@@ -1029,18 +1212,87 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "ended": true
   },
   'GET /api/mobile/trip': {
-    "id": "trip_1",
-    "number": "T-1042",
-    "status": "IN_PROGRESS",
+    "source": "DAY_DETAILS",
+    "id": null,
+    "trip": null,
+    "logDate": "2026-10-08",
+    "shippingDocument": "BOL-2201",
+    "shippingDocuments": [
+      "BOL-2201"
+    ],
+    "trailerId": null,
+    "trailerNumber": "X53-1188",
+    "trailerNumbers": [
+      "X53-1188"
+    ],
+    "bobtail": false,
+    "notes": null,
+    "updatedAt": "2026-10-08T14:02:11.000Z",
     "stops": [],
     "documents": []
   },
   'PATCH /api/mobile/trip': {
+    "source": "TRIP",
     "id": "trip_1",
-    "shippingDocument": "BOL-2201",
+    "number": "T-1042",
+    "status": "IN_PROGRESS",
+    "vehicleId": "veh_1",
     "trailerId": "trl_1",
-    "notes": "Left the yard early"
+    "shippingDocument": "BOL-2201",
+    "shippingDocuments": [
+      "BOL-2201",
+      "BOL-2202"
+    ],
+    "trailerNumber": "TR-1",
+    "trailerNumbers": [
+      "TR-1",
+      "X53-1188"
+    ],
+    "bobtail": false,
+    "commodity": "Produce",
+    "weightLbs": 38000,
+    "pieces": 22,
+    "plannedStartAt": "2026-10-08T12:00:00.000Z",
+    "plannedEndAt": "2026-10-09T02:00:00.000Z",
+    "startedAt": "2026-10-08T12:10:00.000Z",
+    "completedAt": null,
+    "etaAt": "2026-10-09T01:30:00.000Z",
+    "onTime": true,
+    "notes": "Left the yard early",
+    "stops": [
+      {
+        "id": "stp_1",
+        "sequence": 1,
+        "type": "PICKUP",
+        "name": "Shipper #4821",
+        "address": "100 Dock Rd, Columbus, OH",
+        "latitude": 39.96,
+        "longitude": -82.99,
+        "scheduledAt": "2026-10-08T12:00:00.000Z",
+        "arrivedAt": "2026-10-08T12:05:00.000Z",
+        "departedAt": null,
+        "status": "ARRIVED",
+        "note": null
+      }
+    ],
+    "documents": [
+      {
+        "tripId": "trip_1",
+        "number": "T-1042",
+        "shippingDocument": "BOL-2201",
+        "commodity": "Produce",
+        "pieces": 22,
+        "weightLbs": 38000
+      }
+    ]
   },
+  'GET /api/mobile/trailers': [
+    {
+      "id": "trl_1",
+      "number": "TR-1",
+      "plate": null
+    }
+  ],
   'GET /api/mobile/dvirs': [
     {
       "id": "dvir_1",
@@ -1049,14 +1301,96 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
       "submittedAt": "2026-09-10T12:00:00.000Z",
       "vehicleCondition": "DEFECTS_FOUND",
       "defectCount": 1,
-      "repairStatus": "PENDING"
+      "repairStatus": "PENDING",
+      "trailerNumber": "X53-1188",
+      "odometerMi": 84213
     }
   ],
   'GET /api/mobile/dvirs/{id}': {
     "id": "dvir_1",
+    "driverId": "drv_1",
     "vehicleId": "veh_1",
-    "defects": [],
+    "trailerId": null,
+    "type": "PRE_TRIP",
+    "submittedAt": "2026-09-10T12:00:00.000Z",
+    "odometerMi": 84213,
+    "location": {
+      "lat": 39.96,
+      "lon": -82.99,
+      "name": "2mi ESE OH Columbus"
+    },
+    "trailerNumber": "X53-1188",
+    "vehicleCondition": "DEFECTS_FOUND",
+    "notes": null,
+    "repairStatus": "PENDING",
+    "driverSignature": {
+      "key": "signatures/drv_1/sig_9c2a.png",
+      "url": "https://...",
+      "hash": "a1b2..."
+    },
+    "mechanicSignature": null,
+    "nextDriverReviewedAt": null,
+    "defects": [
+      {
+        "id": "def_1",
+        "part": "TRUCK",
+        "category": "BRAKES_SERVICE",
+        "severity": "MAJOR",
+        "description": "Air leak at the rear axle",
+        "status": "OPEN",
+        "outOfService": false,
+        "resolvedAt": null,
+        "resolutionNote": null,
+        "photos": [
+          {
+            "id": "att_1",
+            "url": "https://...",
+            "mimeType": "image/jpeg",
+            "sizeBytes": 120344
+          }
+        ]
+      }
+    ],
     "photos": []
+  },
+  'GET /api/mobile/defect-catalog': [
+    {
+      "code": "ACCIDENT_PHOTO",
+      "name": "Accident Photo",
+      "part": "TRUCK",
+      "category": "Accident",
+      "critical": false,
+      "isPhoto": true
+    },
+    {
+      "code": "BRAKES_SERVICE",
+      "name": "Brakes, Service",
+      "part": "TRUCK",
+      "category": "Brakes",
+      "critical": true,
+      "isPhoto": false
+    }
+  ],
+  'GET /api/mobile/saved-signature': {
+    "signatureImageId": "3f2c...",
+    "key": "signatures/drv_1/3f2c.png",
+    "url": "https://...",
+    "mimeType": "image/png",
+    "sizeBytes": 4821,
+    "sha256": "a1b2...",
+    "updatedAt": "2026-10-08T12:00:00.000Z"
+  },
+  'PUT /api/mobile/saved-signature': {
+    "signatureImageId": "3f2c...",
+    "key": "signatures/drv_1/3f2c.png",
+    "url": "https://...",
+    "mimeType": "image/png",
+    "sizeBytes": 4821,
+    "sha256": "a1b2...",
+    "updatedAt": "2026-10-08T12:00:00.000Z"
+  },
+  'DELETE /api/mobile/saved-signature': {
+    "deleted": true
   },
   'GET /api/mobile/contacts': [
     {
@@ -1075,8 +1409,11 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
   'POST /api/mobile/push-tokens': {
     "id": "pt_1",
     "driverId": "drv_1",
+    "token": "fcm-token...",
     "platform": "IOS",
-    "lastSeenAt": "2026-09-21T00:00:00.000Z"
+    "deviceLabel": "iPhone 15",
+    "lastSeenAt": "2026-09-21T00:00:00.000Z",
+    "createdAt": "2026-09-01T00:00:00.000Z"
   },
   'DELETE /api/mobile/push-tokens/{token}': {
     "deleted": true
@@ -1088,7 +1425,8 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
       "serial": "PT30-001",
       "firmware": "2.4.1",
       "bleState": "CONNECTED",
-      "storedEventsCount": 12
+      "storedEventsCount": 12,
+      "lastDeviceStatusAt": "2026-09-21T00:00:00.000Z"
     },
     "activeCodes": [
       {
@@ -1105,6 +1443,7 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     },
     "hosDrift": {
       "computedAt": "2026-09-21T00:00:00.000Z",
+      "lastComparedAt": "2026-09-21T00:00:05.000Z",
       "maxDriftSec": 4,
       "driftAlerted": false
     }
@@ -1114,31 +1453,159 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
       {
         "id": "cnv_1",
         "type": "DIRECT",
+        "title": "Jane Dispatcher",
+        "lastMessageAt": "2026-09-11T15:00:00.000Z",
         "lastMessage": {
           "id": "msg_1",
-          "body": "On schedule."
+          "conversationId": "cnv_1",
+          "senderUserId": "usr_1",
+          "senderDriverId": null,
+          "body": "On schedule.",
+          "attachmentId": null,
+          "clientId": null,
+          "sentAt": "2026-09-11T15:00:00.000Z",
+          "deliveredAt": null,
+          "readAt": null,
+          "senderId": "usr_1",
+          "senderType": "STAFF",
+          "senderName": "Jane Dispatcher"
         },
-        "unreadCount": 2
+        "unreadCount": 2,
+        "participants": [
+          {
+            "id": "drv_1",
+            "type": "DRIVER",
+            "name": "John Smith"
+          },
+          {
+            "id": "usr_1",
+            "type": "STAFF",
+            "name": "Jane Dispatcher"
+          }
+        ]
       }
     ]
+  },
+  'POST /api/mobile/conversations': {
+    "conversationId": "cnv_1",
+    "message": {
+      "id": "msg_1",
+      "body": "Running 20 min late.",
+      "sentAt": "2026-10-08T15:00:00.000Z",
+      "senderId": "drv_1",
+      "senderType": "DRIVER",
+      "clientId": "0b9d6f5e-0000-4000-8000-000000000002"
+    }
   },
   'GET /api/mobile/conversations/{id}/messages': {
     "items": [
       {
         "id": "msg_1",
+        "conversationId": "cnv_1",
+        "senderUserId": "usr_1",
+        "senderDriverId": null,
         "body": "On schedule.",
-        "sentAt": "2026-09-11T15:00:00.000Z"
+        "attachmentId": null,
+        "clientId": null,
+        "sentAt": "2026-09-11T15:00:00.000Z",
+        "deliveredAt": null,
+        "readAt": null,
+        "senderId": "usr_1",
+        "senderType": "STAFF",
+        "senderName": "Jane Dispatcher"
       }
     ],
     "limit": 50
   },
   'POST /api/mobile/conversations/{id}/messages': {
     "id": "msg_2",
+    "conversationId": "cnv_1",
+    "senderUserId": null,
+    "senderDriverId": "drv_1",
     "body": "Confirmed.",
-    "sentAt": "2026-09-11T15:05:00.000Z"
+    "attachmentId": null,
+    "clientId": "5d2c...",
+    "sentAt": "2026-09-11T15:05:00.000Z",
+    "deliveredAt": null,
+    "readAt": null,
+    "senderId": "drv_1",
+    "senderType": "DRIVER",
+    "senderName": "John Smith"
   },
   'POST /api/mobile/conversations/{id}/read': {
     "messagesMarked": 3
+  },
+  'GET /api/mobile/maintenance': [
+    {
+      "id": "3f2c0a7e-0000-4000-8000-000000000001",
+      "scheduleType": "OIL_CHANGE",
+      "scheduleName": "Engine oil & filter",
+      "frequencyMi": 25000,
+      "remainingMi": 1200,
+      "status": "OPEN",
+      "at": "2026-11-01T00:00:00.000Z"
+    }
+  ],
+  'GET /api/mobile/maintenance/{id}': {
+    "id": "3f2c0a7e-0000-4000-8000-000000000001",
+    "scheduleType": "OIL_CHANGE",
+    "scheduleName": "Engine oil & filter",
+    "frequencyMi": 25000,
+    "remainingMi": 1200,
+    "status": "REJECTED",
+    "at": "2026-10-08T12:00:00.000Z",
+    "invoiceNumber": "INV-2291",
+    "vendorName": "Pilot Truck Care",
+    "cost": 412.5,
+    "notes": "Changed filters too",
+    "invoiceAttachment": {
+      "id": "9a1d...",
+      "fileName": "invoice-INV-2291.pdf",
+      "mimeType": "application/pdf"
+    },
+    "submittedAt": "2026-10-08T12:00:00.000Z",
+    "reviewNote": "Amount does not match the PDF."
+  },
+  'POST /api/mobile/maintenance/{id}/submit': {
+    "id": "3f2c0a7e-0000-4000-8000-000000000001",
+    "scheduleType": "OIL_CHANGE",
+    "scheduleName": "Engine oil & filter",
+    "frequencyMi": 25000,
+    "remainingMi": 1200,
+    "status": "OPEN",
+    "at": "2026-10-08T12:00:00.000Z",
+    "invoiceNumber": "INV-2291",
+    "vendorName": "Pilot Truck Care",
+    "cost": 412.5,
+    "notes": "Changed filters too",
+    "invoiceAttachment": {
+      "id": "9a1d2b3c-0000-4000-8000-000000000009",
+      "fileName": "invoice-INV-2291.pdf",
+      "mimeType": "application/pdf"
+    },
+    "submittedAt": "2026-10-08T12:00:00.000Z",
+    "reviewNote": null
+  },
+  'POST /api/mobile/device/mac': {
+    "deviceId": "0b6f1c2e-0000-4000-8000-000000000101",
+    "macAddress": "A4:C1:38:5E:A8:6E",
+    "outcome": "STORED"
+  },
+  'GET /api/mobile/device-config': {
+    "serial": "PT30_A86E",
+    "model": "PT30",
+    "systemVars": {
+      "PERIODIC_EVENT_GAP": 30,
+      "PERIODIC_EVENT_GAP_NOBLE": 30,
+      "EVENTS_STORED": 1,
+      "DRIVING_ACCL": 0,
+      "DRIVING_BRAKING": 450,
+      "DRIVING_CORNERING": 0,
+      "HSI_MODE": 1
+    },
+    "autoFirmware": true,
+    "shareDiagnostics": true,
+    "configVersion": "3f9a1c0b7d2e"
   },
   'POST /api/logs/edit-requests/{id}/accept': {
     "id": "edt_1",
@@ -1204,7 +1671,7 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
         "odometerMiles": 993590,
         "latitude": 38.02,
         "longitude": -84.5,
-        "locationDescription": "0.64 mi N of Florence, KY",
+        "locationDescription": "1mi N KY Florence",
         "totalEngineHours": 4321.4,
         "checksumValid": true
       }
@@ -1266,86 +1733,211 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     ]
   },
   'POST /api/mobile/log-entries': {
-    "id": "evt_9100",
-    "eventSequenceId": 1043,
+    "id": "9100",
+    "driverId": "drv_1",
+    "status": "ON",
+    "specialCondition": "NONE",
+    "locationName": "Columbus, OH",
+    "startAt": "2026-09-10T18:26:58.000Z",
+    "endAt": null,
     "recordOrigin": 2,
     "recordStatus": 1,
-    "dutyStatus": "ON",
-    "occurredAt": "2026-09-10T18:26:58.000Z",
-    "annotation": "Loading at shipper #4821",
+    "applied": true,
     "recertificationRequired": true
   },
   'POST /api/mobile/certify': {
     "driverId": "drv_1",
-    "certified": [
+    "days": [
       {
         "date": "2026-09-10",
+        "certified": true,
+        "certificationCount": 1,
+        "eventCode": 1,
         "certifiedAt": "2026-09-11T15:41:00.000Z",
-        "signatureCount": 1
+        "certifierType": "DRIVER"
       }
     ]
   },
   'GET /api/mobile/log-edit-requests': {
+    "driverId": "drv_1",
     "items": [
       {
-        "id": "edt_1",
-        "date": "2026-09-10",
+        "id": "9120",
+        "driverId": "drv_1",
         "status": "PENDING",
-        "reason": "Driver forgot to switch to On duty while loading at shipper #4821.",
-        "proposed": {
-          "status": "ON",
-          "startAt": "2026-09-10T18:26:58.000Z",
-          "endAt": "2026-09-10T19:30:00.000Z"
-        }
+        "kind": "EDIT",
+        "originalEventId": "9100",
+        "proposedStatus": "ON",
+        "proposedSpecial": "NONE",
+        "proposedStart": "2026-09-10T18:26:58.000Z",
+        "proposedEnd": "2026-09-10T19:30:00.000Z",
+        "locationName": "Columbus, OH",
+        "annotation": "Forgot to switch to On duty while loading",
+        "requestedById": "usr_1",
+        "requestedAt": "2026-09-11T14:00:00.000Z",
+        "resolvedAt": null
       }
     ]
   },
+  'GET /api/mobile/certification-status': [
+    {
+      "date": "2026-10-07",
+      "certified": true,
+      "certifiedAt": "2026-10-08T01:02:00.000Z",
+      "certificationCount": 1,
+      "recertificationRequired": false
+    },
+    {
+      "date": "2026-10-08",
+      "certified": false,
+      "certifiedAt": null,
+      "certificationCount": 1,
+      "recertificationRequired": true
+    }
+  ],
   'GET /api/mobile/logs': {
     "driverId": "drv_1",
     "date": "2026-09-10",
     "timezone": "America/New_York",
     "summary": {
-      "drivingSec": 32400,
-      "onDutySec": 7200,
+      "date": "2026-09-10",
+      "timezone": "America/New_York",
       "offDutySec": 39600,
       "sleeperSec": 7200,
-      "certified": false
+      "drivingSec": 32400,
+      "onDutySec": 7200,
+      "totalDistanceMi": 512,
+      "dayLengthSec": 86400,
+      "certified": false,
+      "certifiedAt": null,
+      "certificationCount": 0,
+      "hasViolation": false,
+      "violationCount": 0,
+      "hasUnassigned": false,
+      "hasEdits": false
     },
     "graph": [
       {
         "status": "OFF",
         "effective": "OFF",
+        "special": "NONE",
         "startAt": "2026-09-10T04:00:00.000Z",
-        "durationSec": 3600
+        "endAt": "2026-09-10T05:00:00.000Z",
+        "durationSec": 3600,
+        "eventId": "9100",
+        "locationDescription": "3mi W OH Columbus",
+        "odometerMi": 120345,
+        "engineHours": 5321.4,
+        "annotation": null,
+        "carriedOver": true
       }
-    ]
+    ],
+    "events": [
+      {
+        "id": "9101",
+        "eventType": 1,
+        "eventCode": 3,
+        "eventSequenceId": 1043,
+        "eventDateTime": "2026-09-10T05:00:00.000Z",
+        "recordStatus": 1,
+        "recordOrigin": 1,
+        "status": "D",
+        "locationName": null,
+        "totalVehicleMiles": 120345,
+        "totalEngineHours": 5321.4,
+        "annotation": null,
+        "comment": null,
+        "supersedesId": null,
+        "editedById": null,
+        "editorType": null,
+        "editReason": null,
+        "vehicleId": "veh_1",
+        "eventId": "9101",
+        "locationDescription": "3mi W OH Columbus",
+        "odometerMi": 120345,
+        "engineHours": 5321.4,
+        "specialCondition": null,
+        "malfunctionCode": null,
+        "diagnosticCode": null
+      }
+    ],
+    "trip": {
+      "shippingDocuments": [
+        "BOL-4821"
+      ],
+      "trailerNumbers": [
+        "TR-778"
+      ],
+      "notes": null,
+      "bobtail": false,
+      "tripIds": [
+        "5b0c…"
+      ],
+      "tripNumbers": [
+        "T-1042"
+      ],
+      "dayDetails": false
+    },
+    "malfunctionIndicator": false,
+    "diagnosticIndicator": false,
+    "violations": [],
+    "certification": {
+      "certified": false,
+      "certifiedAt": null,
+      "certifiedById": null,
+      "certifierType": null,
+      "certificationCount": 0,
+      "signatureUrl": null,
+      "recertificationRequired": false
+    }
   },
   'POST /api/ingest/events': {
-    "received": 120,
-    "stored": 118,
+    "accepted": 118,
     "duplicates": 2,
-    "unidentified": 0,
+    "sequenceIds": {
+      "drv_1": [
+        1042,
+        1043
+      ]
+    },
     "warnings": [],
-    "firstEventSequenceId": 1042,
-    "lastEventSequenceId": 1159
+    "malfunctions": [],
+    "diagnostics": [],
+    "unidentifiedSegmentIds": [],
+    "confirmationRequests": []
   },
   'POST /api/ingest/telemetry': {
-    "received": 60,
-    "stored": 60,
-    "duplicates": 0
+    "accepted": 60,
+    "duplicates": 0,
+    "denserThanContract": 0
+  },
+  'POST /api/ingest/device-events': {
+    "received": 2,
+    "stored": 2,
+    "duplicates": 0,
+    "safetyEvents": 1
   },
   'POST /api/ingest/ble-state': {
-    "deviceId": "dev_1",
-    "bleState": "OUT_OF_RANGE",
-    "recordedAt": "2026-09-11T15:41:00.000Z",
-    "diagnosticRaised": false
+    "bleState": "CONNECTED",
+    "connectionType": "USB",
+    "disconnectedAlert": false
   },
   'POST /api/ingest/device-status': {
-    "deviceId": "dev_1",
-    "storedEventCount": 12,
-    "firmwareVersion": "L108",
-    "firmwareOutdated": false,
-    "lastHeartbeatAt": "2026-09-11T15:41:00.000Z"
+    "storedEventsCount": 12,
+    "backlogAlert": false,
+    "codes": [],
+    "model": "PT40",
+    "vinMismatch": false,
+    "systemVars": {
+      "PERIODIC_EVENT_GAP": 30,
+      "PERIODIC_EVENT_GAP_NOBLE": 30,
+      "EVENTS_STORED": 1,
+      "DRIVING_ACCL": 0,
+      "DRIVING_BRAKING": 450,
+      "DRIVING_CORNERING": 0,
+      "HSI_MODE": 1
+    },
+    "configVersion": "3f9a1c0b7d2e"
   },
   'GET /api/vehicles/{id}/dtc': {
     "items": [
@@ -1354,10 +1946,49 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
         "vehicleId": "veh_1",
         "spn": 100,
         "fmi": 1,
+        "code": null,
+        "bus": "J1939",
+        "milOn": true,
+        "conversionMethod": 0,
+        "active": null,
         "occurrence": 3,
         "source": "0",
         "description": null,
         "firstSeenAt": "2026-09-10T12:00:00.000Z",
+        "lastSeenAt": "2026-09-11T08:00:00.000Z",
+        "clearedAt": null
+      },
+      {
+        "id": "dtc_2",
+        "vehicleId": "veh_1",
+        "spn": null,
+        "fmi": 3,
+        "code": "SID 254",
+        "bus": "J1708",
+        "milOn": false,
+        "conversionMethod": null,
+        "active": true,
+        "occurrence": 1,
+        "source": null,
+        "description": null,
+        "firstSeenAt": "2026-09-11T08:00:00.000Z",
+        "lastSeenAt": "2026-09-11T08:00:00.000Z",
+        "clearedAt": null
+      },
+      {
+        "id": "dtc_3",
+        "vehicleId": "veh_1",
+        "spn": null,
+        "fmi": null,
+        "code": "P0301",
+        "bus": "OBD_II",
+        "milOn": true,
+        "conversionMethod": null,
+        "active": null,
+        "occurrence": 1,
+        "source": null,
+        "description": null,
+        "firstSeenAt": "2026-09-11T08:00:00.000Z",
         "lastSeenAt": "2026-09-11T08:00:00.000Z",
         "clearedAt": null
       }
@@ -1415,13 +2046,45 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
         "serial": "PT30_A86E",
         "model": "PT30",
         "bleState": "CONNECTED",
-        "firmwareOutdated": false
+        "firmware": "L108",
+        "firmwareOutdated": false,
+        "productName": "PT30",
+        "bleFirmware": "1.4.2",
+        "imei": null,
+        "reportedVin": "1FUJGLDR7CLBP8834",
+        "sdkVersion": "6.11.1",
+        "appPlatform": "ANDROID",
+        "connectionType": "BLE",
+        "busType": "J1939",
+        "lastInfoAt": "2026-10-10T12:00:00.000Z",
+        "periodicConnectedSec": 30,
+        "periodicNoBleSec": 30,
+        "periodicDisconnectedMin": 30,
+        "harshAccelMg": 0,
+        "harshBrakeMg": 450,
+        "harshCornerMg": 0,
+        "systemVars": {
+          "PERIODIC_EVENT_GAP": 30,
+          "PERIODIC_EVENT_GAP_NOBLE": 30,
+          "EVENTS_STORED": 1,
+          "DRIVING_ACCL": 0,
+          "DRIVING_BRAKING": 450,
+          "DRIVING_CORNERING": 0,
+          "HSI_MODE": 1
+        },
+        "connection": "CONNECTED"
       }
     ],
     "page": 1,
     "limit": 25,
     "total": 1,
-    "totalPages": 1
+    "totalPages": 1,
+    "connectionCounts": {
+      "total": 12,
+      "connected": 7,
+      "disconnected": 5,
+      "offlineOver24h": 2
+    }
   },
   'POST /api/devices': {
     "id": "dev_9",
@@ -1440,6 +2103,12 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
       }
     ]
   },
+  'GET /api/devices/counts': {
+    "total": 12,
+    "connected": 7,
+    "disconnected": 5,
+    "offlineOver24h": 2
+  },
   'GET /api/devices/{id}': {
     "id": "dev_1",
     "serial": "PT30_A86E",
@@ -1447,9 +2116,33 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "status": "ASSIGNED",
     "vehicleId": "veh_1",
     "bleState": "CONNECTED",
-    "firmwareVersion": "L108",
+    "firmware": "L108",
     "firmwareOutdated": false,
-    "lastHeartbeatAt": "2026-09-11T15:41:00.000Z"
+    "lastSeenAt": "2026-09-11T15:41:00.000Z",
+    "productName": "PT30",
+    "bleFirmware": "1.4.2",
+    "imei": null,
+    "reportedVin": "1FUJGLDR7CLBP8834",
+    "sdkVersion": "6.11.1",
+    "appPlatform": "ANDROID",
+    "connectionType": "BLE",
+    "busType": "J1939",
+    "lastInfoAt": "2026-10-10T12:00:00.000Z",
+    "periodicConnectedSec": 30,
+    "periodicNoBleSec": 30,
+    "periodicDisconnectedMin": 30,
+    "harshAccelMg": 0,
+    "harshBrakeMg": 450,
+    "harshCornerMg": 0,
+    "systemVars": {
+      "PERIODIC_EVENT_GAP": 30,
+      "PERIODIC_EVENT_GAP_NOBLE": 30,
+      "EVENTS_STORED": 1,
+      "DRIVING_ACCL": 0,
+      "DRIVING_BRAKING": 450,
+      "DRIVING_CORNERING": 0,
+      "HSI_MODE": 1
+    }
   },
   'PATCH /api/devices/{id}': {
     "id": "dev_1",
@@ -1635,22 +2328,35 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "resolutionNote": "Adverse weather, dispatcher confirmed"
   },
   'POST /api/mobile/hos-state': {
+    "hosEngineVersion": "1.0.3",
     "accepted": true,
-    "engineVersion": "1.0.1",
     "versionMismatch": false,
+    "updateRequired": false,
+    "compared": true,
     "drift": false,
-    "server": {
-      "driveRemainingSec": 0,
-      "shiftRemainingSec": 1140,
-      "cycleRemainingSec": 46140,
-      "breakRemainingSec": 7440
+    "maxDriftSec": 0,
+    "fields": [],
+    "statusMismatch": false,
+    "serverState": {
+      "currentStatus": "D",
+      "driveRemainingSec": 3600,
+      "shiftRemainingSec": 7200,
+      "breakRemainingSec": 1800,
+      "cycleRemainingSec": 36000,
+      "dailyTotals": {
+        "off": 3600,
+        "sb": 0,
+        "drive": 36000,
+        "on": 1800
+      },
+      "violations": [],
+      "statusSince": "2026-10-08T13:00:00.000Z",
+      "nextBreakDueAt": "2026-10-08T15:30:00.000Z",
+      "shiftEndsAt": "2026-10-08T17:00:00.000Z",
+      "cycleRecapAt": null,
+      "restartAvailableAt": null
     },
-    "deltasSec": {
-      "driveRemainingSec": 0,
-      "shiftRemainingSec": 0,
-      "cycleRemainingSec": 0,
-      "breakRemainingSec": 0
-    }
+    "driftThresholdSec": 60
   },
   'GET /api/dvir': {
     "items": [
@@ -1818,7 +2524,9 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
   },
   'PATCH /api/maintenance-schedules/{id}': {
     "id": "ms_1",
-    "enabled": false
+    "enabled": false,
+    "status": "REJECTED",
+    "reviewNote": "Amount does not match the PDF."
   },
   'DELETE /api/maintenance-schedules/{id}': {
     "deleted": true
@@ -1880,17 +2588,31 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
   },
   'POST /api/mobile/feedback': {
     "id": "fbk_1",
+    "driverId": "drv_1",
+    "userId": null,
+    "answers": {
+      "tenure": "1-3 years",
+      "ease": "Easy",
+      "hosSatisfaction": "Satisfied",
+      "recommend": 9,
+      "overallExperience": 5
+    },
     "comment": "Great app!",
+    "appVersion": "1.0.3",
+    "platform": "android",
     "createdAt": "2026-09-21T00:00:00.000Z"
   },
   'GET /api/mobile/support/tickets': {
     "items": [
       {
         "id": "tck_1",
+        "number": "TCK-000001",
         "subject": "App crashes on certify",
+        "body": "It closes after tapping Certify.",
         "category": "diagnostics",
         "priority": "NORMAL",
         "status": "OPEN",
+        "contactMethod": null,
         "createdAt": "2026-09-21T00:00:00.000Z",
         "updatedAt": "2026-09-21T00:00:00.000Z"
       }
@@ -1900,8 +2622,29 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "id": "tck_9",
     "number": "TCK-000009",
     "subject": "App crashes on certify",
+    "body": "It closes after tapping Certify.",
+    "category": "diagnostics",
+    "priority": "NORMAL",
     "status": "OPEN",
-    "priority": "NORMAL"
+    "createdByUserId": null,
+    "createdByDriverId": "drv_1",
+    "assignedToId": null,
+    "contactMethod": "PHONE",
+    "createdAt": "2026-10-08T00:00:00.000Z",
+    "updatedAt": "2026-10-08T00:00:00.000Z",
+    "resolvedAt": null
+  },
+  'GET /api/mobile/support/tickets/{id}': {
+    "id": "tck_9",
+    "number": "TCK-000009",
+    "subject": "App crashes on certify",
+    "body": "It closes after tapping Certify.",
+    "category": "diagnostics",
+    "priority": "NORMAL",
+    "status": "OPEN",
+    "contactMethod": null,
+    "createdAt": "2026-10-08T00:00:00.000Z",
+    "updatedAt": "2026-10-08T00:00:00.000Z"
   },
   'GET /api/trips': {
     "items": [
@@ -1973,18 +2716,55 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "status": "REVIEWED"
   },
   'GET /api/safety/scorecard': {
+    "periodStart": "2026-09-11",
+    "periodEnd": "2026-10-10",
+    "computedAt": "2026-10-11T10:30:02.000Z",
+    "minMiles": 100,
+    "fleet": {
+      "score": 88,
+      "previousScore": 85,
+      "trend": 3,
+      "scoredDrivers": 12,
+      "unscoredDrivers": 2,
+      "belowThresholdCount": 1,
+      "milesDriven": 48210
+    },
     "items": [
       {
+        "id": "dsc_1",
         "driverId": "drv_1",
-        "score": 68,
-        "harshCount": 4,
+        "periodStart": "2026-09-11",
+        "periodEnd": "2026-10-10",
+        "score": 96,
+        "scored": true,
+        "harshCount": 1,
+        "speedingCount": 0,
+        "seatbeltCount": 0,
+        "milesDriven": 5210,
+        "violationCount": 0,
         "rank": 1,
-        "previousScore": 74,
-        "trend": -6
+        "previousScore": 92,
+        "trend": 4,
+        "computedAt": "2026-10-11T10:30:02.000Z"
+      },
+      {
+        "id": "dsc_2",
+        "driverId": "drv_2",
+        "periodStart": "2026-09-11",
+        "periodEnd": "2026-10-10",
+        "score": null,
+        "scored": false,
+        "harshCount": 0,
+        "speedingCount": 0,
+        "seatbeltCount": 0,
+        "milesDriven": 42,
+        "violationCount": 0,
+        "rank": null,
+        "previousScore": null,
+        "trend": null,
+        "computedAt": "2026-10-11T10:30:02.000Z"
       }
-    ],
-    "periodStart": "2026-08-12",
-    "periodEnd": "2026-09-11"
+    ]
   },
   'POST /api/safety/coaching': {
     "id": "sfe_1",
@@ -1998,7 +2778,11 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
         "name": "Columbus Terminal",
         "type": "CIRCLE",
         "radiusMi": 1,
-        "alertOnEnter": true
+        "alertOnEnter": true,
+        "colour": "BLUE",
+        "countAsYardMove": false,
+        "vehicleGroupId": null,
+        "vehicleGroupName": null
       }
     ]
   },
@@ -2006,16 +2790,24 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "id": "gf_2",
     "name": "Cust. dock 4",
     "type": "CIRCLE",
-    "radiusMi": 0.5
+    "radiusMi": 0.5,
+    "colour": "GREEN",
+    "countAsYardMove": true,
+    "vehicleGroupId": "b1c2d3e4-0000-4000-8000-000000000001"
   },
   'GET /api/geofences/{id}': {
     "id": "gf_1",
     "name": "Columbus Terminal",
-    "type": "CIRCLE"
+    "type": "CIRCLE",
+    "colour": "BLUE",
+    "countAsYardMove": false,
+    "vehicleGroupId": "b1c2d3e4-0000-4000-8000-000000000001",
+    "vehicleGroupName": "Northeast"
   },
   'PATCH /api/geofences/{id}': {
     "id": "gf_1",
-    "enabled": false
+    "enabled": false,
+    "vehicleGroupId": null
   },
   'DELETE /api/geofences/{id}': {
     "id": "gf_1",
@@ -2050,7 +2842,11 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
         "driveRemainingSec": 0,
         "shiftEndsAt": "2026-09-12T15:59:34.000Z",
         "eldSerial": "PT30_A86E",
-        "bleState": "CONNECTED"
+        "bleState": "CONNECTED",
+        "recordStatus": "ACTIVE",
+        "connectivity": "ONLINE",
+        "isStale": false,
+        "staleSince": null
       }
     ],
     "generatedAt": "2026-09-12T15:39:10.000Z"
@@ -2061,7 +2857,11 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
         {
           "vehicleId": "veh_1",
           "unitNumber": "101",
-          "dutyStatus": "DRIVING"
+          "dutyStatus": "DRIVING",
+          "recordStatus": "ACTIVE",
+          "connectivity": "ONLINE",
+          "isStale": false,
+          "staleSince": null
         }
       ],
       "generatedAt": "2026-09-16T15:39:10.000Z",
@@ -2098,7 +2898,9 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     },
     "vehicles": {
       "active": 40,
-      "total": 45
+      "total": 45,
+      "inactive": 3,
+      "outOfService": 2
     },
     "generatedAt": "2026-09-16T15:39:10.000Z"
   },

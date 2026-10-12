@@ -55,7 +55,7 @@ export function AvailableHoursCard({ driverId }: { driverId: string }) {
 
   return (
     <Card>
-      <SectionHeader title="Available hours" subtitle={cycleRuleLabel(query.data?.cycleLimitSec)} />
+      <SectionHeader title="Available hours" subtitle={cycleRuleLabel(query.data?.cycleLimitSec, query.data?.hosRuleset)} />
       <div className="mt-4">
         {query.isLoading ? (
           <LoadingState rows={4} />

@@ -44,4 +44,15 @@ describe('<HosMeter>', () => {
     expect(screen.getByText('10-hour break required')).toBeInTheDocument();
     expect(screen.queryByText('limit exceeded')).not.toBeInTheDocument();
   });
+
+  it('UI-002: a cycle used up off the wheel reads "cycle exhausted" in the warning tone, not as a violation', () => {
+    render(<HosMeter label="Cycle" remainingSec={0} limitSec={70 * 3600} zeroNote="cycle exhausted" />);
+    expect(screen.getByText('cycle exhausted')).toHaveClass('text-warning');
+    expect(screen.queryByText('limit exceeded')).not.toBeInTheDocument();
+  });
+
+  it('a real driving overrun stays "limit exceeded" in the danger tone', () => {
+    render(<HosMeter label="Cycle" remainingSec={0} limitSec={70 * 3600} />);
+    expect(screen.getByText('limit exceeded')).toHaveClass('text-danger');
+  });
 });

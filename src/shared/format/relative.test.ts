@@ -5,6 +5,7 @@ import {
   formatRelative,
   formatRelativeShort,
   formatTimeWithAge,
+  formatAgo,
 } from './relative';
 import { nowTickStats, useNowTick, useRelativeTime } from './useRelativeTime';
 
@@ -48,6 +49,20 @@ describe('§8.2 relative time', () => {
     expect(formatTimeWithAge('14:26', ago(1_000), NOW)).toBe('14:26 · 1m ago');
     expect(formatTimeWithAge('14:26', ago(3 * DAY), NOW)).toBe('14:26 · 3d ago');
     expect(formatTimeWithAge('14:26', null, NOW)).toBe('14:26');
+  });
+});
+
+describe('UI-003 formatAgo — an age, never a date', () => {
+  it('walks minutes, hours and days', () => {
+    expect(formatAgo(ago(5_000), NOW)).toBe('just now');
+    expect(formatAgo(ago(12 * MINUTE), NOW)).toBe('12 min ago');
+    expect(formatAgo(ago(3 * HOUR), NOW)).toBe('3 h ago');
+    expect(formatAgo(ago(4 * DAY + HOUR), NOW)).toBe('4 d ago');
+    expect(formatAgo(ago(40 * DAY), NOW)).toBe('40 d ago');
+  });
+  it('dashes a missing or invalid value', () => {
+    expect(formatAgo(null, NOW)).toBe('—');
+    expect(formatAgo('nope', NOW)).toBe('—');
   });
 });
 

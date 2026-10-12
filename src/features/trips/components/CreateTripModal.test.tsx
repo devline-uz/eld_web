@@ -22,9 +22,14 @@ const PLACES: Record<string, { name: string; lat: number; lon: number }> = {
   Dayton: { name: 'Dayton, Ohio, United States', lat: 39.76, lon: -84.19 },
   Springfield: { name: 'Springfield, Ohio, United States', lat: 39.92, lon: -83.81 },
   Xenia: { name: 'Xenia, Ohio, United States', lat: 39.68, lon: -83.93 },
+  // FE-008 — the pickup/delivery the helpers below type and then pick (named as typed).
+  'Columbus, OH': { name: 'Columbus, OH', lat: 39.96, lon: -83 },
+  'Dayton, OH': { name: 'Dayton, OH', lat: 39.76, lon: -84.19 },
 };
 vi.mock('@/shared/map/geocode', async (importOriginal) => ({
   ...(await importOriginal<typeof GeocodeModule>()),
+  // A geocoder is configured: pickup and delivery must be picked places (FE-008).
+  geocodingEnabled: true,
   usePlaceSearch: (query: string, enabled: boolean) => {
     const place = enabled ? PLACES[query.trim()] : undefined;
     return { data: place ? [place] : [], isError: false };
@@ -101,6 +106,12 @@ async function selectDriver(name: string) {
   await user.click(await screen.findByText(name));
 }
 
+/** Types a place and picks its suggestion — pickup/delivery must carry coordinates (FE-008). */
+async function typeAndPick(user: ReturnType<typeof userEvent.setup>, input: HTMLInputElement, text: string) {
+  await user.type(input, text);
+  await user.click(within(await screen.findByRole('option', { name: text })).getByRole('button'));
+}
+
 /** Fills a stop window's native `datetime-local` — `'2026-09-20T14:30'`. */
 function enterWindow(label: 'Pickup' | 'Delivery', value: string) {
   fireEvent.change(screen.getByLabelText(new RegExp(`^${label} window`)), { target: { value } });
@@ -148,6 +159,48 @@ describe('CreateTripModal — WB-115 assignment block', () => {
   });
 });
 
+describe('CreateTripModal — UI-010 unit status and driver hours', () => {
+  it('lists an out-of-service unit with its status and does not let it be picked', async () => {
+    renderModal();
+    server.use(
+      http.get(url(endpoints.vehicles.list), () =>
+        ok({
+          items: [
+            { id: 'veh_1', unitNumber: '101', make: 'Volvo', model: 'VNL', status: 'ACTIVE' },
+            { id: 'veh_2', unitNumber: '102', make: 'Volvo', model: 'VNL', status: 'OUT_OF_SERVICE' },
+            { id: 'veh_3', unitNumber: '103', make: 'Volvo', model: 'VNL', status: 'INACTIVE' },
+          ],
+          page: 1,
+          limit: 500,
+          total: 3,
+          totalPages: 1,
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    const unitLabel = screen
+      .getByText((content, el) => el?.tagName === 'SPAN' && el.classList.contains('text-label') && content.trim().startsWith('Unit'))
+      .closest('label')!;
+    await user.click(within(unitLabel).getByRole('button'));
+    const oos = (await screen.findByText('#102')).closest('button')!;
+    expect(oos).toBeDisabled();
+    expect(within(oos).getByText('Out of service')).toBeInTheDocument();
+    expect(within(screen.getByText('#103').closest('button')!).getByText('Inactive')).toBeInTheDocument();
+    expect(screen.getByText('#101').closest('button')).toBeEnabled();
+  });
+
+  it('warns when the picked driver has no driving time left', async () => {
+    renderModal();
+    server.use(
+      http.get(url(endpoints.drivers.hos(':id')), () =>
+        ok({ driveRemainingSec: 0, shiftRemainingSec: 3600, cycleRemainingSec: 180000, breakInSec: 0, onDutySince: null }),
+      ),
+    );
+    await selectDriver('Vera Verified');
+    expect(await screen.findByText('Out of hours — no driving time available now.')).toBeInTheDocument();
+  });
+});
+
 describe('CreateTripModal — submit', () => {
   async function fillRequiredAndSubmit(
     pickup: string,
@@ -159,7 +212,10 @@ describe('CreateTripModal — submit', () => {
       editAfterPick,
       moveStop,
       noDriver,
+      noPost = false,
     }: {
+      /** The form is expected to refuse the submit — no POST is awaited. */
+      noPost?: boolean;
       noDriver?: boolean;
       twice?: boolean;
       intermediate?: string | string[];
@@ -192,8 +248,8 @@ describe('CreateTripModal — submit', () => {
       await user.type(origin!, 'Columbus');
       await user.click(within(await screen.findByRole('option', { name: COLUMBUS.name })).getByRole('button'));
       if (editAfterPick) await user.type(origin!, editAfterPick);
-    } else await user.type(origin!, 'Columbus, OH');
-    await user.type(destination!, 'Dayton, OH');
+    } else await typeAndPick(user, origin!, 'Columbus, OH');
+    await typeAndPick(user, destination!, 'Dayton, OH');
     enterWindow('Pickup', pickup);
     enterWindow('Delivery', delivery);
     const intermediates = intermediate === undefined ? [] : [intermediate].flat();
@@ -220,6 +276,7 @@ describe('CreateTripModal — submit', () => {
     const submit = screen.getByRole('button', { name: 'Create trip' });
     await user.click(submit);
     if (twice) await user.click(submit);
+    if (noPost) return posts;
     await vi.waitFor(() => expect(posts).toHaveLength(1));
     release();
     return posts;
@@ -252,9 +309,9 @@ describe('CreateTripModal — submit', () => {
     const posts = await fillRequiredAndSubmit(`${tomorrow}T08:00`, `${tomorrow}T14:00`, { intermediate: 'Springfield, OH' });
 
     expect(posts[0]!.stops).toEqual([
-      { sequence: 1, type: 'PICKUP', name: 'Columbus, OH', scheduledAt: new Date(`${tomorrow}T08:00`).toISOString() },
+      { sequence: 1, type: 'PICKUP', name: 'Columbus, OH', scheduledAt: new Date(`${tomorrow}T08:00`).toISOString(), latitude: 39.96, longitude: -83 },
       { sequence: 2, type: 'CHECKPOINT', name: 'Springfield, OH', scheduledAt: undefined },
-      { sequence: 3, type: 'DELIVERY', name: 'Dayton, OH', scheduledAt: new Date(`${tomorrow}T14:00`).toISOString() },
+      { sequence: 3, type: 'DELIVERY', name: 'Dayton, OH', scheduledAt: new Date(`${tomorrow}T14:00`).toISOString(), latitude: 39.76, longitude: -84.19 },
     ]);
   });
 
@@ -274,21 +331,25 @@ describe('CreateTripModal — submit', () => {
     ]);
   });
 
-  it('sends latitude/longitude of a picked pickup place and omits them for free-text delivery', async () => {
+  it('sends latitude/longitude of the picked pickup and delivery places', async () => {
     const posts = await fillRequiredAndSubmit(`${tomorrow}T08:00`, `${tomorrow}T14:00`, { pick: true });
     const stops = posts[0]!.stops as Record<string, unknown>[];
 
     expect(stops[0]).toMatchObject({ type: 'PICKUP', name: COLUMBUS.name, latitude: COLUMBUS.lat, longitude: COLUMBUS.lon });
-    expect(stops[1]).not.toHaveProperty('latitude');
-    expect(stops[1]).not.toHaveProperty('longitude');
+    expect(stops[1]).toMatchObject({ type: 'DELIVERY', name: 'Dayton, OH', latitude: 39.76, longitude: -84.19 });
   });
 
-  it('drops the coordinates when the pickup text is edited after picking a place', async () => {
-    const posts = await fillRequiredAndSubmit(`${tomorrow}T08:00`, `${tomorrow}T14:00`, { pick: true, editAfterPick: ' dock 4' });
-    const stops = posts[0]!.stops as Record<string, unknown>[];
-
-    expect(stops[0]).toMatchObject({ type: 'PICKUP', name: `${COLUMBUS.name} dock 4` });
-    expect(stops[0]).not.toHaveProperty('latitude');
+  // FE-008 — editing the picked text drops its coordinates; free text is refused, not saved
+  // as a trip whose route can never be drawn.
+  it('refuses a pickup typed (or edited) without picking a suggestion, with a field error', async () => {
+    const posts = await fillRequiredAndSubmit(`${tomorrow}T08:00`, `${tomorrow}T14:00`, {
+      pick: true,
+      editAfterPick: ' dock 4',
+      noPost: true,
+    });
+    expect(await screen.findByText('Choose a place from the suggestions so the route can be drawn.')).toBeInTheDocument();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(posts).toHaveLength(0);
   });
 
   // An added-then-emptied row must not be sent as a nameless stop.
@@ -348,6 +409,15 @@ describe('CreateTripModal — date, distance and rate validation', () => {
   it('caps the distance at the `CreateTripDto` 10,000 mi', async () => {
     await fillAndSubmit({ pickup: `${day(1)}T08:00`, distance: '10001' });
     expect(await screen.findByText('Distance must be 10,000 mi or less.')).toBeInTheDocument();
+  });
+
+  it('FE-012: caps the weight at 200,000 lbs', async () => {
+    renderModal();
+    const user = userEvent.setup();
+    enterWindow('Pickup', `${day(1)}T08:00`);
+    await user.type(screen.getByPlaceholderText('lbs'), '200001');
+    await user.click(screen.getByRole('button', { name: 'Create trip' }));
+    expect(await screen.findByText('Weight must be 200,000 lbs or less.')).toBeInTheDocument();
   });
 
   it('caps the rate at the `CreateTripDto` $1,000,000', async () => {
@@ -420,8 +490,8 @@ describe('CreateTripModal — dirty close, payload and 422 mapping', () => {
     const inputs = document.querySelectorAll<HTMLInputElement>('form input');
     const [reference, , , origin, , destination] = Array.from(inputs);
     await user.type(reference!, 'TR-1');
-    await user.type(origin!, 'Columbus, OH');
-    await user.type(destination!, 'Dayton, OH');
+    await typeAndPick(user, origin!, 'Columbus, OH');
+    await typeAndPick(user, destination!, 'Dayton, OH');
     enterWindow('Pickup', `${tomorrow}T08:00`);
     enterWindow('Delivery', `${tomorrow}T14:00`);
     await selectDriver('Vera Verified');
@@ -631,6 +701,40 @@ describe('CreateTripModal — dirty close, payload and 422 mapping', () => {
     await user.click(await screen.findByText('#T-1000'));
     await user.click(screen.getByRole('button', { name: 'Create trip' }));
     expect(await screen.findByText('This trailer has been deleted and cannot be assigned.')).toBeInTheDocument();
+  });
+
+  it('FE-004: two clicks in the same tick send one POST /trips', async () => {
+    renderModal();
+    let posts = 0;
+    server.use(
+      http.post(url(endpoints.trips.create), async () => {
+        posts += 1;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        return ok({ id: 'trp_1', number: 'TR-1' });
+      }),
+    );
+    await fillValidForm();
+    const submit = screen.getByRole('button', { name: 'Create trip' });
+    fireEvent.click(submit);
+    fireEvent.click(submit);
+    await vi.waitFor(() => expect(posts).toBe(1));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(posts).toBe(1);
+  });
+
+  it.each([
+    [404, 'DRIVER_NOT_FOUND', 'Driver not found.', 'Driver not found.'],
+    [409, 'VEHICLE_OUT_OF_SERVICE', 'Vehicle is out of service.', 'This unit is out of service.'],
+    [422, 'VEHICLE_INACTIVE', 'Unit 101 is inactive and cannot be assigned.', 'Unit 101 is inactive and cannot be assigned.'],
+  ])('places a %i %s from the server under the picker it names', async (status, code, serverMessage, shown) => {
+    renderModal();
+    server.use(http.post(url(endpoints.trips.create), () => fail(status, code, serverMessage)));
+    const user = await fillValidForm();
+    await user.click(screen.getByRole('button', { name: 'Create trip' }));
+    const message = await screen.findByText(shown);
+    const label = message.closest('label') ?? message.parentElement!;
+    expect(label.textContent).toMatch(code.startsWith('DRIVER') ? /Driver/ : /Unit/);
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
 
   it('shows a 409 TRIP_SCHEDULE_CONFLICT under the Unit field naming the other trip, and keeps the modal open', async () => {

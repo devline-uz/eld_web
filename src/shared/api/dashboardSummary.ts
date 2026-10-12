@@ -29,13 +29,15 @@ export interface DashboardSummaryResponse {
   liveFleet: {
     items: LiveFleetUnit[];
     generatedAt: string;
+    /** UI-003 — `moving` excludes stale units. */
     counts: { total: number; onDuty: number; moving: number; idle: number; offline: number };
   };
   violations: { items: DashboardViolation[]; total: number };
   unidentified: { total: number; totalDurationSec: number };
   notifications: { unreadCount: number };
   carrier: { id: string; name: string; timezone: string | null };
-  vehicles: { active: number; total: number };
+  /** UI-004 — `inactive` / `outOfService` are fleet-wide record-status counts (additive). */
+  vehicles: { active: number; total: number; inactive?: number; outOfService?: number };
   generatedAt: string;
 }
 

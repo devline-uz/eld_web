@@ -20,6 +20,8 @@ import { conflictField } from '@/shared/api/conflicts';
 import { DRIVER_CONFLICT_RULES, CONFLICT_MESSAGES, findCachedDriverConflicts } from '../lib/driverConflicts';
 import { VALIDATION_MESSAGES } from '@/shared/forms/messages';
 import { HOME_TERMINAL_TIMEZONES } from '../lib/terminals';
+import { HOS_RULESET_OPTIONS } from '@/shared/lib/hosRuleset';
+import type { HosRuleset } from '@/shared/api/carrier';
 import { DRIVER_TOAST } from '../lib/copy';
 import {
   DRIVER_DTO_LIMITS,
@@ -148,6 +150,8 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
   const [showPassword, setShowPassword] = useState(false);
   const [assignedVehicleId, setAssignedVehicleId] = useState('');
+  // UI-005 — '' = Company default: `hosRuleset` is left out and the backend applies the carrier's.
+  const [hosRuleset, setHosRuleset] = useState<HosRuleset | ''>('');
   const [allowPersonalConveyance, setAllowPersonalConveyance] = useState(true);
   const [allowYardMove, setAllowYardMove] = useState(true);
   const [adverseDrivingEnabled, setAdverseDrivingEnabled] = useState(false);
@@ -235,6 +239,7 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
   // live outside RHF, so a real edit to any of them must confirm on close.
   const extrasDirty =
     assignedVehicleId !== '' ||
+    hosRuleset !== '' ||
     !allowPersonalConveyance ||
     !allowYardMove ||
     adverseDrivingEnabled ||
@@ -283,6 +288,7 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
         eldExemptReason: eldExempt ? eldExemptReason : undefined,
         sendInvitation,
         assignedVehicleId: assignedVehicleId || undefined,
+        ...(hosRuleset ? { hosRuleset } : {}),
       },
       {
         onSuccess: () => {
@@ -539,6 +545,21 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
                 {HOME_TERMINAL_TIMEZONES.map((t) => (
                   <option key={t.value} value={t.value}>
                     {t.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="HOS ruleset">
+              <select
+                value={hosRuleset}
+                onChange={(e) => setHosRuleset(e.target.value as HosRuleset | '')}
+                disabled={isPending}
+                className={inputClass}
+              >
+                <option value="">Company default</option>
+                {HOS_RULESET_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
                   </option>
                 ))}
               </select>

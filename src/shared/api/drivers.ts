@@ -16,8 +16,10 @@ import { qk, qkRoot } from './queryKeys';
 import { typedCachePolicy } from './queryPolicy';
 import type { OffsetPage } from './types';
 import type { DriverRow } from './vehicles';
+import type { HosRuleset } from './carrier';
 
 export type { DriverRow } from './vehicles';
+export type { HosRuleset } from './carrier';
 
 export interface DriverListParams {
   [key: string]: string | number | boolean | undefined;
@@ -65,7 +67,10 @@ export interface DriverRosterEntry {
     | 'allowYardMove'
     | 'shortHaulException'
     | 'splitSleeperEnabled'
-  >;
+  > & {
+    /** UI-005 — the driver's HOS ruleset. Optional: absent on an older backend. */
+    hosRuleset?: HosRuleset;
+  };
   dutyStatus: 'DRIVING' | 'ON_DUTY' | 'SLEEPER' | 'OFF_DUTY';
   unit: { id: string; unitNumber: string } | null;
   hos: { driveRemainingSec: number; shiftRemainingSec: number; cycleRemainingSec: number };
@@ -87,6 +92,8 @@ export interface DriverRosterResponse {
   limit: number;
   total: number;
   totalPages: number;
+  /** UI-015 — header counts over EVERY driver (filters / search / page ignored). */
+  summary?: { total: number; withActiveViolations: number };
 }
 
 /** Server-side roster filters (B-1 + B-55): `terminal` exact name, `exempt` = `eldExempt`. */
@@ -161,17 +168,21 @@ export function useDriverRosterCounts(params: DriverRosterParams = {}): DriverRo
     queryFn: ({ signal }) => client.list<DriverRosterEntry>(endpoints.drivers.roster, countParams, { signal }),
     ...typedCachePolicy<OffsetPage<DriverRosterEntry>>('live'),
   });
+  // UI-015 — the roster's `summary` is global (filters / search / page ignored), so it is exact
+  // for the unfiltered header counts at any roster size; a filtered call still counts its rows.
+  const unfiltered = Object.values(params).every((v) => v === undefined || v === '');
   return useMemo(() => {
     const items = query.data?.items ?? [];
     const offDuty = items.filter((r) => r.dutyStatus === 'OFF_DUTY').length;
+    const summary = unfiltered ? (query.data as DriverRosterResponse | undefined)?.summary : undefined;
     return {
-      all: query.data?.total ?? items.length,
+      all: summary?.total ?? query.data?.total ?? items.length,
       onDuty: items.length - offDuty,
       offDuty,
-      violations: items.filter((r) => r.openViolations > 0).length,
+      violations: summary?.withActiveViolations ?? items.filter((r) => r.openViolations > 0).length,
       isLoading: query.isLoading,
     };
-  }, [query.data, query.isLoading]);
+  }, [query.data, query.isLoading, unfiltered]);
 }
 
 /** B-2 `GET /drivers/:id/hos` — backend `DriverHosClocks` (`driver-roster.service.ts`). */
@@ -188,6 +199,8 @@ export interface DriverHosResponse {
   dutyStatus: DriverRosterEntry['dutyStatus'];
   statusSince: string;
   computedAt: string;
+  /** UI-005 — the ruleset every limit above comes from. */
+  hosRuleset?: HosRuleset;
   /** BUG-002 — see `DriverRosterEntry.isStale`; the clocks are as of `staleSince`. */
   isStale?: boolean;
   staleSince?: string | null;
@@ -274,6 +287,8 @@ export interface CreateDriverPayload {
   eldExemptReason?: string;
   /** B-82 (shipped) — emails the driver an app invitation (one-time code). Q-2: email only. */
   sendInvitation?: boolean;
+  /** UI-005 — optional: omitted → the backend applies the carrier's ruleset. Never defaulted here. */
+  hosRuleset?: HosRuleset;
 }
 
 export function useCreateDriver() {

@@ -9,6 +9,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
 import { ok, url } from '@/mocks/envelope';
 import { endpoints } from '@/shared/api/endpoints';
+import { EMPTY_STATE_COPY } from '@/shared/ui/copy';
 import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/client';
 import { ToastProvider } from '@/shared/ui/Toast';
 import { qk } from '@/shared/api/queryKeys';
@@ -74,6 +75,36 @@ beforeEach(() => {
 });
 
 describe('W-02 Live Fleet', () => {
+  it('UI-003/UI-004: a stale unit is marked with its last update; an OOS record and a box-less unit say so', async () => {
+    const base = {
+      driverPhone: null, speedMph: null, headingDeg: null, odometerMi: null, lat: null, lon: null, locationLabel: null,
+      driveRemainingSec: null, shiftEndsAt: null, eldSerial: null, bleState: null,
+    };
+    const staleSince = new Date(Date.now() - 4 * 24 * 3_600_000 - 60_000).toISOString();
+    server.use(
+      http.get(url(endpoints.live.fleet), () =>
+        ok({
+          generatedAt: new Date().toISOString(),
+          items: [
+            { ...base, vehicleId: 'v_stale', unitNumber: '#201', driverId: 'drv_9', driverName: 'Stale Driver', dutyStatus: 'ELD_OFFLINE', lastSeenAt: staleSince, eldSerial: 'PT30_X', bleState: 'DISCONNECTED', recordStatus: 'ACTIVE', connectivity: 'ELD_OFFLINE', isStale: true, staleSince },
+            { ...base, vehicleId: 'v_oos', unitNumber: '#202', driverId: null, driverName: null, dutyStatus: 'INACTIVE', lastSeenAt: null, recordStatus: 'OUT_OF_SERVICE', connectivity: 'NO_DEVICE', isStale: false, staleSince: null },
+          ],
+        }),
+      ),
+    );
+    renderPage();
+
+    const stale = (await screen.findByText('Unit #201')).closest('button')!;
+    expect(stale).toHaveAttribute('data-stale', 'true');
+    expect(within(stale).getByText('Last update 4 d ago')).toBeInTheDocument();
+    expect(within(stale).getByText('ELD offline')).toBeInTheDocument();
+
+    const oos = screen.getByText('Unit #202').closest('button')!;
+    expect(within(oos).getByText('Out of service')).toBeInTheDocument();
+    expect(within(oos).queryByText('Inactive')).not.toBeInTheDocument();
+    expect(within(oos).getByText('No device')).toBeInTheDocument();
+  });
+
   it('renders the exact empty-state copy when no units are reporting', async () => {
     server.use(http.get(url(endpoints.live.fleet), () => ok({ items: [], generatedAt: new Date().toISOString() })));
 
@@ -232,7 +263,8 @@ describe('W-02 Live Fleet', () => {
     const traffic = screen.getByRole('button', { name: 'Traffic' });
     expect(traffic).toBeDisabled();
     expect(traffic).toHaveAttribute('aria-pressed', 'false');
-    expect(traffic).toHaveAttribute('title', expect.stringMatching(/VITE_TRAFFIC_TILES_URL/));
+    // UI-017 — user-facing copy, never the env-var name.
+    expect(traffic).toHaveAttribute('title', 'Traffic layer not available');
 
     await user.click(screen.getByRole('button', { name: 'Vehicles' }));
     expect(screen.getByRole('button', { name: 'Vehicles' })).toHaveAttribute('aria-pressed', 'false');
@@ -311,6 +343,44 @@ describe('W-02 Live Fleet — stage 3', () => {
   it('names the unit search box', async () => {
     renderPage();
     expect(await screen.findByRole('searchbox', { name: 'Search units' })).toBeInTheDocument();
+  });
+
+  it('FE-006: "Unit 104" and the plate find the unit; no match is a search empty state; chips count the matches', async () => {
+    server.use(
+      http.get(url(endpoints.vehicles.list), () =>
+        ok({
+          items: [
+            { id: 'veh_1', unitNumber: '101', licensePlate: 'OH-1234' },
+            { id: 'veh_2', unitNumber: '104', licensePlate: 'KY 9876' },
+          ],
+          page: 1,
+          limit: 200,
+          total: 2,
+          totalPages: 1,
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    const box = await screen.findByRole('searchbox', { name: 'Search units' });
+    await screen.findByRole('button', { name: 'All 2' });
+
+    await user.type(box, 'Unit 104');
+    expect(await screen.findByRole('button', { name: 'All 1' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Driving 0' })).toBeInTheDocument();
+
+    await user.clear(box);
+    await user.type(box, 'oh1234');
+    expect(await screen.findByRole('button', { name: 'All 1' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Driving 1' })).toBeInTheDocument();
+
+    await user.clear(box);
+    await user.type(box, 'Volvo');
+    expect(await screen.findByText('Nothing matches "Volvo"')).toBeInTheDocument();
+    expect(screen.queryByText(EMPTY_STATE_COPY.liveFleet.title)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Clear search' }));
+    expect(box).toHaveValue('');
+    expect(await screen.findByRole('button', { name: 'All 2' })).toBeInTheDocument();
   });
 
   it('`?unit=` opens that unit; a driverless unit disables View logs with the reason; Close is a 32px target and drops the param', async () => {

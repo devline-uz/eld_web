@@ -11,8 +11,8 @@ import { licenceNumber, refineLicenceForState } from './driverLicence';
  */
 export const driverSchema = z
   .object({
-    firstName: f.requiredString(),
-    lastName: f.requiredString(),
+    firstName: f.personName(),
+    lastName: f.personName(),
     email: f.email(),
     username: f.username(),
     password: f.driverPassword(),

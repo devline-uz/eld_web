@@ -1,5 +1,5 @@
 // owner: web-api-client — fetch wrapper implementing all nine web/tz.md §6.2 rules:
-// 1 credentials:'omit' + Bearer · 2 single-flight refresh on 401 TOKEN_EXPIRED + replay ·
+// 1 credentials:'omit' + Bearer · 2 single-flight refresh on 401 TOKEN_EXPIRED/INVALID + replay ·
 // 3 refresh 401 → signOut → /sign-in?reason=expired · 4 (retired, web/decisions.md WD-067) ·
 // 5 plain 403 → <ForbiddenState>, no toast · 6 422 → field errors ·
 // 7 5xx/network → GET retries twice (1 s, 3 s) · 8 X-Client-Version · 9 AbortController.
@@ -343,6 +343,17 @@ async function ensureAccessToken(options: InternalOptions): Promise<boolean> {
 
 /* ------------------------------------------------------------------ request pipeline */
 
+/** 401 codes that mean "the access token is not (or no longer) accepted". */
+const SESSION_401_CODES: ReadonlySet<string> = new Set(['TOKEN_EXPIRED', 'TOKEN_INVALID', 'UNAUTHORIZED']);
+
+/** A 401 on an authenticated request that a refresh can fix. An anonymous call, or one sent
+ * with no token at all (nothing to refresh), is left to its caller — except `TOKEN_EXPIRED`,
+ * which keeps its original rule-2 behaviour. */
+function isSessionRejection(code: string, options: InternalOptions): boolean {
+  if (options.anonymous || !SESSION_401_CODES.has(code)) return false;
+  return code === 'TOKEN_EXPIRED' || Boolean(bridge.getAccessToken());
+}
+
 async function send<T>(options: InternalOptions): Promise<T> {
   const isGet = options.method === 'GET';
   let attempt = 0;
@@ -366,10 +377,16 @@ async function send<T>(options: InternalOptions): Promise<T> {
     const body = await readBody(res);
     const error = toApiError(res.status, body);
 
-    // §6.2 rule 2 — expired access token: refresh once, then replay this exact request.
-    if (res.status === 401 && error.code === 'TOKEN_EXPIRED' && !options.retriedAfterRefresh) {
-      await refreshAccessToken();
-      return await send<T>({ ...options, retriedAfterRefresh: true });
+    // §6.2 rule 2 — a rejected session token: refresh once, then replay this exact request.
+    // Not only `TOKEN_EXPIRED`: a `TOKEN_INVALID`/`UNAUTHORIZED` 401 on a request that carried a
+    // token used to leave the user stuck on error cards (QA FE-002). A replay that is still
+    // rejected means the session is gone — sign out to /sign-in?reason=expired (rule 3).
+    if (res.status === 401 && isSessionRejection(error.code, options)) {
+      if (!options.retriedAfterRefresh) {
+        await refreshAccessToken();
+        return await send<T>({ ...options, retriedAfterRefresh: true });
+      }
+      bridge.onSignOut('expired');
     }
 
     // §6.2 rule 7 — 5xx on a GET retries twice; 4xx never retries.
@@ -458,7 +475,10 @@ export const client = {
       for (const chunk of rest) items.push(...chunk.items);
     }
 
+    // Page-level extras the backend adds beside the page (UI-004 `statusCounts`, UI-012
+    // `connectionCounts`) describe the whole collection, so the first page's copy is kept.
     return {
+      ...first,
       items: items.slice(0, requested),
       page,
       limit: requested,

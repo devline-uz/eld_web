@@ -20,7 +20,7 @@ import {
 import { useCoDriverPairings, useVehicle } from '@/shared/api/vehicles';
 import { client } from '@/shared/api/client';
 import { endpoints } from '@/shared/api/endpoints';
-import { formErrorMessage } from '@/shared/api/errors';
+import { formErrorMessage, openTripsOf } from '@/shared/api/errors';
 import { Avatar } from '@/shared/ui/Avatar';
 import { Badge } from '@/shared/ui/Badge';
 import { Button } from '@/shared/ui/Button';
@@ -40,6 +40,7 @@ import { EditDriverModal } from './components/EditDriverModal';
 import { DriverDocumentsTab } from './components/DriverDocumentsTab';
 import { DRIVER_TOAST } from './lib/copy';
 import { DVIR_HREF, tripsHrefForDriver } from './lib/links';
+import { hosRulesetLabel } from '@/shared/lib/hosRuleset';
 
 const TABS = ['overview', 'hos', 'dvirs', 'trips', 'documents', 'activity'] as const;
 type Tab = (typeof TABS)[number];
@@ -265,9 +266,14 @@ export default function DriverProfilePage() {
       },
       onError: (error) => {
         setConfirmDeactivate(false);
+        // BE-013 — a driver with open trips is refused with 409 `details.openTrips`: name them.
+        const trips = openTripsOf(error);
         toast({
           kind: 'error',
-          title: formErrorMessage(error),
+          title: trips
+            ? `${driverQuery.data ? `${driverQuery.data.firstName} ${driverQuery.data.lastName}` : 'This driver'} still has open trips`
+            : formErrorMessage(error),
+          ...(trips ? { description: `Reassign or cancel ${trips.map((t) => t.number).join(', ')} first.` } : {}),
         });
       },
     });
@@ -409,7 +415,8 @@ export default function DriverProfilePage() {
             <Card>
               <SectionHeader
                 title="Hours of service · right now"
-                subtitle="Property-carrying · 70 hr / 8 day cycle"
+                // UI-005 — the driver's own ruleset (clocks response, else the driver row), never a constant.
+                subtitle={hosRulesetLabel(hosQuery.data?.hosRuleset ?? driverQuery.data?.hosRuleset, hosQuery.data?.cycleLimitSec)}
               />
               {hosQuery.isLoading ? (
                 <LoadingState rows={4} className="mt-3" />

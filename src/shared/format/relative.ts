@@ -65,3 +65,15 @@ export function formatTimeWithAge(clock: string, value: DateInput, now: number =
   if (diff < DAY) return `${clock} · ${Math.floor(diff / HOUR)}h ago`;
   return `${clock} · ${Math.floor(diff / DAY)}d ago`;
 }
+
+/** UI-003 — `4 d ago` · `3 h ago` · `12 min ago` · `just now`: an age that never turns into a date,
+ * for "Last update 4 d ago" on a stale unit. Empty / invalid → the dash. */
+export function formatAgo(value: DateInput, now: number = Date.now()): string {
+  const then = toTime(value);
+  if (then === null) return EMPTY.dash;
+  const diff = now - then;
+  if (diff < MINUTE) return 'just now';
+  if (diff < HOUR) return `${Math.floor(diff / MINUTE)} min ago`;
+  if (diff < DAY) return `${Math.floor(diff / HOUR)} h ago`;
+  return `${Math.floor(diff / DAY)} d ago`;
+}

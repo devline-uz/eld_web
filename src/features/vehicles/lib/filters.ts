@@ -8,7 +8,8 @@
 // Recorded as a gap (web/backend-gaps.md B-54).
 import type { VehicleTableRow } from '@/shared/api/vehicles';
 
-export const VEHICLE_STATUS_OPTIONS = ['DRIVING', 'IDLE', 'OFF_DUTY', 'ELD_OFFLINE', 'INACTIVE'] as const;
+/** QA UI-019 — `ACTIVE` (no live duty) and `OUT_OF_SERVICE` are statuses the table shows too. */
+export const VEHICLE_STATUS_OPTIONS = ['ACTIVE', 'DRIVING', 'IDLE', 'OFF_DUTY', 'ELD_OFFLINE', 'OUT_OF_SERVICE', 'INACTIVE'] as const;
 export type VehicleStatusFilter = (typeof VEHICLE_STATUS_OPTIONS)[number];
 
 export interface VehicleFilters {
@@ -120,14 +121,55 @@ export function effectiveVehicleStatus(row: VehicleTableRow, duty: string | unde
   return null;
 }
 
+/** The status the W-03 STATUS column draws for a row — the filter matches what the user sees:
+ * Out of service first, then Inactive, then the live duty, else plain Active (QA UI-019). */
+export function badgeVehicleStatus(row: VehicleTableRow, duty: string | undefined): VehicleStatusFilter {
+  if (row.status === 'OUT_OF_SERVICE') return 'OUT_OF_SERVICE';
+  return effectiveVehicleStatus(row, duty) ?? 'ACTIVE';
+}
+
+/** Columns `GET /vehicles?sort=` accepts (`vehicles.service.ts` SORTABLE_FIELDS), by table column
+ * id. `makeModel` sorts by make. Year/driver/ELD/odometer have no server sort (UI-007). */
+export const VEHICLE_SORT_FIELDS: Readonly<Record<string, 'unitNumber' | 'status' | 'make' | 'vin'>> = {
+  unitNumber: 'unitNumber',
+  status: 'status',
+  makeModel: 'make',
+  vin: 'vin',
+};
+
+export interface VehicleSort {
+  /** Table column id (a key of `VEHICLE_SORT_FIELDS`). */
+  id: string;
+  desc: boolean;
+}
+
+/** `?sort=unitNumber:desc` (column id) → the sort; anything unknown is ignored. */
+export function parseVehicleSort(raw: string | null): VehicleSort | null {
+  const [id, dir] = (raw ?? '').split(':');
+  return id && id in VEHICLE_SORT_FIELDS && (dir === 'asc' || dir === 'desc') ? { id, desc: dir === 'desc' } : null;
+}
+
+/** The API's `sort` param for a column sort (`makeModel` → `make:asc`). */
+export function vehicleSortParam(sort: VehicleSort | null): string | undefined {
+  return sort ? `${VEHICLE_SORT_FIELDS[sort.id]}:${sort.desc ? 'desc' : 'asc'}` : undefined;
+}
+
+/** The same order applied in memory — window mode (11.23 drawer filters) has no server page. */
+export function sortVehicleRows<T extends VehicleTableRow>(rows: T[], sort: VehicleSort | null): T[] {
+  if (!sort) return rows;
+  const field = VEHICLE_SORT_FIELDS[sort.id]!;
+  const dir = sort.desc ? -1 : 1;
+  return [...rows].sort((a, b) => dir * String(a[field] ?? '').localeCompare(String(b[field] ?? ''), undefined, { numeric: true }));
+}
+
 export function matchesVehicleFilters(
   row: VehicleTableRow,
   duty: string | undefined,
   filters: VehicleFilters,
 ): boolean {
   if (filters.status.length) {
-    const status = effectiveVehicleStatus(row, duty);
-    if (!status || !filters.status.includes(status)) return false;
+    const status = badgeVehicleStatus(row, duty);
+    if (!filters.status.includes(status)) return false;
   }
   if (filters.eldDevice.length) {
     const token = row.eldSerial ? (row.eldDeviceModel ?? row.eldSerial) : 'UNASSIGNED';

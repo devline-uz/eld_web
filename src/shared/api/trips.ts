@@ -77,13 +77,23 @@ export interface TripRow {
  * `Loading` wins while the driver is stopped at the pickup; otherwise `onTime` (or a passed
  * `etaAt`) decides `Late` vs `On time` (web/decisions.md WD-029). `Draft` (B-73) is its own state:
  * a draft never has a driver yet, so it never reaches the pickup/onTime branches below. */
-export type TripDisplayStatus = 'On time' | 'Late' | 'Loading' | 'Delivered' | 'Cancelled' | 'Planned' | 'Draft';
+export type TripDisplayStatus = 'On time' | 'Late' | 'Loading' | 'Delivered' | 'Cancelled' | 'Planned' | 'Draft' | 'Upcoming';
 
-export function computeDisplayStatus(trip: Pick<TripRow, 'status' | 'onTime' | 'etaAt' | 'stops'>): TripDisplayStatus {
+/** An ASSIGNED trip whose planned pickup is still ahead — dispatched, not started (QA FE-007). */
+export function isUpcoming(trip: Pick<TripRow, 'status' | 'plannedStartAt'>, now: number = Date.now()): boolean {
+  if (trip.status !== 'ASSIGNED' || !trip.plannedStartAt) return false;
+  const start = Date.parse(trip.plannedStartAt);
+  return Number.isFinite(start) && start > now;
+}
+
+export function computeDisplayStatus(
+  trip: Pick<TripRow, 'status' | 'onTime' | 'etaAt' | 'stops'> & Partial<Pick<TripRow, 'plannedStartAt'>>,
+): TripDisplayStatus {
   if (trip.status === 'DELIVERED') return 'Delivered';
   if (trip.status === 'CANCELLED') return 'Cancelled';
   if (trip.status === 'DRAFT') return 'Draft';
   if (trip.status === 'PLANNED') return 'Planned';
+  if (isUpcoming({ status: trip.status, plannedStartAt: trip.plannedStartAt ?? null })) return 'Upcoming';
   const pickup = trip.stops.find((s) => s.type === 'PICKUP');
   if (pickup && pickup.arrivedAt && !pickup.departedAt) return 'Loading';
   if (trip.onTime === false) return 'Late';
@@ -233,24 +243,36 @@ export function useTripsBoard({ segment, page, limit, search, useWindow, filter 
     [needle],
   );
 
+  // QA FE-007 — an ASSIGNED trip whose pickup is still in the future has not started: it is
+  // `Scheduled`, not `Active`. Split by `plannedStartAt` against the time the slice was fetched
+  // (re-evaluated on every refetch, so a trip moves to Active within one poll of its start).
+  const futureAssigned = useMemo(
+    () => (assignedQuery.data?.items ?? []).filter((t) => isUpcoming(t, assignedQuery.dataUpdatedAt)),
+    [assignedQuery.data, assignedQuery.dataUpdatedAt],
+  );
+  const futureIds = useMemo(() => new Set(futureAssigned.map((t) => t.id)), [futureAssigned]);
+
   const activeRows = useMemo(
     () =>
       joinTrips(
-        [...(assignedQuery.data?.items ?? []), ...(inProgressQuery.data?.items ?? [])].sort(byPlannedStartDesc),
+        [
+          ...(assignedQuery.data?.items ?? []).filter((t) => !futureIds.has(t.id)),
+          ...(inProgressQuery.data?.items ?? []),
+        ].sort(byPlannedStartDesc),
         driverById,
         vehicleById,
       ),
-    [assignedQuery.data, inProgressQuery.data, driverById, vehicleById],
+    [assignedQuery.data, inProgressQuery.data, futureIds, driverById, vehicleById],
   );
 
   const scheduledRows = useMemo(
     () =>
       joinTrips(
-        [...(draftQuery.data?.items ?? []), ...(plannedQuery.data?.items ?? [])].sort(byPlannedStartDesc),
+        [...(draftQuery.data?.items ?? []), ...(plannedQuery.data?.items ?? []), ...futureAssigned].sort(byPlannedStartDesc),
         driverById,
         vehicleById,
       ),
-    [draftQuery.data, plannedQuery.data, driverById, vehicleById],
+    [draftQuery.data, plannedQuery.data, futureAssigned, driverById, vehicleById],
   );
 
   const historyStatus = segment === 'COMPLETED' ? 'DELIVERED' : undefined;
@@ -285,8 +307,8 @@ export function useTripsBoard({ segment, page, limit, search, useWindow, filter 
 
   const delivered = kpiQuery.data?.items ?? [];
   const onTimeDelivered = delivered.filter((t) => t.onTime !== false).length;
-  const activeTotal = (assignedQuery.data?.total ?? 0) + (inProgressQuery.data?.total ?? 0);
-  const scheduledTotal = (draftQuery.data?.total ?? 0) + (plannedQuery.data?.total ?? 0);
+  const activeTotal = (assignedQuery.data?.total ?? 0) + (inProgressQuery.data?.total ?? 0) - futureAssigned.length;
+  const scheduledTotal = (draftQuery.data?.total ?? 0) + (plannedQuery.data?.total ?? 0) + futureAssigned.length;
 
   const isActiveLoading = assignedQuery.isLoading || inProgressQuery.isLoading;
   const isScheduledLoading = draftQuery.isLoading || plannedQuery.isLoading;
@@ -304,7 +326,8 @@ export function useTripsBoard({ segment, page, limit, search, useWindow, filter 
       completed: kpiQuery.data?.total ?? 0,
     },
     kpis: {
-      onTimePct: delivered.length > 0 ? Math.round((onTimeDelivered / delivered.length) * 100) : 0,
+      /** `null` with no delivered trip yet — the card shows `—`, never `0%` (QA FE-007). */
+      onTimePct: delivered.length > 0 ? Math.round((onTimeDelivered / delivered.length) * 100) : null,
       onTimeWindow: delivered.length,
       lateCount: activeRows.filter((t) => t.displayStatus === 'Late').length,
     },

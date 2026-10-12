@@ -183,10 +183,6 @@ describe('W-06 Drivers', () => {
     renderPage();
     await screen.findByText('John Smith');
 
-    // §6.9 `q` is forwarded to the roster endpoint (asserted in the search test below).
-    await user.type(screen.getByPlaceholderText('Search driver, username…'), 'smith');
-    await screen.findByText('John Smith');
-
     await user.click(screen.getAllByRole('button', { name: 'Logs' })[0]!);
 
     for (const label of [
@@ -203,6 +199,12 @@ describe('W-06 Drivers', () => {
 
     await user.click(screen.getAllByRole('button', { name: 'Row actions' })[0]!);
     await user.click(await screen.findByText('View driver profile'));
+
+    // §6.9 `q` is forwarded to the roster endpoint (asserted in the search test below). Typed
+    // last: the FE-003 debounce re-renders the table 250 ms later and would close an open menu.
+    await user.type(screen.getByPlaceholderText('Search driver, username…'), 'smith');
+    await vi.waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('q=smith'));
+    await screen.findByText('John Smith');
   });
 
   // Regression — the MSW roster handler ignored `q`, so typing in the search box re-requested the
@@ -231,6 +233,64 @@ describe('W-06 Drivers', () => {
     } finally {
       server.events.removeListener('request:start', onRequest);
     }
+  });
+
+  it('FE-003: fast typing keeps every character and sends one debounced roster request', async () => {
+    const sentQ: Array<string | null> = [];
+    const onRequest = ({ request }: { request: Request }) => {
+      const reqUrl = new URL(request.url);
+      if (reqUrl.pathname.endsWith(endpoints.drivers.roster)) sentQ.push(reqUrl.searchParams.get('q'));
+    };
+    server.events.on('request:start', onRequest);
+    try {
+      const user = userEvent.setup({ delay: null });
+      renderPage();
+      await screen.findByText('John Smith');
+      const box = screen.getByRole('textbox', { name: 'Search drivers' });
+      await user.type(box, 'webb');
+      expect(box).toHaveValue('webb');
+      // nothing per keystroke — the URL and the request follow only once typing settles
+      expect(sentQ.filter((q) => q && q !== 'webb')).toEqual([]);
+      await vi.waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(/^\/drivers\?q=webb$/));
+      await screen.findByText('Marcus Webb');
+      expect(box).toHaveValue('webb');
+      expect(sentQ.filter((q) => q !== null).every((q) => q === 'webb')).toBe(true);
+    } finally {
+      server.events.removeListener('request:start', onRequest);
+    }
+  });
+
+  it('UI-006: the header and the tab counts do not follow the selected tab or the search', async () => {
+    const user = userEvent.setup();
+    renderPage();
+    const all = await screen.findByRole('button', { name: 'All 58' });
+    const header = await screen.findByText(/^58 drivers · \d+ on duty · /);
+    const headerText = header.textContent;
+    const violationsTab = screen.getByRole('button', { name: /^Violations \d+$/ });
+    const violationsLabel = violationsTab.textContent;
+    await user.click(violationsTab);
+    expect(screen.getByRole('button', { name: violationsLabel! })).toHaveAttribute('aria-pressed', 'true');
+    // still the whole roster on the All tab and in the header
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.getByRole('button', { name: 'All 58' })).toBeInTheDocument();
+    expect(all).toBeInTheDocument();
+    expect(screen.getByText(headerText!)).toBeInTheDocument();
+
+    await user.type(screen.getByRole('textbox', { name: 'Search drivers' }), 'webb');
+    await vi.waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('q=webb'));
+    // the header is fleet-wide; a search never rewrites it
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.getByText(headerText!)).toBeInTheDocument();
+  });
+
+  it('UI-006: a single driver reads "1 driver", not "1 drivers"', async () => {
+    server.use(
+      http.get(url(endpoints.drivers.roster), () =>
+        ok({ items: [rosterEntry('drv_x', 'Solo', 'DRIVING')], page: 1, limit: 10, total: 1, totalPages: 1 }),
+      ),
+    );
+    renderPage();
+    expect(await screen.findByText(/^1 driver · 1 on duty · /)).toBeInTheDocument();
   });
 
   it("row menu Send message deep-links to that driver's conversation (WB-139)", async () => {

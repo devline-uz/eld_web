@@ -198,11 +198,15 @@ export function DataTable<T>({
             {headerGroup.headers.map((header) => {
               const sortDirection = header.column.getIsSorted();
               const ariaSort = sortDirection === 'asc' ? 'ascending' : sortDirection === 'desc' ? 'descending' : 'none';
-              const numeric = (header.column.columnDef.meta as { numeric?: boolean } | undefined)?.numeric;
+              const meta = header.column.columnDef.meta as { numeric?: boolean; width?: string } | undefined;
+              const numeric = meta?.numeric;
               return (
                 <th
                   key={header.id}
                   scope="col"
+                  // `meta.width` (a percentage) pins a column under `table-fixed`, so re-sorting or
+                  // paging never re-flows the widths (QA UI-007).
+                  style={meta?.width ? { width: meta.width } : undefined}
                   aria-sort={header.column.getCanSort() ? ariaSort : undefined}
                   className={cn(
                     'px-3 text-table-head font-semibold uppercase tracking-wide text-text-muted',

@@ -60,6 +60,33 @@ describe('DvirPage', () => {
     expect(await screen.findByText('Vehicles out of service')).toBeInTheDocument();
   });
 
+  it('UI-011: an OVERDUE service is listed apart as "Overdue by …" — never "Due in" via Math.abs', async () => {
+    const schedule = (id: string, name: string, due: Record<string, unknown>) => ({
+      id, vehicleId: 'veh_1', name, intervalMi: 25000, intervalDays: null, lastServiceMi: 0, lastServiceAt: null,
+      nextDueMi: 25000, nextDueAt: null, enabled: true, due: { nextDueMi: 25000, nextDueAt: null, daysRemaining: null, ...due },
+    });
+    server.use(
+      http.get(url(endpoints.maintenanceSchedules.list), () =>
+        ok({
+          items: [
+            schedule('ms_due', 'Oil change', { state: 'DUE_SOON', milesRemaining: 320 }),
+            schedule('ms_over', 'Brake inspection', { state: 'OVERDUE', milesRemaining: -48699 }),
+          ],
+          page: 1, limit: 200, total: 2, totalPages: 1,
+        }),
+      ),
+    );
+    renderPage();
+
+    const overdue = await screen.findByRole('region', { name: 'Overdue maintenance' });
+    expect(within(overdue).getByText(/Brake inspection/)).toBeInTheDocument();
+    expect(within(overdue).getByText('Overdue by 48,699 mi')).toHaveClass('text-danger');
+    const upcoming = screen.getByRole('region', { name: 'Upcoming maintenance' });
+    expect(within(upcoming).getByText(/Oil change/)).toBeInTheDocument();
+    expect(within(upcoming).queryByText(/Brake inspection/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Due in 48,699 mi/)).not.toBeInTheDocument();
+  });
+
   it('shows the DVIR empty-state copy verbatim when there are no recent inspections', async () => {
     server.use(http.get(url(endpoints.dvir.list), () => ok({ items: [], page: 1, limit: 25, total: 0, totalPages: 1 })));
     renderPage();

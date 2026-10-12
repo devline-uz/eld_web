@@ -28,7 +28,9 @@ const SOURCE = 'route-line';
 const LINE_LAYER = 'route-line-layer';
 const POINT_LAYER = 'route-points-layer';
 const LABEL_LAYER = 'route-labels-layer';
-const FIT_PADDING = 40;
+/** Marker radius 9 + stroke 2 + label, plus room for the compact attribution button in the
+ * bottom-right corner — 40 clipped the delivery marker at the card edge (QA UI-018). */
+const FIT_PADDING = 56;
 
 function cssToken(name: string, fallback: string): string {
   const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -116,8 +118,22 @@ export default function RouteMap(props: RouteMapProps) {
       return;
     }
     mapRef.current = map;
-    map.on('error', () => setFailed(true));
+    // Only a style that never loads is a failure; a tile/glyph error afterwards leaves a usable
+    // map and is just logged (QA FE-001, same rule as GeofencePickerMap).
+    let styleLoaded = false;
+    map.on('error', (event: maplibregl.ErrorEvent) => {
+      if (styleLoaded) {
+        console.warn('[RouteMap] map resource failed to load', event?.error);
+        return;
+      }
+      console.error('[RouteMap] map style failed to load', event?.error);
+      setFailed(true);
+    });
+    map.on('style.load', () => {
+      styleLoaded = true;
+    });
     map.on('load', () => {
+      styleLoaded = true;
       install(map, propsRef.current);
       fit(map, propsRef.current);
       setReady(true);

@@ -28,6 +28,8 @@ import { DRIVER_CONFLICT_RULES, CONFLICT_MESSAGES, findCachedDriverConflicts } f
 import { DRIVER_TOAST } from '../lib/copy';
 import { DRIVER_DTO_LIMITS, DRIVER_FIELD_LABELS, tooLongMessage } from '../lib/driverFormLimits';
 import { HOME_TERMINAL_TIMEZONES } from '../lib/terminals';
+import { HOS_RULESET_OPTIONS } from '@/shared/lib/hosRuleset';
+import type { HosRuleset } from '@/shared/api/carrier';
 import { PhoneNumberInput } from '@/shared/forms/PhoneNumberInput';
 
 const US_STATES = [
@@ -87,10 +89,10 @@ const US_STATES = [
 const editDriverSchema = z.object({
   // `UpdateDriverDto` caps (drivers.dto.ts) — past them the PATCH came back as an unexplained 422.
   firstName: f
-    .requiredString()
+    .personName()
     .max(DRIVER_DTO_LIMITS.firstName, tooLongMessage('First name', DRIVER_DTO_LIMITS.firstName)),
   lastName: f
-    .requiredString()
+    .personName()
     .max(DRIVER_DTO_LIMITS.lastName, tooLongMessage('Last name', DRIVER_DTO_LIMITS.lastName)),
   email: f.email(),
   /** Same international rule as Add driver: per-country validation, E.164 out. */
@@ -170,6 +172,9 @@ export function EditDriverModal({ driver, onClose }: EditDriverModalProps) {
   const [splitSleeperEnabled, setSplitSleeperEnabled] = useState(driver.splitSleeperEnabled);
   const [eldExempt, setEldExempt] = useState(driver.eldExempt);
   const [eldExemptReason, setEldExemptReason] = useState(driver.eldExemptReason ?? '');
+  // UI-005 — the driver's current ruleset; '' (only when the row carries none) = Company default,
+  // i.e. nothing is sent. The ruleset is sent only when the dispatcher actually changes it.
+  const [hosRuleset, setHosRuleset] = useState<HosRuleset | ''>(driver.hosRuleset ?? '');
   const [exemptReasonError, setExemptReasonError] = useState<string | null>(null);
   // The banner sits at the top of this tall `lg` modal while Save is in the footer — bring it into
   // view when it appears, or a refused PATCH looks like nothing happened.
@@ -229,7 +234,8 @@ export function EditDriverModal({ driver, onClose }: EditDriverModalProps) {
     shortHaulException !== driver.shortHaulException ||
     splitSleeperEnabled !== driver.splitSleeperEnabled ||
     eldExempt !== driver.eldExempt ||
-    eldExemptReason !== (driver.eldExemptReason ?? '');
+    eldExemptReason !== (driver.eldExemptReason ?? '') ||
+    hosRuleset !== (driver.hosRuleset ?? '');
 
   function onSubmit(values: EditDriverValues) {
     if (isPending) return;
@@ -268,6 +274,7 @@ export function EditDriverModal({ driver, onClose }: EditDriverModalProps) {
         splitSleeperEnabled,
         eldExempt,
         eldExemptReason: eldExempt ? eldExemptReason : undefined,
+        ...(hosRuleset && hosRuleset !== driver.hosRuleset ? { hosRuleset } : {}),
       },
       {
         onSuccess: () => {
@@ -422,6 +429,21 @@ export function EditDriverModal({ driver, onClose }: EditDriverModalProps) {
               {HOME_TERMINAL_TIMEZONES.map((t) => (
                 <option key={t.value} value={t.value}>
                   {t.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="HOS ruleset">
+            <select
+              value={hosRuleset}
+              onChange={(e) => setHosRuleset(e.target.value as HosRuleset | '')}
+              disabled={isPending}
+              className={inputClass}
+            >
+              {driver.hosRuleset ? null : <option value="">Company default</option>}
+              {HOS_RULESET_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
                 </option>
               ))}
             </select>

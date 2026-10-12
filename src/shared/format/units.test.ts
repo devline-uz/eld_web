@@ -42,6 +42,9 @@ describe('§8.1 units — group thousands, never convert, never round', () => {
     expect(formatPercent(93.5)).toBe('93.5%');
     expect(formatWeight(21300)).toBe('21,300 lbs');
     expect(formatMoney(2184.3)).toBe('$2,184.30');
+    // QA UI-020 — sign before the symbol, thousands grouped
+    expect(formatMoney(-66.8)).toBe('-$66.80');
+    expect(formatMoney(5000)).toBe('$5,000.00');
     expect(formatGForce(-0.42)).toBe('-0.42 g');
     expect(formatGForce(0.38)).toBe('0.38 g');
     expect(formatOdometer(993589)).toBe('993,589');

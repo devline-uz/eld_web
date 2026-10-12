@@ -88,7 +88,8 @@ function usePopulatedFleet() {
           (!status || v.status === status) &&
           (!q || [v.unitNumber, v.vin, v.licensePlate ?? ''].some((t) => t.toLowerCase().includes(q))),
       );
-      return ok({ ...page, items, total: items.length });
+      // UI-004 — `statusCounts` is fleet-wide: the `status` / `q` filters never narrow it.
+      return ok({ ...page, items, total: items.length, statusCounts: { ACTIVE: 1, INACTIVE: 0, OUT_OF_SERVICE: 0, total: 1 } });
     }),
     http.get(url(endpoints.drivers.list), () =>
       ok({
@@ -311,13 +312,63 @@ describe('W-03 Vehicles', () => {
     await user.click(screen.getByRole('button', { name: /Apply 1 filters/ }));
 
     // veh_1 is ACTIVE, not INACTIVE — the status filter removes it from the table.
-    expect(await screen.findByText(/Nothing matches/)).toBeInTheDocument();
+    expect(await screen.findByText('No units match these filters')).toBeInTheDocument();
+    expect(screen.getByText('1 filter applied')).toBeInTheDocument();
     expect(screen.getByText('Filters · 1')).toBeInTheDocument();
     expect(screen.getByText(/Status: Inactive/)).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Clear all' }));
     expect(await screen.findByText('#101')).toBeInTheDocument();
     expect(screen.getByText('Filters')).toBeInTheDocument();
+  });
+
+  it('UI-019: a search that the status filter empties names the filters, not just the search', async () => {
+    usePopulatedFleet();
+    renderPage(['/vehicles?q=Volvo&fStatus=INACTIVE']);
+    expect(await screen.findByText('Nothing matches "Volvo" with the current filters')).toBeInTheDocument();
+    expect(screen.getByText('1 filter applied')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Clear filters' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Clear search' })).toBeInTheDocument();
+  });
+
+  it('UI-019: clicking a row opens that unit profile', async () => {
+    usePopulatedFleet();
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByText('1FUJGLDR8LLLL1234'));
+    expect(screen.getByTestId('location')).toHaveTextContent(/^\/vehicles\/veh_1$/);
+  });
+
+  it('UI-019: the status filter offers Active and Out of service', async () => {
+    usePopulatedFleet();
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('#101');
+    await user.click(screen.getByRole('button', { name: 'Filters' }));
+    const drawer = await screen.findByRole('dialog');
+    expect(within(drawer).getByText('Active')).toBeInTheDocument();
+    expect(within(drawer).getByText('Out of service')).toBeInTheDocument();
+  });
+
+  it('UI-007: clicking a sortable header asks the server for that order (whole fleet, not the page)', async () => {
+    const sorts: (string | null)[] = [];
+    usePopulatedFleet();
+    server.use(
+      http.get(url(endpoints.vehicles.list), ({ request }) => {
+        const params = new URL(request.url).searchParams;
+        sorts.push(params.get('sort'));
+        return ok({ items: [VEHICLE_ROW], page: 1, limit: Number(params.get('limit') ?? 10), total: 1, totalPages: 1 });
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('#101');
+    await user.click(screen.getByRole('button', { name: 'UNIT #' }));
+    await vi.waitFor(() => expect(sorts).toContain('unitNumber:asc'));
+    await user.click(screen.getByRole('button', { name: /UNIT #/ }));
+    await vi.waitFor(() => expect(sorts).toContain('unitNumber:desc'));
+    // YEAR has no server sort — not offered as a sort button
+    expect(screen.queryByRole('button', { name: 'YEAR' })).not.toBeInTheDocument();
   });
 
   // Regression — a `page` query param that is not a positive integer used to reach `Number()`
@@ -400,6 +451,10 @@ describe('W-03 Vehicles', () => {
               shiftEndsAt: null,
               eldSerial: null,
               bleState: null,
+              recordStatus: 'ACTIVE',
+              connectivity: 'NO_DEVICE',
+              isStale: false,
+              staleSince: null,
             },
           ],
         }),
@@ -409,6 +464,56 @@ describe('W-03 Vehicles', () => {
 
     const row = (await screen.findByText('#101')).closest('tr')!;
     expect(await within(row).findByText('Active')).toBeInTheDocument();
+    expect(within(row).queryByText('Inactive')).not.toBeInTheDocument();
+    // UI-004 — the live INACTIVE is explained, not dropped: the unit has no ELD paired.
+    expect(within(row).getByText('No device')).toBeInTheDocument();
+  });
+
+  // UI-004 — the record status is the headline; the ELD link is the secondary line.
+  it('UI-004: an OUT_OF_SERVICE record reads "Out of service" with its ELD link under it', async () => {
+    server.use(
+      http.get(url(endpoints.vehicles.list), () =>
+        ok({ items: [{ ...VEHICLE_ROW, status: 'OUT_OF_SERVICE' }], page: 1, limit: 10, total: 1, totalPages: 1 }),
+      ),
+      http.get(url(endpoints.drivers.list), () => ok({ items: [], page: 1, limit: 500, total: 0, totalPages: 1 })),
+      http.get(url(endpoints.devices.list), () => ok({ items: [], page: 1, limit: 500, total: 0, totalPages: 1 })),
+      http.get(url(endpoints.live.fleet), () =>
+        ok({
+          generatedAt: '2026-09-27T00:00:00.000Z',
+          items: [
+            {
+              vehicleId: 'veh_1',
+              unitNumber: '#101',
+              driverId: null,
+              driverName: null,
+              driverPhone: null,
+              dutyStatus: 'INACTIVE',
+              speedMph: null,
+              headingDeg: null,
+              odometerMi: null,
+              lat: null,
+              lon: null,
+              locationLabel: null,
+              lastSeenAt: '2026-09-20T00:00:00.000Z',
+              driveRemainingSec: null,
+              shiftEndsAt: null,
+              eldSerial: 'PT30_A86E',
+              bleState: 'DISCONNECTED',
+              recordStatus: 'OUT_OF_SERVICE',
+              connectivity: 'ELD_OFFLINE',
+              isStale: false,
+              staleSince: null,
+            },
+          ],
+        }),
+      ),
+    );
+    renderPage();
+
+    const row = (await screen.findByText('#101')).closest('tr')!;
+    expect(await within(row).findByText('ELD offline')).toBeInTheDocument();
+    expect(within(row).getByText('Out of service')).toBeInTheDocument();
+    expect(within(row).queryByText('Active')).not.toBeInTheDocument();
     expect(within(row).queryByText('Inactive')).not.toBeInTheDocument();
   });
 

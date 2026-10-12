@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeDue, DUE_SOON_DAYS, DUE_SOON_MILES, overdueReasons } from './maintenanceDue';
+import { computeDue, DUE_SOON_DAYS, DUE_SOON_MILES, overdueReasons, maintenanceDueLabel } from './maintenanceDue';
 
 const NOW = new Date('2026-10-10T12:00:00.000Z');
 const base = { intervalMi: null, intervalDays: null, lastServiceMi: null, lastServiceAt: null, currentOdometerMi: 0, now: NOW };
@@ -54,5 +54,21 @@ describe('computeDue — mirrors eld_backend maintenance-due.ts', () => {
 
   it('no interval → OK with all nulls', () => {
     expect(computeDue(base)).toEqual({ state: 'OK', nextDueMi: null, nextDueAt: null, milesRemaining: null, daysRemaining: null });
+  });
+});
+
+describe('UI-011 maintenanceDueLabel', () => {
+  const fmt = (mi: number) => mi.toLocaleString('en-US');
+  it('never folds an overdue service into "Due in" with Math.abs', () => {
+    expect(maintenanceDueLabel({ state: 'OVERDUE', milesRemaining: -48699, daysRemaining: null }, fmt)).toBe('Overdue by 48,699 mi');
+    expect(maintenanceDueLabel({ state: 'OVERDUE', milesRemaining: 1200, daysRemaining: -3 }, fmt)).toBe('Overdue by 3 d');
+    expect(maintenanceDueLabel({ state: 'OVERDUE', milesRemaining: 0, daysRemaining: null }, fmt)).toBe('Due now');
+    expect(maintenanceDueLabel({ state: 'OVERDUE', milesRemaining: null, daysRemaining: 0 }, fmt)).toBe('Due today');
+    expect(maintenanceDueLabel({ state: 'OVERDUE', milesRemaining: null, daysRemaining: null }, fmt)).toBe('Overdue');
+  });
+  it('a due-soon service reads "Due in"', () => {
+    expect(maintenanceDueLabel({ state: 'DUE_SOON', milesRemaining: 320, daysRemaining: 10 }, fmt)).toBe('Due in 320 mi');
+    expect(maintenanceDueLabel({ state: 'DUE_SOON', milesRemaining: null, daysRemaining: 5 }, fmt)).toBe('Due in 5 d');
+    expect(maintenanceDueLabel({ state: 'OK', milesRemaining: null, daysRemaining: null }, fmt)).toBe('Due');
   });
 });

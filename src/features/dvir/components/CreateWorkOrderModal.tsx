@@ -22,6 +22,7 @@ import {
   WORK_ORDER_FIELD_LABELS,
   WORK_ORDER_LIMITS,
 } from '../lib/workOrderFieldGuards';
+import { formatEnumLabel } from '@/shared/format/enumLabel';
 
 const PRIORITIES: { value: WorkOrderPriority; label: string }[] = [
   { value: 'URGENT', label: 'Critical — out of service' },
@@ -118,11 +119,17 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
     setSelectedDefects((prev) => (prev.includes(id) ? prev.filter((d) => d !== id) : [...prev, id]));
   }
 
+  const inFlight = useRef(false);
+
   function submit() {
     // B-42 (shipped 2026-09-24) — `estimatedLaborHours`, `keepOutOfService`, `notifyDriver` and
     // `blockDispatchAssignment` are real `CreateWorkOrderDto` fields now.
+    // QA FE-004 — `isPending` only flips on the next render: two clicks in one tick both got
+    // through and created two work orders. Same-tick ref guard, as in AddVehicleModal.
+    if (inFlight.current || mutation.isPending) return;
     setServerError(null);
     if (!valid) return;
+    inFlight.current = true;
     mutation.mutate(
       {
         vehicleId: selectedVehicleId,
@@ -140,6 +147,9 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
         blockDispatchAssignment,
       },
       {
+        onSettled: () => {
+          inFlight.current = false;
+        },
         onSuccess: (wo) => {
           toast({ kind: 'success', title: `Work order ${wo.number} created`, description: 'The unit and any attached defects were updated.' });
           onClose();
@@ -212,7 +222,7 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
                   <input type="checkbox" checked={selectedDefects.includes(d.id)} onChange={() => toggleDefect(d.id)} className="mt-1" />
                   <span className="flex-1">
                     <span className="flex items-center gap-2">
-                      <span className="text-body-strong text-text">{d.category}</span>
+                      <span className="text-body-strong text-text">{formatEnumLabel(d.category)}</span>
                       <SeverityBadge severity={d.severity} />
                     </span>
                     <span className="block text-caption text-text-muted">{d.description}</span>

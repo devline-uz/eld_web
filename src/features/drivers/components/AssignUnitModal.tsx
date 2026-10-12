@@ -8,7 +8,7 @@ import { useState } from 'react';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
-import { formErrorMessage } from '@/shared/api/errors';
+import { assignDriverErrorMessage } from '@/shared/api/errors';
 import { useAssignDriver, useVehiclesPicker } from '@/shared/api/vehicles';
 import { DRIVER_TOAST } from '../lib/copy';
 
@@ -55,7 +55,7 @@ export function AssignUnitModal({
           onClose();
         },
         onError: (error) => {
-          setBanner(formErrorMessage(error));
+          setBanner(assignDriverErrorMessage(error));
         },
       },
     );

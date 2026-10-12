@@ -1,6 +1,6 @@
 // web/tz.md §14.3 — the code table maps one-to-one with backend/src/common/errors/codes.ts.
 import { describe, expect, it } from 'vitest';
-import { ApiError, ERROR_MESSAGES, NetworkError, errorMessage, formErrorMessage, isApiError, toUserMessage } from './errors';
+import { ApiError, ERROR_MESSAGES, NetworkError, errorMessage, formErrorMessage, isApiError, openTripsOf, toUserMessage, assignDriverErrorMessage } from './errors';
 
 describe('§14.3 error copy', () => {
   it('uses the exact strings from the table', () => {
@@ -125,5 +125,39 @@ describe('formErrorMessage', () => {
     expect(formErrorMessage(new ApiError(404, { code: 'NOT_FOUND' }))).toBe('Not found.');
     expect(formErrorMessage(new NetworkError())).toBe('No connection. Check your network and try again.');
     expect(formErrorMessage('oops')).toBe('Something went wrong.');
+  });
+});
+
+describe('BE-013 openTripsOf', () => {
+  const conflict = (details: Record<string, unknown>, status = 409) =>
+    new ApiError(status, { code: 'CONFLICT', message: 'still has open trips', details });
+
+  it('reads the open trips a 409 delete refusal names', () => {
+    const trips = [{ id: 'trp_1', number: 'TRP-1001', status: 'ASSIGNED' }];
+    expect(openTripsOf(conflict({ openTrips: trips }))).toEqual(trips);
+  });
+
+  it('is null for anything else', () => {
+    expect(openTripsOf(conflict({ openTrips: [] }))).toBeNull();
+    expect(openTripsOf(conflict({ openTrips: 'TRP-1' }))).toBeNull();
+    expect(openTripsOf(conflict({ openTrips: [{ id: 1 }] }))).toBeNull();
+    expect(openTripsOf(conflict({ openTrips: [{ id: 'trp_1', number: 'TRP-1' }] }, 422))).toBeNull();
+    expect(openTripsOf(new Error('boom'))).toBeNull();
+  });
+});
+
+describe('assign-driver refusals (POST /vehicles/:id/assign-driver)', () => {
+  const e = (status: number, code: string, message = 'Request failed') => new ApiError(status, { code, message });
+  it('uses the server sentence for a 409 CONFLICT, never "That value is already in use."', () => {
+    expect(assignDriverErrorMessage(e(409, 'CONFLICT', 'Vehicle is inactive and cannot be assigned a driver.'))).toBe(
+      'Vehicle is inactive and cannot be assigned a driver.',
+    );
+    expect(assignDriverErrorMessage(e(409, 'CONFLICT'))).toBe(ERROR_MESSAGES.CONFLICT);
+  });
+  it('explains out of service, a deleted driver and a deleted unit', () => {
+    expect(assignDriverErrorMessage(e(409, 'VEHICLE_OUT_OF_SERVICE'))).toMatch(/out of service/);
+    expect(assignDriverErrorMessage(e(404, 'DRIVER_NOT_FOUND'))).toBe('This driver was deleted or no longer exists. Pick another driver.');
+    expect(assignDriverErrorMessage(e(404, 'VEHICLE_NOT_FOUND'))).toBe('This unit was deleted or no longer exists.');
+    expect(assignDriverErrorMessage(new Error('x'))).toBe('Something went wrong.');
   });
 });
