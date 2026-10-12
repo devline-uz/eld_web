@@ -46,7 +46,7 @@ describe('LiveUnitNote', () => {
   it('renders nothing for a live unit and the warning-toned note for a stale one', () => {
     const { container, rerender } = render(<LiveUnitNote unit={live} />);
     expect(container).toBeEmptyDOMElement();
-    rerender(<LiveUnitNote unit={{ ...live, isStale: true, staleSince: new Date(Date.now() - 2 * DAY).toISOString() }} />);
+    rerender(<LiveUnitNote unit={{ ...live, isStale: true, staleSince: new Date(Date.now() - 2 * DAY - 60_000).toISOString() }} />);
     const note = screen.getByTestId('live-unit-note');
     expect(note).toHaveTextContent('Last update 2 d ago');
     expect(note).toHaveClass('text-warning');
