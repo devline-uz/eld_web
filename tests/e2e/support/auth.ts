@@ -26,13 +26,12 @@ export const DEMO_ACCOUNTS: Record<DemoRole, { email: string; password: string; 
 };
 
 /**
- * Opens the collapsed "▾ Developer sign-in" block and submits the dev password form. There is no
+ * Fills the always-open dev password form (no toggle since 2026-10-12) and submits it. There is no
  * second step for any role (web/decisions.md WD-067).
  */
 export async function signInAsDev(page: Page, role: DemoRole): Promise<void> {
   const { email, password } = DEMO_ACCOUNTS[role];
   await page.goto('/sign-in');
-  await page.getByRole('button', { name: 'Developer sign-in' }).click();
   await page.getByLabel('Email').fill(email);
   await page.getByLabel('Password', { exact: true }).fill(password);
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
@@ -44,7 +43,6 @@ export async function signInAsDev(page: Page, role: DemoRole): Promise<void> {
 export async function fillViaDemoLink(page: Page, role: DemoRole): Promise<void> {
   const { demoLink } = DEMO_ACCOUNTS[role];
   await page.goto('/sign-in');
-  await page.getByRole('button', { name: 'Developer sign-in' }).click();
   await page.getByRole('button', { name: demoLink, exact: true }).click();
 }
 

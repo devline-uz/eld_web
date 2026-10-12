@@ -20,6 +20,10 @@ export const endpoints = {
     signOut: '/auth/logout',
     passwordForgot: '/auth/password/forgot',
     passwordReset: '/auth/password/reset',
+    /** Sign-in "Forgot password?" (dev auth only) — emails a 6-digit code; 404 for an unknown email. */
+    passwordResetCode: '/auth/password/reset-code',
+    /** Sign-in "Forgot password?" — verifies the code and sets the new password. */
+    passwordResetCodeConfirm: '/auth/password/reset-code/confirm',
     /** B-84 (shipped) — completes a `PATCH /users/:id { email }` re-verification link. */
     emailVerify: '/auth/email/verify',
   },

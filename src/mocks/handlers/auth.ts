@@ -13,6 +13,37 @@ export const authHandlers = [
     return ok(fixture('POST /api/auth/login'));
   }),
 
+  // Sign-in "Forgot password?" — any `@universal-logistics.example` address is an account (the
+  // demo users); anything else is the documented 404. The mock code is always `123456`;
+  // `000000` is a wrong code and `111111` an expired one.
+  http.post(url(endpoints.auth.passwordResetCode), async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { email?: string };
+    const email = (body.email ?? '').trim().toLowerCase();
+    if (!email.endsWith('@universal-logistics.example')) {
+      return fail(404, 'NOT_FOUND', 'No account found with this email.', {
+        email: 'No account found with this email.',
+      });
+    }
+    return ok({ ...(fixture('POST /api/auth/password/reset-code') as Record<string, unknown>), email });
+  }),
+  http.post(url(endpoints.auth.passwordResetCodeConfirm), async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { code?: string; newPassword?: string };
+    if ((body.newPassword ?? '').length < 8) {
+      return fail(422, 'VALIDATION_FAILED', 'Request validation failed.', {
+        issues: [{ path: 'newPassword', code: 'too_small', message: 'Password must be at least 8 characters.' }],
+      });
+    }
+    if (body.code === '111111') {
+      const message = 'This code has expired or was already used. Request a new code.';
+      return fail(422, 'RESET_CODE_EXPIRED', message, { code: message });
+    }
+    if (body.code !== '123456') {
+      const message = 'Incorrect code. 4 attempts left.';
+      return fail(422, 'RESET_CODE_INVALID', message, { code: message, attemptsRemaining: 4 });
+    }
+    return ok(fixture('POST /api/auth/password/reset-code/confirm'));
+  }),
+
   http.post(url(endpoints.auth.refresh), () => ok(fixture('POST /api/auth/refresh'))),
   http.post(url(endpoints.auth.signOut), () => ok(fixture('POST /api/auth/logout'))),
   http.post(url(endpoints.auth.google), () => ok(fixture('POST /api/auth/google'))),
