@@ -84,9 +84,12 @@ describe('W-00 · the card', () => {
     ).toBeInTheDocument();
   });
 
-  it('has no password recovery, no SAML and no "keep me signed in" (Q-1)', () => {
+  it('has no SAML and no "keep me signed in" (Q-1); password recovery lives in the dev form only', () => {
     renderSignIn();
-    expect(screen.queryByText(/Forgot password/i)).not.toBeInTheDocument();
+    // Customer request 2026-10-12: `Forgot password?` came back, inside the dev password form
+    // (PasswordResetFlow.test.tsx). The production build still has none (production test).
+    const devForm = screen.getByRole('form', { name: 'Developer sign-in' });
+    expect(screen.getByRole('button', { name: 'Forgot password?' }).closest('form')).toBe(devForm);
     expect(screen.queryByText(/SAML/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Keep me signed in/i)).not.toBeInTheDocument();
   });
@@ -123,27 +126,25 @@ describe('W-00 · the card', () => {
 });
 
 describe('W-00 · the dev block (VITE_AUTH_MODE=dev)', () => {
-  it('is collapsed, warns that it is dev-only, and opens on click', async () => {
-    const user = userEvent.setup();
+  it('shows the password form open, with no toggle and no dev-mode notice, above Google', () => {
     renderSignIn();
-    expect(
-      screen.getByText('Development mode — password sign-in is disabled in production.'),
-    ).toBeInTheDocument();
-
-    const toggle = screen.getByRole('button', { name: 'Developer sign-in' });
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByLabelText('Email')).not.toBeInTheDocument();
-
-    await user.click(toggle);
-    expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByLabelText('Email')).toBeInTheDocument();
+    expect(screen.queryByText(/Development mode/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Developer sign-in' })).not.toBeInTheDocument();
+    expect(screen.getByRole('form', { name: 'Developer sign-in' })).toBeInTheDocument();
+    const email = screen.getByLabelText('Email');
     expect(screen.getByLabelText('Password')).toBeInTheDocument();
+
+    const google = screen.getByRole('button', { name: /Continue with Google/ });
+    const note = screen.getByText(
+      'Access is granted by invitation. Ask your administrator to invite your work Google account.',
+    );
+    // The password form comes first; Google and its note follow it.
+    expect(email.compareDocumentPosition(google) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(google.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('offers no demo-account quick-fill — credentials are typed', async () => {
-    const user = userEvent.setup();
+  it('offers no demo-account quick-fill — credentials are typed', () => {
     renderSignIn();
-    await user.click(screen.getByRole('button', { name: 'Developer sign-in' }));
     expect(screen.queryByText(/Demo accounts/)).not.toBeInTheDocument();
     expect(screen.getByLabelText('Email')).toHaveValue('');
     expect(screen.getByLabelText('Password')).toHaveValue('');
@@ -152,7 +153,6 @@ describe('W-00 · the dev block (VITE_AUTH_MODE=dev)', () => {
   it('reveals and hides the password', async () => {
     const user = userEvent.setup();
     renderSignIn();
-    await user.click(screen.getByRole('button', { name: 'Developer sign-in' }));
     expect(screen.getByLabelText('Password')).toHaveAttribute('type', 'password');
     await user.click(screen.getByRole('button', { name: 'Show password' }));
     expect(screen.getByLabelText('Password')).toHaveAttribute('type', 'text');
@@ -164,7 +164,6 @@ describe('W-00 · the dev block (VITE_AUTH_MODE=dev)', () => {
     const user = userEvent.setup();
     const ctx = mockAuth();
     renderSignIn();
-    await user.click(screen.getByRole('button', { name: 'Developer sign-in' }));
     await user.type(screen.getByLabelText('Email'), 'sarah.chen@universal-logistics.example');
     await user.type(screen.getByLabelText('Password'), 'Onebook2026');
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
@@ -183,7 +182,6 @@ describe('W-00 · the dev block (VITE_AUTH_MODE=dev)', () => {
       signInWithPassword: vi.fn(() => new Promise(() => undefined)),
     });
     renderSignIn();
-    await user.click(screen.getByRole('button', { name: 'Developer sign-in' }));
     await user.type(screen.getByLabelText('Email'), 'sarah.chen@universal-logistics.example');
     await user.type(screen.getByLabelText('Password'), 'Onebook2026{Enter}{Enter}');
 
@@ -210,7 +208,6 @@ describe('W-00 · the dev block (VITE_AUTH_MODE=dev)', () => {
       }),
     });
     renderSignIn();
-    await user.click(screen.getByRole('button', { name: 'Developer sign-in' }));
     await user.type(screen.getByLabelText('Email'), 'sarah.chen@universal-logistics.example');
     await user.type(screen.getByLabelText('Password'), 'Onebook2026');
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
@@ -226,13 +223,12 @@ describe('W-00 · the dev block (VITE_AUTH_MODE=dev)', () => {
       }),
     });
     renderSignIn();
-    await user.click(screen.getByRole('button', { name: 'Developer sign-in' }));
     await user.type(screen.getByLabelText('Email'), 'sarah.chen@universal-logistics.example');
     await user.type(screen.getByLabelText('Password'), 'Onebook2026');
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      'Password sign-in is turned off on this server (production mode). Sign in with Continue with Google above.',
+      'Password sign-in is turned off on this server (production mode). Sign in with Continue with Google below.',
     );
   });
 });
@@ -425,7 +421,6 @@ describe('W-00 developer sign-in — empty credentials', () => {
     const user = userEvent.setup();
     const ctx = mockAuth();
     renderSignIn();
-    await user.click(screen.getByRole('button', { name: 'Developer sign-in' }));
 
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
 
@@ -441,7 +436,6 @@ describe('W-00 developer sign-in — empty credentials', () => {
     const user = userEvent.setup();
     const ctx = mockAuth();
     renderSignIn();
-    await user.click(screen.getByRole('button', { name: 'Developer sign-in' }));
     await user.type(screen.getByLabelText('Email'), 'sarah.chen@universal-logistics.example');
 
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
@@ -455,7 +449,6 @@ describe('W-00 developer sign-in — empty credentials', () => {
     const user = userEvent.setup();
     const ctx = mockAuth();
     renderSignIn();
-    await user.click(screen.getByRole('button', { name: 'Developer sign-in' }));
     await user.click(screen.getByRole('button', { name: 'Sign in' }));
     expect(screen.getAllByText('This field is required.')).toHaveLength(2);
 

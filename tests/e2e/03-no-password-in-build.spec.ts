@@ -1,5 +1,6 @@
 // web/tz.md §18.1 scenario 3 — the production build contains no password form at all:
-// `dist/` must not contain the string "Developer sign-in". This is a build-artifact test, not
+// `dist/` must not contain the string "Developer sign-in" (the dev form's accessible name — the
+// toggle that used to carry it was removed 2026-10-12). This is a build-artifact test, not
 // a browser test: it runs a real `vite build --mode production` with `VITE_AUTH_MODE=production`
 // into a scratch output directory (never the `dist/` the bundle-budget script checks) and greps
 // the emitted JS for the banned string.

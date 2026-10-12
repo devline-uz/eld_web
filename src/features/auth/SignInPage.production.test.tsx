@@ -36,11 +36,12 @@ describe('W-00 · production mode', () => {
     );
 
     expect(screen.getByRole('button', { name: /Continue with Google/ })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Developer sign-in' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('form', { name: 'Developer sign-in' })).not.toBeInTheDocument();
     expect(screen.queryByText(/Development mode/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Demo accounts/)).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Email')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Forgot password/i)).not.toBeInTheDocument();
     expect(document.body.innerHTML).not.toContain('Developer sign-in');
   });
 });

@@ -191,6 +191,9 @@ export const ERROR_MESSAGES: Record<string, string> = {
   TRIP_IN_PROGRESS: 'This trip is in progress and cannot be deleted. Wait until it is delivered or cancel it first.',
   GEOCODER_NOT_CONFIGURED: 'Address lookup is not configured. Draw the geofence on the map instead.',
   GEOCODE_FAILED: 'That address could not be found. Check it or draw the geofence on the map.',
+  // --- Sign-in "Forgot password?" (2026-10-12) ---------------------------------------------------
+  RESET_CODE_INVALID: 'Incorrect code.',
+  RESET_CODE_EXPIRED: 'This code has expired or was already used. Request a new code.',
 };
 
 /** §14.3 — unknown code → `Something went wrong. Reference: <traceId>`. */

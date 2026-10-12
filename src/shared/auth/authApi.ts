@@ -61,6 +61,31 @@ export function loginWithPassword(email: string, password: string): Promise<Toke
   return authRequest<TokenPair>(endpoints.auth.signIn, { body: { email, password } });
 }
 
+export interface PasswordResetCodeSent {
+  success: true;
+  /** The account email as stored — sent back on confirm. */
+  email: string;
+  expiresInSec: number;
+  resendAfterSec: number;
+}
+
+/**
+ * Dev build only (Q-1) — "Forgot password?" step 1. 404 NOT_FOUND for an unknown/inactive email,
+ * 429 RATE_LIMITED (`details.retryAfterSec`) inside the resend cooldown, 403 under AUTH_MODE=production.
+ */
+export function requestPasswordResetCode(email: string): Promise<PasswordResetCodeSent> {
+  return authRequest<PasswordResetCodeSent>(endpoints.auth.passwordResetCode, { body: { email } });
+}
+
+/** Step 2 — 422 RESET_CODE_INVALID (`details.attemptsRemaining`) / RESET_CODE_EXPIRED / VALIDATION_FAILED. */
+export function confirmPasswordResetCode(input: {
+  email: string;
+  code: string;
+  newPassword: string;
+}): Promise<{ success: true }> {
+  return authRequest<{ success: true }>(endpoints.auth.passwordResetCodeConfirm, { body: input });
+}
+
 /** The only way in under `production` (Q-1). Never auto-registers: 403 USER_NOT_INVITED. */
 export function loginWithGoogleIdToken(idToken: string): Promise<TokenPair> {
   return authRequest<TokenPair>(endpoints.auth.google, { body: { idToken } });

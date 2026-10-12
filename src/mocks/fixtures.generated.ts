@@ -66,6 +66,15 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
   'POST /api/auth/password/reset': {
     "success": true
   },
+  'POST /api/auth/password/reset-code': {
+    "success": true,
+    "email": "sarah.chen@universal-logistics.example",
+    "expiresInSec": 900,
+    "resendAfterSec": 60
+  },
+  'POST /api/auth/password/reset-code/confirm': {
+    "success": true
+  },
   'POST /api/auth/driver/password/forgot': {
     "success": true
   },

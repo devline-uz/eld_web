@@ -1,10 +1,12 @@
-// owner: web-auth-rbac — the collapsed `Developer sign-in` block (web/tz.md §6.6, Q-1).
+// owner: web-auth-rbac — the always-open developer password form (web/tz.md §6.6, Q-1). The
+// collapsible `Developer sign-in` toggle and the `Development mode` notice were removed on
+// customer request (2026-10-12); the form's accessible name keeps the `Developer sign-in` string.
 //
 // ⚠️ This module is only ever referenced behind `import.meta.env.VITE_AUTH_MODE === 'dev'`.
 // Vite inlines that literal, so a production build drops the whole branch and this file never
 // reaches `dist/` — E2E scenario 3 greps `dist/` for the string `Developer sign-in`.
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { ChevronDown, ChevronRight, Eye, EyeOff } from 'lucide-react';
+import { Eye, EyeOff } from 'lucide-react';
 import { Button } from '@/shared/ui/Button';
 import { VALIDATION_MESSAGES } from '@/shared/forms/messages';
 import { fields } from '@/shared/forms';
@@ -12,12 +14,17 @@ import { fields } from '@/shared/forms';
 export function DeveloperSignIn({
   onSubmit,
   busy,
+  initialEmail = '',
+  onForgotPassword,
 }: {
   onSubmit: (email: string, password: string) => void;
   busy: boolean;
+  /** Prefill — e.g. the address whose password was just reset. */
+  initialEmail?: string;
+  /** Opens the inline "Reset password" steps; receives whatever is typed in Email. */
+  onForgotPassword?: (email: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState('');
   const [visible, setVisible] = useState(false);
   // WB — `Sign in` used to call `onSubmit('', '')`, which fired a real `POST /auth/login` with two
@@ -48,115 +55,105 @@ export function DeveloperSignIn({
 
   return (
     <div className="mt-5">
-      <div className="flex items-center gap-3" aria-hidden="true">
+      <form
+        id="developer-sign-in-panel"
+        aria-label="Developer sign-in"
+        className="flex flex-col gap-3"
+        noValidate
+        onSubmit={submit}
+      >
+        {/* The error sits outside the <label> so it never becomes part of the field's
+              accessible name. */}
+        <div className="flex flex-col gap-1">
+          <label className="flex flex-col gap-1">
+            <span className="text-label text-text-secondary">Email</span>
+            <input
+              type="email"
+              autoComplete="username"
+              value={email}
+              onChange={(event) => {
+                setEmail(event.target.value);
+                setErrors((prev) => ({ ...prev, email: undefined }));
+              }}
+              aria-invalid={errors.email ? true : undefined}
+              aria-describedby={errors.email ? 'developer-sign-in-email-error' : undefined}
+              className="h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text"
+            />
+          </label>
+          {errors.email ? (
+            <span
+              id="developer-sign-in-email-error"
+              role="alert"
+              className="text-caption text-danger"
+            >
+              {errors.email}
+            </span>
+          ) : null}
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <label className="flex flex-col gap-1">
+            <span className="text-label text-text-secondary">Password</span>
+            <span className="relative flex items-center">
+              <input
+                type={visible ? 'text' : 'password'}
+                autoComplete="current-password"
+                value={password}
+                onChange={(event) => {
+                  setPassword(event.target.value);
+                  setErrors((prev) => ({ ...prev, password: undefined }));
+                }}
+                aria-invalid={errors.password ? true : undefined}
+                aria-describedby={errors.password ? 'developer-sign-in-password-error' : undefined}
+                className="h-input w-full rounded-md border border-border bg-bg-surface px-3 pr-10 text-body text-text"
+              />
+              <button
+                type="button"
+                aria-label={visible ? 'Hide password' : 'Show password'}
+                onClick={() => setVisible((value) => !value)}
+                className="absolute right-2 flex size-btn-sm items-center justify-center rounded-md text-text-muted hover:bg-bg-subtle"
+              >
+                {visible ? (
+                  <EyeOff size={16} strokeWidth={1.75} aria-hidden="true" />
+                ) : (
+                  <Eye size={16} strokeWidth={1.75} aria-hidden="true" />
+                )}
+              </button>
+            </span>
+          </label>
+          {errors.password ? (
+            <span
+              id="developer-sign-in-password-error"
+              role="alert"
+              className="text-caption text-danger"
+            >
+              {errors.password}
+            </span>
+          ) : null}
+        </div>
+
+        <Button type="submit" variant="secondary" size="lg" className="w-full" loading={busy}>
+          Sign in
+        </Button>
+
+        {onForgotPassword ? (
+          <button
+            type="button"
+            onClick={() => onForgotPassword(email.trim())}
+            disabled={busy}
+            className="self-center rounded-sm text-caption font-medium text-primary hover:underline disabled:opacity-50"
+          >
+            Forgot password?
+          </button>
+        ) : null}
+      </form>
+
+      {/* The Google button follows the form (customer request 2026-10-12). */}
+      <div className="mt-5 flex items-center gap-3" aria-hidden="true">
         <span className="h-px flex-1 bg-border" />
         <span className="text-caption text-text-muted">or</span>
         <span className="h-px flex-1 bg-border" />
       </div>
-
-      <p className="mt-4 rounded-md bg-warning-soft px-3 py-2 text-caption text-text-secondary">
-        Development mode — password sign-in is disabled in production.
-      </p>
-
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-        aria-controls="developer-sign-in-panel"
-        className="mt-3 flex w-full items-center justify-between rounded-md px-1 py-2 text-label text-text-secondary hover:bg-bg-subtle"
-      >
-        <span>Developer sign-in</span>
-        {open ? (
-          <ChevronDown size={16} strokeWidth={1.75} aria-hidden="true" />
-        ) : (
-          <ChevronRight size={16} strokeWidth={1.75} aria-hidden="true" />
-        )}
-      </button>
-
-      {open ? (
-        <form
-          id="developer-sign-in-panel"
-          className="mt-2 flex flex-col gap-3"
-          noValidate
-          onSubmit={submit}
-        >
-          {/* The error sits outside the <label> so it never becomes part of the field's
-              accessible name. */}
-          <div className="flex flex-col gap-1">
-            <label className="flex flex-col gap-1">
-              <span className="text-label text-text-secondary">Email</span>
-              <input
-                type="email"
-                autoComplete="username"
-                value={email}
-                onChange={(event) => {
-                  setEmail(event.target.value);
-                  setErrors((prev) => ({ ...prev, email: undefined }));
-                }}
-                aria-invalid={errors.email ? true : undefined}
-                aria-describedby={errors.email ? 'developer-sign-in-email-error' : undefined}
-                className="h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text"
-              />
-            </label>
-            {errors.email ? (
-              <span
-                id="developer-sign-in-email-error"
-                role="alert"
-                className="text-caption text-danger"
-              >
-                {errors.email}
-              </span>
-            ) : null}
-          </div>
-
-          <div className="flex flex-col gap-1">
-            <label className="flex flex-col gap-1">
-              <span className="text-label text-text-secondary">Password</span>
-              <span className="relative flex items-center">
-                <input
-                  type={visible ? 'text' : 'password'}
-                  autoComplete="current-password"
-                  value={password}
-                  onChange={(event) => {
-                    setPassword(event.target.value);
-                    setErrors((prev) => ({ ...prev, password: undefined }));
-                  }}
-                  aria-invalid={errors.password ? true : undefined}
-                  aria-describedby={
-                    errors.password ? 'developer-sign-in-password-error' : undefined
-                  }
-                  className="h-input w-full rounded-md border border-border bg-bg-surface px-3 pr-10 text-body text-text"
-                />
-                <button
-                  type="button"
-                  aria-label={visible ? 'Hide password' : 'Show password'}
-                  onClick={() => setVisible((value) => !value)}
-                  className="absolute right-2 flex size-btn-sm items-center justify-center rounded-md text-text-muted hover:bg-bg-subtle"
-                >
-                  {visible ? (
-                    <EyeOff size={16} strokeWidth={1.75} aria-hidden="true" />
-                  ) : (
-                    <Eye size={16} strokeWidth={1.75} aria-hidden="true" />
-                  )}
-                </button>
-              </span>
-            </label>
-            {errors.password ? (
-              <span
-                id="developer-sign-in-password-error"
-                role="alert"
-                className="text-caption text-danger"
-              >
-                {errors.password}
-              </span>
-            ) : null}
-          </div>
-
-          <Button type="submit" variant="secondary" size="lg" className="w-full" loading={busy}>
-            Sign in
-          </Button>
-        </form>
-      ) : null}
     </div>
   );
 }

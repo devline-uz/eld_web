@@ -1,8 +1,10 @@
 // owner: web-auth-rbac — W-00 Sign in (web/tz.md §10 W-00, §6.5–§6.7, customer decision Q-1).
 //
-// Production has exactly one way in: Continue with Google. `Forgot password?`,
-// `Keep me signed in` and `Continue with SAML single sign-on` from the design are removed —
-// W-00c is not built at all. The email + password form exists only in a dev build.
+// Production has exactly one way in: Continue with Google. `Keep me signed in` and
+// `Continue with SAML single sign-on` from the design are removed. The email + password form
+// exists only in a dev build, where it is always open and sits above Continue with Google
+// (customer request 2026-10-12); its `Forgot password?` link (same request) swaps the card for
+// the inline email → emailed code → new password steps (PasswordResetFlow), dev build only.
 //
 // 📐 The §10 entry points at `.tmp_docimg/shared-login.png`, which is not in the repo, and the
 // file called `Sign in — split brand panel with SSO.jpg` actually draws 11.1 Create a geofence
@@ -24,6 +26,7 @@ import {
 } from '@/shared/auth/returnTo';
 import { Button } from '@/shared/ui/Button';
 import { DeveloperSignIn } from './DeveloperSignIn';
+import { PasswordResetFlow } from './PasswordResetFlow';
 import { GoogleLogo } from './GoogleLogo';
 
 /** Vite inlines this literal, so the dev branch below disappears from a production build. */
@@ -63,7 +66,7 @@ function signInErrorMessage(cause: unknown): string | null {
     }
     if (error.status === 403 && error.code === 'PASSWORD_LOGIN_DISABLED') {
       // B-25 — a dev build pointed at an API running AUTH_MODE=production (Q-1).
-      return 'Password sign-in is turned off on this server (production mode). Sign in with Continue with Google above.';
+      return 'Password sign-in is turned off on this server (production mode). Sign in with Continue with Google below.';
     }
     if (error.status === 429) return 'Too many attempts. Try again in a minute.';
     if (error.status === 401 && error.code === 'INVALID_CREDENTIALS') {
@@ -96,6 +99,11 @@ export default function SignInPage() {
   useEffect(() => forgetReturnPath(), []);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<'google' | 'password' | null>(null);
+  // Dev auth only — the inline "Forgot password?" steps replace the card content while open.
+  const [resetFrom, setResetFrom] = useState<string | null>(null);
+  const [signInEmail, setSignInEmail] = useState('');
+  // Remounts the password form so a prefilled email (after a reset) actually lands in it.
+  const [formKey, setFormKey] = useState(0);
 
   // The guard redirects to a bare `/sign-in`, so the reason the session ended arrives through
   // the auth context; an explicit `?reason=` (a hard redirect from client.ts) still wins.
@@ -157,6 +165,25 @@ export default function SignInPage() {
     }
   }
 
+  if (IS_DEV_AUTH && resetFrom !== null) {
+    return (
+      <div className="w-sign-in-card">
+        <div className="rounded-xl bg-bg-surface p-8 shadow-card">
+          <PasswordResetFlow
+            initialEmail={resetFrom}
+            onBack={() => setResetFrom(null)}
+            onDone={(email) => {
+              setSignInEmail(email);
+              setFormKey((key) => key + 1);
+              setError(null);
+              setResetFrom(null);
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="w-sign-in-card">
       <div className="rounded-xl bg-bg-surface p-8 shadow-card">
@@ -180,6 +207,20 @@ export default function SignInPage() {
           </p>
         ) : null}
 
+        {IS_DEV_AUTH ? (
+          <DevBlock
+            key={formKey}
+            busy={busy === 'password'}
+            setBusy={setBusy}
+            setError={setError}
+            initialEmail={signInEmail}
+            onForgotPassword={(email) => {
+              setError(null);
+              setResetFrom(email);
+            }}
+          />
+        ) : null}
+
         <Button
           variant="secondary"
           size="lg"
@@ -195,10 +236,6 @@ export default function SignInPage() {
           Access is granted by invitation. Ask your administrator to invite your work Google
           account.
         </p>
-
-        {IS_DEV_AUTH ? (
-          <DevBlock busy={busy === 'password'} setBusy={setBusy} setError={setError} />
-        ) : null}
 
         <hr className="mt-6 border-border" />
         <p className="mt-3 text-center text-caption text-text-muted">
@@ -218,16 +255,22 @@ function DevBlock({
   busy,
   setBusy,
   setError,
+  initialEmail,
+  onForgotPassword,
 }: {
   busy: boolean;
   setBusy: (value: 'google' | 'password' | null) => void;
   setError: (value: string | null) => void;
+  initialEmail: string;
+  onForgotPassword: (email: string) => void;
 }) {
   const { signInWithPassword } = useAuth();
 
   return (
     <DeveloperSignIn
       busy={busy}
+      initialEmail={initialEmail}
+      onForgotPassword={onForgotPassword}
       onSubmit={(email, password) => {
         setError(null);
         setBusy('password');

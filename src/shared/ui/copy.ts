@@ -118,6 +118,8 @@ export interface ToastCopy {
 
 /** §13.3 — verbatim. */
 export const TOAST_COPY = {
+  /** Sign-in "Forgot password?" — not in §13.3's table (customer request 2026-10-12). */
+  passwordUpdated: { title: 'Password updated', description: 'Sign in with your new password.' } satisfies ToastCopy,
   unitCreated: (unitNumber: string, eldSerial: string): ToastCopy => ({
     title: `Unit #${unitNumber} created`,
     description: `ELD ${eldSerial} paired and the driver was notified.`,
