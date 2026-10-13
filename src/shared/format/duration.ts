@@ -30,3 +30,9 @@ export function formatMinutes(seconds: Sec): string {
   if (!isSec(seconds)) return EMPTY.dash;
   return `${Math.max(0, Math.round(seconds / 60))} min`;
 }
+
+/** `1:05` — media playback position / clip length (voice messages). Minutes are not padded. */
+export function formatMediaTime(seconds: Sec): string {
+  const total = isSec(seconds) ? Math.max(0, Math.floor(seconds)) : 0;
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}

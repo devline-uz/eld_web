@@ -11,7 +11,7 @@ import { server } from '@/mocks/server';
 import { ok, url } from '@/mocks/envelope';
 import { endpoints } from '@/shared/api/endpoints';
 import { qk } from '@/shared/api/queryKeys';
-import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/client';
+import { client, setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/client';
 import { ToastProvider } from '@/shared/ui/Toast';
 import * as RealtimeProviderModule from '@/shared/realtime/RealtimeProvider';
 import MessagesPage from './MessagesPage';
@@ -823,5 +823,151 @@ describe('W-16 Messages — group conversations', () => {
     expect(await screen.findByRole('button', { name: 'View logs' })).toBeInTheDocument();
     await waitFor(() => expect(hosRequests).toContain('drv_1'));
     expect(screen.queryByText(/members ·/)).not.toBeInTheDocument();
+  });
+});
+
+describe('W-16 Messages — voice messages', () => {
+  const AUDIO_MESSAGE = {
+    id: 'msg_a',
+    conversationId: 'cnv_1',
+    senderUserId: null,
+    senderDriverId: 'drv_1',
+    type: 'AUDIO',
+    body: 'Voice message',
+    attachmentId: 'att_a',
+    attachment: { id: 'att_a', kind: 'AUDIO', mimeType: 'audio/webm', sizeBytes: 4096, durationMs: 7000 },
+    clientId: null,
+    sentAt: '2026-09-12T15:00:00.000Z',
+    deliveredAt: null,
+    readAt: null,
+  };
+
+  const originalMediaDevices = navigator.mediaDevices;
+  const originalMediaRecorder = (globalThis as { MediaRecorder?: unknown }).MediaRecorder;
+
+  afterEach(() => {
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: originalMediaDevices });
+    (globalThis as { MediaRecorder?: unknown }).MediaRecorder = originalMediaRecorder;
+    vi.restoreAllMocks();
+  });
+
+  /** A minimal MediaRecorder: emits one chunk and `stop` on `stop()`. */
+  class FakeRecorder {
+    static isTypeSupported = (type: string) => type.startsWith('audio/webm');
+    state: 'inactive' | 'recording' = 'inactive';
+    mimeType = 'audio/webm;codecs=opus';
+    ondataavailable: ((e: { data: Blob }) => void) | null = null;
+    onstop: (() => void) | null = null;
+    start() {
+      this.state = 'recording';
+    }
+    stop() {
+      this.state = 'inactive';
+      this.ondataavailable?.({ data: new Blob([new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3])], { type: 'audio/webm' }) });
+      this.onstop?.();
+    }
+  }
+
+  function installMicrophone(getUserMedia: () => Promise<unknown>) {
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia } });
+    (globalThis as { MediaRecorder?: unknown }).MediaRecorder = FakeRecorder;
+  }
+
+  it('renders a received voice message as a player and resolves the clip URL on play', async () => {
+    usePopulatedConversations();
+    let presigned = 0;
+    server.use(
+      http.get(url(endpoints.conversations.messages(':id')), () => ok({ items: [AUDIO_MESSAGE], page: 1, limit: 100, total: 1, totalPages: 1 })),
+      http.get(url(endpoints.attachments.presign(':id')), () => {
+        presigned += 1;
+        return ok({ url: 'https://minio.local/messages/cnv_1/att_a.webm?sig=1', expiresAt: new Date(Date.now() + 15 * 60_000).toISOString() });
+      }),
+    );
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByText('John Smith'));
+    const button = await screen.findByRole('button', { name: 'Play voice message' });
+    expect(screen.getByText('0:07')).toBeInTheDocument();
+    await user.click(button);
+    await waitFor(() => expect(play).toHaveBeenCalled());
+    expect(presigned).toBe(1);
+  });
+
+  it('says why when microphone access is denied, and stays in text mode', async () => {
+    usePopulatedConversations();
+    installMicrophone(() => Promise.reject(new DOMException('denied', 'NotAllowedError')));
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByText('John Smith'));
+    await user.click(await screen.findByRole('button', { name: 'Record voice message' }));
+
+    expect(await screen.findByText(/Microphone access is blocked/)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Write a message to John Smith…')).toBeInTheDocument();
+  });
+
+  it('records, previews and sends a voice message as multipart with a clientId', async () => {
+    usePopulatedConversations();
+    const track = { stop: vi.fn() };
+    installMicrophone(() => Promise.resolve({ getTracks: () => [track] }));
+    vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:clip');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    // jsdom's FormData is not a multipart body Node's fetch understands, so the upload is
+    // captured at the client boundary instead of in an MSW handler.
+    let fields: Record<string, FormDataEntryValue> = {};
+    let uploadPath = '';
+    vi.spyOn(client, 'upload').mockImplementation(async (path: string, form: FormData) => {
+      uploadPath = path;
+      fields = Object.fromEntries(form.entries());
+      return { ...AUDIO_MESSAGE, id: 'msg_b', senderUserId: 'usr_1', senderDriverId: null, clientId: String(form.get('clientId')) } as never;
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByText('John Smith'));
+    await user.click(await screen.findByRole('button', { name: 'Record voice message' }));
+    expect(await screen.findByText('Recording…')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Stop recording' }));
+    expect(track.stop).toHaveBeenCalled();
+    await user.click(await screen.findByRole('button', { name: 'Send voice message' }));
+
+    await waitFor(() => expect(fields.clientId).toBeTruthy());
+    expect(uploadPath).toBe(endpoints.conversations.sendAudio('cnv_1'));
+    expect(fields.file).toBeInstanceOf(File);
+    expect(fields.durationMs).toBeDefined();
+    // Back to the text composer once sent.
+    expect(await screen.findByPlaceholderText('Write a message to John Smith…')).toBeInTheDocument();
+  });
+
+  it('cancelling a recording sends nothing', async () => {
+    usePopulatedConversations();
+    installMicrophone(() => Promise.resolve({ getTracks: () => [{ stop: vi.fn() }] }));
+    let posted = false;
+    server.use(
+      http.post(url(endpoints.conversations.sendAudio(':id')), () => {
+        posted = true;
+        return ok(AUDIO_MESSAGE);
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByText('John Smith'));
+    await user.click(await screen.findByRole('button', { name: 'Record voice message' }));
+    await user.click(await screen.findByRole('button', { name: 'Cancel recording' }));
+
+    expect(await screen.findByPlaceholderText('Write a message to John Smith…')).toBeInTheDocument();
+    expect(posted).toBe(false);
+  });
+
+  it('shows "Voice message" as the sidebar preview of an audio last message', async () => {
+    server.use(
+      http.get(url(endpoints.conversations.list), () => ok({ items: [{ ...CONVERSATION, lastMessage: AUDIO_MESSAGE, unreadCount: 0 }] })),
+      http.get(url(endpoints.drivers.list), () => ok({ items: [DRIVER], page: 1, limit: 500, total: 1, totalPages: 1 })),
+    );
+    renderPage();
+    expect(await screen.findByText('Voice message')).toBeInTheDocument();
   });
 });

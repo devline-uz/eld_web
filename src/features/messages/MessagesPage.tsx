@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { Phone, Plus, Search, Send, User } from 'lucide-react';
+import { ChevronLeft, Mic, Phone, Plus, Search, Send, Square, Trash2, User, X } from 'lucide-react';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
 import { useAuth } from '@/shared/auth/AuthProvider';
@@ -19,6 +19,7 @@ import { useToast } from '@/shared/ui/Toast';
 import { formatRelativeShort } from '@/shared/format/relative';
 import { formatLocal } from '@/shared/format/datetime';
 import { formatHosHours } from '@/shared/format/hos';
+import { formatMediaTime } from '@/shared/format/duration';
 import { hosTone } from '@/shared/ui/ProgressBar';
 import { formatSpeed } from '@/shared/format/numbers';
 import { useDriver, useDriverHos } from '@/shared/api/drivers';
@@ -30,6 +31,7 @@ import {
   useConversationsList,
   useMessages,
   useSendMessage,
+  useSendAudioMessage,
   useCreateConversation,
   useMarkConversationRead,
   upsertMessage,
@@ -40,6 +42,8 @@ import {
   type MessageRow,
 } from '@/shared/api/messaging';
 import { NewConversationModal } from './components/NewConversationModal';
+import { AudioMessagePlayer } from './components/AudioMessagePlayer';
+import { useVoiceRecorder, VOICE_MESSAGE_MAX_MS } from './useVoiceRecorder';
 
 type Segment = 'ALL' | 'UNREAD' | 'GROUPS';
 
@@ -111,7 +115,8 @@ function conversationInitials(conversation: ConversationListItem): string {
 function conversationPreview(conversation: ConversationListItem): string {
   if (conversation.lastMessage) {
     const mine = Boolean(conversation.lastMessage.senderUserId);
-    return `${mine ? 'You: ' : ''}${conversation.lastMessage.body}`;
+    const body = conversation.lastMessage.type === 'AUDIO' ? 'Voice message' : conversation.lastMessage.body;
+    return `${mine ? 'You: ' : ''}${body}`;
   }
   return conversation.lastMessageAt ? 'Tap to open the conversation' : 'No messages yet';
 }
@@ -231,6 +236,13 @@ export default function MessagesPage() {
 
   const messagesQuery = useMessages(selected?.id);
   const sendMessage = useSendMessage(selected?.id ?? '');
+  const sendAudio = useSendAudioMessage(selected?.id ?? '');
+  const recorder = useVoiceRecorder((message) => toast({ kind: 'error', title: message }));
+  const discardRecording = recorder.discard;
+  // A recording never follows the dispatcher into another conversation.
+  useEffect(() => {
+    discardRecording();
+  }, [selected?.id, discardRecording]);
   const liveFleet = useLiveFleet();
   const trips = useActiveTrips();
   const driverHos = useDriverHos(selected?.type === 'GROUP' ? undefined : selected?.driver?.id);
@@ -347,8 +359,62 @@ export default function MessagesPage() {
     sendOrRetry(trimmed, clientId);
   }
 
+  /** Voice messages — uploads the clip under `clientId`; the optimistic bubble plays the local
+   * `blob:` URL meanwhile and keeps the blob for `Retry` (same idempotency key) on failure. */
+  function sendAudioOrRetry(blob: Blob, durationMs: number, clientId: string, localUrl: string | undefined) {
+    if (!selected) return;
+    const conversationId = selected.id;
+    setMessageStatus(queryClient, conversationId, clientId, 'sending');
+    sendAudio.mutate(
+      { blob, durationMs, clientId },
+      {
+        onSuccess: () => {
+          if (localUrl) URL.revokeObjectURL(localUrl);
+        },
+        onError: (error) => {
+          setMessageStatus(queryClient, conversationId, clientId, 'failed');
+          toast({
+            kind: 'error',
+            title: 'Could not send the voice message.',
+            description: formErrorMessage(error, [], { file: 'Recording', durationMs: 'Duration' }),
+          });
+        },
+      },
+    );
+  }
+
+  function handleSendRecording() {
+    if (!selected) return;
+    const clip = recorder.take();
+    if (!clip) return;
+    const clientId = crypto.randomUUID();
+    const optimistic: MessageRow = {
+      id: `optimistic-${clientId}`,
+      conversationId: selected.id,
+      senderUserId: user?.id ?? null,
+      senderDriverId: null,
+      type: 'AUDIO',
+      body: 'Voice message',
+      attachmentId: null,
+      attachment: { id: '', kind: 'AUDIO', mimeType: clip.blob.type, sizeBytes: clip.blob.size, durationMs: Math.round(clip.durationMs) },
+      localAudioUrl: clip.url,
+      localAudioBlob: clip.blob,
+      clientId,
+      sentAt: new Date().toISOString(),
+      deliveredAt: null,
+      readAt: null,
+      status: 'sending',
+    };
+    upsertMessage(queryClient, selected.id, optimistic);
+    sendAudioOrRetry(clip.blob, clip.durationMs, clientId, clip.url);
+  }
+
   function handleRetry(message: MessageRow) {
     if (!message.clientId) return;
+    if (message.type === 'AUDIO' && message.localAudioBlob) {
+      sendAudioOrRetry(message.localAudioBlob, message.attachment?.durationMs ?? 0, message.clientId, message.localAudioUrl);
+      return;
+    }
     sendOrRetry(message.body, message.clientId);
   }
 
@@ -367,8 +433,11 @@ export default function MessagesPage() {
 
   return (
     <div className="flex h-content-h overflow-hidden rounded-lg border border-border bg-bg-surface">
-      {/* Left panel — conversations */}
-      <div className="flex w-conversations-list shrink-0 flex-col border-r border-border">
+      {/* Left panel — conversations. Below lg the panes stack: the list fills the card until a
+          conversation is open, then the thread takes over (with a back button). */}
+      <div
+        className={`${selected ? 'hidden lg:flex' : 'flex'} w-full shrink-0 flex-col border-border lg:w-conversations-list lg:border-r`}
+      >
         <div className="flex items-center justify-between border-b border-border p-3">
           <h2 className="text-card-title font-semibold text-text">Conversations</h2>
           <Can perm="messaging" level="FULL">
@@ -473,7 +542,7 @@ export default function MessagesPage() {
       </div>
 
       {/* Middle panel — thread */}
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className={`${selected ? 'flex' : 'hidden lg:flex'} min-w-0 flex-1 flex-col`}>
         {!selected && createConversation.isPending ? (
           <LoadingState className="p-4" />
         ) : !selected ? (
@@ -482,8 +551,16 @@ export default function MessagesPage() {
           </div>
         ) : (
           <>
-            <div className="flex items-center justify-between border-b border-border p-3">
-              <div className="flex items-center gap-2">
+            <div className="flex items-center justify-between gap-2 border-b border-border p-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <button
+                  type="button"
+                  aria-label="Back to conversations"
+                  onClick={() => setSelectedId(null)}
+                  className="-ml-1 flex size-8 shrink-0 items-center justify-center rounded-md text-text-secondary hover:bg-bg-subtle lg:hidden"
+                >
+                  <ChevronLeft size={18} strokeWidth={1.75} aria-hidden="true" />
+                </button>
                 {selected.type === 'GROUP' ? (
                   <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-violet-soft text-caption font-semibold text-violet">
                     {conversationInitials(selected)}
@@ -491,8 +568,8 @@ export default function MessagesPage() {
                 ) : (
                   <Avatar name={conversationName(selected)} size="md" />
                 )}
-                <div>
-                  <p className="text-body-strong text-text">{conversationName(selected)}</p>
+                <div className="min-w-0">
+                  <p className="truncate text-body-strong text-text">{conversationName(selected)}</p>
                   <p className="text-caption text-text-muted">
                     {selected.type === 'GROUP'
                       ? groupMembersLabel(selected)
@@ -502,7 +579,7 @@ export default function MessagesPage() {
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 whitespace-nowrap">
                 {selected.driver && selected.type !== 'GROUP' && (
                   <Button variant="secondary" size="sm" onClick={() => navigate(`/hos-logs?driverId=${selected.driver!.id}`)}>
                     View logs
@@ -530,14 +607,28 @@ export default function MessagesPage() {
                       const outgoing = Boolean(message.senderUserId);
                       const failed = message.status === 'failed';
                       const sending = message.status === 'sending';
+                      const isAudio = message.type === 'AUDIO';
                       return (
                         <div key={message.id} className={`flex flex-col ${outgoing ? 'items-end' : 'items-start'}`}>
                           <div
-                            className={`max-w-[70%] rounded-lg px-3 py-2 text-body ${
+                            className={`max-w-[85%] rounded-lg px-3 py-2 text-body sm:max-w-[70%] ${isAudio ? 'w-64' : ''} ${
                               outgoing ? 'bg-primary text-text-inverse' : 'border border-border bg-bg-surface text-text'
                             } ${failed ? 'border-2 border-danger' : ''}`}
                           >
-                            <p>{message.body}</p>
+                            {isAudio ? (
+                              message.localAudioUrl || message.attachment ? (
+                                <AudioMessagePlayer
+                                  src={message.localAudioUrl}
+                                  attachmentId={message.localAudioUrl ? undefined : message.attachment?.id}
+                                  durationMs={message.attachment?.durationMs}
+                                  tone={outgoing ? 'inverse' : 'default'}
+                                />
+                              ) : (
+                                <p className="italic">Voice message unavailable</p>
+                              )
+                            ) : (
+                              <p className="whitespace-pre-wrap break-words">{message.body}</p>
+                            )}
                             <p className={`mt-1 text-right text-caption ${outgoing ? 'text-white/80' : 'text-text-muted'}`}>
                               {formatLocal(message.sentAt, 'time')}{' '}
                               {outgoing && !sending && !failed ? (message.readAt ? '✓✓' : '✓') : ''}
@@ -573,33 +664,79 @@ export default function MessagesPage() {
                     </button>
                   ))}
                 </div>
-                <div className="flex items-end gap-2">
-                  <textarea
-                    ref={composerRef}
-                    value={draft}
-                    onChange={(e) => setDraft(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault();
-                        handleSend(draft);
-                      }
-                    }}
-                    placeholder={`Write a message to ${conversationName(selected)}…`}
-                    rows={1}
-                    className="flex-1 resize-none rounded-md border border-border bg-bg-surface px-3 py-2 text-body text-text outline-none"
-                  />
-                  <Button
-                    variant="primary"
-                    size="lg"
-                    iconOnly
-                    round
-                    aria-label="Send message"
-                    disabled={!draft.trim()}
-                    onClick={() => handleSend(draft)}
-                  >
-                    <Send aria-hidden size={18} strokeWidth={1.75} fill="currentColor" />
-                  </Button>
-                </div>
+                {recorder.status === 'recording' || recorder.status === 'recorded' ? (
+                  <div className="flex items-center gap-2">
+                    <Button variant="ghost" size="lg" iconOnly round aria-label={recorder.status === 'recording' ? 'Cancel recording' : 'Discard recording'} onClick={recorder.discard}>
+                      {recorder.status === 'recording' ? (
+                        <X aria-hidden size={18} strokeWidth={1.75} />
+                      ) : (
+                        <Trash2 aria-hidden size={18} strokeWidth={1.75} />
+                      )}
+                    </Button>
+                    {recorder.status === 'recording' ? (
+                      <div role="status" aria-live="polite" className="flex min-w-0 flex-1 items-center gap-2 rounded-md border border-border px-3 py-2">
+                        <span aria-hidden className="size-2.5 shrink-0 animate-pulse rounded-full bg-danger" />
+                        <span className="truncate text-body text-text">Recording…</span>
+                        <span className="ml-auto shrink-0 text-body tabular-nums text-text-secondary">
+                          {formatMediaTime(recorder.elapsedMs / 1000)} / {formatMediaTime(VOICE_MESSAGE_MAX_MS / 1000)}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="flex min-w-0 flex-1 items-center rounded-md border border-border px-3 py-1.5">
+                        {recorder.clip && <AudioMessagePlayer key={recorder.clip.url} src={recorder.clip.url} durationMs={recorder.clip.durationMs} />}
+                      </div>
+                    )}
+                    {recorder.status === 'recording' ? (
+                      <Button variant="danger" size="lg" iconOnly round aria-label="Stop recording" onClick={recorder.stop}>
+                        <Square aria-hidden size={16} strokeWidth={1.75} fill="currentColor" />
+                      </Button>
+                    ) : (
+                      <Button variant="primary" size="lg" iconOnly round aria-label="Send voice message" onClick={handleSendRecording}>
+                        <Send aria-hidden size={18} strokeWidth={1.75} fill="currentColor" />
+                      </Button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex items-end gap-2">
+                    <textarea
+                      ref={composerRef}
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSend(draft);
+                        }
+                      }}
+                      placeholder={`Write a message to ${conversationName(selected)}…`}
+                      rows={1}
+                      className="min-w-0 flex-1 resize-none rounded-md border border-border bg-bg-surface px-3 py-2 text-body text-text outline-none"
+                    />
+                    <Button
+                      variant="secondary"
+                      size="lg"
+                      iconOnly
+                      round
+                      aria-label="Record voice message"
+                      title="Record voice message"
+                      loading={recorder.status === 'requesting'}
+                      onClick={() => void recorder.start()}
+                    >
+                      <Mic aria-hidden size={18} strokeWidth={1.75} />
+                    </Button>
+                    <Button
+                      variant="primary"
+                      size="lg"
+                      iconOnly
+                      round
+                      aria-label="Send message"
+                      disabled={!draft.trim()}
+                      onClick={() => handleSend(draft)}
+                    >
+                      <Send aria-hidden size={18} strokeWidth={1.75} fill="currentColor" />
+                    </Button>
+                  </div>
+                )}
               </div>
             </Can>
           </>
@@ -608,7 +745,7 @@ export default function MessagesPage() {
 
       {/* Right panel — driver context */}
       {selected?.driver && selected.type !== 'GROUP' && (
-        <div className="w-message-context shrink-0 overflow-y-auto border-l border-border p-4">
+        <div className="hidden w-message-context shrink-0 overflow-y-auto border-l border-border p-4 xl:block">
           <div className="flex flex-col items-center gap-1 text-center">
             <Avatar name={conversationName(selected)} size="xl" />
             <p className="text-card-title font-semibold text-text">{conversationName(selected)}</p>

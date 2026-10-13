@@ -216,6 +216,8 @@ export const endpoints = {
     create: '/conversations',
     messages: (id: string) => `/conversations/${id}/messages`,
     sendMessage: (id: string) => `/conversations/${id}/messages`,
+    /** Voice messages — multipart `file` (+ `durationMs`, `clientId`) → an AUDIO message. */
+    sendAudio: (id: string) => `/conversations/${id}/messages/audio`,
     /** B-67 (shipped) — marks the caller's copy read up to now. */
     read: (id: string) => `/conversations/${id}/read`,
     broadcast: '/messages/broadcast',

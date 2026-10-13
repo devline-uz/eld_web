@@ -45,13 +45,33 @@ export interface ConversationRow {
   unreadCount?: number;
 }
 
+/** Voice messages — the clip on an AUDIO message. No URL on the wire: resolve it with
+ * `fetchMessageAudioUrl` at play time (presigned URLs are never cached, §17). */
+export interface MessageAudio {
+  id: string;
+  kind: 'AUDIO';
+  mimeType: string;
+  sizeBytes: number;
+  durationMs: number | null;
+}
+
 export interface MessageRow {
   id: string;
   conversationId: string;
   senderUserId: string | null;
   senderDriverId: string | null;
+  /** Voice messages — absent on rows from an older backend (read as TEXT). */
+  type?: 'TEXT' | 'AUDIO';
+  /** For AUDIO: the plain-text fallback ("Voice message"). */
   body: string;
   attachmentId: string | null;
+  /** Voice messages — set on AUDIO rows (`null` when the clip cannot be resolved). */
+  attachment?: MessageAudio | null;
+  /** Client-only — the recorded clip's `blob:` URL while an optimistic voice message is in flight
+   * (or failed), so it plays back and can be retried without a server round trip. */
+  localAudioUrl?: string;
+  /** Client-only — the recorded blob kept for `Retry` of a failed voice message. */
+  localAudioBlob?: Blob;
   clientId: string | null;
   sentAt: string;
   deliveredAt: string | null;
@@ -139,6 +159,47 @@ export function useSendMessage(conversationId: string) {
       bumpConversation(queryClient, conversationId, message.sentAt, message);
     },
   });
+}
+
+export interface SendAudioPayload {
+  blob: Blob;
+  durationMs: number;
+  clientId: string;
+}
+
+/** File extension for the multipart filename — the server sniffs the bytes, this is cosmetic. */
+function audioExtension(mimeType: string): string {
+  if (mimeType.includes('webm')) return 'webm';
+  if (mimeType.includes('ogg')) return 'ogg';
+  if (mimeType.includes('mp4') || mimeType.includes('m4a')) return 'm4a';
+  if (mimeType.includes('mpeg')) return 'mp3';
+  if (mimeType.includes('wav')) return 'wav';
+  return 'bin';
+}
+
+/** Voice messages — `POST /conversations/:id/messages/audio` (multipart). Same `clientId`
+ * idempotency and cache patching as `useSendMessage`. */
+export function useSendAudioMessage(conversationId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ blob, durationMs, clientId }: SendAudioPayload) => {
+      const form = new FormData();
+      form.append('durationMs', String(Math.round(durationMs)));
+      form.append('clientId', clientId);
+      form.append('file', blob, `voice-message.${audioExtension(blob.type)}`);
+      return client.upload<MessageRow>(endpoints.conversations.sendAudio(conversationId), form);
+    },
+    onSuccess: (message) => {
+      upsertMessage(queryClient, conversationId, message);
+      bumpConversation(queryClient, conversationId, message.sentAt, message);
+    },
+  });
+}
+
+/** Voice messages — a 15-minute presigned GET for one clip, fetched at play time and kept only
+ * in the player's component state (never in the query cache, never logged — §17). */
+export function fetchMessageAudioUrl(attachmentId: string, signal?: AbortSignal): Promise<{ url: string; expiresAt: string }> {
+  return client.get<{ url: string; expiresAt: string }>(endpoints.attachments.presign(attachmentId), { signal });
 }
 
 /** Appends (or replaces the optimistic placeholder for) a message, de-duplicated by `id` and by
