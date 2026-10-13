@@ -10,7 +10,7 @@ import { http, HttpResponse } from 'msw';
 import { endpoints } from '@/shared/api/endpoints';
 import { fixture } from '../fixtures.generated';
 import { fail, ok, url } from '../envelope';
-import { DRIVERS, VEHICLES, liveVehicles, mockId } from './mockState';
+import { CO_DRIVER_PAIRINGS, DRIVERS, VEHICLES, liveVehicles, mockId } from './mockState';
 
 type Json = Record<string, unknown>;
 
@@ -106,16 +106,40 @@ export const phase13Handlers = [
   }),
 
   /* -------------------------------------------------- co-driver pairings (B-7) */
+  // Mirrors `CoDriverPairingsService`: self-pairing / duplicate active co-driver → 409 CONFLICT,
+  // missing driver / unit → 404, ending an ended pairing → 409.
   http.post(url(endpoints.coDriverPairings.create), async ({ request }) => {
     const dto = await body(request);
-    return ok(
-      { ...doc('POST /api/co-driver-pairings'), ...dto, id: mockId('pair'), startedAt: (dto.startedAt as string) ?? new Date().toISOString(), endedAt: null },
-      201,
-    );
+    const primaryDriverId = String(dto.primaryDriverId ?? '');
+    const coDriverId = String(dto.coDriverId ?? '');
+    const vehicleId = String(dto.vehicleId ?? '');
+    if (primaryDriverId === coDriverId) return fail(409, 'CONFLICT', 'A driver cannot be paired with themselves.');
+    if (!DRIVERS.some((d) => d.id === primaryDriverId) || !DRIVERS.some((d) => d.id === coDriverId)) {
+      return fail(404, 'DRIVER_NOT_FOUND', 'Driver not found.');
+    }
+    if (!liveVehicles().some((v) => v.id === vehicleId)) return fail(404, 'VEHICLE_NOT_FOUND', 'Vehicle not found.');
+    if (CO_DRIVER_PAIRINGS.some((p) => p.coDriverId === coDriverId && p.vehicleId === vehicleId && p.endedAt === null)) {
+      return fail(409, 'CONFLICT', 'This co-driver already has an active pairing on this unit.');
+    }
+    const row = {
+      ...doc('POST /api/co-driver-pairings'),
+      id: mockId('pair'),
+      primaryDriverId,
+      coDriverId,
+      vehicleId,
+      startedAt: typeof dto.startedAt === 'string' ? dto.startedAt : new Date().toISOString(),
+      endedAt: null,
+    };
+    CO_DRIVER_PAIRINGS.unshift(row);
+    return ok(row, 201);
   }),
-  http.post(url(endpoints.coDriverPairings.end(':id')), ({ params }) =>
-    ok({ id: String(params.id), endedAt: new Date().toISOString() }, 201),
-  ),
+  http.post(url(endpoints.coDriverPairings.end(':id')), ({ params }) => {
+    const pairing = CO_DRIVER_PAIRINGS.find((p) => p.id === String(params.id));
+    if (!pairing) return fail(404, 'CO_DRIVER_PAIRING_NOT_FOUND', 'Co-driver pairing not found.');
+    if (pairing.endedAt) return fail(409, 'CONFLICT', 'This pairing has already ended.');
+    pairing.endedAt = new Date().toISOString();
+    return ok({ ...pairing }, 201);
+  }),
 
   /* -------------------------------------------------- devices (B-88) */
   http.patch(url(endpoints.devices.update(':id')), async ({ params, request }) =>

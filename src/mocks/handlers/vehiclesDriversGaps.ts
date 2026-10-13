@@ -118,6 +118,11 @@ export const ROSTER_ENTRIES: DriverRosterEntry[] = [...NAMED_ROSTER_ENTRIES, ...
   // UI-005 — most drivers run the carrier's 70 h / 8 day property ruleset; every 10th (from the
   // 4th) runs 60 h / 7 day, so the roster's cycle column is exercised with both.
   driver: { ...entry.driver, hosRuleset: i % 10 === 3 ? 'US_60_7_PROPERTY' : 'US_70_8_PROPERTY' },
+  // BUG-002 — backend `DriverRosterService` always sends these (`NOT_STALE` unless a status ran
+  // past its plausible maximum). No seeded driver is stale; the stale path is covered in
+  // DriversPage.test.tsx with a per-test override.
+  isStale: false,
+  staleSince: null,
 }));
 
 /** UI-015 — backend roster `summary`: over EVERY driver, filters / search / page ignored. */
@@ -139,6 +144,9 @@ const HOS_RIGHT_NOW = {
   dutyStatus: 'DRIVING',
   statusSince: '2026-09-12T18:00:00.000Z',
   computedAt: '2026-09-12T20:00:00.000Z',
+  // BUG-002 — top-level on `GET /drivers/:id/hos`; not stale ⇒ `staleSince: null`.
+  isStale: false,
+  staleSince: null,
   hosRuleset: 'US_70_8_PROPERTY',
 };
 

@@ -20,7 +20,7 @@ import {
   type PermissionLevel,
   type Role,
 } from '@/shared/auth/permissions';
-import type { DriverRow, VehicleRow } from '@/shared/api/vehicles';
+import type { CoDriverPairingRow, DriverRow, VehicleRow } from '@/shared/api/vehicles';
 import type { TrailerRow } from '@/shared/api/trailers';
 import type {
   AlertRuleRow,
@@ -566,6 +566,11 @@ export let SCORECARD: DriverScoreRow[] = [];
 export let SCORECARD_FLEET: DemoFleet = demoFleet([], []);
 export const SCORECARD_PERIOD = { periodStart: daysAgo(30).slice(0, 10), periodEnd: daysAgo(1).slice(0, 10) };
 
+/* ------------------------------------------------------------------ co-driver pairings (B-7) */
+
+/** No seeded pairings (team driving is rare) — `POST /co-driver-pairings` adds, `…/:id/end` ends. */
+export let CO_DRIVER_PAIRINGS: CoDriverPairingRow[] = [];
+
 /* ------------------------------------------------------------------ reset */
 
 let nextId = 0;
@@ -590,6 +595,7 @@ export function resetMockState(): void {
   TICKETS = seedTickets();
   SAFETY_EVENTS = seedSafetyEvents();
   ({ rows: SCORECARD, fleet: SCORECARD_FLEET } = seedScorecard());
+  CO_DRIVER_PAIRINGS = [];
   nextId = 0;
 }
 

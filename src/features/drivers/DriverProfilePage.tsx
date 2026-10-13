@@ -17,10 +17,10 @@ import {
   type DriverHosResponse,
   useSendDriverVerification,
 } from '@/shared/api/drivers';
-import { useCoDriverPairings, useVehicle } from '@/shared/api/vehicles';
+import { useCoDriverPairings, useEndCoDriverPairing, useVehicle } from '@/shared/api/vehicles';
 import { client } from '@/shared/api/client';
 import { endpoints } from '@/shared/api/endpoints';
-import { formErrorMessage, openTripsOf } from '@/shared/api/errors';
+import { coDriverPairingErrorMessage, formErrorMessage, openTripsOf } from '@/shared/api/errors';
 import { Avatar } from '@/shared/ui/Avatar';
 import { Badge } from '@/shared/ui/Badge';
 import { Button } from '@/shared/ui/Button';
@@ -226,6 +226,8 @@ export default function DriverProfilePage() {
   const queryClient = useQueryClient();
   const [editOpen, setEditOpen] = useState(false);
   const [confirmDeactivate, setConfirmDeactivate] = useState(false);
+  const [endPairingOpen, setEndPairingOpen] = useState(false);
+  const endPairing = useEndCoDriverPairing();
   // WB-183 — the row menu's `Deactivate driver` had no handler at all; it now confirms first
   // (§5.9 destructive confirm) and then really writes `PATCH /drivers/:id { status: 'INACTIVE' }`.
   const deactivate = useDeactivateDriver();
@@ -506,9 +508,22 @@ export default function DriverProfilePage() {
               <DetailRow
                 label="Co-driver"
                 value={
-                  coDriverQuery.data
-                    ? `${coDriverQuery.data.firstName} ${coDriverQuery.data.lastName}`
-                    : '—'
+                  <span className="inline-flex flex-wrap items-center justify-end gap-2">
+                    <span>
+                      {coDriverQuery.data
+                        ? `${coDriverQuery.data.firstName} ${coDriverQuery.data.lastName}`
+                        : '—'}
+                    </span>
+                    {/* B-7 — assigning a co-driver lives on the unit profile (it pairs with the
+                        unit's primary driver); ending the active pairing works from either side. */}
+                    {coDriverPairing && (
+                      <Can perm="drivers" level="FULL">
+                        <Button variant="ghost" size="sm" onClick={() => setEndPairingOpen(true)}>
+                          End pairing
+                        </Button>
+                      </Can>
+                    )}
+                  </span>
                 }
               />
               <DetailRow
@@ -584,6 +599,27 @@ export default function DriverProfilePage() {
         description="They can no longer sign in to the mobile app. Their logs, DVIRs and certifications stay available for audits."
         confirmLabel="Deactivate"
         loading={deactivate.isPending}
+      />
+      <ConfirmDelete
+        open={endPairingOpen && Boolean(coDriverPairing)}
+        onClose={() => setEndPairingOpen(false)}
+        loading={endPairing.isPending}
+        onConfirm={() => {
+          if (!coDriverPairing) return;
+          endPairing.mutate(coDriverPairing.id, {
+            onSuccess: () => {
+              toast({ kind: 'success', title: 'Co-driver pairing ended' });
+              setEndPairingOpen(false);
+            },
+            onError: (error) => {
+              toast({ kind: 'error', title: coDriverPairingErrorMessage(error) });
+              setEndPairingOpen(false);
+            },
+          });
+        }}
+        title="End co-driver pairing?"
+        description="The two drivers stop team driving on this unit from now. Logs recorded during the pairing stay in place."
+        confirmLabel="End pairing"
       />
     </div>
   );

@@ -12,8 +12,16 @@ import { usePermission } from '@/shared/auth/usePermission';
 import { useIsOffline, OFFLINE_TOOLTIP } from '@/shared/realtime/RealtimeProvider';
 import { usePageHeader } from '@/app/layouts/Topbar';
 import { useLiveFleet, type LiveConnectivity } from '@/shared/api/liveFleet';
-import { useVehiclesList, useVehicleCounts, useBulkVehicleStatus, joinVehicles, totalVehicleMiles, type VehicleTableRow } from '@/shared/api/vehicles';
-import { useVehiclesLookup } from '@/shared/api/lookups';
+import {
+  useVehiclesList,
+  useVehicleCounts,
+  useBulkVehicleStatus,
+  joinVehicles,
+  totalVehicleMiles,
+  type CoDriverPairingRow,
+  type VehicleTableRow,
+} from '@/shared/api/vehicles';
+import { useVehiclesLookup, useDriversLookup } from '@/shared/api/lookups';
 import { client } from '@/shared/api/client';
 import { endpoints } from '@/shared/api/endpoints';
 import { Button } from '@/shared/ui/Button';
@@ -34,6 +42,9 @@ import { AddVehicleModal } from './components/AddVehicleModal';
 import { DeleteUnitModal } from './components/DeleteUnitModal';
 import { AssignDriverModal } from './components/AssignDriverModal';
 import { CalibrateOdometerModal } from './components/CalibrateOdometerModal';
+import { AssignCoDriverModal } from './components/AssignCoDriverModal';
+import { EndCoDriverPairingDialog } from './components/EndCoDriverPairingDialog';
+import { CoDriverMenuItems } from './components/CoDriverMenuItems';
 import { ImportVehiclesModal } from './components/ImportVehiclesModal';
 import { VehicleFiltersDrawer, VehicleFilterChips } from './components/VehicleFiltersDrawer';
 import { MULTI_ASSIGN_REASON, NO_DRIVER_LOGS_REASON } from './lib/copy';
@@ -207,6 +218,13 @@ export default function VehiclesPage() {
   const [deleteVehicle, setDeleteVehicle] = useState<VehicleTableRow | null>(null);
   const [assignVehicle, setAssignVehicle] = useState<VehicleTableRow | null>(null);
   const [calibrateVehicle, setCalibrateVehicle] = useState<VehicleTableRow | null>(null);
+  const [coDriverVehicle, setCoDriverVehicle] = useState<VehicleTableRow | null>(null);
+  const [endPairingTarget, setEndPairingTarget] = useState<{ row: VehicleTableRow; pairing: CoDriverPairingRow } | null>(null);
+  // Co-driver name for the end-pairing confirm — the session-wide drivers lookup the table already joins.
+  const driversLookup = useDriversLookup(Boolean(endPairingTarget));
+  const endPairingCoDriver = endPairingTarget
+    ? (driversLookup.data?.items.find((d) => d.id === endPairingTarget.pairing.coDriverId) ?? null)
+    : null;
   const [importOpen, setImportOpen] = useState(false);
   const [filtersRevision, setFiltersRevision] = useState(0);
   const [selection, setSelection] = useState<string[]>([]);
@@ -583,6 +601,14 @@ export default function VehiclesPage() {
                           <DropdownMenu.Item onSelect={() => setAssignVehicle(row)} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
                             Assign driver
                           </DropdownMenu.Item>
+                          {/* B-7 team driving — pairing writes are `drivers` FULL. */}
+                          <Can perm="drivers" level="FULL">
+                            <CoDriverMenuItems
+                              row={row}
+                              onAssign={setCoDriverVehicle}
+                              onEnd={(target, pairing) => setEndPairingTarget({ row: target, pairing })}
+                            />
+                          </Can>
                           <DropdownMenu.Item onSelect={() => setCalibrateVehicle(row)} className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle">
                             Calibrate odometer
                           </DropdownMenu.Item>
@@ -666,6 +692,20 @@ export default function VehiclesPage() {
         <DeleteUnitModal vehicle={deleteVehicle} eldSerial={deleteVehicle.eldSerial} onClose={() => setDeleteVehicle(null)} />
       )}
       {assignVehicle && <AssignDriverModal vehicle={assignVehicle} onClose={() => setAssignVehicle(null)} />}
+      {coDriverVehicle?.driver && (
+        <AssignCoDriverModal
+          vehicle={coDriverVehicle}
+          primaryDriver={coDriverVehicle.driver}
+          onClose={() => setCoDriverVehicle(null)}
+        />
+      )}
+      <EndCoDriverPairingDialog
+        open={Boolean(endPairingTarget)}
+        pairing={endPairingTarget?.pairing ?? null}
+        coDriverName={endPairingCoDriver ? `${endPairingCoDriver.firstName} ${endPairingCoDriver.lastName}` : null}
+        unitNumber={endPairingTarget?.row.unitNumber ?? ''}
+        onClose={() => setEndPairingTarget(null)}
+      />
       {calibrateVehicle && <CalibrateOdometerModal vehicle={calibrateVehicle} onClose={() => setCalibrateVehicle(null)} />}
       {importOpen && <ImportVehiclesModal onClose={() => setImportOpen(false)} />}
       <VehicleFiltersDrawer

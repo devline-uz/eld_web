@@ -722,6 +722,9 @@ export function useCoDriverPairings(params: CoDriverPairingParams, enabled = tru
   });
 }
 
+/** `POST /co-driver-pairings` (`drivers` FULL) — body is exactly `CreateCoDriverPairingDto`;
+ * `startedAt` is an ISO instant, omitted = now. The co-driver row on W-04 / W-05 reads only the
+ * pairing list (no driver or vehicle response carries a co-driver), so that root is what refreshes. */
 export function useCreateCoDriverPairing() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -733,11 +736,13 @@ export function useCreateCoDriverPairing() {
   });
 }
 
+/** `POST /co-driver-pairings/:id/end` (`drivers` FULL) — no body; `409` once already ended. */
 export function useEndCoDriverPairing() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => client.post<{ id: string; endedAt: string }>(endpoints.coDriverPairings.end(id)),
-    onSuccess: () => {
+    onSettled: () => {
+      // A 409 "already ended" also means the row on screen is stale — refetch either way.
       void queryClient.invalidateQueries({ queryKey: qkRoot.coDriverPairings });
     },
   });
