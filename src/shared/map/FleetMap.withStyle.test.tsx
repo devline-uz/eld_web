@@ -221,10 +221,14 @@ describe('FleetMap — GeoJSON source + symbol layer (style configured)', () => 
     expect(setData).toHaveBeenCalledTimes(uploads);
     expect(map.easeTo).toHaveBeenCalledTimes(eases);
 
-    // A real move still patches the source and follows the selected unit.
+    // A real move still patches the source; the camera then rides the marker's glide (jumpTo per
+    // frame, starting where the marker is drawn) instead of restarting an ease on every fix.
     rerender(<FleetMap units={[UNITS[0]!, { ...UNITS[1]!, lat: 40.2 }]} selectedId="v2" />);
     expect(setData).toHaveBeenCalledTimes(uploads + 1);
-    expect(map.easeTo).toHaveBeenLastCalledWith(expect.objectContaining({ center: [-83.1, 40.2] }));
+    expect(map.easeTo).toHaveBeenCalledTimes(eases);
+    const center = (map.jumpTo.mock.lastCall![0] as { center: [number, number] }).center;
+    expect(center[0]).toBeCloseTo(-83.1, 4);
+    expect(center[1]).toBeCloseTo(40.1, 3);
   });
 
   it('flashes the unit after a geofence.transition and clears the filter when it ends', () => {

@@ -20,6 +20,7 @@ import type { DutyStatus } from '@/shared/ui/Badge';
 import { EMPTY_COLLECTION, trafficTilesUrl, type MapLayer } from './overlays';
 import { createHeadingTracker, normalizeHeading } from './heading';
 import { createMotionTracker } from './motion';
+import { EMPTY_TRAIL, TRAIL_LAYER, TRAIL_SOURCE, trailToGeoJSON } from './trail';
 
 const STYLE_URL: string = import.meta.env.VITE_MAP_STYLE_URL ?? '';
 
@@ -47,6 +48,8 @@ export interface MapUnitFeature {
   speedMph?: number | null;
   /** UI-003 — the duty status is not live (`isStale`); the marker is drawn dimmed. */
   stale?: boolean;
+  /** ISO time of the unit's last fix — ages the fix for dead reckoning and sizes the glide. */
+  lastSeenAt?: string | null;
 }
 
 export interface FleetMapProps {
@@ -62,6 +65,11 @@ export interface FleetMapProps {
   geofences?: FeatureCollection;
   /** `tripsToGeoJSON()` output — drawn as lines + stop dots while `Trips` is on. */
   trips?: FeatureCollection;
+  /** The selected unit's camera follows its (gliding) marker. A manual drag calls `onFollowChange(false)`. */
+  follow?: boolean;
+  onFollowChange?: (follow: boolean) => void;
+  /** Recent track of the selected unit, oldest first, `[lon, lat]` — drawn as a thin line. */
+  trail?: ReadonlyArray<readonly [number, number]>;
   /** Small embedded preview (Dashboard card): the wheel scrolls the page, never zooms the map. */
   preview?: boolean;
 }
@@ -83,7 +91,7 @@ const TRIP_STOP_LAYER = 'fleet-trip-stops';
 
 /** Map layer ids owned by each W-02 layer chip. */
 const LAYER_IDS: Record<MapLayer, readonly string[]> = {
-  Vehicles: [CLUSTER_LAYER, CLUSTER_COUNT_LAYER, UNCLUSTERED_LAYER, FLASH_LAYER],
+  Vehicles: [CLUSTER_LAYER, CLUSTER_COUNT_LAYER, UNCLUSTERED_LAYER, FLASH_LAYER, TRAIL_LAYER],
   Trips: [TRIP_LINE_LAYER, TRIP_STOP_LAYER],
   Geofences: [GEOFENCE_FILL_LAYER, GEOFENCE_LINE_LAYER],
   Traffic: [TRAFFIC_LAYER],
@@ -238,7 +246,7 @@ function validUnits(units: MapUnitFeature[]): MapUnitFeature[] {
  * same signature draw the same markers, so the source is not re-uploaded (WB-256). Headings the
  * tracker derives from movement only change when a position does, which this already covers. */
 function unitsSignature(units: MapUnitFeature[]): string {
-  return units.map((u) => `${u.id}|${u.lat}|${u.lon}|${u.dutyStatus}|${u.headingDeg ?? ''}|${u.stale ? 1 : 0}`).join(';');
+  return units.map((u) => `${u.id}|${u.lat}|${u.lon}|${u.dutyStatus}|${u.headingDeg ?? ''}|${u.stale ? 1 : 0}|${u.speedMph ?? ''}|${u.lastSeenAt ?? ''}`).join(';');
 }
 
 /** `headings` is the tracker's resolved heading per unit id (reported `headingDeg`, else derived
@@ -467,6 +475,15 @@ function installLayers(map: maplibregl.Map, state: OverlayState) {
     },
   });
 
+  map.addSource(TRAIL_SOURCE, { type: 'geojson', data: EMPTY_TRAIL });
+  map.addLayer({
+    id: TRAIL_LAYER,
+    type: 'line',
+    source: TRAIL_SOURCE,
+    layout: { 'line-cap': 'round', 'line-join': 'round' },
+    paint: { 'line-color': token('--color-primary', 'blue'), 'line-width': 3, 'line-opacity': 0.6 },
+  });
+
   map.addSource(SOURCE_ID, {
     type: 'geojson',
     data: toFeatureCollection(state.units, state.headings),
@@ -539,6 +556,9 @@ export default function FleetMap({
   layers = DEFAULT_LAYERS,
   geofences = EMPTY_COLLECTION,
   trips = EMPTY_COLLECTION,
+  follow = true,
+  onFollowChange,
+  trail,
   preview = false,
 }: FleetMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -563,6 +583,11 @@ export default function FleetMap({
   const motionRef = useRef<ReturnType<typeof createMotionTracker> | null>(null);
   motionRef.current ??= createMotionTracker();
   const frameRef = useRef<number | null>(null);
+  // Read inside the frame loop / map listeners, which must not re-bind on every render.
+  const followRef = useRef({ follow, selectedId: selectedId ?? null, onFollowChange });
+  useEffect(() => {
+    followRef.current = { follow, selectedId: selectedId ?? null, onFollowChange };
+  }, [follow, selectedId, onFollowChange]);
   const overlayRef = useRef<OverlayState>({
     units,
     layers,
@@ -626,6 +651,10 @@ export default function FleetMap({
       const id = e.features?.[0]?.properties?.id as string | undefined;
       if (id) onSelectUnit?.(id);
     });
+    // Only a hand-made drag (it has an `originalEvent`) ends follow mode — our own easeTo/jumpTo don't.
+    map.on('dragstart', (e: { originalEvent?: unknown }) => {
+      if (e?.originalEvent) followRef.current.onFollowChange?.(false);
+    });
     map.on('mouseenter', UNCLUSTERED_LAYER, () => {
       map.getCanvas().style.cursor = 'pointer';
     });
@@ -687,6 +716,7 @@ export default function FleetMap({
     const animate = canAnimate();
     if (animate) {
       const headings = overlayRef.current.headings;
+      const wallNow = Date.now();
       motionRef.current!.update(
         valid.map((u) => ({
           id: u.id,
@@ -695,18 +725,29 @@ export default function FleetMap({
           speedMph: u.speedMph,
           heading: normalizeHeading(headings.get(u.id) ?? u.headingDeg),
           moving: u.dutyStatus === 'DRIVING' && !u.stale,
+          fixAtMs: u.lastSeenAt ? Date.parse(u.lastSeenAt) || null : null,
+          wallNowMs: wallNow,
         })),
         performance.now(),
       );
     }
     const draw = (now: number) => {
       const positions = motionRef.current!.positions(now);
+      const headings = new Map(overlayRef.current.headings);
+      for (const [id, p] of positions) if (p.heading !== null) headings.set(id, p.heading);
       source?.setData(
         toFeatureCollection(
-          valid.map((u) => ({ ...u, ...positions.get(u.id) })),
-          overlayRef.current.headings,
+          valid.map((u) => {
+            const p = positions.get(u.id);
+            return p ? { ...u, lat: p.lat, lon: p.lon } : u;
+          }),
+          headings,
         ),
       );
+      // Follow mode: the marker already glides smoothly, so the camera just rides along with it.
+      const f = followRef.current;
+      const me = f.follow && f.selectedId ? positions.get(f.selectedId) : undefined;
+      if (me) mapRef.current?.jumpTo({ center: [me.lon, me.lat] });
     };
     if (source && changed) {
       if (animate) draw(performance.now());
@@ -766,11 +807,27 @@ export default function FleetMap({
   const selectedUnit = selectedId ? units.find((u) => u.id === selectedId) : undefined;
   const selectedLon = selectedUnit?.lon;
   const selectedLat = selectedUnit?.lat;
+  // Selecting (or re-enabling follow) eases to the unit; while following, the frame loop above keeps
+  // the camera on the gliding marker, so a coordinate change only eases when no loop is running.
+  const camKeyRef = useRef<string | null>(null);
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !ready || selectedLon === undefined || selectedLat === undefined) return;
+    if (!map || !ready || !follow || selectedLon === undefined || selectedLat === undefined) return;
+    const key = `${selectedId}|${follow}`;
+    const retarget = camKeyRef.current !== key;
+    camKeyRef.current = key;
+    if (!retarget && canAnimate()) return;
     map.easeTo({ center: [selectedLon, selectedLat], duration: 300 });
-  }, [selectedId, ready, selectedLon, selectedLat]);
+  }, [selectedId, follow, ready, selectedLon, selectedLat]);
+  useEffect(() => {
+    if (!follow) camKeyRef.current = null;
+  }, [follow]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    (map.getSource(TRAIL_SOURCE) as maplibregl.GeoJSONSource | undefined)?.setData(trailToGeoJSON(trail));
+  }, [trail, ready]);
 
   if (!HAS_STYLE || loadError) {
     return <MapUnavailable className={className} reason={HAS_STYLE ? 'failed' : 'not-configured'} />;

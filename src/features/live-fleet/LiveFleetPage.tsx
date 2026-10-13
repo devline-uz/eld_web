@@ -13,11 +13,13 @@ import {
   type KeyboardEvent,
 } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { MessageSquare, Plus, Search, X } from 'lucide-react';
+import { Crosshair, MessageSquare, Plus, Search, X } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { qk } from '@/shared/api/queryKeys';
 import { useLiveFleet, hasPosition, type LiveFleetResponse, type LiveFleetUnit } from '@/shared/api/liveFleet';
 import { useGeofences } from '@/shared/api/geofences';
+import { useVehicleTelemetry } from '@/shared/api/vehicles';
+import { trailFromTelemetry } from '@/shared/map/trail';
 import { useActiveTripRows } from '@/shared/api/trips';
 import {
   MAP_LAYERS,
@@ -53,6 +55,9 @@ import {
   type TelemetryPointPayload,
   type UnitPatch,
 } from './lib/telemetryPatch';
+
+/** How many recent telemetry fixes make up the selected unit's trail. */
+const TRAIL_POINTS = 40;
 
 const FleetMap = lazy(() => import('@/shared/map/FleetMap'));
 
@@ -348,6 +353,9 @@ export default function LiveFleetPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [selectedId, setSelectedId] = useState<string | null>(() => searchParams.get('unit'));
   const [flashId, setFlashId] = useState<string | null>(null);
+  // Follow mode: the camera rides the selected unit until the dispatcher drags the map; selecting a
+  // unit (re)enables it, the `Follow` button turns it back on.
+  const [follow, setFollow] = useState(true);
   const [geofenceOpen, setGeofenceOpen] = useState(false);
 
   // §7.2 — `telemetry.point` is throttled to 200 ms and patched into the cached fleet, one unit at
@@ -435,13 +443,22 @@ export default function LiveFleetPage() {
         headingDeg: u.headingDeg,
         speedMph: u.speedMph,
         stale: u.isStale,
+        lastSeenAt: u.lastSeenAt,
       })),
     [filtered],
   );
   // One callback for every row, so `memo(UnitListRow)` can skip unchanged rows.
-  const selectUnit = useCallback((vehicleId: string) => setSelectedId(vehicleId), []);
+  const selectUnit = useCallback((vehicleId: string) => {
+    setSelectedId(vehicleId);
+    setFollow(true);
+  }, []);
+  const selectFromMap = selectUnit;
 
   const selected = units.find((u) => u.vehicleId === selectedId) ?? null;
+  // Breadcrumb trail: the selected unit's last telemetry fixes (`GET /vehicles/:id/telemetry`, 30 s poll
+  // while the tab is visible). A role without `vehicles` READ simply gets no trail.
+  const trailQuery = useVehicleTelemetry(selectedId ?? undefined, { limit: TRAIL_POINTS });
+  const trail = useMemo(() => trailFromTelemetry(trailQuery.data?.items), [trailQuery.data]);
   const { drivingCount, idleCount } = useMemo(
     () => ({
       drivingCount: searchMatches.filter((u) => u.dutyStatus === 'DRIVING').length,
@@ -578,6 +595,19 @@ export default function LiveFleetPage() {
           </div>
         </Can>
 
+        {selected && hasPosition(selected) && (
+          <div className="absolute right-2 top-[6.5rem] z-10 sm:right-4 sm:top-16">
+            <Button
+              variant="secondary"
+              aria-pressed={follow}
+              iconLeft={<Crosshair size={16} strokeWidth={1.75} />}
+              onClick={() => setFollow((v) => !v)}
+            >
+              {follow ? 'Following' : 'Follow'}
+            </Button>
+          </div>
+        )}
+
         {fleet.isError ? (
           <div className="flex h-full items-center justify-center">
             <ErrorState title="Map could not be loaded" onRetry={() => void fleet.refetch()} />
@@ -587,7 +617,10 @@ export default function LiveFleetPage() {
             <FleetMap
               units={mapUnits}
               selectedId={selectedId}
-              onSelectUnit={setSelectedId}
+              onSelectUnit={selectFromMap}
+              follow={follow}
+              onFollowChange={setFollow}
+              trail={selected ? trail : undefined}
               flashUnitId={flashId}
               layers={activeLayers}
               geofences={geofenceGeoJSON}

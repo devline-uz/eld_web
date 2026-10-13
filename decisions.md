@@ -1508,3 +1508,13 @@ ends the fetch much sooner.
 **Options.** (a) Uzbek strings; (b) English strings with the same meaning; for who/when: (c) wait for backend, (d) render `virtualEldUpdatedBy` if present.
 **Choice.** (b) English, keys in `VIRTUAL_ELD_COPY` (`features/settings/lib/copy.ts`); the success toast is the plain `Settings saved`; `VIRTUAL_ELD_REQUIRES_TEST_ERODS` -> `Set eRODS mode to TEST first.`. Permission = `carrierSettings` FULL (as Company profile). Card shows only when `virtualEldAvailable === true` (missing = hidden). `PATCH` result is merged into the cached carrier. Who/when: `virtualEldUpdatedAt` in carrier timezone plus optional `virtualEldUpdatedBy` (string or `{name|fullName|email}`) when the backend sends it.
 **Why.** Panel language consistency; fail-closed on an older backend; no client-side faking of the actor. Read-only roles get a disabled switch + tooltip as the brief requires (exception to the absent-from-DOM rule, like the Admin chip).
+
+## WD-LF-MOTION — Live Fleet marker motion (interpolation, dead reckoning, follow, trail)
+
+**Problem.** `telemetry.point` frames arrive about once a minute; markers jumped to each new fix and froze in between.
+**Choice.** `shared/map/motion.ts` (pure, unit-tested) drives one rAF loop in `FleetMap` (~20 fps `setData` on the existing GeoJSON source, no React state per frame, loop ends when nothing moves, rAF pauses on hidden tabs, off under `prefers-reduced-motion`).
+- Interpolation: new fix is blended in from the drawn position, linear lat/lon over the gap between the two fixes (clamped 1–60 s); heading turns on the shortest arc over min(gap, 3 s).
+- Dead reckoning: only DRIVING, not stale, speed >= 1 mph, fix age <= 90 s; capped at 75 s or 1.5 mi (2414 m) past the fix, then stops. New fix corrects from the extrapolated position (no snap).
+- Follow: selecting a unit follows it (`jumpTo` per frame on the glide); a hand drag calls `onFollowChange(false)`; the `Follow` button re-enables. Selection changes still `easeTo` 300 ms.
+- Trail: last 40 fixes from `GET /vehicles/:id/telemetry` (exists), drawn as a line for the selected unit.
+**Limits.** No road snapping (no routing service) — extrapolation is a straight line along the heading.
