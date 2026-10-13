@@ -497,9 +497,12 @@ export const fleetWriteHandlers = [
   // One box per unit (minus a few spares), so the Vehicles table's ELD SERIAL column and W-20 ELD
   // devices describe the same fleet instead of the single generated example row.
   // UI-012 — `connection` is the effective link; `connectionCounts` covers the whole inventory.
+  // pt30_pt40/tz.md §9.3 — `?virtual=true|false` filters on `isVirtual`.
   http.get(url(endpoints.devices.list), ({ request }) => {
     const now = Date.now();
-    const page = serverPage<DeviceRow>(DEVICES, request, ['serial', 'model']);
+    const virtual = new URL(request.url).searchParams.get('virtual');
+    const source = virtual === null ? DEVICES : DEVICES.filter((d) => Boolean(d.isVirtual) === (virtual === 'true'));
+    const page = serverPage<DeviceRow>(source, request, ['serial', 'model']);
     return ok({
       ...page,
       items: page.items.map((d) => ({ ...d, connection: effectiveConnection(d, now) })),

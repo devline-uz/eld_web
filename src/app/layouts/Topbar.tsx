@@ -15,6 +15,7 @@ import {
 import { useIsFetching, useQueryClient } from '@tanstack/react-query';
 import { Menu, RefreshCw, Search } from 'lucide-react';
 import { useMatches } from 'react-router-dom';
+import { useCarrier } from '@/shared/api/carrier';
 import { applyNotificationNew, useUnreadNotificationCount } from '@/shared/api/notifications';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import type { Role } from '@/shared/auth/permissions';
@@ -143,10 +144,13 @@ export function PageHeading({
   fallbackTitle = APP_NAME,
   fallbackSubtitle,
   role = null,
+  testEld = false,
 }: {
   fallbackTitle?: string;
   fallbackSubtitle?: string;
   role?: Role | null;
+  /** pt30_pt40/tz.md §10.1 — Test PT30/40 mode is on for the carrier. */
+  testEld?: boolean;
 }) {
   const dynamic = useContext(PageHeaderValueContext);
   const title = dynamic?.title ?? fallbackTitle;
@@ -162,6 +166,11 @@ export function PageHeading({
       <div className="flex items-center gap-2">
         <h1 className="truncate text-page-title text-text">{title}</h1>
         <RoleChip role={role} />
+        {testEld ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-warning-soft px-2 py-1 text-badge text-warning">
+            TEST ELD
+          </span>
+        ) : null}
       </div>
       {subtitle ? <div className="truncate text-page-sub text-text-muted">{subtitle}</div> : null}
     </div>
@@ -185,6 +194,8 @@ export function Topbar({ onOpenNav }: { onOpenNav?: () => void } = {}) {
   const { toast } = useToast();
   const isFetching = useIsFetching() > 0;
   const role = user?.role ?? null;
+  // Same query as the sidebar organisation card — no extra request or polling.
+  const testEld = useCarrier().data?.virtualEldEnabled === true;
 
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
@@ -245,7 +256,7 @@ export function Topbar({ onOpenNav }: { onOpenNav?: () => void } = {}) {
           <Menu size={20} strokeWidth={1.75} aria-hidden="true" />
         </button>
       ) : null}
-      <PageHeading fallbackTitle={staticTitle} fallbackSubtitle={staticSubtitle} role={role} />
+      <PageHeading fallbackTitle={staticTitle} fallbackSubtitle={staticSubtitle} role={role} testEld={testEld} />
 
       {/* 1. Context filter — screens that have one render it into this slot (§4.4). */}
       <div id="topbar-context-filter" className="flex min-w-0 items-center gap-2 empty:hidden" />

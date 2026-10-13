@@ -51,6 +51,9 @@ const CLIENT_DISCONNECT_REASON = 'io client disconnect';
  * There is no token-change event exposed by shared/auth, so polling is the documented seam. */
 const TOKEN_WATCH_MS = 5_000;
 
+/** How often the connect effect re-checks for the access token after a reload. */
+const TOKEN_WAIT_MS = 250;
+
 /** How often the "cached N minutes ago" banner copy re-renders while offline. */
 const OFFLINE_TICK_MS = 30_000;
 
@@ -202,53 +205,76 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
   const tokenCycle = useRef(false);
 
   /* --- connect once per authenticated session -------------------------------------------- */
+  // After a full page reload the session is restored (`isAuthenticated`) before the access token
+  // comes back from the refresh call, so the token may still be missing here. Wait for it instead
+  // of giving up — otherwise the socket never opened after F5 and every screen silently fell back
+  // to polling (Live Fleet markers moved only on the 30 s poll).
   useEffect(() => {
     if (!isAuthenticated) return;
-    const token = getAccessToken();
-    if (!token) return;
+    let socket: Socket | null = null;
+    let unregister: () => void = () => undefined;
+    let waitTimer: ReturnType<typeof setInterval> | null = null;
 
-    const socket = io(`${WS_URL}${WS_NAMESPACE}`, {
-      auth: { token },
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionDelay: 1_000,
-      reconnectionDelayMax: 30_000,
-      randomizationFactor: 0.5,
-    });
-    store.setSocket(socket);
+    const connect = (token: string) => {
+      const s = io(`${WS_URL}${WS_NAMESPACE}`, {
+        auth: { token },
+        transports: ['websocket', 'polling'],
+        reconnection: true,
+        reconnectionDelay: 1_000,
+        reconnectionDelayMax: 30_000,
+        randomizationFactor: 0.5,
+      });
+      socket = s;
+      store.setSocket(s);
 
-    let everConnected = false;
+      let everConnected = false;
 
-    socket.on('connect', () => {
-      store.patch({ connected: true, failedAttempts: 0 });
-      const rotatedToken = tokenCycle.current;
-      tokenCycle.current = false;
-      if (everConnected && !rotatedToken) {
-        // §7.2 — no resume/seq: invalidate every currently-mounted query instead.
-        void queryClient.invalidateQueries();
-        toast({ kind: 'success', ...TOAST_COPY.reconnected });
-      }
-      everConnected = true;
-    });
+      s.on('connect', () => {
+        store.patch({ connected: true, failedAttempts: 0 });
+        const rotatedToken = tokenCycle.current;
+        tokenCycle.current = false;
+        if (everConnected && !rotatedToken) {
+          // §7.2 — no resume/seq: invalidate every currently-mounted query instead.
+          void queryClient.invalidateQueries();
+          toast({ kind: 'success', ...TOAST_COPY.reconnected });
+        }
+        everConnected = true;
+      });
 
-    socket.on('disconnect', (reason: string) => {
-      store.patch({ connected: false });
-      // Only our own `socket.disconnect()` belongs to a token cycle; anything else is a real drop.
-      if (reason !== CLIENT_DISCONNECT_REASON) tokenCycle.current = false;
-      if (reason === SERVER_REJECTED_REASON) {
-        // A rejected/expired token — this is a sign-out path, not a retry loop.
-        signOut();
-      }
-    });
+      s.on('disconnect', (reason: string) => {
+        store.patch({ connected: false });
+        // Only our own `socket.disconnect()` belongs to a token cycle; anything else is a real drop.
+        if (reason !== CLIENT_DISCONNECT_REASON) tokenCycle.current = false;
+        if (reason === SERVER_REJECTED_REASON) {
+          // A rejected/expired token — this is a sign-out path, not a retry loop.
+          signOut();
+        }
+      });
 
-    socket.on('connect_error', () => {
-      tokenCycle.current = false;
-      store.incrementFailedAttempts();
-    });
+      s.on('connect_error', () => {
+        tokenCycle.current = false;
+        store.incrementFailedAttempts();
+      });
 
-    const unregister = registerSocketDisconnect(() => socket.disconnect());
+      unregister = registerSocketDisconnect(() => s.disconnect());
+    };
+
+    const initial = getAccessToken();
+    if (initial) {
+      connect(initial);
+    } else {
+      waitTimer = setInterval(() => {
+        const token = getAccessToken();
+        if (!token) return;
+        if (waitTimer) clearInterval(waitTimer);
+        waitTimer = null;
+        connect(token);
+      }, TOKEN_WAIT_MS);
+    }
 
     return () => {
+      if (waitTimer) clearInterval(waitTimer);
+      if (!socket) return;
       unregister();
       socket.removeAllListeners();
       socket.disconnect();

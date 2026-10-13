@@ -37,6 +37,7 @@ import {
   upsertMessage,
   bumpConversation,
   markConversationRead,
+  applyMessageRead,
   setMessageStatus,
   type ConversationListItem,
   type MessageRow,
@@ -44,6 +45,8 @@ import {
 import { NewConversationModal } from './components/NewConversationModal';
 import { AudioMessagePlayer } from './components/AudioMessagePlayer';
 import { useVoiceRecorder, VOICE_MESSAGE_MAX_MS } from './useVoiceRecorder';
+import { MessageTicks } from './components/MessageTicks';
+import { useRemoteTyping, useTypingEmitter } from './useTyping';
 
 type Segment = 'ALL' | 'UNREAD' | 'GROUPS';
 
@@ -102,6 +105,11 @@ function groupMembersLabel(conversation: ConversationListItem): string {
   const count = conversation.participants.length;
   const drivers = conversation.participants.filter((p) => p.driverId).length;
   return `${count} member${count === 1 ? '' : 's'} · ${drivers} driver${drivers === 1 ? '' : 's'}`;
+}
+
+/** Who is typing: the driver's name in a direct thread, a generic label in a group. */
+function typingName(conversation: ConversationListItem): string {
+  return conversation.type === 'GROUP' ? 'A driver' : conversationName(conversation);
 }
 
 function conversationInitials(conversation: ConversationListItem): string {
@@ -247,6 +255,8 @@ export default function MessagesPage() {
   const trips = useActiveTrips();
   const driverHos = useDriverHos(selected?.type === 'GROUP' ? undefined : selected?.driver?.id);
 
+  const typingOut = useTypingEmitter(selected?.id);
+  const remoteTyping = useRemoteTyping();
   const markRead = useMarkConversationRead(user?.id);
   const markReadMutate = markRead.mutate;
   /** B-67 (shipped) — opening a still-unread conversation persists `lastReadAt` server-side via
@@ -285,6 +295,7 @@ export default function MessagesPage() {
       }
       const isOpen = selected?.id === conversationId;
       const fromOther = message.senderUserId !== user?.id;
+      if (message.senderDriverId) remoteTyping.clear(conversationId);
       upsertMessage(queryClient, conversationId, message);
       bumpConversation(queryClient, conversationId, message.sentAt, message, { unread: fromOther && !isOpen });
       // Read on arrival in the open thread, so a reload does not resurrect the unread dot.
@@ -295,6 +306,9 @@ export default function MessagesPage() {
     'conversation.new': (payload) => {
       if (!conversations.items.some((c) => c.id === payload.conversationId)) void refetchConversations();
     },
+    // D-146 — a driver (or another staff member) read the thread: patch ticks + lastReadAt in place.
+    'message.read': (payload) => applyMessageRead(queryClient, payload, user?.id),
+    typing: (payload) => remoteTyping.onTyping(payload),
     // Read in another tab/device of the same user — clear the badge here too.
     'conversation.read': (payload) => {
       if (payload.userId && payload.userId === user?.id) markConversationRead(queryClient, payload.conversationId, user.id);
@@ -356,6 +370,7 @@ export default function MessagesPage() {
     };
     upsertMessage(queryClient, selected.id, optimistic);
     setDraft('');
+    typingOut.stop();
     sendOrRetry(trimmed, clientId);
   }
 
@@ -631,10 +646,14 @@ export default function MessagesPage() {
                             )}
                             <p className={`mt-1 text-right text-caption ${outgoing ? 'text-white/80' : 'text-text-muted'}`}>
                               {formatLocal(message.sentAt, 'time')}{' '}
-                              {outgoing && !sending && !failed ? (message.readAt ? '✓✓' : '✓') : ''}
                               {outgoing && sending ? 'Sending…' : ''}
                             </p>
                           </div>
+                          {outgoing && !sending && !failed && (
+                            <div className="mt-0.5 flex justify-end">
+                              <MessageTicks message={message} />
+                            </div>
+                          )}
                           {failed && (
                             <div className="mt-1 flex items-center gap-2 text-caption text-danger">
                               <span>Not delivered.</span>
@@ -649,6 +668,12 @@ export default function MessagesPage() {
                 </div>
               )}
             </div>
+
+            {remoteTyping.typing.has(selected.id) && (
+              <p role="status" className="px-4 pb-1 text-caption text-text-muted">
+                {typingName(selected)} is typing…
+              </p>
+            )}
 
             <Can perm="messaging" level="FULL">
               <div className="border-t border-border p-3">
@@ -701,7 +726,11 @@ export default function MessagesPage() {
                     <textarea
                       ref={composerRef}
                       value={draft}
-                      onChange={(e) => setDraft(e.target.value)}
+                      onChange={(e) => {
+                        setDraft(e.target.value);
+                        typingOut.notifyInput(e.target.value.trim().length > 0);
+                      }}
+                      onBlur={typingOut.stop}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' && !e.shiftKey) {
                           e.preventDefault();
@@ -720,7 +749,10 @@ export default function MessagesPage() {
                       aria-label="Record voice message"
                       title="Record voice message"
                       loading={recorder.status === 'requesting'}
-                      onClick={() => void recorder.start()}
+                      onClick={() => {
+                        typingOut.stop();
+                        void recorder.start();
+                      }}
                     >
                       <Mic aria-hidden size={18} strokeWidth={1.75} />
                     </Button>

@@ -82,6 +82,9 @@ export const ERROR_MESSAGES: Record<string, string> = {
   ERODS_TEST_MODE: 'eRODS is in test mode — the file will not reach FMCSA.',
   // The backend registry spells this one ERODS_TEST_MODE_ONLY (web/bugs.md WB-001).
   ERODS_TEST_MODE_ONLY: 'eRODS is in test mode — the file will not reach FMCSA.',
+  // pt30_pt40/tz.md §9.2 — Test PT30/40 (virtual ELD) guards.
+  VIRTUAL_ELD_NOT_ALLOWED: 'Test PT30/40 mode is not allowed in this environment.',
+  VIRTUAL_ELD_REQUIRES_TEST_ERODS: 'Test PT30/40 mode needs eRODS in TEST mode. Set eRODS to TEST first.',
   USER_NOT_INVITED: 'This account is not invited to the panel.',
   EMAIL_NOT_VERIFIED: 'Verify your email address first.',
   CONFLICT: 'That value is already in use.',

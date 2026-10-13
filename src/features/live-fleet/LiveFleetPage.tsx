@@ -350,12 +350,6 @@ export default function LiveFleetPage() {
   const [flashId, setFlashId] = useState<string | null>(null);
   const [geofenceOpen, setGeofenceOpen] = useState(false);
 
-  useRoom('fleet', {
-    'geofence.transition': (payload) => {
-      setFlashId(payload.vehicleId);
-      setTimeout(() => setFlashId((current) => (current === payload.vehicleId ? null : current)), 2000);
-    },
-  });
   // §7.2 — `telemetry.point` is throttled to 200 ms and patched into the cached fleet, one unit at
   // a time; a frame that cannot be mapped (today's `{ vehicleId, count }` has no fix) costs one
   // throttled invalidate instead of a full-fleet refetch per frame (WB-258).
@@ -377,7 +371,15 @@ export default function LiveFleetPage() {
     pending.set(payload.vehicleId, { ...pending.get(payload.vehicleId), ...patch });
     patchFleet(pending);
   };
-  useRoom(selectedId ? `vehicle:${selectedId}` : null, { 'telemetry.point': onTelemetry });
+  // D-149 — the backend sends every unit's `telemetry.point` (with its latest fix) to `fleet` as
+  // well, so one subscription moves every marker; no per-vehicle room is needed here.
+  useRoom('fleet', {
+    'geofence.transition': (payload) => {
+      setFlashId(payload.vehicleId);
+      setTimeout(() => setFlashId((current) => (current === payload.vehicleId ? null : current)), 2000);
+    },
+    'telemetry.point': onTelemetry,
+  });
 
   // The subtitle node changes only with the data; its own 1 s tick re-renders just the text.
   const subtitle = useMemo(
@@ -431,6 +433,7 @@ export default function LiveFleetPage() {
         lon: u.lon,
         dutyStatus: u.dutyStatus,
         headingDeg: u.headingDeg,
+        speedMph: u.speedMph,
         stale: u.isStale,
       })),
     [filtered],

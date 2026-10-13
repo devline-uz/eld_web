@@ -19,10 +19,20 @@ import type { Feature, FeatureCollection, Point } from 'geojson';
 import type { DutyStatus } from '@/shared/ui/Badge';
 import { EMPTY_COLLECTION, trafficTilesUrl, type MapLayer } from './overlays';
 import { createHeadingTracker, normalizeHeading } from './heading';
+import { createMotionTracker } from './motion';
 
 const STYLE_URL: string = import.meta.env.VITE_MAP_STYLE_URL ?? '';
 
 maplibregl.setWorkerUrl(maplibreWorkerUrl);
+
+/** Marker redraw interval while units glide (~20 fps). */
+const FRAME_MS = 50;
+
+/** Marker motion needs a frame clock and is skipped for `prefers-reduced-motion`. */
+function canAnimate(): boolean {
+  if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') return false;
+  return !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+}
 
 /** UI-003 — opacity of a stale unit's marker. */
 const STALE_MARKER_OPACITY = 0.45;
@@ -33,6 +43,8 @@ export interface MapUnitFeature {
   lon: number;
   dutyStatus: DutyStatus;
   headingDeg?: number | null;
+  /** Reported speed — a DRIVING marker keeps gliding at it between fixes (`motion.ts`). */
+  speedMph?: number | null;
   /** UI-003 — the duty status is not live (`isStale`); the marker is drawn dimmed. */
   stale?: boolean;
 }
@@ -547,6 +559,10 @@ export default function FleetMap({
   // still turns with its movement and keeps its heading when it stops.
   const headingTrackerRef = useRef<ReturnType<typeof createHeadingTracker> | null>(null);
   headingTrackerRef.current ??= createHeadingTracker();
+  // Navigation-app motion between fixes (backend D-149); off under `prefers-reduced-motion`.
+  const motionRef = useRef<ReturnType<typeof createMotionTracker> | null>(null);
+  motionRef.current ??= createMotionTracker();
+  const frameRef = useRef<number | null>(null);
   const overlayRef = useRef<OverlayState>({
     units,
     layers,
@@ -656,7 +672,9 @@ export default function FleetMap({
     return () => observer.disconnect();
   }, []);
 
-  /** Point updates patch the existing GeoJSON source instead of remounting the map (§16.3 rule 6). */
+  /** Point updates patch the existing GeoJSON source instead of remounting the map (§16.3 rule 6).
+   * While units move, a frame loop (~20 fps, paused with the tab) redraws them at their glided
+   * positions; it stops by itself once every marker has settled. */
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
@@ -664,16 +682,58 @@ export default function FleetMap({
     // A parent re-render (a keystroke, a 30 s poll returning the same positions) hands a new array
     // with the same markers — skip the GeoJSON rebuild + worker upload then (WB-256).
     const signature = unitsSignature(units);
-    if (source && signature !== lastUnitsSignatureRef.current) {
-      source.setData(toFeatureCollection(units, overlayRef.current.headings));
+    const changed = signature !== lastUnitsSignatureRef.current;
+    const valid = validUnits(units);
+    const animate = canAnimate();
+    if (animate) {
+      const headings = overlayRef.current.headings;
+      motionRef.current!.update(
+        valid.map((u) => ({
+          id: u.id,
+          lat: u.lat,
+          lon: u.lon,
+          speedMph: u.speedMph,
+          heading: normalizeHeading(headings.get(u.id) ?? u.headingDeg),
+          moving: u.dutyStatus === 'DRIVING' && !u.stale,
+        })),
+        performance.now(),
+      );
+    }
+    const draw = (now: number) => {
+      const positions = motionRef.current!.positions(now);
+      source?.setData(
+        toFeatureCollection(
+          valid.map((u) => ({ ...u, ...positions.get(u.id) })),
+          overlayRef.current.headings,
+        ),
+      );
+    };
+    if (source && changed) {
+      if (animate) draw(performance.now());
+      else source.setData(toFeatureCollection(units, overlayRef.current.headings));
       lastUnitsSignatureRef.current = signature;
+    }
+    if (source && animate && motionRef.current!.active(performance.now())) {
+      let last = 0;
+      const tick = (now: number) => {
+        if (now - last >= FRAME_MS) {
+          last = now;
+          draw(now);
+        }
+        frameRef.current = motionRef.current!.active(now) ? requestAnimationFrame(tick) : null;
+      };
+      frameRef.current = requestAnimationFrame(tick);
     }
     // First data arrives after `load` (e.g. the initial fetch was still pending) — fit once, then
     // leave the camera alone for subsequent polls so a dispatcher's own pan/zoom is not undone.
-    if (!hasFitToDataRef.current && validUnits(units).length > 0) {
+    if (!hasFitToDataRef.current && valid.length > 0) {
       fitToUnits(map, units);
       hasFitToDataRef.current = true;
     }
+    return () => {
+      if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+    };
   }, [units, ready]);
 
   /** The W-02 layer chips — `visibility` only, so hiding a layer never drops its source data. */

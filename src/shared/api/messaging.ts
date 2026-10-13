@@ -354,3 +354,63 @@ export function useMarkConversationRead(currentUserId: string | undefined) {
     },
   });
 }
+
+/* ------------------------------------------------------------------ D-146 read receipts */
+
+export interface MessageReadPayload {
+  conversationId: string;
+  readerType: 'DRIVER' | 'STAFF';
+  readerId: string;
+  lastReadMessageId: string | null;
+  readAt: string;
+}
+
+/** `message.read` -> the query cache, in place (no refetch). The reader's participant row gets
+ * `lastReadAt`; the messages the *other* side sent that the reader has now seen get `readAt`
+ * (and `deliveredAt` if still empty): a DRIVER read stamps staff messages, a STAFF read stamps
+ * driver messages. "Seen" = up to `lastReadMessageId`'s `sentAt` when that message is cached,
+ * else up to `readAt`. Unsent optimistic rows are never touched. A STAFF read by the caller
+ * zeroes the unread badge (the same as `conversation.read`). */
+export function applyMessageRead(
+  queryClient: ReturnType<typeof useQueryClient>,
+  payload: MessageReadPayload,
+  currentUserId: string | undefined,
+): void {
+  const { conversationId, readerType, readerId, lastReadMessageId, readAt } = payload;
+  const readerIsDriver = readerType === 'DRIVER';
+
+  queryClient.setQueryData<OffsetPage<MessageRow> | undefined>(qk.messages(conversationId), (prev) => {
+    if (!prev) return prev;
+    const anchor = lastReadMessageId ? prev.items.find((m) => m.id === lastReadMessageId) : undefined;
+    const cutoff = new Date(anchor?.sentAt ?? readAt).getTime();
+    let changed = false;
+    const items = prev.items.map((m) => {
+      if (m.status) return m;
+      const sentByReader = readerIsDriver ? Boolean(m.senderDriverId) : Boolean(m.senderUserId);
+      if (sentByReader || m.readAt || new Date(m.sentAt).getTime() > cutoff) return m;
+      changed = true;
+      return { ...m, readAt, deliveredAt: m.deliveredAt ?? readAt };
+    });
+    return changed ? { ...prev, items } : prev;
+  });
+
+  if (readerType === 'STAFF' && readerId === currentUserId) {
+    markConversationRead(queryClient, conversationId, currentUserId);
+    return;
+  }
+  queryClient.setQueryData<{ items: ConversationRow[] } | undefined>(qk.conversations(), (prev) => {
+    if (!prev) return prev;
+    return {
+      items: prev.items.map((c) =>
+        c.id === conversationId
+          ? {
+              ...c,
+              participants: c.participants.map((p) =>
+                (readerIsDriver ? p.driverId === readerId : p.userId === readerId) ? { ...p, lastReadAt: readAt } : p,
+              ),
+            }
+          : c,
+      ),
+    };
+  });
+}

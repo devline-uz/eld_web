@@ -32,12 +32,14 @@ import {
   type DeviceStatus,
   type BleState,
 } from '@/shared/api/settingsAdmin';
+import { VirtualEldCard } from './components/VirtualEldCard';
 import { RegisterDeviceModal } from './components/RegisterDeviceModal';
 import { PairDeviceModal } from './components/PairDeviceModal';
 import { UpdateFirmwareModal } from './components/UpdateFirmwareModal';
 import { SETTINGS_TOAST } from './lib/copy';
 import { usePageHeader } from '@/app/layouts/Topbar';
 
+type DeviceKind = 'ALL' | 'REAL' | 'TEST';
 type Segment = 'ALL' | 'CONNECTED' | 'DISCONNECTED' | 'UNASSIGNED';
 
 const BLE_TONE: Record<BleState, 'success' | 'warning' | 'neutral'> = {
@@ -70,6 +72,7 @@ export default function DevicesPage() {
   const canFull = can('devices', 'FULL');
   const { toast } = useToast();
   const [segment, setSegment] = useState<Segment>('ALL');
+  const [kind, setKind] = useState<DeviceKind>('ALL');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(25);
@@ -85,11 +88,11 @@ export default function DevicesPage() {
   // narrowed result — `GET /devices?page=3` for a 1-page result answers an empty page, which this
   // screen renders as "No results for …" / "No devices registered yet" although matches exist.
   // Adjusted during render, not in an effect (react.dev "you might not need an effect").
-  const listKey = JSON.stringify([search, segment]);
+  const listKey = JSON.stringify([search, segment, kind]);
   const [prevListKey, setPrevListKey] = useState(listKey);
   const requestedPage = listKey === prevListKey ? page : 1;
   if (listKey !== prevListKey) setPrevListKey(listKey);
-  const devicesQuery = useDevicesList({ page: requestedPage, limit, q: search || undefined, status: statusFilter });
+  const devicesQuery = useDevicesList({ page: requestedPage, limit, q: search || undefined, status: statusFilter, virtual: kind === 'ALL' ? undefined : kind === 'TEST' ? 'true' : 'false' });
   const totalPages = devicesQuery.data?.totalPages ?? 1;
   const currentPage = devicesQuery.isLoading ? requestedPage : Math.min(requestedPage, Math.max(1, totalPages));
   if (currentPage !== page) setPage(currentPage);
@@ -170,7 +173,13 @@ export default function DevicesPage() {
   }
 
   const columns: ColumnDef<DeviceRow, unknown>[] = [
-    { accessorKey: 'serial', header: 'SERIAL', cell: ({ row }) => <span className="text-body-strong text-text">{row.original.serial}</span> },
+    { accessorKey: 'serial', header: 'SERIAL', cell: ({ row }) => (
+        <span className="inline-flex items-center gap-2 text-body-strong text-text">
+          {row.original.serial}
+          {row.original.isVirtual ? <Badge tone="warning">TEST</Badge> : null}
+        </span>
+      ),
+    },
     { accessorKey: 'model', header: 'MODEL', cell: ({ row }) => <span className="text-text">{row.original.model === 'PT30' ? 'Pacific Track' : 'Pacific Track'}</span> },
     {
       id: 'firmware',
@@ -231,6 +240,7 @@ export default function DevicesPage() {
 
   return (
     <div className="flex flex-col gap-4">
+      <VirtualEldCard />
       <div className="flex items-center justify-end">
         <Can perm="devices" level="FULL">
           <Button variant="primary" iconLeft={<Plus size={16} strokeWidth={1.75} />} onClick={() => setRegisterOpen(true)}>
@@ -267,6 +277,25 @@ export default function DevicesPage() {
           ))}
         </div>
         <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+          <div role="group" aria-label="Device kind" className="flex h-9 w-fit shrink-0 overflow-hidden rounded-md border border-border">
+            {(
+              [
+                ['ALL', 'All'],
+                ['REAL', 'Real'],
+                ['TEST', 'Test'],
+              ] as [DeviceKind, string][]
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={kind === value}
+                onClick={() => setKind(value)}
+                className={kind === value ? 'bg-bg-inverse px-3 text-body-strong text-text-inverse' : 'bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <div className="flex h-input min-w-0 flex-1 items-center gap-2 rounded-md border border-border bg-bg-surface px-3 sm:flex-none">
             <Search size={16} strokeWidth={1.75} className="text-text-muted" />
             <input

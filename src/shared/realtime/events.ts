@@ -63,6 +63,23 @@ export interface RealtimeEventPayloads {
     userId?: string;
     driverId?: string;
   };
+  /** rooms: `conversation:{id}`, `driver:{id}`, each participant's `user:{id}` (backend D-146). A
+   * reader opened/read a thread; `lastReadMessageId` is the newest message they have seen. */
+  'message.read': {
+    conversationId: string;
+    readerType: 'DRIVER' | 'STAFF';
+    readerId: string;
+    lastReadMessageId: string | null;
+    readAt: string;
+  };
+  /** room: `conversation:{id}` — someone else is composing. The server drops identical state
+   * within 2 s. The web also EMITS `typing` `{ conversationId, isTyping }` (client -> server). */
+  typing: {
+    conversationId: string;
+    userType: 'DRIVER' | 'STAFF';
+    userId: string;
+    isTyping: boolean;
+  };
   /** room: `fleet` */
   'trip.status_changed': {
     tripId: string;
@@ -93,10 +110,16 @@ export interface RealtimeEventPayloads {
     vehicleId: string;
     count: number;
   };
-  /** room: `vehicle:{id}` — high-frequency, throttle before touching state (§7.2). */
+  /** rooms: `vehicle:{id}` and `fleet` — high-frequency, throttle before touching state (§7.2).
+   * Carries the batch's latest fix when it had one (backend D-149). */
   'telemetry.point': {
     vehicleId: string;
     count: number;
+    latitude?: number | null;
+    longitude?: number | null;
+    speedMph?: number | null;
+    headingDeg?: number | null;
+    time?: string;
   };
   /** room: `vehicle:{id}` (falls back to `vehicle:unassigned`) */
   'device.ble_state': {
@@ -112,6 +135,8 @@ export const REALTIME_EVENTS = [
   'message.new',
   'conversation.new',
   'conversation.read',
+  'message.read',
+  'typing',
   'trip.status_changed',
   'safety.event_created',
   'geofence.transition',

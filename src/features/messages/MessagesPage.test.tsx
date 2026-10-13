@@ -3,7 +3,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { StrictMode } from 'react';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -969,5 +969,57 @@ describe('W-16 Messages — voice messages', () => {
     );
     renderPage();
     expect(await screen.findByText('Voice message')).toBeInTheDocument();
+  });
+});
+
+describe('W-16 Messages — receipts and typing (D-146)', () => {
+  it('shows a driver typing indicator on `typing`, updates ticks on `message.read`', async () => {
+    usePopulatedConversations();
+    server.use(
+      http.get(url(endpoints.conversations.messages(':id')), () =>
+        ok({
+          items: [
+            {
+              id: 'msg_s',
+              conversationId: 'cnv_1',
+              senderUserId: 'usr_1',
+              senderDriverId: null,
+              body: 'Where are you?',
+              attachmentId: null,
+              clientId: null,
+              sentAt: '2026-09-12T15:00:00.000Z',
+              deliveredAt: '2026-09-12T15:00:05.000Z',
+              readAt: null,
+            },
+          ],
+          page: 1,
+          limit: 100,
+          total: 1,
+          totalPages: 1,
+        }),
+      ),
+    );
+    const socket = fakeSocket();
+    const user = userEvent.setup();
+    renderPage(socket);
+    await user.click(await screen.findByText('John Smith'));
+    await screen.findByText('Where are you?');
+    expect(screen.getByRole('img', { name: /^Delivered / })).toBeInTheDocument();
+
+    act(() => socket.trigger('typing', { conversationId: 'cnv_1', userType: 'DRIVER', userId: 'drv_1', isTyping: true }));
+    expect(await screen.findByText('John Smith is typing…')).toBeInTheDocument();
+    act(() => socket.trigger('typing', { conversationId: 'cnv_1', userType: 'DRIVER', userId: 'drv_1', isTyping: false }));
+    await waitFor(() => expect(screen.queryByText('John Smith is typing…')).not.toBeInTheDocument());
+
+    act(() =>
+      socket.trigger('message.read', {
+        conversationId: 'cnv_1',
+        readerType: 'DRIVER',
+        readerId: 'drv_1',
+        lastReadMessageId: 'msg_s',
+        readAt: '2026-09-12T15:10:00.000Z',
+      }),
+    );
+    expect(await screen.findByRole('img', { name: /^Read / })).toBeInTheDocument();
   });
 });

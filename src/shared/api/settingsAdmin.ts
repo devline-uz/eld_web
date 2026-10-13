@@ -21,6 +21,19 @@ import type { PermissionKey, PermissionLevel } from '@/shared/auth/permissions';
 /* ------------------------------------------------------------------ Carrier — W-17 */
 
 export { useCarrier, type CarrierRow, type HosRuleset } from './carrier';
+
+/** pt30_pt40/tz.md §9.3 — `PATCH /carrier { virtualEldEnabled }`. Merges into the cached carrier so a
+ * response that omits `virtualEldAvailable` cannot make the card vanish, then refetches. */
+export function useSetVirtualEld() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (virtualEldEnabled: boolean) => client.patch<CarrierRow>(endpoints.carrier.root, { virtualEldEnabled }),
+    onSuccess: (data) => {
+      qc.setQueryData<CarrierRow>(qk.carrier, (prev) => (prev ? { ...prev, ...data } : data));
+      void qc.invalidateQueries({ queryKey: qk.carrier });
+    },
+  });
+}
 export function useUpdateCarrier() {
   const qc = useQueryClient();
   return useMutation({
@@ -194,6 +207,8 @@ export interface DeviceRow {
   firmware?: string | null;
   lastSeenAt?: string | null;
   storedEventsCount?: number;
+  /** pt30_pt40/tz.md §9.3 — Test PT30/40 emulator device (`serial` starts with `V`). */
+  isVirtual?: boolean;
   /** B-88 (shipped 2026-09-24). */
   autoFirmware?: boolean;
   shareDiagnostics?: boolean;
@@ -223,6 +238,8 @@ export interface DeviceListParams {
   q?: string;
   status?: DeviceStatus;
   bleState?: BleState;
+  /** pt30_pt40/tz.md §9.3 — `GET /devices?virtual=true|false`. */
+  virtual?: 'true' | 'false';
   /** B-35 (shipped) — devices paired to one unit. */
   vehicleId?: string;
 }

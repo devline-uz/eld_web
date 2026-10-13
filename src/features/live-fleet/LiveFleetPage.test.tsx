@@ -442,7 +442,7 @@ describe('W-02 Live Fleet — performance', () => {
     renderPage('/live-fleet?unit=veh_1', queryClient);
     await screen.findByRole('heading', { name: 'Unit #1001' }, { timeout: 8000 });
     const requestsBefore = fleetRequests;
-    const telemetry = roomHandlers.get('vehicle:veh_1')!['telemetry.point']!;
+    const telemetry = roomHandlers.get('fleet')!['telemetry.point']!;
 
     // A frame with a fix patches only that unit, in place — no invalidate, no refetch.
     act(() => telemetry({ vehicleId: 'veh_1', count: 1, latitude: 41.5, longitude: -84, speedMph: 63 }));
@@ -450,7 +450,7 @@ describe('W-02 Live Fleet — performance', () => {
     expect(cached?.items.find((u) => u.vehicleId === 'veh_1')).toMatchObject({ lat: 41.5, speedMph: 63 });
     expect(invalidate).not.toHaveBeenCalled();
 
-    // Today's `{ vehicleId, count }` frames: 50 in a burst → one leading invalidate + one trailing.
+    // Fix-less `{ vehicleId, count }` frames: 50 in a burst → one leading invalidate + one trailing.
     act(() => {
       for (let i = 0; i < 50; i += 1) telemetry({ vehicleId: 'veh_1', count: 1 });
     });

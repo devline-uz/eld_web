@@ -175,6 +175,7 @@ function seedDevices(): DeviceRow[] {
       firmwareOutdated: i % 6 === 0,
       lastHeartbeatAt: paired ? ago((i % 40) * 60_000) : daysAgo(3 + i),
       storedEventsCount: i % 5,
+      isVirtual: n === 3,
       // The PT30 info/config fields `GET /devices` documents (openapi.json) — without them the
       // contract test rejected this handler as drifted from the API.
       firmware: i % 6 === 0 ? 'L107' : 'L108',
@@ -255,6 +256,9 @@ function seedCarrier(): CarrierRow {
     eldIdentifier: 'OBK001',
     eldRegistrationId: null,
     erodsMode: 'PRODUCTION',
+    virtualEldEnabled: false,
+    virtualEldAvailable: true,
+    virtualEldUpdatedAt: null,
   };
 }
 

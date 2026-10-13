@@ -9,7 +9,7 @@ import { useRoom } from './useRoom';
 
 const signOut = vi.fn();
 let isAuthenticated = true;
-let accessToken = 'test-access-token';
+let accessToken: string | null = 'test-access-token';
 
 vi.mock('@/shared/auth/AuthProvider', () => ({
   useAuth: () => ({ isAuthenticated, signOut }),
@@ -93,6 +93,22 @@ describe('RealtimeProvider', () => {
       expect.any(String),
       expect.objectContaining({ auth: { token: 'test-access-token' } }),
     );
+  });
+
+  it('after a page reload waits for the access token, then connects and joins rooms', async () => {
+    // F5: the session is restored before the refresh call hands back the access token.
+    accessToken = null;
+    const queryClient = new QueryClient();
+    renderProvider(queryClient);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(lastSocket).toBeNull();
+
+    accessToken = 'late-token';
+    await waitFor(() => expect(lastSocket).not.toBeNull());
+    const { io } = await import('socket.io-client');
+    expect(io).toHaveBeenLastCalledWith(expect.any(String), expect.objectContaining({ auth: { token: 'late-token' } }));
+    act(() => lastSocket!.trigger('connect'));
+    await waitFor(() => expect(lastSocket!.emit).toHaveBeenCalledWith('subscribe', 'fleet', expect.any(Function)));
   });
 
   it('invalidates every mounted query on reconnect (no resume/seq substitute)', async () => {

@@ -1,10 +1,10 @@
 // W-02 — maps a `telemetry.point` frame onto the cached `GET /live/fleet` response (web/tz.md §7.2:
 // throttle to 200 ms, patch with `setQueryData`, never refetch the whole fleet per frame).
 //
-// Today's gateway frame is `{ vehicleId, count }` (backend ingest.service.ts) — it says *that* a
-// unit reported, not *where*, so it cannot be mapped and the page falls back to one throttled
-// invalidate. The moment the frame carries a fix (`latitude`/`longitude` like the ingest DTO, or
-// `lat`/`lon`), only that unit's row is patched in place.
+// The gateway frame is `{ vehicleId, count, latitude, longitude, speedMph, headingDeg, time }`
+// (backend D-149), sent to `vehicle:{id}` and `fleet`; only that unit's row is patched in place.
+// A batch without a GPS fix has no coordinates — the page then falls back to one throttled
+// invalidate.
 import type { LiveFleetResponse, LiveFleetUnit } from '@/shared/api/liveFleet';
 import type { RealtimeEventPayloads } from '@/shared/realtime/events';
 
