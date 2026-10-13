@@ -433,6 +433,7 @@ export default function LiveFleetPage() {
         lon: u.lon,
         dutyStatus: u.dutyStatus,
         headingDeg: u.headingDeg,
+        speedMph: u.speedMph,
         stale: u.isStale,
       })),
     [filtered],
