@@ -110,10 +110,16 @@ export interface RealtimeEventPayloads {
     vehicleId: string;
     count: number;
   };
-  /** room: `vehicle:{id}` — high-frequency, throttle before touching state (§7.2). */
+  /** rooms: `vehicle:{id}` and `fleet` — high-frequency, throttle before touching state (§7.2).
+   * Carries the batch's latest fix when it had one (backend D-149). */
   'telemetry.point': {
     vehicleId: string;
     count: number;
+    latitude?: number | null;
+    longitude?: number | null;
+    speedMph?: number | null;
+    headingDeg?: number | null;
+    time?: string;
   };
   /** room: `vehicle:{id}` (falls back to `vehicle:unassigned`) */
   'device.ble_state': {
