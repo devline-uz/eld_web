@@ -158,8 +158,8 @@ export default function AlertRulesPage() {
         </div>
       </Card>
 
-      <div className="flex items-center justify-between">
-        <div className="flex h-9 w-fit overflow-hidden rounded-md border border-border">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex h-9 w-fit max-w-full overflow-x-auto rounded-md border border-border">
           {(
             [
               ['ALL', `All ${rows.length}`],
@@ -172,14 +172,14 @@ export default function AlertRulesPage() {
               type="button"
               aria-pressed={segment === value}
               onClick={() => setSegment(value)}
-              className={segment === value ? 'bg-bg-inverse px-3 text-body-strong text-text-inverse' : 'bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'}
+              className={segment === value ? 'shrink-0 whitespace-nowrap bg-bg-inverse px-3 text-body-strong text-text-inverse' : 'shrink-0 whitespace-nowrap bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'}
             >
               {label}
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex h-input items-center gap-2 rounded-md border border-border bg-bg-surface px-3">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+          <div className="flex h-input min-w-0 flex-1 items-center gap-2 rounded-md border border-border bg-bg-surface px-3 sm:flex-none">
             <Search size={16} strokeWidth={1.75} className="text-text-muted" />
             <input
               type="search"
@@ -187,7 +187,7 @@ export default function AlertRulesPage() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search rule…"
-              className="w-56 bg-transparent text-body outline-none"
+              className="w-full min-w-0 bg-transparent text-body outline-none sm:w-56"
             />
           </div>
           {/* Design: an `All severities` select to the right of the search. */}
@@ -218,24 +218,24 @@ export default function AlertRulesPage() {
         ) : (
           <div className="flex flex-col">
             {filtered.map((rule) => (
-              <div key={rule.id} className="flex items-center gap-4 border-b border-border p-4 last:border-b-0">
+              <div key={rule.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-border p-4 last:border-b-0">
                 <span className={`flex size-8 shrink-0 items-center justify-center rounded-md ${SEVERITY_BG[rule.severity]}`}>
                   {SEVERITY_ICON[rule.severity]}
                 </span>
-                <div className="min-w-0 flex-1">
-                  <p className="flex items-center gap-2 text-body-strong text-text">
+                <div className="min-w-0 flex-1 basis-48">
+                  <p className="flex flex-wrap items-center gap-2 text-body-strong text-text">
                     {rule.name}
                     {rule.channels.includes('IN_APP') && <Badge tone="neutral">In-app</Badge>}
                     {rule.channels.includes('EMAIL') && <Badge tone="neutral">Email</Badge>}
                   </p>
                   <p className="text-caption text-text-muted">{rule.conditions.map(describeCondition).join(', ')}</p>
                 </div>
-                <div className="shrink-0 text-right">
+                <div className="shrink-0 sm:text-right">
                   <p className="text-caption text-text-secondary">{(rule.recipients.roles ?? []).join(', ') || '—'}</p>
                   <Badge tone={isMuted(rule) ? 'neutral' : 'success'}>{isMuted(rule) ? 'Muted' : 'Active'}</Badge>
                 </div>
                 {canFull && (
-                  <div className="flex items-center gap-2">
+                  <div className="ml-auto flex items-center gap-2 sm:ml-0">
                     <button
                       type="button"
                       role="switch"

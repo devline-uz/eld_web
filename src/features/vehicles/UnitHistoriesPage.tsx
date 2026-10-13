@@ -197,8 +197,8 @@ export default function UnitHistoriesPage() {
         </span>
       </div>
 
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <span className="text-body-strong text-text">
             🚚 Unit {vehicleQuery.data?.unitNumber ?? id} · {[vehicleQuery.data?.make, vehicleQuery.data?.model].filter(Boolean).join(' ')}
           </span>
@@ -212,8 +212,8 @@ export default function UnitHistoriesPage() {
             </Button>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex h-9 overflow-hidden rounded-md border border-border">
+        <div className="flex max-w-full flex-wrap items-center gap-2">
+          <div className="flex h-9 max-w-full overflow-x-auto rounded-md border border-border">
             {(
               [
                 ['ALL', `All ${counts.all}`],
@@ -229,8 +229,8 @@ export default function UnitHistoriesPage() {
                 onClick={() => setSegmentFilter(value)}
                 className={
                   segmentFilter === value
-                    ? 'bg-bg-inverse px-3 text-body-strong text-text-inverse'
-                    : 'bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'
+                    ? 'shrink-0 whitespace-nowrap bg-bg-inverse px-3 text-body-strong text-text-inverse'
+                    : 'shrink-0 whitespace-nowrap bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'
                 }
               >
                 {label}
@@ -257,7 +257,7 @@ export default function UnitHistoriesPage() {
         <ErrorState onRetry={() => historiesQuery.refetch()} />
       ) : (
         <>
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <KpiCard
               icon={Route}
               label="Distance travelled"
@@ -401,9 +401,9 @@ export default function UnitHistoriesPage() {
             )}
           </Card>
 
-          <div className="grid grid-cols-[1fr_348px] gap-4">
+          <div className="grid grid-cols-1 xl:grid-cols-[1fr_348px] gap-4">
             <Card padded={false}>
-              <div className="flex items-center justify-between p-card pb-0">
+              <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 p-4 pb-0 sm:p-card sm:pb-0">
                 <SectionHeader title="Movement segments" subtitle={`${segments.length} segments today · drive, stop and idle`} />
                 {hasTrack && (
                   <Button variant="ghost" size="sm" onClick={() => setHoveredMarker(hoveredMarker ? null : (segments[0]?.marker ?? null))}>
@@ -411,7 +411,8 @@ export default function UnitHistoriesPage() {
                   </Button>
                 )}
               </div>
-              <table className="mt-2 w-full text-body">
+              <div className="overflow-x-auto mt-2">
+              <table className="w-full text-body min-w-lg lg:min-w-0">
                 <thead>
                   <tr className="border-t border-border text-table-head text-text-muted">
                     <th className="p-3 text-left font-semibold">TYPE</th>
@@ -457,6 +458,7 @@ export default function UnitHistoriesPage() {
                   ))}
                 </tbody>
               </table>
+              </div>
             </Card>
 
             <Card>

@@ -70,7 +70,7 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
 function DriverHosMeters({ clocks }: { clocks: DriverHosResponse }) {
   const notes = hosClockNotes(clocks);
   return (
-    <div className="mt-3 grid grid-cols-4 gap-3">
+    <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <div className="rounded-md border border-border p-3.5">
         <HosMeter
           label="Drive left"
@@ -303,10 +303,10 @@ export default function DriverProfilePage() {
   return (
     <div className="flex flex-col gap-4">
       <Card>
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex gap-4">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex min-w-0 gap-4">
             <Avatar name={name} size="xl" />
-            <div>
+            <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-page-title text-text">{name}</h2>
                 {driver.status === 'ACTIVE' && (
@@ -320,7 +320,7 @@ export default function DriverProfilePage() {
                   </Badge>
                 )}
               </div>
-              <p className="mt-1 text-body text-text-muted">
+              <p className="mt-1 break-words text-body text-text-muted">
                 {vehicleQuery.data ? `Unit ${vehicleQuery.data.unitNumber} · ` : ''}
                 CDL {driver.cdlState}-{driver.cdlNumber} · {driver.homeTerminalName} terminal
                 {driver.email ? ` · ${driver.email}` : ''}
@@ -328,7 +328,7 @@ export default function DriverProfilePage() {
               </p>
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 lg:shrink-0">
             {canMessage && (
               <Button
                 variant="secondary"
@@ -391,7 +391,7 @@ export default function DriverProfilePage() {
         </div>
       </Card>
 
-      <div className="flex h-9 w-fit overflow-hidden rounded-md border border-border">
+      <div className="flex h-9 w-fit max-w-full overflow-x-auto rounded-md border border-border">
         {TABS.map((t) => (
           <button
             key={t}
@@ -400,8 +400,8 @@ export default function DriverProfilePage() {
             onClick={() => setTab(t)}
             className={
               tab === t
-                ? 'bg-bg-inverse px-3 text-body-strong text-text-inverse'
-                : 'bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'
+                ? 'shrink-0 whitespace-nowrap bg-bg-inverse px-3 text-body-strong text-text-inverse'
+                : 'shrink-0 whitespace-nowrap bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'
             }
           >
             {TAB_LABEL[t]}
@@ -410,7 +410,7 @@ export default function DriverProfilePage() {
       </div>
 
       {tab === 'overview' && (
-        <div className="grid grid-cols-[1fr_348px] gap-4">
+        <div className="grid grid-cols-1 xl:grid-cols-[1fr_348px] gap-4">
           <div className="flex flex-col gap-4">
             <Card>
               <SectionHeader

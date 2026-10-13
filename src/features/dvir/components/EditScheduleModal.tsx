@@ -314,7 +314,7 @@ export function EditScheduleModal({ schedule, onClose }: { schedule?: ScheduleTa
           <FieldError id={nameErrorId} message={serverFieldErrors.name ?? null} />
         </label>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="flex flex-col gap-1">
             <label className="flex flex-col gap-1">
               <span className="text-label text-text">Interval (miles)</span>
@@ -361,7 +361,7 @@ export function EditScheduleModal({ schedule, onClose }: { schedule?: ScheduleTa
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="flex flex-col gap-1">
             <label className="flex flex-col gap-1">
               <span className="text-label text-text">Last service odometer</span>

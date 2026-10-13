@@ -150,7 +150,7 @@ function RegionForm({ prefs }: { prefs: MyPreferences }) {
           {banner}
         </p>
       ) : null}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <SelectField label="Language" value={draft.language} options={LANGUAGES} disabled={update.isPending} onChange={set('language')} />
         <SelectField label="Time zone" value={draft.timezone} options={TIME_ZONES} disabled={update.isPending} onChange={set('timezone')} />
         <SelectField label="Date format" value={draft.dateFormat} options={DATE_FORMATS} disabled={update.isPending} onChange={set('dateFormat')} />

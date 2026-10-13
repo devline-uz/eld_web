@@ -167,7 +167,7 @@ export default function SignInPage() {
 
   if (IS_DEV_AUTH && resetFrom !== null) {
     return (
-      <div className="w-sign-in-card">
+      <div className="w-sign-in-card max-w-full">
         <div className="rounded-xl bg-bg-surface p-8 shadow-card">
           <PasswordResetFlow
             initialEmail={resetFrom}
@@ -185,7 +185,7 @@ export default function SignInPage() {
   }
 
   return (
-    <div className="w-sign-in-card">
+    <div className="w-sign-in-card max-w-full">
       <div className="rounded-xl bg-bg-surface p-8 shadow-card">
         <h1 className="text-page-title text-text">Sign in to your account</h1>
         <p className="mt-1 text-page-sub text-text-muted">

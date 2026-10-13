@@ -318,7 +318,7 @@ export function RequestLogEditModal({
         </p>
       )}
 
-      <div className="mt-4 grid grid-cols-3 gap-4">
+      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Field label="Date">
           <input readOnly value={dateLabel} className={cn(inputClass, 'bg-bg-subtle')} />
         </Field>
@@ -378,7 +378,7 @@ export function RequestLogEditModal({
         )}
       </fieldset>
 
-      <div className="mt-4 grid grid-cols-3 gap-4">
+      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
         {geocodingEnabled ? (
           <Field
             label="Location"
@@ -476,7 +476,7 @@ export function RequestLogEditModal({
         </p>
       </div>
 
-      <div className="mt-4 grid grid-cols-2 gap-4">
+      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="rounded-md bg-bg-subtle p-3">
           <p className="text-table-head font-semibold uppercase tracking-wide text-text-muted">Before</p>
           <p className="tabular mt-1 text-body text-text">

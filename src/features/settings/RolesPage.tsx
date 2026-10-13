@@ -156,8 +156,8 @@ export default function RolesPage() {
         </Can>
       </div>
 
-      <div className="flex items-center justify-between">
-        <div className="flex h-9 w-fit overflow-hidden rounded-md border border-border">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex h-9 w-fit max-w-full overflow-x-auto rounded-md border border-border">
           {(
             [
               ['matrix', 'Permission matrix'],
@@ -172,8 +172,8 @@ export default function RolesPage() {
               onClick={() => setTab(value)}
               className={
                 tab === value
-                  ? 'bg-bg-inverse px-3 text-body-strong text-text-inverse'
-                  : 'bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'
+                  ? 'shrink-0 whitespace-nowrap bg-bg-inverse px-3 text-body-strong text-text-inverse'
+                  : 'shrink-0 whitespace-nowrap bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'
               }
             >
               {label}
@@ -181,8 +181,8 @@ export default function RolesPage() {
           ))}
         </div>
         {tab === 'matrix' && (
-          <div className="flex items-center gap-2">
-            <div className="flex h-input items-center gap-2 rounded-md border border-border bg-bg-surface px-3">
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+            <div className="flex h-input min-w-0 flex-1 items-center gap-2 rounded-md border border-border bg-bg-surface px-3 sm:flex-none">
               <Search size={16} strokeWidth={1.75} className="text-text-muted" />
               <input
                 type="search"
@@ -190,7 +190,7 @@ export default function RolesPage() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search permission…"
-                className="w-56 bg-transparent text-body outline-none"
+                className="w-full min-w-0 bg-transparent text-body outline-none sm:w-56"
               />
             </div>
             {canFull && (
@@ -295,7 +295,7 @@ export default function RolesPage() {
       )}
 
       {tab === 'roles' && (
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {roles.map((role) => (
             <Card key={role.id}>
               <div className="flex items-start justify-between gap-3">
@@ -333,30 +333,32 @@ export default function RolesPage() {
           ) : (auditLogQuery.data?.items.length ?? 0) === 0 ? (
             <EmptyState title="No events match these filters" description="Try a wider date range or clear the filters." />
           ) : (
-            <table className="w-full border-collapse text-body">
-              <thead className="h-table-head">
-                <tr className="border-b border-border">
-                  <th className="px-3 text-left text-table-head font-semibold uppercase tracking-wide text-text-muted">TIMESTAMP</th>
-                  <th className="px-3 text-left text-table-head font-semibold uppercase tracking-wide text-text-muted">ACTION</th>
-                  <th className="px-3 text-left text-table-head font-semibold uppercase tracking-wide text-text-muted">OBJECT</th>
-                </tr>
-              </thead>
-              <tbody>
-                {auditLogQuery.data?.items.map((entry) => (
-                  <tr key={entry.id} className="h-row border-b border-border last:border-0">
-                    <td className="px-3 tabular-nums text-text">
-                      {formatCarrier(entry.createdAt, carrierQuery.data?.timezone ?? 'UTC', 'dateTimeSeconds')}
-                    </td>
-                    <td className="px-3">
-                      <Badge tone={entry.action === 'DELETE' ? 'danger' : entry.action === 'CREATE' ? 'success' : 'info'}>
-                        {entry.action}
-                      </Badge>
-                    </td>
-                    <td className="px-3 text-text">{entry.objectLabel ?? entry.objectType}</td>
+            <div className="relative overflow-x-auto">
+              <table className="w-full border-collapse text-body">
+                <thead className="h-table-head">
+                  <tr className="border-b border-border">
+                    <th className="px-3 text-left text-table-head font-semibold uppercase tracking-wide text-text-muted">TIMESTAMP</th>
+                    <th className="px-3 text-left text-table-head font-semibold uppercase tracking-wide text-text-muted">ACTION</th>
+                    <th className="px-3 text-left text-table-head font-semibold uppercase tracking-wide text-text-muted">OBJECT</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {auditLogQuery.data?.items.map((entry) => (
+                    <tr key={entry.id} className="h-row border-b border-border last:border-0">
+                      <td className="px-3 tabular-nums text-text">
+                        {formatCarrier(entry.createdAt, carrierQuery.data?.timezone ?? 'UTC', 'dateTimeSeconds')}
+                      </td>
+                      <td className="px-3">
+                        <Badge tone={entry.action === 'DELETE' ? 'danger' : entry.action === 'CREATE' ? 'success' : 'info'}>
+                          {entry.action}
+                        </Badge>
+                      </td>
+                      <td className="px-3 text-text">{entry.objectLabel ?? entry.objectType}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </Card>
       )}

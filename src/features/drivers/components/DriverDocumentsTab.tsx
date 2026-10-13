@@ -171,7 +171,8 @@ export function DriverDocumentsTab({ driverId }: { driverId: string }) {
         ) : (docsQuery.data?.length ?? 0) === 0 ? (
           <p className="p-4 text-body text-text-muted">No documents uploaded.</p>
         ) : (
-          <table className="w-full text-body">
+          <div className="overflow-x-auto">
+          <table className="w-full text-body min-w-lg lg:min-w-0">
             <thead>
               <tr className="border-t border-border text-table-head text-text-muted">
                 <th className="p-3 text-left font-semibold">FILE</th>
@@ -219,6 +220,7 @@ export function DriverDocumentsTab({ driverId }: { driverId: string }) {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </Card>
 

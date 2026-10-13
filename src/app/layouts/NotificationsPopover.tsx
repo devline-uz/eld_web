@@ -22,7 +22,7 @@ export default function NotificationsPopover({ open, onOpenChange, unread, isPat
           align="end"
           sideOffset={8}
           aria-label="Notifications"
-          className="z-50 w-notifications-panel overflow-hidden rounded-lg border border-border bg-bg-surface shadow-pop"
+          className="z-50 w-notifications-panel max-w-[calc(100vw-16px)] overflow-hidden rounded-lg border border-border bg-bg-surface shadow-pop"
         >
           <NotificationsPanel onClose={() => onOpenChange(false)} isPathAllowed={isPathAllowed} />
         </Popover.Content>

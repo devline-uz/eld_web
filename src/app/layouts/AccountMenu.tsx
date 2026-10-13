@@ -77,7 +77,7 @@ export default function AccountMenu({ open, onOpenChange, onOpenShortcuts }: Acc
         <DropdownMenu.Content
           align="end"
           sideOffset={8}
-          className="z-50 w-account-menu overflow-hidden rounded-lg border border-border bg-bg-surface pb-1 shadow-pop"
+          className="z-50 w-account-menu max-w-[calc(100vw-16px)] overflow-hidden rounded-lg border border-border bg-bg-surface pb-1 shadow-pop"
         >
           <div className="flex items-center gap-3 px-3 py-3">
             {/* Decorative — the name is right beside it, and role="img" is not a valid menu child. */}

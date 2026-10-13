@@ -145,7 +145,7 @@ function SafetyTabs({ tab, counts, onChange }: { tab: SafetyTab; counts: Record<
     refs.current[next]?.focus();
   }
   return (
-    <div role="tablist" aria-label="Safety views" onKeyDown={onKeyDown} className="flex h-9 w-fit items-center gap-1 rounded-md bg-bg-subtle p-1">
+    <div role="tablist" aria-label="Safety views" onKeyDown={onKeyDown} className="flex h-9 w-fit max-w-full shrink-0 items-center gap-1 overflow-x-auto rounded-md bg-bg-subtle p-1">
       {TAB_ORDER.map((value) => {
         const selected = tab === value;
         return (
@@ -163,8 +163,8 @@ function SafetyTabs({ tab, counts, onChange }: { tab: SafetyTab; counts: Record<
             onClick={() => onChange(value)}
             className={
               selected
-                ? 'flex h-full items-center gap-1.5 rounded-sm bg-bg-surface px-3 text-body-strong text-text shadow-card'
-                : 'flex h-full items-center gap-1.5 rounded-sm px-3 text-body text-text-secondary hover:text-text'
+                ? 'flex h-full shrink-0 items-center gap-1.5 whitespace-nowrap rounded-sm bg-bg-surface px-3 text-body-strong text-text shadow-card'
+                : 'flex h-full shrink-0 items-center gap-1.5 whitespace-nowrap rounded-sm px-3 text-body text-text-secondary hover:text-text'
             }
           >
             {TAB_LABEL[value]}
@@ -604,7 +604,7 @@ export default function SafetyPage() {
 
   const driverScorecardCard = (
     <Card padded={false}>
-      <div className="flex items-start justify-between p-card pb-0">
+      <div className="flex flex-wrap items-start justify-between gap-2 p-card pb-0">
         <SectionHeader
           title="Driver scorecard"
           subtitle={[
@@ -616,7 +616,7 @@ export default function SafetyPage() {
             .join(' · ')}
         />
         <Can perm="safety" level="FULL">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <select
               aria-label="Select driver to coach"
               value={coachDriverId}
@@ -662,17 +662,17 @@ export default function SafetyPage() {
   return (
     <div className="flex flex-col gap-4">
 
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <SafetyTabs tab={tab} counts={tabCounts} onChange={setTab} />
-        <div className="flex items-center gap-2">
-          <div className="flex h-input items-center gap-2 rounded-md border border-border bg-bg-surface px-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex h-input w-full items-center gap-2 rounded-md border border-border bg-bg-surface px-3 sm:w-auto">
             <Search size={16} strokeWidth={1.75} className="text-text-muted" />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={tab === 'scorecards' ? 'Search driver…' : 'Search driver, unit…'}
               aria-label={tab === 'scorecards' ? 'Search driver' : 'Search driver, unit'}
-              className="w-56 bg-transparent text-body outline-none"
+              className="w-full min-w-0 bg-transparent text-body outline-none sm:w-56"
             />
           </div>
           {tab !== 'scorecards' && (
@@ -707,7 +707,7 @@ export default function SafetyPage() {
             {isKpiLoading ? (
               <KpiRowSkeleton />
             ) : (
-              <div className="grid grid-cols-4 gap-card-gap">
+              <div className="grid grid-cols-1 gap-card-gap sm:grid-cols-2 xl:grid-cols-4">
                 <KpiCard
                   label="Fleet safety score"
                   value={fleetScore ?? '—'}
@@ -740,7 +740,7 @@ export default function SafetyPage() {
               </div>
             )}
 
-            <div className="grid grid-cols-[1fr_348px] gap-card-gap">
+            <div className="grid grid-cols-1 gap-card-gap xl:grid-cols-[1fr_348px]">
               <Card padded={false}>
                 <div className="p-card pb-0">
                   <SectionHeader title="Safety events" subtitle={`${currentEvents.length.toLocaleString('en-US')} events · ${pendingCoaching} need review`} />

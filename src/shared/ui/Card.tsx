@@ -17,7 +17,7 @@ export function Card({
     <div
       className={cn(
         'rounded-lg border border-border bg-bg-surface shadow-card',
-        padded && 'p-card',
+        padded && 'p-4 sm:p-card',
         className,
       )}
     >
@@ -38,8 +38,8 @@ export function SectionHeader({
   className?: string;
 }) {
   return (
-    <div className={cn('flex items-start justify-between gap-4', className)}>
-      <div>
+    <div className={cn('flex flex-wrap items-start justify-between gap-x-4 gap-y-2', className)}>
+      <div className="min-w-0">
         <h2 className="text-card-title font-semibold text-text">{title}</h2>
         {subtitle && <p className="mt-0.5 text-card-sub text-text-muted">{subtitle}</p>}
       </div>

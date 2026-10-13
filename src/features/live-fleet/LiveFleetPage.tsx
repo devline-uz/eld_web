@@ -250,7 +250,7 @@ function DetailCard({
   const shiftEnds = useCountdown(unit.shiftEndsAt);
 
   return (
-    <div className="absolute right-4 top-16 z-10 w-detail-card rounded-lg bg-bg-surface p-4 shadow-pop">
+    <div className="absolute inset-x-2 bottom-2 z-10 max-h-[85%] overflow-y-auto rounded-lg bg-bg-surface p-4 shadow-pop sm:inset-x-auto sm:bottom-auto sm:right-4 sm:top-16 sm:max-h-none sm:w-detail-card sm:overflow-visible">
       <div className="flex items-start justify-between">
         <h3 className="text-card-title font-semibold text-text">Unit {unit.unitNumber}</h3>
         {/* Stage 3 — was a bare ~16×16 glyph; now the 32×32 target the Modal close uses. */}
@@ -463,8 +463,8 @@ export default function LiveFleetPage() {
     // the full-bleed `<main>` drops, which leaves `100vh - topbar - 2 * page` — precisely
     // `--spacing-content-h`. `xl:overflow-hidden` clips the left column's square corners inside
     // the new radius; both panes already scroll on their own.
-    <div className="flex h-full xl:m-page xl:h-content-h xl:overflow-hidden xl:rounded-lg xl:border xl:border-border xl:bg-bg-surface">
-      <div className="flex w-unit-list shrink-0 flex-col border-r border-border bg-bg-surface">
+    <div className="flex h-full flex-col lg:flex-row xl:m-page xl:h-content-h xl:overflow-hidden xl:rounded-lg xl:border xl:border-border xl:bg-bg-surface">
+      <div className="flex h-[70vh] w-full shrink-0 flex-col border-t border-border bg-bg-surface lg:h-auto lg:w-unit-list lg:border-t-0 lg:border-r">
         <div className="p-4">
           <label className="relative flex items-center">
             <Search size={16} strokeWidth={1.75} aria-hidden="true" className="pointer-events-none absolute left-3 text-text-muted" />
@@ -477,7 +477,7 @@ export default function LiveFleetPage() {
               className="h-input w-full rounded-md border border-border bg-bg-app pl-8 pr-3 text-body text-text placeholder:text-text-muted"
             />
           </label>
-          <div className="mt-3 flex gap-2">
+          <div className="mt-3 flex gap-2 overflow-x-auto">
             {(
               [
                 ['ALL', `All ${searchMatches.length}`],
@@ -490,7 +490,7 @@ export default function LiveFleetPage() {
                 type="button"
                 aria-pressed={segment === value}
                 onClick={() => setSegment(value)}
-                className={`h-8 rounded-md px-3 text-body ${
+                className={`h-8 shrink-0 whitespace-nowrap rounded-md px-3 text-body ${
                   segment === value ? 'bg-bg-inverse text-text-inverse' : 'bg-bg-subtle text-text-secondary hover:bg-border'
                 }`}
               >
@@ -539,8 +539,8 @@ export default function LiveFleetPage() {
         </div>
       </div>
 
-      <div className="relative flex-1 bg-bg-subtle">
-        <div className="absolute left-4 top-4 z-10 flex h-9 overflow-hidden rounded-md bg-bg-surface shadow-card">
+      <div className="relative order-first h-[60vh] shrink-0 bg-bg-subtle lg:order-none lg:h-auto lg:flex-1 lg:shrink">
+        <div className="absolute left-2 top-2 z-10 flex h-9 max-w-[calc(100%-1rem)] overflow-x-auto rounded-md bg-bg-surface shadow-card sm:left-4 sm:top-4 sm:max-w-none sm:overflow-hidden">
           {MAP_LAYERS.map((layer) => {
             // No traffic tile source configured → the chip says so instead of silently doing nothing.
             const unavailable = layer === 'Traffic' && !trafficAvailable;
@@ -553,7 +553,7 @@ export default function LiveFleetPage() {
                 disabled={unavailable}
                 title={unavailable ? TRAFFIC_UNCONFIGURED_TITLE : undefined}
                 onClick={() => toggleLayer(layer)}
-                className={`px-3 text-body ${
+                className={`shrink-0 whitespace-nowrap px-3 text-body ${
                   on
                     ? 'bg-bg-inverse text-text-inverse'
                     : unavailable
@@ -568,7 +568,7 @@ export default function LiveFleetPage() {
         </div>
 
         <Can perm="liveFleet" level="FULL">
-          <div className="absolute right-4 top-4 z-10">
+          <div className="absolute right-2 top-14 z-10 sm:right-4 sm:top-4">
             <Button variant="primary" iconLeft={<Plus size={16} strokeWidth={1.75} />} onClick={() => setGeofenceOpen(true)}>
               New geofence
             </Button>

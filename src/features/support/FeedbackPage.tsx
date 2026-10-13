@@ -134,7 +134,7 @@ export default function FeedbackPage() {
               {QUESTIONS.map((q) => (
                 <div key={q.id}>
                   <p className="mb-2 text-body-strong text-text">{q.question}</p>
-                  <div className="grid grid-cols-4 gap-2">
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                     {q.options.map((opt) => (
                       <button
                         key={opt}

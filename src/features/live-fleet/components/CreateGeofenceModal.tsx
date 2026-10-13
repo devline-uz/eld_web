@@ -288,7 +288,7 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
             {serverError}
           </p>
         )}
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <label className="flex flex-col gap-1">
             <span className="text-label text-text">
               Geofence name <span className="text-danger">*</span>
@@ -341,7 +341,7 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
           <div
             role="group"
             aria-label="Shape"
-            className="flex h-9 w-fit overflow-hidden rounded-md border border-border"
+            className="flex h-9 w-fit max-w-full overflow-x-auto rounded-md border border-border"
           >
             {SHAPE_SEGMENTS.map((seg) => {
               const active = segment === seg;
@@ -354,8 +354,8 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
                   onClick={() => onSegmentChange(seg)}
                   className={
                     active
-                      ? 'bg-bg-inverse px-3 text-body-strong text-text-inverse'
-                      : 'bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'
+                      ? 'shrink-0 whitespace-nowrap bg-bg-inverse px-3 text-body-strong text-text-inverse'
+                      : 'shrink-0 whitespace-nowrap bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'
                   }
                 >
                   {seg}
@@ -409,7 +409,7 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
           )}
         </div>
 
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <label className="flex flex-col gap-1">
             <span className="text-label text-text">
               Address{segment === 'Address' && <span className="text-danger"> *</span>}
@@ -482,7 +482,7 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
           </label>
         </div>
 
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           <FilterCheckbox
             label="Arrival event"
             checked={alertOnEnter}

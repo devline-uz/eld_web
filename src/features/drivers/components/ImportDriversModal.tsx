@@ -361,7 +361,7 @@ export function ImportDriversModal({ onClose }: { onClose: () => void }) {
         )}
         {/* B-69 shipped — `ImportDriversOptionsDto` rides alongside the parsed rows. */}
         <fieldset className="flex flex-col gap-4" disabled={mutation.isPending}>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <label className="flex flex-col gap-1">
               <span className="text-label text-text">Duplicate handling</span>
               <select

@@ -246,7 +246,7 @@ export default function HosLogsPage() {
 
       {/* control row — interactive only, dropped from the printout */}
       <div className="flex flex-wrap items-center justify-between gap-3" data-print-hide="">
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <DriverPicker
             value={driverOptions.find((option) => option.id === driverId)}
             options={driverOptions}
@@ -311,7 +311,7 @@ export default function HosLogsPage() {
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Can perm="hosEdit" level="FULL">
             <Button
               variant="secondary"
@@ -428,7 +428,7 @@ export default function HosLogsPage() {
           </Card>
 
           {/* three-card row */}
-          <div className="grid grid-cols-3 gap-card-gap print:break-inside-avoid [&>*]:min-w-0 [&>*]:print:shadow-none">
+          <div className="grid grid-cols-1 gap-card-gap lg:grid-cols-3 print:grid-cols-3 print:break-inside-avoid [&>*]:min-w-0 [&>*]:print:shadow-none">
             <AvailableHoursCard driverId={driverId} />
             <ViolationsCard
               driverId={driverId}

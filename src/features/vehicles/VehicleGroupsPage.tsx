@@ -110,23 +110,23 @@ export default function VehicleGroupsPage() {
 
   return (
     <div className="flex flex-col gap-4 xl:max-h-content-h">
-      <div className="flex items-center justify-between xl:shrink-0">
+      <div className="flex flex-wrap items-center justify-between gap-3 xl:shrink-0">
         <InventoryTabs />
-        <div className="flex items-center gap-2">
-          <div className="flex h-input items-center gap-2 rounded-md border border-border bg-bg-surface px-3">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+          <div className="flex h-input w-full items-center gap-2 rounded-md border border-border bg-bg-surface px-3 sm:w-auto">
             <Search size={16} strokeWidth={1.75} className="text-text-muted" />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search group name…"
               aria-label="Search group name"
-              className="w-56 bg-transparent text-body outline-none"
+              className="w-full min-w-0 bg-transparent text-body outline-none sm:w-56"
             />
           </div>
           <Can perm="vehicles" level="FULL">
             <Button
               variant="primary"
-              className="w-btn-add"
+              className="sm:w-btn-add"
               iconLeft={<Plus size={16} strokeWidth={1.75} />}
               onClick={() => setCreateOpen(true)}
               disabled={isOffline}

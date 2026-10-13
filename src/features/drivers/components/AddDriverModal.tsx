@@ -397,7 +397,7 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
           <p className="mb-2 text-caption font-semibold uppercase tracking-wide text-text-muted">
             Personal details
           </p>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <Field label="First name" required error={errors.firstName?.message}>
               <input
                 {...register('firstName')}
@@ -506,7 +506,7 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
           <p className="mb-2 text-caption font-semibold uppercase tracking-wide text-text-muted">
             Licence & terminal
           </p>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <Field label="Driver licence number" required error={errors.cdlNumber?.message}>
               <input
                 {...register('cdlNumber')}
@@ -590,7 +590,7 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
           <p className="mb-2 text-caption font-semibold uppercase tracking-wide text-text-muted">
             HOS exemptions and allowances
           </p>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             <label className="flex items-center gap-2 text-body text-text">
               <input
                 type="checkbox"

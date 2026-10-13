@@ -211,7 +211,7 @@ export default function DashboardPage() {
       {kpiLoading ? (
         <KpiRowSkeleton />
       ) : (
-        <div className="grid grid-cols-4 gap-card-gap">
+        <div className="grid grid-cols-1 gap-card-gap sm:grid-cols-2 xl:grid-cols-4">
           <KpiCard
             label="Active vehicles"
             value={summary.isError ? '—' : formatNumber(activeVehicles)}
@@ -249,7 +249,7 @@ export default function DashboardPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-[1fr_348px] gap-card-gap">
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_348px] gap-card-gap">
         <Card padded={false}>
           <div className="border-b border-border p-card">
             <SectionHeader

@@ -20,19 +20,19 @@ export function AccountLayout() {
     ? hash
     : itemHash(ACCOUNT_NAV[0]?.to ?? '#');
   return (
-    <div className="flex gap-card-gap">
-      <nav aria-label="My account" className="w-subnav shrink-0">
+    <div className="flex flex-col gap-4 lg:flex-row lg:gap-card-gap">
+      <nav aria-label="My account" className="w-full min-w-0 shrink-0 lg:w-subnav">
         <p className="px-3 pb-2 text-nav-section text-text-muted">MY ACCOUNT</p>
-        <ul className="flex flex-col gap-1">
+        <ul className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1 lg:mx-0 lg:flex-col lg:overflow-visible lg:px-0 lg:pb-0">
           {ACCOUNT_NAV.map((item) => {
             const isActive = itemHash(item.to) === activeHash;
             return (
-              <li key={item.to}>
+              <li key={item.to} className="shrink-0">
                 <a
                   href={itemHash(item.to)}
                   aria-current={isActive ? 'location' : undefined}
                   className={[
-                    'flex h-nav-item items-center rounded-md px-3 text-nav',
+                    'flex h-nav-item items-center whitespace-nowrap rounded-md px-3 text-nav',
                     isActive
                       ? 'bg-bg-nav-active text-primary'
                       : 'text-text-secondary hover:bg-bg-subtle',

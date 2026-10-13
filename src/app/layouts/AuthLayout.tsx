@@ -8,8 +8,8 @@ import { RouteFallback } from './RouteFallback';
 
 export function AuthLayout() {
   return (
-    <div className="grid min-h-screen grid-cols-2">
-      <aside aria-label="OneBook ELD" className="flex flex-col bg-bg-inverse p-8">
+    <div className="grid min-h-screen grid-cols-1 lg:grid-cols-2">
+      <aside aria-label="OneBook ELD" className="flex flex-col bg-bg-inverse p-6 lg:p-8">
         <div className="flex items-center gap-3 text-text-inverse">
           <span className="flex size-avatar-lg items-center justify-center rounded-md bg-primary">
             <Truck size={20} strokeWidth={1.75} aria-hidden="true" />
@@ -22,7 +22,7 @@ export function AuthLayout() {
 
         {/* W-00 left panel — product copy only, deliberately static: a signed-out visitor never
             sees carrier numbers (§10 W-00). */}
-        <div className="my-auto max-w-xl">
+        <div className="my-auto hidden max-w-xl lg:block">
           <p className="text-4xl leading-tight font-semibold text-text-inverse">
             Every log, every unit, every inspection — audit ready.
           </p>
@@ -32,7 +32,7 @@ export function AuthLayout() {
           </p>
         </div>
       </aside>
-      <main className="flex items-center justify-center bg-bg-app p-8">
+      <main className="flex items-center justify-center bg-bg-app p-4 sm:p-8">
         <Suspense fallback={<RouteFallback />}>
           <Outlet />
         </Suspense>

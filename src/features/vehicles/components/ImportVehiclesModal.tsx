@@ -245,7 +245,7 @@ export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
           </p>
         )}
         {/* B-69 shipped — `ImportVehiclesOptionsDto` rides alongside the parsed rows. */}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1">
             <span className="text-label text-text">Duplicate handling</span>
             <select

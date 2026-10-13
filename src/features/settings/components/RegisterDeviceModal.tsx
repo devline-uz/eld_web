@@ -238,7 +238,7 @@ export function RegisterDeviceModal({ onClose }: { onClose: () => void }) {
       }
     >
       <form className="flex flex-col gap-4" onSubmit={handleSubmit(onSubmit)}>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Device model" required>
             <select {...register('model')} disabled={submitting} className={inputClass}>
               <option value="PT30">Pacific Track PT30</option>
@@ -272,7 +272,7 @@ export function RegisterDeviceModal({ onClose }: { onClose: () => void }) {
           </Button>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Assign to unit">
             <select {...register('vehicleId')} disabled={submitting} className={inputClass}>
               <option value="">None</option>

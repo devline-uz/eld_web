@@ -152,7 +152,7 @@ export function NewTicketModal({ contactEmail, onClose }: { contactEmail: string
             {banner}
           </p>
         )}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Category" required error={errors.category?.message}>
             <select {...register('category')} disabled={busy} className={inputClass}>
               {CATEGORIES.map((c) => (

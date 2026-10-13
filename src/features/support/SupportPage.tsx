@@ -110,7 +110,7 @@ export default function SupportPage() {
         </Button>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Card>
           <div className="flex items-center gap-3">
             <span className="flex size-9 items-center justify-center rounded-md bg-primary-soft text-primary">
@@ -156,8 +156,8 @@ export default function SupportPage() {
         </Card>
       </div>
 
-      <div className="flex items-center justify-between">
-        <div className="flex h-9 w-fit overflow-hidden rounded-md border border-border">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex h-9 w-fit max-w-full overflow-x-auto rounded-md border border-border">
           {(
             [
               ['ALL', `All ${rows.length}`],
@@ -171,14 +171,14 @@ export default function SupportPage() {
               type="button"
               aria-pressed={segment === value}
               onClick={() => setSegment(value)}
-              className={segment === value ? 'bg-bg-inverse px-3 text-body-strong text-text-inverse' : 'bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'}
+              className={segment === value ? 'shrink-0 whitespace-nowrap bg-bg-inverse px-3 text-body-strong text-text-inverse' : 'shrink-0 whitespace-nowrap bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'}
             >
               {label}
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex h-input items-center gap-2 rounded-md border border-border bg-bg-surface px-3">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+          <div className="flex h-input min-w-0 flex-1 items-center gap-2 rounded-md border border-border bg-bg-surface px-3 sm:flex-none">
             <Search size={16} strokeWidth={1.75} className="text-text-muted" />
             <input
               type="search"
@@ -186,7 +186,7 @@ export default function SupportPage() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search ticket…"
-              className="w-56 bg-transparent text-body outline-none"
+              className="w-full min-w-0 bg-transparent text-body outline-none sm:w-56"
             />
           </div>
           {/* Design: `All priorities` select next to the search (`GET /support/tickets?priority=`). */}

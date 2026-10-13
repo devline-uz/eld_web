@@ -92,10 +92,12 @@ export function GraphGrid({
   const spoken = gridSpokenSummary(model.totals, dateLabel, zone);
 
   return (
-    <div>
+    // Responsive: below ~40rem the 24-hour grid keeps its width and scrolls sideways inside the
+    // card; `relative` also contains the sr-only table so it cannot widen the page.
+    <div className="relative overflow-x-auto">
       {/* WB-068 — `role="img"` wraps only the drawn part. Its children are presentational, so the
           sr-only audit table must be a SIBLING, or it is dropped from the accessibility tree. */}
-      <div role="img" aria-label={spoken} className="flex items-stretch gap-3">
+      <div role="img" aria-label={spoken} className="flex min-w-[40rem] items-stretch gap-3">
       {/* left column: OFF / SB / D / ON with their sub-labels */}
       <div aria-hidden className="w-hos-labels shrink-0" style={{ paddingTop: GRID.axisHeight }}>
         {ROW_ORDER.map((row) => (

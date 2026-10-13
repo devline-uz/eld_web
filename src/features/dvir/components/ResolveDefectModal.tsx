@@ -252,7 +252,7 @@ export function ResolveDefectModal({ defect, onClose }: { defect: DefectTableRow
           </select>
         </label>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1">
             <span className="text-label text-text">Corrected by</span>
             <input
@@ -294,7 +294,7 @@ export function ResolveDefectModal({ defect, onClose }: { defect: DefectTableRow
           </label>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <label className="flex flex-col gap-1">
             <span className="text-label text-text">Labor hours</span>
             <input

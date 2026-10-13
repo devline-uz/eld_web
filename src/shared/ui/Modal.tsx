@@ -42,9 +42,10 @@ export function ModalCancelButton({ children = 'Cancel', disabled }: ModalCancel
 export type ModalSize = 'sm' | 'md' | 'lg';
 
 const SIZE_CLASSES: Record<ModalSize, string> = {
-  sm: 'w-[460px]',
-  md: 'w-[640px]',
-  lg: 'w-[720px]',
+  // Never wider than the viewport minus a 16px gutter each side (phones/tablets).
+  sm: 'w-[min(460px,calc(100vw-32px))]',
+  md: 'w-[min(640px,calc(100vw-32px))]',
+  lg: 'w-[min(720px,calc(100vw-32px))]',
 };
 
 export interface ModalProps {
@@ -103,12 +104,12 @@ export function Modal({
               }
             }}
             className={cn(
-              'fixed left-1/2 top-1/2 z-50 flex max-h-[calc(100vh-96px)] -translate-x-1/2 -translate-y-1/2 flex-col',
+              'fixed left-1/2 top-1/2 z-50 flex max-h-[calc(100dvh-32px)] sm:max-h-[calc(100vh-96px)] -translate-x-1/2 -translate-y-1/2 flex-col',
               'rounded-xl bg-bg-surface shadow-modal outline-none',
               SIZE_CLASSES[size],
             )}
           >
-            <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border p-card">
+            <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border p-4 sm:p-card">
               <div>
                 <Dialog.Title className="text-[17px] font-semibold leading-6 text-text">{title}</Dialog.Title>
                 {subtitle && <Dialog.Description className="mt-0.5 text-card-sub text-text-muted">{subtitle}</Dialog.Description>}
@@ -127,8 +128,8 @@ export function Modal({
               </Dialog.Close>
             </div>
             <ModalCloseContext.Provider value={requestClose}>
-              <div className="flex-1 overflow-y-auto p-card">{children}</div>
-              {footer && <div className="flex shrink-0 items-center justify-end gap-2 border-t border-border p-card">{footer}</div>}
+              <div className="flex-1 overflow-y-auto p-4 sm:p-card">{children}</div>
+              {footer && <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border p-4 sm:p-card">{footer}</div>}
             </ModalCloseContext.Provider>
           </Dialog.Content>
         </Dialog.Portal>
@@ -179,9 +180,9 @@ export function Drawer({ open, onClose, title, subtitle, isDirty = false, footer
                 requestClose();
               }
             }}
-            className="fixed inset-y-0 right-0 z-50 flex w-side-panel flex-col bg-bg-surface shadow-modal outline-none"
+            className="fixed inset-y-0 right-0 z-50 flex w-side-panel max-w-full flex-col bg-bg-surface shadow-modal outline-none"
           >
-            <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border p-card">
+            <div className="flex shrink-0 items-start justify-between gap-4 border-b border-border p-4 sm:p-card">
               <div>
                 <Dialog.Title className="text-[17px] font-semibold leading-6 text-text">{title}</Dialog.Title>
                 {subtitle && <Dialog.Description className="mt-0.5 text-card-sub text-text-muted">{subtitle}</Dialog.Description>}
@@ -200,8 +201,8 @@ export function Drawer({ open, onClose, title, subtitle, isDirty = false, footer
               </Dialog.Close>
             </div>
             <ModalCloseContext.Provider value={requestClose}>
-              <div className="flex-1 overflow-y-auto p-card">{children}</div>
-              {footer && <div className="flex shrink-0 items-center gap-2 border-t border-border p-card">{footer}</div>}
+              <div className="flex-1 overflow-y-auto p-4 sm:p-card">{children}</div>
+              {footer && <div className="flex shrink-0 flex-wrap items-center gap-2 border-t border-border p-4 sm:p-card">{footer}</div>}
             </ModalCloseContext.Provider>
           </Dialog.Content>
         </Dialog.Portal>
@@ -232,7 +233,7 @@ export function DiscardChangesDialog({
     <Dialog.Root open={open} onOpenChange={(next) => !next && onKeepEditing()}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-bg-overlay" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[460px] -translate-x-1/2 -translate-y-1/2 rounded-xl bg-bg-surface p-card shadow-modal outline-none">
+        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(460px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 rounded-xl bg-bg-surface p-card shadow-modal outline-none">
           <Dialog.Title className="text-[17px] font-semibold text-text">Discard changes?</Dialog.Title>
           <Dialog.Description className="mt-1 text-body text-text-muted">Your edits will be lost.</Dialog.Description>
           <div className="mt-5 flex justify-end gap-2">

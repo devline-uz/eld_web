@@ -91,65 +91,67 @@ export function SessionsCard() {
             description="Devices you sign in on appear here."
           />
         ) : (
-          <table className="w-full">
-            <caption className="sr-only">Active sessions</caption>
-            <thead>
-              <tr className="h-table-head border-y border-border bg-bg-subtle">
-                <th scope="col" className={`${HEAD} pl-card`}>
-                  DEVICE
-                </th>
-                <th scope="col" className={HEAD}>
-                  LOCATION
-                </th>
-                <th scope="col" className={HEAD}>
-                  IP ADDRESS
-                </th>
-                <th scope="col" className={HEAD}>
-                  LAST ACTIVE
-                </th>
-                <th scope="col" className="pr-card">
-                  <span className="sr-only">Actions</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => {
-                const device = deviceLabel(row.userAgent, row.deviceLabel);
-                return (
-                  <tr key={row.id} className="h-row border-b border-border last:border-b-0">
-                    <td className="pl-card text-body-strong text-text">{device}</td>
-                    <td className="px-4 text-body text-text-secondary">{row.location || EMPTY.dash}</td>
-                    <td className="px-4 text-body tabular text-text-secondary">{row.ip || EMPTY.dash}</td>
-                    <td className="px-4 text-body tabular">
-                      {row.current ? (
-                        <span className="font-semibold text-success">Now · this device</span>
-                      ) : (
-                        <span className="text-text-secondary">{formatRelative(row.lastSeenAt, now)}</span>
-                      )}
-                    </td>
-                    <td className="pr-card text-right">
-                      {row.current ? (
-                        <Badge tone="success" dot>
-                          Current
-                        </Badge>
-                      ) : (
-                        <Button
-                          variant="secondary"
-                          size="sm"
-                          aria-label={`Sign out ${device}`}
-                          loading={pendingId === row.id}
-                          disabled={pendingId !== null && pendingId !== row.id}
-                          onClick={() => revokeOne(row.id)}
-                        >
-                          Sign out
-                        </Button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <div className="relative overflow-x-auto">
+            <table className="w-full min-w-120 sm:min-w-0">
+              <caption className="sr-only">Active sessions</caption>
+              <thead>
+                <tr className="h-table-head border-y border-border bg-bg-subtle">
+                  <th scope="col" className={`${HEAD} pl-card`}>
+                    DEVICE
+                  </th>
+                  <th scope="col" className={HEAD}>
+                    LOCATION
+                  </th>
+                  <th scope="col" className={HEAD}>
+                    IP ADDRESS
+                  </th>
+                  <th scope="col" className={HEAD}>
+                    LAST ACTIVE
+                  </th>
+                  <th scope="col" className="pr-card">
+                    <span className="sr-only">Actions</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => {
+                  const device = deviceLabel(row.userAgent, row.deviceLabel);
+                  return (
+                    <tr key={row.id} className="h-row border-b border-border last:border-b-0">
+                      <td className="pl-card text-body-strong text-text">{device}</td>
+                      <td className="px-4 text-body text-text-secondary">{row.location || EMPTY.dash}</td>
+                      <td className="px-4 text-body tabular text-text-secondary">{row.ip || EMPTY.dash}</td>
+                      <td className="px-4 text-body tabular">
+                        {row.current ? (
+                          <span className="font-semibold text-success">Now · this device</span>
+                        ) : (
+                          <span className="text-text-secondary">{formatRelative(row.lastSeenAt, now)}</span>
+                        )}
+                      </td>
+                      <td className="pr-card text-right">
+                        {row.current ? (
+                          <Badge tone="success" dot>
+                            Current
+                          </Badge>
+                        ) : (
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            aria-label={`Sign out ${device}`}
+                            loading={pendingId === row.id}
+                            disabled={pendingId !== null && pendingId !== row.id}
+                            onClick={() => revokeOne(row.id)}
+                          >
+                            Sign out
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </Card>
 

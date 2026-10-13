@@ -273,7 +273,7 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
 
       <Card>
         <SectionHeader title="Company profile" subtitle="Shown on IFTA, FMCSA and DVIR exports" className="mb-4" />
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <Field label="Company name" required error={errors.name}>
             <input
               className={inputClass}
@@ -375,7 +375,7 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
               onChange={(e) => setText('city', filterCityInput(e.target.value, LIMITS.cityMax))}
             />
           </Field>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field label={subdivisionLabel(country)} error={errors.state}>
               {stateOptions ? (
                 <Select
@@ -422,7 +422,7 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
           subtitle="Applies to every driver unless overridden on the driver profile"
           className="mb-4"
         />
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <Field label="HOS ruleset" required error={errors.hosRuleset}>
             <select
               className={inputClass}
@@ -501,7 +501,7 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
         </div>
       </Card>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <ToggleRow
           title="Allow personal conveyance"
           description="Drivers may log PC time while off duty"
@@ -520,7 +520,7 @@ function CompanyProfileForm({ carrier }: { carrier: CarrierRow }) {
 
       <Card>
         <SectionHeader title="eRODS" subtitle="FMCSA electronic data transfer identity" className="mb-4" />
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <Field
             label="ELD identifier"
             error={eldError ?? undefined}

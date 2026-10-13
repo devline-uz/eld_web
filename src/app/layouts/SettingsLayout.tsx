@@ -13,17 +13,17 @@ export function SettingsLayout() {
   const items = SETTINGS_NAV.filter((item) => isNavItemVisible(item, can, role));
 
   return (
-    <div className="flex gap-card-gap">
-      <nav aria-label="Settings" className="w-subnav shrink-0">
+    <div className="flex flex-col gap-4 lg:flex-row lg:gap-card-gap">
+      <nav aria-label="Settings" className="w-full min-w-0 shrink-0 lg:w-subnav">
         <p className="px-3 pb-2 text-nav-section text-text-muted">SETTINGS</p>
-        <ul className="flex flex-col gap-1">
+        <ul className="-mx-1 flex gap-1 overflow-x-auto px-1 pb-1 lg:mx-0 lg:flex-col lg:overflow-visible lg:px-0 lg:pb-0">
           {items.map((item) => (
-            <li key={item.to}>
+            <li key={item.to} className="shrink-0">
               <NavLink
                 to={item.to}
                 className={({ isActive }) =>
                   [
-                    'flex h-nav-item items-center gap-3 rounded-md px-3 text-nav',
+                    'flex h-nav-item items-center gap-3 whitespace-nowrap rounded-md px-3 text-nav',
                     isActive
                       ? 'bg-bg-nav-active text-primary'
                       : 'text-text-secondary hover:bg-bg-subtle',

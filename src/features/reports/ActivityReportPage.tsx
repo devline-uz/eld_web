@@ -294,7 +294,7 @@ export default function ActivityReportPage() {
             setParam('groupBy', value === 'vehicleGroup' ? value : null);
           }}
         />
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           <Can perm="reports" level="FULL">
             <Button variant="secondary" iconLeft={<Calendar size={16} strokeWidth={1.75} />} onClick={() => setScheduleOpen(true)}>
               Schedule
@@ -331,7 +331,7 @@ export default function ActivityReportPage() {
       {summary.isLoading ? (
         <KpiRowSkeleton />
       ) : (
-        <div className="grid grid-cols-4 gap-card-gap">
+        <div className="grid grid-cols-1 gap-card-gap sm:grid-cols-2 xl:grid-cols-4">
           <KpiCard
             label="Total driving"
             value={summary.isError || !kpis ? EMPTY.dash : hours(kpis.drivingSec)}

@@ -500,8 +500,8 @@ export default function DriversPage() {
   return (
     <div className="flex flex-col gap-4 xl:max-h-content-h">
       <div className="flex items-center justify-end xl:shrink-0">
-        <div className="flex items-center gap-2">
-          <div className="flex h-input items-center gap-2 rounded-md border border-border bg-bg-surface px-3">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+          <div className="flex h-input w-full items-center gap-2 rounded-md border border-border bg-bg-surface px-3 sm:w-auto">
             <Search size={16} strokeWidth={1.75} className="text-text-muted" />
             <input
               value={searchInput}
@@ -511,7 +511,7 @@ export default function DriversPage() {
                 if (e.key === 'Escape' && searchInput) clearSearch();
               }}
               placeholder="Search driver, username…"
-              className="w-56 bg-transparent text-body outline-none"
+              className="w-full min-w-0 bg-transparent text-body outline-none sm:w-56"
             />
             {searchInput && (
               <button
@@ -537,7 +537,7 @@ export default function DriversPage() {
           </Button>
           <Button
             variant="secondary"
-            className="w-btn-wide"
+            className="sm:w-btn-wide"
             iconLeft={<Upload size={16} strokeWidth={1.75} />}
             loading={exporting}
             disabled={exporting}
@@ -548,7 +548,7 @@ export default function DriversPage() {
           <Can perm="drivers" level="FULL">
             <Button
               variant="secondary"
-              className="w-btn-wide"
+              className="sm:w-btn-wide"
               iconLeft={<Download size={16} strokeWidth={1.75} />}
               onClick={() => setImportOpen(true)}
             >
@@ -556,7 +556,7 @@ export default function DriversPage() {
             </Button>
             <Button
               variant="primary"
-              className="w-btn-add"
+              className="sm:w-btn-add"
               iconLeft={<Plus size={16} strokeWidth={1.75} />}
               onClick={() => setAddOpen(true)}
             >
@@ -566,7 +566,7 @@ export default function DriversPage() {
         </div>
       </div>
 
-      <div className="flex h-9 w-fit overflow-hidden rounded-md border border-border xl:shrink-0">
+      <div className="flex h-9 w-fit max-w-full overflow-x-auto rounded-md border border-border xl:shrink-0">
         {(
           [
             ['ALL', `All ${counts.all}`],
@@ -582,8 +582,8 @@ export default function DriversPage() {
             onClick={() => setParam('segment', value === 'ALL' ? null : value)}
             className={
               segment === value
-                ? 'bg-bg-inverse px-3 text-body-strong text-text-inverse'
-                : 'bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'
+                ? 'shrink-0 whitespace-nowrap bg-bg-inverse px-3 text-body-strong text-text-inverse'
+                : 'shrink-0 whitespace-nowrap bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'
             }
           >
             {label}
@@ -739,7 +739,7 @@ export default function DriversPage() {
       </Card>
 
       {selection.length > 0 && canFull && (
-        <div className="fixed inset-x-0 bottom-6 z-30 mx-auto flex h-14 w-fit min-w-bulk-bar items-center gap-3 rounded-lg bg-bg-inverse px-4 shadow-pop">
+        <div className="fixed inset-x-4 bottom-6 z-30 mx-auto flex min-h-14 w-fit flex-wrap items-center gap-3 py-2 sm:inset-x-0 sm:h-14 sm:min-w-bulk-bar sm:flex-nowrap sm:py-0 rounded-lg bg-bg-inverse px-4 shadow-pop">
           <span className="text-body-strong text-text-inverse">
             {selection.length} drivers selected
           </span>

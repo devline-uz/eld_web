@@ -192,7 +192,7 @@ export default function IftaReportPage() {
           options={groupOptions}
           onSelect={(id) => setFilter('group', id)}
         />
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           <Button
             variant="secondary"
             iconLeft={<Upload size={16} strokeWidth={1.75} />}
@@ -228,7 +228,7 @@ export default function IftaReportPage() {
       {summary.isLoading ? (
         <KpiRowSkeleton />
       ) : (
-        <div className="grid grid-cols-4 gap-card-gap">
+        <div className="grid grid-cols-1 gap-card-gap sm:grid-cols-2 xl:grid-cols-4">
           <KpiCard
             label="Total miles"
             value={kpis ? formatNumber(kpis.totalMiles) : EMPTY.dash}
@@ -260,7 +260,7 @@ export default function IftaReportPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-[minmax(0,1fr)_var(--spacing-side-panel)] items-start gap-card-gap">
+      <div className="grid grid-cols-1 items-start gap-card-gap xl:grid-cols-[minmax(0,1fr)_var(--spacing-side-panel)]">
         <Card padded={false}>
           <div className="p-card">
             <SectionHeader

@@ -174,7 +174,7 @@ export function NewConversationModal({
       }
     >
       <div className="flex flex-col gap-3">
-        <div className="flex h-9 w-fit overflow-hidden rounded-md border border-border">
+        <div className="flex h-9 w-fit max-w-full overflow-x-auto rounded-md border border-border">
           {(
             [
               ['DIRECT', 'Message a driver'],
@@ -190,7 +190,7 @@ export function NewConversationModal({
                 setTab(value);
                 setAttempted(false);
               }}
-              className={tab === value ? 'bg-bg-inverse px-3 text-body-strong text-text-inverse' : 'bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'}
+              className={tab === value ? 'shrink-0 whitespace-nowrap bg-bg-inverse px-3 text-body-strong text-text-inverse' : 'shrink-0 whitespace-nowrap bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'}
             >
               {label}
             </button>

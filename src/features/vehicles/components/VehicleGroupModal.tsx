@@ -352,7 +352,7 @@ function VehicleGroupForm({
               {selected.size} selected
             </span>
           </div>
-          <div className="flex h-input items-center gap-2 rounded-md border border-border bg-bg-surface px-3">
+          <div className="flex h-input w-full items-center gap-2 rounded-md border border-border bg-bg-surface px-3 sm:w-auto">
             <Search size={16} strokeWidth={1.75} className="text-text-muted" />
             <input
               value={search}

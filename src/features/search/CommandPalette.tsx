@@ -141,7 +141,7 @@ export default function CommandPalette({
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-bg-overlay" />
-        <Dialog.Content className="fixed left-1/2 top-palette-top z-50 flex w-palette -translate-x-1/2 flex-col overflow-hidden rounded-xl bg-bg-surface shadow-modal">
+        <Dialog.Content className="fixed left-1/2 top-palette-top z-50 flex w-palette max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-col overflow-hidden rounded-xl bg-bg-surface shadow-modal">
           <Dialog.Title className="sr-only">Command palette</Dialog.Title>
           <Dialog.Description className="sr-only">
             Search drivers and vehicles or jump to a page. Use the arrow keys to move and Enter to open.

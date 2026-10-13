@@ -83,7 +83,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             }}
             role={entry.kind === 'error' ? 'alert' : 'status'}
             aria-live={entry.kind === 'error' ? 'assertive' : 'polite'}
-            className="flex w-side-panel items-start gap-3 rounded-lg border border-border bg-bg-surface p-4 shadow-pop"
+            className="flex w-side-panel max-w-[calc(100vw-32px)] items-start gap-3 rounded-lg border border-border bg-bg-surface p-4 shadow-pop"
           >
             <span className="mt-0.5 shrink-0">{ICONS[entry.kind]}</span>
             <div className="flex-1">
@@ -108,7 +108,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             </RadixToast.Close>
           </RadixToast.Root>
         ))}
-        <RadixToast.Viewport className="fixed top-topbar right-6 z-50 flex flex-col gap-2 outline-none" />
+        <RadixToast.Viewport className="fixed top-topbar right-4 z-50 sm:right-6 flex flex-col gap-2 outline-none" />
       </RadixToast.Provider>
     </ToastContext.Provider>
   );

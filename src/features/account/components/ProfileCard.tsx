@@ -225,7 +225,7 @@ function ProfileForm({ profile }: { profile: MyProfile }) {
       <ProfilePhoto profile={profile} />
 
       <fieldset disabled={isSubmitting} className="contents">
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <Field id={`${uid}-firstName`} label="First name" required error={errors.firstName?.message}>
             <input
               id={`${uid}-firstName`}
@@ -259,7 +259,7 @@ function ProfileForm({ profile }: { profile: MyProfile }) {
           </Field>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field id={`${uid}-email`} label="Work email" hint="Managed by your administrator">
             <div className="relative">
               <Mail

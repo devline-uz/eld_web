@@ -1,11 +1,12 @@
 // Sidebar chrome — web/tz.md §4.1 brand block, §4.2 navigation, §4.3 organisation card.
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronDown, PanelLeftClose, PanelLeftOpen, Truck } from 'lucide-react';
+import { PanelLeftClose, PanelLeftOpen, Truck, X } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { usePermission } from '@/shared/auth/usePermission';
 import { useCarrier } from '@/shared/api/carrier';
+import { MOBILE_NAV_QUERY, useMediaQuery } from '@/shared/hooks';
 import { vehiclesCountQuery } from '@/shared/api/vehicleCounts';
 import { cn } from '@/shared/ui/cn';
 import { DevlineLogo } from '@/shared/ui/DevlineLogo';
@@ -44,30 +45,42 @@ function useSidebarCollapsed(): [boolean, () => void] {
   return [collapsed, toggle];
 }
 
-function Brand({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+function Brand({
+  collapsed,
+  onToggle,
+  onClose,
+}: {
+  collapsed: boolean;
+  onToggle: () => void;
+  /** Set while the sidebar is the < lg off-canvas drawer: the rail toggle becomes a close button. */
+  onClose?: () => void;
+}) {
+  // Expanded: 212px rail − 24px padding − 40px logo − 2×8px gaps − 24px toggle (32px drawer close)
+  // leaves ~100–108px, enough for the full brand line. The old disabled "Switch organisation" chevron
+  // (already in the account menu as a v2 item) plus 12px gaps squeezed it to ~64px: "OneB…".
   return (
-    <div className={cn('flex items-center gap-3 py-4', collapsed ? 'flex-col px-2' : 'px-3')}>
+    <div className={cn('flex items-center py-4', collapsed ? 'flex-col gap-3 px-2' : 'gap-2 px-3')}>
       <span className="flex size-avatar-lg shrink-0 items-center justify-center rounded-md bg-primary text-text-inverse">
         <Truck size={20} strokeWidth={1.75} aria-hidden="true" />
       </span>
       {!collapsed && (
-        <>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-brand text-text">OneBook ELD</span>
-            {/* Product line, identical for every role — never the user's role. */}
-            <span className="block truncate text-card-sub text-text-muted">Fleet Manager</span>
-          </span>
-          <button
-            type="button"
-            disabled
-            aria-label="Switch organisation — available in v2"
-            title="Switch organisation — v2"
-            className="flex size-6 shrink-0 items-center justify-center text-text-muted disabled:cursor-not-allowed"
-          >
-            <ChevronDown size={16} strokeWidth={1.75} aria-hidden="true" />
-          </button>
-        </>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-brand text-text">OneBook ELD</span>
+          {/* Product line, identical for every role — never the user's role. */}
+          <span className="block truncate text-card-sub text-text-muted">Fleet Manager</span>
+        </span>
       )}
+      {onClose ? (
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close navigation"
+          title="Close navigation"
+          className="flex size-8 shrink-0 items-center justify-center rounded-md text-text-muted hover:bg-bg-subtle hover:text-text"
+        >
+          <X size={18} strokeWidth={1.75} aria-hidden="true" />
+        </button>
+      ) : (
       <button
         type="button"
         onClick={onToggle}
@@ -83,6 +96,7 @@ function Brand({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => vo
           <PanelLeftClose size={16} strokeWidth={1.75} aria-hidden="true" />
         )}
       </button>
+      )}
     </div>
   );
 }
@@ -141,7 +155,14 @@ function OrganisationCard({ collapsed }: { collapsed: boolean }) {
   );
 }
 
-export function Sidebar() {
+export interface SidebarProps {
+  /** < lg only: whether the off-canvas drawer is open (ignored on desktop). */
+  mobileOpen?: boolean;
+  /** < lg only: close the off-canvas drawer (backdrop, Esc, X, or navigating). */
+  onMobileClose?: () => void;
+}
+
+export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps = {}) {
   const { user } = useAuth();
   const { can } = usePermission();
   const { pathname } = useLocation();
@@ -151,16 +172,46 @@ export function Sidebar() {
   const queryClient = useQueryClient();
   const warmer = useMemo(() => createRouteWarmer(queryClient), [queryClient]);
   useEffect(() => () => warmer.cancel(), [warmer]);
-  const [collapsed, toggleCollapsed] = useSidebarCollapsed();
+  const [storedCollapsed, toggleCollapsed] = useSidebarCollapsed();
+  // Below `lg` the sidebar is an off-canvas drawer opened from the topbar's menu button; the
+  // 64px rail only exists on desktop, so the drawer always renders expanded.
+  const isMobile = useMediaQuery(MOBILE_NAV_QUERY);
+  const collapsed = storedCollapsed && !isMobile;
+  const drawerHidden = isMobile && !mobileOpen;
+
+  // Navigating from the drawer closes it.
+  useEffect(() => {
+    onMobileClose?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only a route change should close it
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!isMobile || !mobileOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onMobileClose?.();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [isMobile, mobileOpen, onMobileClose]);
 
   return (
+    <>
+    {isMobile && mobileOpen ? (
+      <div aria-hidden="true" onClick={onMobileClose} className="fixed inset-0 z-40 bg-bg-overlay lg:hidden" />
+    ) : null}
     <aside
+      id="app-sidebar"
+      inert={drawerHidden}
       className={cn(
         'flex shrink-0 flex-col border-r border-border bg-bg-sidebar xl:h-full',
+        // < lg: fixed off-canvas drawer; ≥ lg: the in-flow sidebar column.
+        'fixed inset-y-0 left-0 z-50 max-w-[85vw] transition-transform duration-200 lg:static lg:z-auto lg:max-w-none lg:translate-x-0 lg:transition-none',
+        mobileOpen ? 'translate-x-0 shadow-modal lg:shadow-none' : '-translate-x-full',
+        // `collapsed` is always false below lg, so the drawer is the full 212px.
         collapsed ? 'w-sidebar-collapsed' : 'w-sidebar',
       )}
     >
-      <Brand collapsed={collapsed} onToggle={toggleCollapsed} />
+      <Brand collapsed={collapsed} onToggle={toggleCollapsed} onClose={isMobile ? onMobileClose : undefined} />
       <nav
         id="sidebar-nav"
         aria-label="Main"
@@ -208,5 +259,6 @@ export function Sidebar() {
       </nav>
       <OrganisationCard collapsed={collapsed} />
     </aside>
+    </>
   );
 }

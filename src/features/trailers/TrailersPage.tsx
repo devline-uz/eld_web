@@ -151,10 +151,10 @@ export default function TrailersPage() {
 
   return (
     <div className="flex flex-col gap-4 xl:max-h-content-h">
-      <div className="flex items-center justify-between xl:shrink-0">
+      <div className="flex flex-wrap items-center justify-between gap-3 xl:shrink-0">
         <InventoryTabs />
-        <div className="flex items-center gap-2">
-          <div className="flex h-input items-center gap-2 rounded-md border border-border bg-bg-surface px-3">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+          <div className="flex h-input w-full items-center gap-2 rounded-md border border-border bg-bg-surface px-3 sm:w-auto">
             <Search size={16} strokeWidth={1.75} className="text-text-muted" />
             <input
               value={searchInput}
@@ -164,19 +164,19 @@ export default function TrailersPage() {
               }}
               placeholder="Search trailer #, VIN…"
               aria-label="Search trailer #, VIN"
-              className="w-56 bg-transparent text-body outline-none"
+              className="w-full min-w-0 bg-transparent text-body outline-none sm:w-56"
             />
           </div>
-          <Button variant="secondary" className="w-btn-wide" iconLeft={<Upload size={16} strokeWidth={1.75} />} onClick={handleExport} loading={exporting}>
+          <Button variant="secondary" className="sm:w-btn-wide" iconLeft={<Upload size={16} strokeWidth={1.75} />} onClick={handleExport} loading={exporting}>
             Export Trailers
           </Button>
           <Can perm="vehicles" level="FULL">
-            <Button variant="secondary" className="w-btn-wide" iconLeft={<Download size={16} strokeWidth={1.75} />} onClick={() => setImportOpen(true)}>
+            <Button variant="secondary" className="sm:w-btn-wide" iconLeft={<Download size={16} strokeWidth={1.75} />} onClick={() => setImportOpen(true)}>
               Import Trailers
             </Button>
             <Button
               variant="primary"
-              className="w-btn-add"
+              className="sm:w-btn-add"
               iconLeft={<Plus size={16} strokeWidth={1.75} />}
               onClick={() => setAddOpen(true)}
               disabled={isOffline}
@@ -188,7 +188,7 @@ export default function TrailersPage() {
         </div>
       </div>
 
-      <div className="flex h-9 w-fit overflow-hidden rounded-md border border-border xl:shrink-0">
+      <div className="flex h-9 w-fit max-w-full overflow-x-auto rounded-md border border-border xl:shrink-0">
         {SEGMENTS.map(([value, label]) => (
           <button
             key={value}
@@ -197,8 +197,8 @@ export default function TrailersPage() {
             onClick={() => setParam('status', value === 'ALL' ? null : value)}
             className={
               segment === value
-                ? 'bg-bg-inverse px-3 text-body-strong text-text-inverse'
-                : 'bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'
+                ? 'shrink-0 whitespace-nowrap bg-bg-inverse px-3 text-body-strong text-text-inverse'
+                : 'shrink-0 whitespace-nowrap bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'
             }
           >
             {label}

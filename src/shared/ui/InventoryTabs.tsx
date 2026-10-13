@@ -11,7 +11,7 @@ const tabs = [
 
 export function InventoryTabs() {
   return (
-    <nav aria-label="Unit inventory" className="flex h-9 w-fit overflow-hidden rounded-md border border-border">
+    <nav aria-label="Unit inventory" className="flex h-9 w-fit max-w-full shrink-0 overflow-x-auto rounded-md border border-border">
       {tabs.map((tab) => (
         <NavLink
           key={tab.to}
@@ -19,8 +19,8 @@ export function InventoryTabs() {
           end
           className={({ isActive }) =>
             isActive
-              ? 'flex items-center bg-bg-inverse px-3 text-body-strong text-text-inverse'
-              : 'flex items-center bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'
+              ? 'flex shrink-0 items-center whitespace-nowrap bg-bg-inverse px-3 text-body-strong text-text-inverse'
+              : 'flex shrink-0 items-center whitespace-nowrap bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'
           }
         >
           {tab.label}

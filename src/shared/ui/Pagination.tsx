@@ -45,7 +45,7 @@ export function Pagination({ page, limit, total, totalPages, itemLabel, onPageCh
   const selectId = useId();
 
   return (
-    <div className="flex h-14 items-center justify-between border-t border-border px-card">
+    <div className="flex min-h-14 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-border px-4 py-2 sm:px-card">
       <div className="flex items-center gap-2 text-body text-text-secondary">
         <label htmlFor={selectId}>Rows per page:</label>
         <select
@@ -61,7 +61,7 @@ export function Pagination({ page, limit, total, totalPages, itemLabel, onPageCh
           ))}
         </select>
       </div>
-      <div className="flex items-center gap-1 text-body text-text-secondary">
+      <div className="flex flex-wrap items-center gap-1 text-body text-text-secondary">
         <span className="tabular mr-2">
           {from}–{to} of {total} {itemLabel}
         </span>

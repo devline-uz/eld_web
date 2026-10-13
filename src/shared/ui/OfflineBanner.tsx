@@ -12,7 +12,7 @@ export function OfflineBanner({ cachedMinutesAgo, onRetry }: OfflineBannerProps)
   return (
     <div
       role="status"
-      className="fixed bottom-6 left-6 z-40 flex w-side-panel items-start gap-3 rounded-lg bg-bg-inverse p-4 text-text-inverse shadow-pop"
+      className="fixed bottom-4 left-4 z-40 flex w-side-panel max-w-[calc(100vw-32px)] items-start sm:bottom-6 sm:left-6 gap-3 rounded-lg bg-bg-inverse p-4 text-text-inverse shadow-pop"
     >
       <WifiOff size={20} strokeWidth={1.75} className="mt-0.5 shrink-0" />
       <div className="flex-1">

@@ -368,8 +368,8 @@ export default function DvirPage() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-end">
-        <div className="flex items-center gap-2">
-          <div className="flex h-input items-center gap-2 rounded-md border border-border bg-bg-surface px-3">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <div className="flex h-input w-full items-center gap-2 rounded-md border border-border bg-bg-surface px-3 sm:w-auto">
             <Search size={16} strokeWidth={1.75} className="text-text-muted" />
             <input
               value={search}
@@ -380,7 +380,7 @@ export default function DvirPage() {
               }}
               aria-label="Search unit, defect"
               placeholder="Search unit, defect…"
-              className="w-56 bg-transparent text-body outline-none"
+              className="w-full min-w-0 bg-transparent text-body outline-none sm:w-56"
             />
             {search && (
               <button
@@ -428,7 +428,7 @@ export default function DvirPage() {
       {isKpiLoading ? (
         <KpiRowSkeleton />
       ) : (
-        <div className="grid grid-cols-4 gap-card-gap">
+        <div className="grid grid-cols-1 gap-card-gap sm:grid-cols-2 xl:grid-cols-4">
           <KpiCard
             label="Open defects"
             value={defects.total}
@@ -464,7 +464,7 @@ export default function DvirPage() {
         </div>
       )}
 
-      <div className="flex h-9 w-fit overflow-hidden rounded-md border border-border">
+      <div className="flex h-9 w-fit max-w-full shrink-0 overflow-x-auto rounded-md border border-border">
         {(
           [
             // The table under this tab is the last 48 h, filtered — counting every DVIR the
@@ -481,8 +481,8 @@ export default function DvirPage() {
             onClick={() => setTab(value)}
             className={
               tab === value
-                ? 'bg-bg-inverse px-3 text-body-strong text-text-inverse'
-                : 'bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'
+                ? 'shrink-0 whitespace-nowrap bg-bg-inverse px-3 text-body-strong text-text-inverse'
+                : 'shrink-0 whitespace-nowrap bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'
             }
           >
             {label}
@@ -499,7 +499,7 @@ export default function DvirPage() {
       )}
 
       {tab === 'dvirs' && (
-        <div className="grid grid-cols-[1fr_348px] gap-card-gap">
+        <div className="grid grid-cols-1 gap-card-gap xl:grid-cols-[1fr_348px]">
           <Card padded={false} className="flex flex-col">
             <div className="p-card pb-0">
               <SectionHeader title="Recent DVIRs" subtitle="Last 48 hours" />
@@ -631,7 +631,7 @@ export default function DvirPage() {
             </div>
           </Card>
 
-          <Card padded={false} className="col-span-2">
+          <Card padded={false} className="xl:col-span-2">
             <div className="flex items-start justify-between p-card pb-0">
               <SectionHeader title="Open defects" subtitle={`${defects.total} total · ${defects.criticalCount} critical`} />
               <Can perm="maintenance" level="FULL">

@@ -257,7 +257,7 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
           )}
         </label>
 
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <label className="flex flex-col gap-1">
             <span className="text-label text-text">Assign to</span>
             <input
@@ -312,7 +312,7 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
           </label>
         </div>
 
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <label className="flex flex-col gap-1">
             <span className="text-label text-text">Estimated parts cost</span>
             <div className="flex items-center gap-2">

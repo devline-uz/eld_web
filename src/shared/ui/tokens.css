@@ -182,7 +182,7 @@
 
   body {
     margin: 0;
-    min-width: var(--spacing-min-width); /* §4.5 — below 1280px the page scrolls */
+    /* Responsive since 2026-10: no 1280px floor; the shell adapts down to phone width. */
     background: var(--color-bg-app);
     color: var(--color-text);
     font-family: var(--font-sans);

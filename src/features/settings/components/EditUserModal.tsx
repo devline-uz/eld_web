@@ -206,7 +206,7 @@ export function EditUserModal({
         )}
         {mode === 'profile' && (
           <>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="First name" required error={errors.firstName?.message}>
                 <input {...register('firstName')} disabled={submitting} className={inputClass} />
               </Field>
@@ -222,7 +222,7 @@ export function EditUserModal({
             >
               <input {...register('email')} disabled={submitting} className={inputClass} />
             </Field>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Job title" error={errors.jobTitle?.message}>
                 <input {...register('jobTitle')} disabled={submitting} className={inputClass} />
               </Field>

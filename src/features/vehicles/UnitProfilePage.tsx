@@ -159,12 +159,12 @@ export default function UnitProfilePage() {
   return (
     <div className="flex flex-col gap-4">
       <Card>
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex gap-4">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex min-w-0 gap-4">
             <span className="flex size-14 shrink-0 items-center justify-center rounded-lg bg-primary-soft text-primary">
               <Truck size={24} strokeWidth={1.75} />
             </span>
-            <div>
+            <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-page-title text-text">Unit {vehicle.unitNumber}</h2>
                 {vehicle.status === 'OUT_OF_SERVICE' && <Badge tone="danger" dot>Out of service</Badge>}
@@ -173,13 +173,13 @@ export default function UnitProfilePage() {
                 {device && deviceConnection(device) === 'CONNECTED' && <Badge tone="info" dot>BLE connected</Badge>}
                 {activeDtcCount > 0 && <Badge tone="warning" dot>{activeDtcCount} active DTCs</Badge>}
               </div>
-              <p className="mt-1 text-body text-text-muted">
+              <p className="mt-1 break-words text-body text-text-muted">
                 {[vehicle.make, vehicle.model, vehicle.year].filter(Boolean).join(' ')} · VIN {vehicle.vin}
                 {vehicle.licensePlate ? ` · Plate ${vehicle.plateState ?? ''} ${vehicle.licensePlate}` : ''} · {fuelLabel(vehicle.fuelType)}
               </p>
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 lg:shrink-0">
             {/* An unassigned unit used to navigate to `?driverId=` — a driver id W-06 cannot
                 resolve. It now says why there is nothing to open. */}
             <Button
@@ -224,7 +224,7 @@ export default function UnitProfilePage() {
         </div>
       </Card>
 
-      <div className="flex h-9 w-fit overflow-hidden rounded-md border border-border">
+      <div className="flex h-9 w-fit max-w-full overflow-x-auto rounded-md border border-border">
         {TABS.map((t) => (
           <button
             key={t}
@@ -234,10 +234,10 @@ export default function UnitProfilePage() {
             onClick={() => setTab(t)}
             className={
               tab === t
-                ? 'bg-bg-inverse px-3 text-body-strong text-text-inverse'
+                ? 'shrink-0 whitespace-nowrap bg-bg-inverse px-3 text-body-strong text-text-inverse'
                 : t === 'documents'
-                  ? 'cursor-not-allowed bg-bg-surface px-3 text-body text-text-muted'
-                  : 'bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'
+                  ? 'shrink-0 cursor-not-allowed whitespace-nowrap bg-bg-surface px-3 text-body text-text-muted'
+                  : 'shrink-0 whitespace-nowrap bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'
             }
           >
             {TAB_LABEL[t]}
@@ -247,7 +247,7 @@ export default function UnitProfilePage() {
       </div>
 
       {tab === 'overview' && (
-        <div className="grid grid-cols-[1fr_348px] gap-4">
+        <div className="grid grid-cols-1 xl:grid-cols-[1fr_348px] gap-4">
           <div className="flex flex-col gap-4">
             <Card>
               <SectionHeader
@@ -270,7 +270,7 @@ export default function UnitProfilePage() {
                 }
               />
               {/* `GET /vehicles/:id/telemetry?limit=1` (Phase 13) — newest point for the live cells. */}
-              <div className="mt-4 grid grid-cols-4 gap-3">
+              <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
                 <TelemetryCell label="Odometer" value={`${formatOdometer(total)} mi`} />
                 <TelemetryCell label="Engine hours" value={formatEngineHoursLong(Number(vehicle.engineHours))} />
                 <TelemetryCell label="Fuel level" value={telemetry?.fuelPct != null ? `${telemetry.fuelPct}%` : '—'} />
@@ -325,7 +325,8 @@ export default function UnitProfilePage() {
               ) : (activitiesQuery.data?.items.length ?? 0) === 0 ? (
                 <p className="p-4 text-body text-text-muted">No activity recorded.</p>
               ) : (
-                <table className="w-full text-body">
+                <div className="overflow-x-auto">
+                <table className="w-full text-body min-w-lg lg:min-w-0">
                   <thead>
                     <tr className="border-t border-border text-table-head text-text-muted">
                       <th className="p-3 text-left font-semibold">TIME STAMP</th>
@@ -347,6 +348,7 @@ export default function UnitProfilePage() {
                     ))}
                   </tbody>
                 </table>
+                </div>
               )}
             </Card>
           </div>
@@ -393,7 +395,8 @@ export default function UnitProfilePage() {
           ) : (dtcQuery.data?.items.length ?? 0) === 0 ? (
             <p className="p-4 text-body text-text-muted">No diagnostic trouble codes reported.</p>
           ) : (
-            <table className="w-full text-body">
+            <div className="overflow-x-auto">
+            <table className="w-full text-body min-w-lg lg:min-w-0">
               <thead>
                 <tr className="border-t border-border text-table-head text-text-muted">
                   <th className="p-3 text-left font-semibold">SPN</th>
@@ -423,6 +426,7 @@ export default function UnitProfilePage() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </Card>
       )}

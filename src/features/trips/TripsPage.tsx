@@ -431,8 +431,8 @@ export default function TripsPage() {
   return (
     <div className="flex flex-col gap-4 xl:max-h-content-h">
       <div className="flex items-center justify-end xl:shrink-0">
-        <div className="flex items-center gap-2">
-          <div className="flex h-input items-center gap-2 rounded-md border border-border bg-bg-surface px-3">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+          <div className="flex h-input w-full items-center gap-2 rounded-md border border-border bg-bg-surface px-3 sm:w-auto">
             <Search size={16} strokeWidth={1.75} className="text-text-muted" />
             <input
               value={search}
@@ -448,7 +448,7 @@ export default function TripsPage() {
               }}
               aria-label="Search trips"
               placeholder="Search trip, driver, city…"
-              className="w-56 bg-transparent text-body outline-none"
+              className="w-full min-w-0 bg-transparent text-body outline-none sm:w-56"
             />
             {search && (
               <button
@@ -487,7 +487,7 @@ export default function TripsPage() {
         {isLoading ? (
           <KpiRowSkeleton />
         ) : (
-          <div className="grid grid-cols-4 gap-card-gap">
+          <div className="grid grid-cols-1 gap-card-gap sm:grid-cols-2 xl:grid-cols-4">
             <KpiCard
               label="On-time delivery"
               value={counts.onTimePct === null ? '—' : `${counts.onTimePct}%`}
@@ -506,7 +506,7 @@ export default function TripsPage() {
         )}
       </div>
 
-      <div className="flex h-9 w-fit overflow-hidden rounded-md border border-border xl:shrink-0">
+      <div className="flex h-9 w-fit max-w-full overflow-x-auto rounded-md border border-border xl:shrink-0">
         {(
           [
             ['ACTIVE', `Active ${counts.active}`],
@@ -522,8 +522,8 @@ export default function TripsPage() {
             onClick={() => setSegment(value)}
             className={
               segment === value
-                ? 'bg-bg-inverse px-3 text-body-strong text-text-inverse'
-                : 'bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'
+                ? 'shrink-0 whitespace-nowrap bg-bg-inverse px-3 text-body-strong text-text-inverse'
+                : 'shrink-0 whitespace-nowrap bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'
             }
           >
             {label}
@@ -545,7 +545,7 @@ export default function TripsPage() {
 
       {segment === 'UNASSIGNED' ? (
         <Card padded={false} className="xl:flex xl:min-h-0 xl:flex-col">
-          <div className="flex items-center justify-between p-card pb-0 xl:shrink-0">
+          <div className="flex flex-wrap items-center justify-between gap-x-4 p-4 pb-0 sm:p-card sm:pb-0 xl:shrink-0">
             <SectionHeader title="Unassigned loads" subtitle={`${counts.unassignedCount} loads waiting for a driver`} />
             <Can perm="trips" level="FULL">
               <Button variant="secondary" iconLeft={<Users size={16} strokeWidth={1.75} />} onClick={handleAutoAssign} loading={autoAssign.isPending} className="mb-4">
@@ -572,7 +572,7 @@ export default function TripsPage() {
           )}
         </Card>
       ) : (
-        <div className="grid grid-cols-[1fr_348px] gap-card-gap xl:min-h-0 xl:grid-rows-[minmax(0,1fr)]">
+        <div className="grid grid-cols-1 xl:grid-cols-[1fr_348px] gap-card-gap xl:min-h-0 xl:grid-rows-[minmax(0,1fr)]">
           <Card padded={false} className="flex flex-col xl:min-h-0">
             {trips.isLoading ? (
               <LoadingState className="p-4" />

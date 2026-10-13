@@ -53,7 +53,7 @@ export function KpiCard({ label, value, hint, chip, icon: Icon, iconTone = 'info
 /** Always 4 skeleton cards while the KPI row loads (§13.1). */
 export function KpiRowSkeleton() {
   return (
-    <div className="grid grid-cols-4 gap-card-gap">
+    <div className="grid grid-cols-1 gap-card-gap sm:grid-cols-2 xl:grid-cols-4">
       {Array.from({ length: 4 }, (_, i) => (
         <Card key={i}>
           <div className="h-kpi-skeleton animate-pulse rounded-md bg-bg-subtle" />

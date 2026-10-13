@@ -301,8 +301,8 @@ export default function UsersPage() {
         </Can>
       </div>
 
-      <div className="flex items-center justify-between">
-        <div className="flex h-9 w-fit overflow-hidden rounded-md border border-border">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex h-9 w-fit max-w-full overflow-x-auto rounded-md border border-border">
           {(
             [
               ['ALL', `All ${counts.all}`],
@@ -319,16 +319,16 @@ export default function UsersPage() {
               onClick={() => setSegment(value)}
               className={
                 segment === value
-                  ? 'bg-bg-inverse px-3 text-body-strong text-text-inverse'
-                  : 'bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'
+                  ? 'shrink-0 whitespace-nowrap bg-bg-inverse px-3 text-body-strong text-text-inverse'
+                  : 'shrink-0 whitespace-nowrap bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'
               }
             >
               {label}
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex h-input items-center gap-2 rounded-md border border-border bg-bg-surface px-3">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+          <div className="flex h-input min-w-0 flex-1 items-center gap-2 rounded-md border border-border bg-bg-surface px-3 sm:flex-none">
             <Search size={16} strokeWidth={1.75} className="text-text-muted" />
             <input
               type="search"
@@ -336,7 +336,7 @@ export default function UsersPage() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search user or email…"
-              className="w-64 bg-transparent text-body outline-none"
+              className="w-full min-w-0 bg-transparent text-body outline-none sm:w-64"
             />
           </div>
           <Button
@@ -464,12 +464,12 @@ export default function UsersPage() {
             {pending.map((user) => (
               <div
                 key={user.id}
-                className="flex items-center justify-between rounded-md border border-border p-3"
+                className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border p-3"
               >
-                <div className="flex items-center gap-3">
+                <div className="flex min-w-0 items-center gap-3">
                   <Avatar name={`${user.firstName} ${user.lastName}`} size="md" />
-                  <div>
-                    <p className="text-body-strong text-text">{user.email}</p>
+                  <div className="min-w-0">
+                    <p className="break-all text-body-strong text-text">{user.email}</p>
                     <p className="text-caption text-text-muted">
                       {user.role.name} · {user.homeTerminalName ?? 'All terminals'}
                       {user.invitedByName ? ` · invited by ${user.invitedByName}` : ''}
@@ -479,7 +479,7 @@ export default function UsersPage() {
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <Badge tone="warning">Invited</Badge>
                   {canFull && (
                     <>

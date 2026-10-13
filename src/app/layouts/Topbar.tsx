@@ -13,7 +13,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useIsFetching, useQueryClient } from '@tanstack/react-query';
-import { RefreshCw, Search } from 'lucide-react';
+import { Menu, RefreshCw, Search } from 'lucide-react';
 import { useMatches } from 'react-router-dom';
 import { applyNotificationNew, useUnreadNotificationCount } from '@/shared/api/notifications';
 import { useAuth } from '@/shared/auth/AuthProvider';
@@ -126,7 +126,7 @@ function RoleChip({ role }: { role: Role | null }) {
   const chip = ROLE_CHIP[role];
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-badge ${chip.className}`}
+      className={`hidden shrink-0 items-center gap-1 rounded-full px-2 py-1 text-badge sm:inline-flex ${chip.className}`}
     >
       <span aria-hidden="true">●</span>
       {chip.label}
@@ -177,7 +177,7 @@ function usePageMeta(): RouteHandle {
   return { title: APP_NAME };
 }
 
-export function Topbar() {
+export function Topbar({ onOpenNav }: { onOpenNav?: () => void } = {}) {
   const { user, isAuthenticated } = useAuth();
   const { can } = usePermission();
   const { title: staticTitle, subtitle: staticSubtitle } = usePageMeta();
@@ -232,11 +232,23 @@ export function Topbar() {
   }, []);
 
   return (
-    <header className="flex h-topbar shrink-0 items-center gap-4 border-b border-border bg-bg-surface px-page">
+    <header className="flex h-topbar shrink-0 items-center gap-2 border-b border-border bg-bg-surface px-4 sm:gap-4 sm:px-page">
+      {/* < lg: the sidebar is an off-canvas drawer opened from here. */}
+      {onOpenNav ? (
+        <button
+          type="button"
+          onClick={onOpenNav}
+          aria-label="Open navigation"
+          aria-controls="app-sidebar"
+          className="-ml-1 flex size-btn shrink-0 items-center justify-center rounded-md text-text-secondary hover:bg-bg-subtle lg:hidden"
+        >
+          <Menu size={20} strokeWidth={1.75} aria-hidden="true" />
+        </button>
+      ) : null}
       <PageHeading fallbackTitle={staticTitle} fallbackSubtitle={staticSubtitle} role={role} />
 
       {/* 1. Context filter — screens that have one render it into this slot (§4.4). */}
-      <div id="topbar-context-filter" className="flex items-center gap-2" />
+      <div id="topbar-context-filter" className="flex min-w-0 items-center gap-2 empty:hidden" />
 
       {/* 2. Global search — opens the command palette (11.28), as does ⌘K. */}
       <button
@@ -250,6 +262,17 @@ export function Topbar() {
       >
         <Search size={16} strokeWidth={1.75} aria-hidden="true" className="shrink-0" />
         <span className="truncate">Search vehicles, drivers…</span>
+      </button>
+      {/* Below xl the search field collapses to an icon button (same palette). */}
+      <button
+        type="button"
+        aria-label="Search"
+        onClick={() => setPaletteOpen(true)}
+        onPointerEnter={() => void loadCommandPalette()}
+        aria-haspopup="dialog"
+        className="hidden size-btn shrink-0 items-center justify-center rounded-md border border-border text-text-secondary hover:bg-bg-subtle sm:flex xl:hidden"
+      >
+        <Search size={16} strokeWidth={1.75} aria-hidden="true" />
       </button>
 
       {/* 3. Notifications (11.27) */}
@@ -271,7 +294,7 @@ export function Topbar() {
         type="button"
         aria-label="Refresh"
         onClick={() => void queryClient.invalidateQueries()}
-        className="flex size-btn items-center justify-center rounded-md border border-border text-text-secondary hover:bg-bg-subtle"
+        className="hidden size-btn shrink-0 items-center sm:flex justify-center rounded-md border border-border text-text-secondary hover:bg-bg-subtle"
       >
         <RefreshCw
           size={16}

@@ -398,49 +398,51 @@ export default function AuditLogPage() {
           ) : filtered.length === 0 ? (
             <EmptyState {...EMPTY_STATE_COPY.auditLog} actions={[{ label: 'Reset filters', onClick: clearAllFilters }]} />
           ) : (
-            <table className="w-full border-collapse text-body">
-              <thead className="h-table-head">
-                <tr className="border-b border-border">
-                  {AUDIT_COLUMNS.map((h) => (
-                    <th
-                      key={h}
-                      scope="col"
-                      className="px-3 text-left text-table-head font-semibold uppercase tracking-wide text-text-muted"
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {pageRows.map((entry) => (
-                  <tr
-                    key={entry.id}
-                    tabIndex={0}
-                    onClick={() => setSelected(entry)}
-                    onKeyDown={(e) => e.key === 'Enter' && setSelected(entry)}
-                    className="h-row cursor-pointer border-b border-border last:border-b-0 hover:bg-bg-subtle"
-                  >
-                    <td className="px-3 tabular-nums text-text">{formatCarrier(entry.createdAt, timezone, 'dateTimeSeconds')}</td>
-                    <td className="px-3">
-                      <span className="flex items-center gap-2">
-                        <Avatar name={entry.actorName ?? entry.actorType} size="sm" />
-                        <span className="flex flex-col">
-                          <span className="text-text">{entry.actorName ?? entry.actorType}</span>
-                          {entry.actorEmail && <span className="text-caption text-text-muted">{entry.actorEmail}</span>}
-                        </span>
-                      </span>
-                    </td>
-                    <td className="px-3">
-                      <Badge tone={ACTION_TONE[entry.action] ?? 'neutral'}>{actionLabel(entry.action)}</Badge>
-                    </td>
-                    <td className="px-3 text-text">{objectOf(entry)}</td>
-                    <td className="max-w-64 truncate px-3 text-caption text-text-muted">{detailOf(entry) ?? '—'}</td>
-                    <td className="px-3 text-right tabular-nums text-text-secondary">{ipOf(entry) ?? '—'}</td>
+            <div className="relative overflow-x-auto">
+              <table className="w-full min-w-160 lg:min-w-0 border-collapse text-body">
+                <thead className="h-table-head">
+                  <tr className="border-b border-border">
+                    {AUDIT_COLUMNS.map((h) => (
+                      <th
+                        key={h}
+                        scope="col"
+                        className="px-3 text-left text-table-head font-semibold uppercase tracking-wide text-text-muted"
+                      >
+                        {h}
+                      </th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {pageRows.map((entry) => (
+                    <tr
+                      key={entry.id}
+                      tabIndex={0}
+                      onClick={() => setSelected(entry)}
+                      onKeyDown={(e) => e.key === 'Enter' && setSelected(entry)}
+                      className="h-row cursor-pointer border-b border-border last:border-b-0 hover:bg-bg-subtle"
+                    >
+                      <td className="px-3 tabular-nums text-text">{formatCarrier(entry.createdAt, timezone, 'dateTimeSeconds')}</td>
+                      <td className="px-3">
+                        <span className="flex items-center gap-2">
+                          <Avatar name={entry.actorName ?? entry.actorType} size="sm" />
+                          <span className="flex flex-col">
+                            <span className="text-text">{entry.actorName ?? entry.actorType}</span>
+                            {entry.actorEmail && <span className="text-caption text-text-muted">{entry.actorEmail}</span>}
+                          </span>
+                        </span>
+                      </td>
+                      <td className="px-3">
+                        <Badge tone={ACTION_TONE[entry.action] ?? 'neutral'}>{actionLabel(entry.action)}</Badge>
+                      </td>
+                      <td className="px-3 text-text">{objectOf(entry)}</td>
+                      <td className="max-w-64 truncate px-3 text-caption text-text-muted">{detailOf(entry) ?? '—'}</td>
+                      <td className="px-3 text-right tabular-nums text-text-secondary">{ipOf(entry) ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
         {!isLoading && !isError && filtered.length > 0 && (

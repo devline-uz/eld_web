@@ -1,6 +1,7 @@
 // AppShell — web/tz.md §4. Sidebar (212px) + topbar (62px) + page container.
-// The page container has NO max-width; below 1280px the page scrolls horizontally (§4.5).
-import { Suspense } from 'react';
+// The page container has NO max-width. Responsive: below `lg` the sidebar becomes an off-canvas
+// drawer opened from the topbar's menu button, and the page padding tightens on phones.
+import { Suspense, useCallback, useState } from 'react';
 import { Outlet, useMatches } from 'react-router-dom';
 import { RouteFallback } from './RouteFallback';
 import { Sidebar } from './Sidebar';
@@ -15,6 +16,9 @@ function useFullBleed(): boolean {
 
 export function AppShell() {
   const fullBleed = useFullBleed();
+  const [navOpen, setNavOpen] = useState(false);
+  const closeNav = useCallback(() => setNavOpen(false), []);
+  const openNav = useCallback(() => setNavOpen(true), []);
   return (
     <div className="flex min-h-screen bg-bg-app xl:h-screen xl:overflow-hidden">
       <a
@@ -23,10 +27,10 @@ export function AppShell() {
       >
         Skip to content
       </a>
-      <Sidebar />
+      <Sidebar mobileOpen={navOpen} onMobileClose={closeNav} />
       <div className="flex min-w-0 flex-1 flex-col xl:min-h-0">
         <PageHeaderProvider>
-          <Topbar />
+          <Topbar onOpenNav={openNav} />
           <main
             id="main-content"
             // `relative` is load-bearing (web/bugs.md WB-050): Tailwind's `sr-only` is
@@ -37,8 +41,8 @@ export function AppShell() {
             // keeps that overflow inside the scroll container. No visual effect at any width.
             className={
               fullBleed
-                ? 'relative flex-1 overflow-hidden xl:min-h-0'
-                : 'relative flex-1 overscroll-contain p-page xl:min-h-0 xl:overflow-y-auto'
+                ? 'relative min-w-0 flex-1 overflow-hidden xl:min-h-0'
+                : 'relative min-w-0 flex-1 overscroll-contain p-4 sm:p-page xl:min-h-0 xl:overflow-y-auto'
             }
           >
             <Suspense fallback={<RouteFallback />}>

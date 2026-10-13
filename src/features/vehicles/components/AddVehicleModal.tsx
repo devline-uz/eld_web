@@ -249,7 +249,7 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
       }
     >
       <form className="flex flex-col gap-4" onSubmit={(e) => void handleSubmit(onSubmit)(e)}>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Unit number" required error={errors.unitNumber?.message}>
             <input {...register('unitNumber')} placeholder="e.g. 126" disabled={submitting} className={inputClass} />
           </Field>
@@ -257,7 +257,7 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
             <input {...register('deviceId')} placeholder="PT30_1C4F" maxLength={LIMITS.vehicleEldSerialMax} disabled={submitting} className={inputClass} />
           </Field>
         </div>
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <Field label="Make" required error={errors.make?.message}>
             <input {...register('make')} maxLength={LIMITS.vehicleMakeModelMax} disabled={submitting} className={inputClass} />
           </Field>
@@ -287,7 +287,7 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
         <Field label="VIN" required error={errors.vin?.message}>
           <input {...register('vin')} placeholder="17-character VIN" disabled={submitting} className={inputClass} />
         </Field>
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <Field label="License plate" error={errors.licensePlate?.message}>
             <input {...register('licensePlate')} disabled={submitting} className={inputClass} />
           </Field>

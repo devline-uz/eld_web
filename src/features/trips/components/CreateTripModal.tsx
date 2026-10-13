@@ -945,7 +945,7 @@ export function CreateTripModal({
             {banner}
           </p>
         )}
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <Field label="Trip / load ID" required={!editing} error={errors.reference?.message}>
             <input
               {...register('reference')}
@@ -977,7 +977,7 @@ export function CreateTripModal({
           <h3 className="text-nav-section font-semibold uppercase tracking-wide text-text-muted">
             Stops
           </h3>
-          <div className="mt-2 grid grid-cols-2 gap-3">
+          <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Pickup location" required={!editing} error={errors.origin?.message}>
               {editing ? (
                 <ReadOnlyValue value={origin} />
@@ -1047,7 +1047,7 @@ export function CreateTripModal({
             intermediateStops.map((stop, index) => (
               <div
                 key={stop.key}
-                className="mt-2 grid grid-cols-[5rem_1fr_1fr_auto] items-end gap-3"
+                className="mt-2 grid grid-cols-1 items-end gap-3 sm:grid-cols-[5rem_1fr_1fr_auto]"
               >
                 <Field label="Order">
                   <Select
@@ -1141,7 +1141,7 @@ export function CreateTripModal({
             Assignment
           </h3>
           {trip ? (
-            <div className="mt-2 grid grid-cols-3 gap-3">
+            <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-3">
               <Field label="Driver">
                 <ReadOnlyValue
                   value={
@@ -1161,7 +1161,7 @@ export function CreateTripModal({
               </p>
             </div>
           ) : (
-            <div className="mt-2 grid grid-cols-3 gap-3">
+            <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-3">
               <Field label="Driver" error={errors.driverId?.message}>
                 <DriverPicker
                   value={selectedDriverOption}
@@ -1223,7 +1223,7 @@ export function CreateTripModal({
           )}
         </div>
 
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Field label="Distance" error={errors.distanceMi?.message}>
             <input
               type="number"

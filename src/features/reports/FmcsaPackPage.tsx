@@ -261,7 +261,7 @@ export default function FmcsaPackPage() {
           options={unitOptions}
           onSelect={(value) => setParam('unit', value === 'all' ? null : value)}
         />
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
           <Button
             variant="secondary"
             iconLeft={<Eye size={16} strokeWidth={1.75} />}
@@ -313,7 +313,7 @@ export default function FmcsaPackPage() {
       {kpiLoading ? (
         <KpiRowSkeleton />
       ) : (
-        <div className="grid grid-cols-4 gap-card-gap">
+        <div className="grid grid-cols-1 gap-card-gap sm:grid-cols-2 xl:grid-cols-4">
           <KpiCard
             label="Daily logs included"
             value={totals.isError ? EMPTY.dash : formatNumber(kpi.dailyLogs)}
@@ -354,7 +354,7 @@ export default function FmcsaPackPage() {
         </p>
       )}
 
-      <div className="grid grid-cols-[minmax(0,1fr)_var(--spacing-side-panel)] items-start gap-card-gap">
+      <div className="grid grid-cols-1 items-start gap-card-gap xl:grid-cols-[minmax(0,1fr)_var(--spacing-side-panel)]">
         <Card>
           <SectionHeader
             title="What the pack contains"

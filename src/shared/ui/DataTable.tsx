@@ -8,7 +8,7 @@ import {
   useReactTable,
 } from '@tanstack/react-table';
 import { useMemo, useState } from 'react';
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { ChevronUp, ChevronDown, MoreHorizontal } from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { cn } from './cn';
@@ -114,6 +114,9 @@ export function DataTable<T>({
             ),
             enableSorting: false,
             size: 36,
+            // A fixed width, so `table-fixed` + percentage columns never squeeze the checkbox
+            // into the first data column.
+            meta: { width: '44px' },
           } satisfies ColumnDef<T, unknown>,
         ]
       : []),
@@ -189,8 +192,16 @@ export function DataTable<T>({
     return <>{emptyState}</>;
   }
 
+  // Responsive: below `lg` a wide table scrolls sideways inside its own wrapper instead of
+  // squeezing every column (or pushing the page wider than the phone). ~112px per column.
+  const minWidth = `${table.getVisibleLeafColumns().length * 112}px`;
+
   return (
-    <table className={cn('w-full border-collapse text-body', className)}>
+    <div className="relative w-full overflow-x-auto">
+    <table
+      style={{ '--dt-min-w': minWidth } as CSSProperties}
+      className={cn('w-full border-collapse text-body max-lg:min-w-[var(--dt-min-w)]', className)}
+    >
       <caption className="sr-only">{caption}</caption>
       <thead className="h-table-head">
         {table.getHeaderGroups().map((headerGroup) => (
@@ -262,5 +273,6 @@ export function DataTable<T>({
         ))}
       </tbody>
     </table>
+    </div>
   );
 }

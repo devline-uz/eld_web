@@ -124,9 +124,9 @@ export function DateRangePicker({ value, preset = 'custom', onChange }: DateRang
         </Button>
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Content align="start" sideOffset={8} className="z-50 flex w-[620px] rounded-lg border border-border bg-bg-surface shadow-pop">
-          <div className="flex w-[168px] flex-col gap-1 border-r border-border p-3">
-            <p className="mb-1 text-nav-section font-semibold uppercase tracking-wide text-text-muted">Presets</p>
+        <Popover.Content align="start" sideOffset={8} className="z-50 flex max-h-[calc(100dvh-32px)] w-[min(620px,calc(100vw-32px))] flex-col overflow-y-auto rounded-lg sm:flex-row border border-border bg-bg-surface shadow-pop">
+          <div className="flex flex-row flex-wrap gap-1 border-b border-border p-3 sm:w-[168px] sm:flex-col sm:flex-nowrap sm:border-r sm:border-b-0">
+            <p className="mb-1 w-full text-nav-section font-semibold uppercase tracking-wide text-text-muted">Presets</p>
             {(Object.keys(PRESET_LABELS) as DateRangePreset[])
               .filter((p) => p !== 'custom')
               .map((p) => (

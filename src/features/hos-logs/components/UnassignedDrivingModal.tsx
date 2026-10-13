@@ -206,7 +206,7 @@ export function UnassignedDrivingModal({
             <div
               key={segment.id}
               className={cn(
-                'flex items-center gap-3 rounded-md border p-3',
+                'flex flex-wrap items-center gap-3 rounded-md border p-3 sm:flex-nowrap',
                 isSelected ? 'border-primary' : 'border-border',
               )}
             >
@@ -242,7 +242,7 @@ export function UnassignedDrivingModal({
                 value={choice[segment.id] ?? LEAVE_UNASSIGNED}
                 onChange={(e) => setChoice((prev) => ({ ...prev, [segment.id]: e.target.value }))}
                 aria-label={`Resolution for ${unitLabel(segment.vehicleId)}`}
-                className="h-input w-60 shrink-0 rounded-md border border-border bg-bg-surface px-3 text-body text-text"
+                className="h-input w-full shrink-0 rounded-md sm:w-60 border border-border bg-bg-surface px-3 text-body text-text"
               >
                 <option value={LEAVE_UNASSIGNED}>Leave unassigned</option>
                 {drivers.map((driver) => (

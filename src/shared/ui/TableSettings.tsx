@@ -56,7 +56,7 @@ export function TableSettings({ columns, onApply, onReset }: TableSettingsProps)
         <Popover.Content
           align="end"
           sideOffset={8}
-          className="z-50 w-[280px] rounded-lg border border-border bg-bg-surface p-3 shadow-pop"
+          className="z-50 w-[min(280px,calc(100vw-32px))] rounded-lg border border-border bg-bg-surface p-3 shadow-pop"
         >
           <div className="flex items-center justify-between">
             <span className="text-body-strong text-text">Table settings</span>
