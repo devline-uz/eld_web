@@ -22,7 +22,8 @@ import { assertMatchesOpenApi, documentedExample } from './openapi';
  * populated rows are held to the example; a row with nulls may be null ONLY on these fields.
  */
 const NULLABLE = {
-  roster: new Set(['unit', 'emailVerified']),
+  // BUG-002 — `staleSince: string | null` (driver-roster.service.ts), null while `isStale: false`.
+  roster: new Set(['unit', 'emailVerified', 'staleSince']),
   rosterDriver: new Set(['appVersion', 'email']),
   liveUnit: new Set([
     'driverId', 'driverName', 'driverPhone', 'speedMph', 'headingDeg', 'odometerMi', 'lat', 'lon',

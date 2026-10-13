@@ -34,6 +34,8 @@ import { useNowTick, useRelativeTime } from '@/shared/format/useRelativeTime';
 import { NO_DRIVER_LOGS_REASON } from './lib/copy';
 import { AddVehicleModal } from './components/AddVehicleModal';
 import { AssignDriverModal } from './components/AssignDriverModal';
+import { AssignCoDriverModal } from './components/AssignCoDriverModal';
+import { EndCoDriverPairingDialog } from './components/EndCoDriverPairingDialog';
 import { CalibrateOdometerModal } from './components/CalibrateOdometerModal';
 import { DeleteUnitModal } from './components/DeleteUnitModal';
 import { activityDetails, activityLabel, activitySource, fuelLabel } from './lib/activity';
@@ -125,6 +127,8 @@ export default function UnitProfilePage() {
   const [assignOpen, setAssignOpen] = useState(false);
   const [calibrateOpen, setCalibrateOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [assignCoDriverOpen, setAssignCoDriverOpen] = useState(false);
+  const [endPairingOpen, setEndPairingOpen] = useState(false);
 
   // UI-003 — "Updated …" is when the unit last said something (newest telemetry point, else the
   // ELD's last contact), never when the browser last refetched the vehicle record.
@@ -148,6 +152,7 @@ export default function UnitProfilePage() {
   const coDriver = coDriverPairing
     ? (driversLookupQuery.data?.items.find((d) => d.id === coDriverPairing.coDriverId) ?? null)
     : null;
+  const coDriverName = coDriver ? `${coDriver.firstName} ${coDriver.lastName}` : null;
   const num = (v: number | string | null | undefined) => (v == null ? null : typeof v === 'string' ? Number(v) : v);
 
   function setTab(next: Tab) {
@@ -376,8 +381,35 @@ export default function UnitProfilePage() {
               <DetailRow label="Fuel type" value={fuelLabel(vehicle.fuelType)} />
               <DetailRow label="Sleeper berth" value={vehicle.sleeperBerth ? 'Available' : 'Not available'} />
               <DetailRow label="Primary driver" value={driver ? `${driver.firstName} ${driver.lastName}` : 'Unassigned'} />
-              {/* ⛔ GAP B-7 — no /co-driver-pairings endpoint; always "—" until it lands. */}
-              <DetailRow label="Co-driver" value={coDriver ? `${coDriver.firstName} ${coDriver.lastName}` : '—'} />
+              {/* B-7 — the active pairing (`GET /co-driver-pairings?vehicleId=&active=true`). Pairing
+                  writes are `drivers` FULL; a co-driver needs a primary driver to pair with. */}
+              <DetailRow
+                label="Co-driver"
+                value={
+                  <span className="inline-flex flex-wrap items-center justify-end gap-2">
+                    <span>{coDriverName ?? '—'}</span>
+                    <Can perm="drivers" level="FULL">
+                      {coDriverPairing ? (
+                        <Button variant="ghost" size="sm" onClick={() => setEndPairingOpen(true)}>
+                          End pairing
+                        </Button>
+                      ) : (
+                        driver &&
+                        coDriverQuery.isSuccess && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            iconLeft={<UserPlus size={14} strokeWidth={1.75} />}
+                            onClick={() => setAssignCoDriverOpen(true)}
+                          >
+                            Assign co-driver
+                          </Button>
+                        )
+                      )}
+                    </Can>
+                  </span>
+                }
+              />
             </div>
           </Card>
         </div>
@@ -482,6 +514,16 @@ export default function UnitProfilePage() {
 
       {editOpen && <AddVehicleModal vehicle={vehicle} onClose={() => setEditOpen(false)} />}
       {assignOpen && <AssignDriverModal vehicle={vehicle} onClose={() => setAssignOpen(false)} />}
+      {assignCoDriverOpen && driver && (
+        <AssignCoDriverModal vehicle={vehicle} primaryDriver={driver} onClose={() => setAssignCoDriverOpen(false)} />
+      )}
+      <EndCoDriverPairingDialog
+        open={endPairingOpen}
+        pairing={coDriverPairing}
+        coDriverName={coDriverName}
+        unitNumber={vehicle.unitNumber}
+        onClose={() => setEndPairingOpen(false)}
+      />
       {calibrateOpen && <CalibrateOdometerModal vehicle={vehicle} onClose={() => setCalibrateOpen(false)} />}
       {deleteOpen && (
         <DeleteUnitModal

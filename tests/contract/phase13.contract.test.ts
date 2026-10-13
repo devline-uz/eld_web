@@ -3,7 +3,7 @@
 // against backend/docs/openapi.json. Request bodies are checked against the documented
 // `requestBody` schema too (required keys present, no undocumented keys), so a renamed DTO field —
 // like B-68's `status` → `resolutionType` — fails here, not in production.
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { client } from '../../src/shared/api/client';
 import { endpoints } from '../../src/shared/api/endpoints';
 import type { ResolveDefectPayload } from '../../src/shared/api/dvir';
@@ -14,6 +14,7 @@ import type { CreateWorkOrderPayload } from '../../src/shared/api/dvir';
 import type { InviteUserPayload, UpdateUserPayload, CreateTicketPayload, UpdateDevicePayload } from '../../src/shared/api/settingsAdmin';
 import type { UpdateMyProfilePayload, MyPreferences } from '../../src/shared/api/me';
 import { assertMatchesOpenApi, openapi, operation } from './openapi';
+import { CO_DRIVER_PAIRINGS } from '../../src/mocks/handlers/mockState';
 
 /* ------------------------------------------------------------------ request-body contract */
 
@@ -88,6 +89,14 @@ describe('Phase 13 responses match openapi.json (default MSW handlers)', () => {
   it.each(GETS)('GET %s', async (documented, path, params) => {
     const data = await client.get(path, { params });
     assertMatchesOpenApi('GET', documented, data);
+  });
+
+  // The pairing mock is stateful (B-7: ending an unknown pairing is a 404) — `pair_1` must exist
+  // and be active for `POST /co-driver-pairings/{id}/end` to answer its documented 201.
+  beforeAll(() => {
+    if (!CO_DRIVER_PAIRINGS.some((p) => p.id === 'pair_1')) {
+      CO_DRIVER_PAIRINGS.push({ id: 'pair_1', primaryDriverId: 'drv_1', coDriverId: 'drv_3', vehicleId: 'veh_1', startedAt: new Date().toISOString(), endedAt: null });
+    }
   });
 
   const WRITES: Array<[string, string, string, unknown]> = [

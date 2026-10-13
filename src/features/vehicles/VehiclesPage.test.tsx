@@ -13,7 +13,11 @@ import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/cli
 import { ToastProvider } from '@/shared/ui/Toast';
 import VehiclesPage from './VehiclesPage';
 
-vi.mock('@/shared/auth/usePermission', () => ({ usePermission: () => ({ can: () => true }) }));
+// `deny` holds `perm:LEVEL` pairs a test switches off; everything else is granted.
+const perms = vi.hoisted(() => ({ deny: new Set<string>() }));
+vi.mock('@/shared/auth/usePermission', () => ({
+  usePermission: () => ({ can: (perm: string, level = 'READ') => !perms.deny.has(`${perm}:${level}`) }),
+}));
 
 function LocationProbe() {
   const location = useLocation();
@@ -42,6 +46,7 @@ afterEach(() => {
 afterAll(() => server.close());
 
 beforeEach(() => {
+  perms.deny.clear();
   setAuthBridge({ getAccessToken: () => 'test-token' });
   setAccessToken('test-token');
 });
@@ -663,5 +668,94 @@ describe('W-03 Vehicles — deleting a unit removes it from the table', () => {
 
     await vi.waitFor(() => expect(screen.queryByText('#101')).not.toBeInTheDocument());
     expect(await screen.findByText(/No vehicles yet|Nothing matches/)).toBeInTheDocument();
+  });
+});
+
+describe('W-03 Vehicles — row-menu co-driver actions (B-7)', () => {
+  const PAIRING = {
+    id: 'pair_1',
+    primaryDriverId: 'drv_1',
+    coDriverId: 'drv_2',
+    vehicleId: 'veh_1',
+    startedAt: '2026-10-01T12:00:00.000Z',
+    endedAt: null,
+  };
+
+  function pairingsAnswer(items: (typeof PAIRING)[]) {
+    server.use(
+      http.get(url(endpoints.coDriverPairings.list), () => ok({ items, page: 1, limit: 1, total: items.length, totalPages: 1 })),
+    );
+  }
+
+  it('shows an enabled "Assign co-driver" right after "Assign driver" when the unit has a primary driver and no pairing', async () => {
+    usePopulatedFleet();
+    pairingsAnswer([]);
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('#101');
+
+    await user.click(screen.getByRole('button', { name: 'Row actions' }));
+    const item = await screen.findByRole('menuitem', { name: 'Assign co-driver' });
+    await vi.waitFor(() => expect(item).not.toHaveAttribute('data-disabled'));
+    expect(screen.queryByText('End co-driver pairing')).not.toBeInTheDocument();
+    const labels = screen.getAllByRole('menuitem').map((el) => el.textContent?.trim());
+    expect(labels.indexOf('Assign co-driver')).toBe(labels.indexOf('Assign driver') + 1);
+
+    await user.click(item);
+    expect(await screen.findByText('Assign co-driver to unit #101')).toBeInTheDocument();
+  });
+
+  it('shows "End co-driver pairing" instead when the unit is paired, and ends it through the confirm', async () => {
+    usePopulatedFleet();
+    pairingsAnswer([PAIRING]);
+    let ended: string | null = null;
+    server.use(
+      http.post(url(endpoints.coDriverPairings.end(':id')), ({ params }) => {
+        ended = String(params.id);
+        return ok({ id: String(params.id), endedAt: '2026-10-13T12:00:00.000Z' });
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('#101');
+
+    await user.click(screen.getByRole('button', { name: 'Row actions' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'End co-driver pairing' }));
+    expect(screen.queryByRole('menuitem', { name: 'Assign co-driver' })).not.toBeInTheDocument();
+    expect(await screen.findByText('End co-driver pairing?')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'End pairing' }));
+    await vi.waitFor(() => expect(ended).toBe('pair_1'));
+    expect(await screen.findByText('Co-driver pairing ended')).toBeInTheDocument();
+  });
+
+  it('a driverless unit shows "Assign co-driver" disabled with the reason', async () => {
+    server.use(
+      http.get(url(endpoints.vehicles.list), () => ok({ items: [VEHICLE_ROW], page: 1, limit: 10, total: 1, totalPages: 1 })),
+      http.get(url(endpoints.drivers.list), () => ok({ items: [], page: 1, limit: 500, total: 0, totalPages: 1 })),
+      http.get(url(endpoints.devices.list), () => ok({ items: [], page: 1, limit: 500, total: 0, totalPages: 1 })),
+    );
+    pairingsAnswer([]);
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('#101');
+
+    await user.click(screen.getByRole('button', { name: 'Row actions' }));
+    const item = await screen.findByText('Assign co-driver');
+    expect(item).toHaveAttribute('data-disabled');
+    expect(item).toHaveAttribute('title', 'Assign a primary driver before adding a co-driver.');
+  });
+
+  it('without drivers FULL neither co-driver item is in the DOM', async () => {
+    perms.deny.add('drivers:FULL');
+    usePopulatedFleet();
+    pairingsAnswer([PAIRING]);
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('#101');
+
+    await user.click(screen.getByRole('button', { name: 'Row actions' }));
+    await screen.findByText('Assign driver');
+    expect(screen.queryByText('Assign co-driver')).not.toBeInTheDocument();
+    expect(screen.queryByText('End co-driver pairing')).not.toBeInTheDocument();
   });
 });

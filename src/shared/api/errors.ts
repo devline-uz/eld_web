@@ -234,6 +234,21 @@ export function assignDriverErrorMessage(error: unknown, labels: Readonly<Record
   return formErrorMessage(error, [], labels);
 }
 
+/**
+ * B-7 `POST /co-driver-pairings` and `POST /co-driver-pairings/:id/end` refusals. Every 409 here
+ * is a `CONFLICT` whose server sentence is the real reason (same driver as primary and co-driver,
+ * co-driver already active on this unit, pairing already ended) — the generic `CONFLICT` copy
+ * ("That value is already in use.") would hide it. Anything else → `formErrorMessage`.
+ */
+export function coDriverPairingErrorMessage(error: unknown, labels: Readonly<Record<string, string>> = {}): string {
+  if (error instanceof ApiError) {
+    if (error.status === 409 && error.message && error.message !== 'Request failed') return error.message;
+    if (error.status === 404 && error.code === 'DRIVER_NOT_FOUND') return 'This driver was deleted or no longer exists. Pick another driver.';
+    if (error.status === 404 && error.code === 'VEHICLE_NOT_FOUND') return 'This unit was deleted or no longer exists.';
+  }
+  return formErrorMessage(error, [], labels);
+}
+
 /** One open trip named by a BE-013 refusal (`details.openTrips`). */
 export interface OpenTripRef {
   id: string;

@@ -12,7 +12,7 @@ import type { DriverRow, VehicleRow } from '@/shared/api/vehicles';
 import { fixture } from '../fixtures.generated';
 import { fail, ok, serverPage, url } from '../envelope';
 import type { DeviceRow } from '@/shared/api/settingsAdmin';
-import { DEVICES, DRIVERS, TRAILERS, VEHICLES, daysAgo, liveVehicles, mockId } from './mockState';
+import { CO_DRIVER_PAIRINGS, DEVICES, DRIVERS, TRAILERS, VEHICLES, daysAgo, liveVehicles, mockId } from './mockState';
 import type { TrailerRow } from '@/shared/api/trailers';
 import { findMockTrip, removeMockTrip } from './tripsMessagingGaps';
 import { mockVehicleGroupName } from './vehicleGroups';
@@ -681,8 +681,23 @@ export const fleetWriteHandlers = [
   }),
   http.delete(url(endpoints.geofences.remove(':id')), () => ok(fixture('DELETE /api/geofences/{id}'))),
 
-  /** B-7 (shipped 2026-09-24) — the documented offset page; no seeded pairings (team driving is rare). */
-  http.get(url(endpoints.coDriverPairings.list), ({ request }) => ok(serverPage([], request))),
+  /** B-7 (shipped 2026-09-24) — the documented offset page over `CO_DRIVER_PAIRINGS` (none seeded:
+   * team driving is rare). `driverId` matches either side; `active` = `endedAt IS NULL`. */
+  http.get(url(endpoints.coDriverPairings.list), ({ request }) => {
+    const params = new URL(request.url).searchParams;
+    const vehicleId = params.get('vehicleId');
+    const driverId = params.get('driverId');
+    const active = params.get('active');
+    const rows = CO_DRIVER_PAIRINGS.filter(
+      (p) =>
+        (!vehicleId || p.vehicleId === vehicleId) &&
+        (!driverId || p.primaryDriverId === driverId || p.coDriverId === driverId) &&
+        (active === null || (active === 'true') === (p.endedAt === null)),
+    );
+    const paging = new URL(request.url);
+    for (const key of ['vehicleId', 'driverId', 'active']) paging.searchParams.delete(key);
+    return ok(serverPage(rows, new Request(paging)));
+  }),
   /** Telemetry read path (shipped 2026-09-24) — `{ items }` newest first, the documented row shape.
    * Every `Decimal` column (lat/lon, engine/idle hours, MPG, voltage) now serialises as a JSON
    * number on the live API (confirmed on :3002, 2026-09-24) — the mock follows suit. */
