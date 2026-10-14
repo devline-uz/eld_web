@@ -25,7 +25,7 @@ import {
 } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { io, type Socket } from 'socket.io-client';
-import { getAccessToken } from '@/shared/api/client';
+import { getAccessToken, refreshAccessToken } from '@/shared/api/client';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { registerSocketDisconnect } from '@/shared/auth/authEvents';
 // Imported from their own modules, not the `@/shared/ui` barrel — pulling the whole barrel in
@@ -46,6 +46,10 @@ const SERVER_REJECTED_REASON = 'io server disconnect';
 
 /** The reason socket.io reports for our own `socket.disconnect()` (the token cycle, WB-119). */
 const CLIENT_DISCONNECT_REASON = 'io client disconnect';
+
+/** CODE-012 — pushed right before the server drops every socket of a user whose access changed:
+ * disabled/deleted, a session revoked ("sign out other devices") or a new role. */
+const AUTH_REVOKED_EVENT = 'auth.revoked';
 
 /** How often we compare the in-memory access token against the one the socket handshook with.
  * There is no token-change event exposed by shared/auth, so polling is the documented seam. */
@@ -186,7 +190,7 @@ export function useIsOffline(): boolean {
 }
 
 export function RealtimeProvider({ children }: { children: ReactNode }) {
-  const { isAuthenticated, signOut } = useAuth();
+  const { isAuthenticated, signOut, refreshUser } = useAuth();
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
@@ -228,6 +232,12 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       store.setSocket(s);
 
       let everConnected = false;
+      /** Set by `auth.revoked`: the disconnect that follows is a re-check, not a rejected token. */
+      let accessChanged = false;
+
+      s.on(AUTH_REVOKED_EVENT, () => {
+        accessChanged = true;
+      });
 
       s.on('connect', () => {
         store.patch({ connected: true, failedAttempts: 0 });
@@ -245,6 +255,22 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
         store.patch({ connected: false });
         // Only our own `socket.disconnect()` belongs to a token cycle; anything else is a real drop.
         if (reason !== CLIENT_DISCONNECT_REASON) tokenCycle.current = false;
+        if (reason === SERVER_REJECTED_REASON && accessChanged) {
+          // CODE-012 — the server dropped this user's sockets because their access changed. If this
+          // tab's own session is still live (another device was signed out, or the role changed) a
+          // refresh succeeds: reconnect with the fresh token and re-read /auth/me for the new
+          // permissions. If this session was the one revoked, the refresh is rejected and the
+          // client's own refresh path signs out.
+          accessChanged = false;
+          void refreshAccessToken()
+            .then((token) => {
+              s.auth = { token };
+              s.connect();
+              void refreshUser?.();
+            })
+            .catch(() => undefined);
+          return;
+        }
         if (reason === SERVER_REJECTED_REASON) {
           // A rejected/expired token — this is a sign-out path, not a retry loop.
           signOut();

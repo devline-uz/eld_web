@@ -44,7 +44,9 @@ export interface DashboardSummaryResponse {
     };
   };
   violations: { items: DashboardViolation[]; total: number };
-  unidentified: { total: number; totalDurationSec: number };
+  /** `total` / `totalDurationSec` = PENDING (unassigned). CODE-029 — `awaitingDriver*` = assigned by
+   * the carrier, waiting for the driver's confirmation (PENDING_CONFIRMATION); optional for older APIs. */
+  unidentified: { total: number; totalDurationSec: number; awaitingDriver?: number; awaitingDriverDurationSec?: number };
   notifications: { unreadCount: number };
   carrier: { id: string; name: string; timezone: string | null };
   /** UI-004 — `inactive` / `outOfService` are fleet-wide record-status counts (additive). */

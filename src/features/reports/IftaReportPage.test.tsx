@@ -86,7 +86,8 @@ describe('W-12 Reports · IFTA', () => {
     expect(screen.getByRole('button', { name: 'Export CSV' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Generate report' })).toBeInTheDocument();
     expect(screen.getByText('Miles by jurisdiction')).toBeInTheDocument();
-    expect(screen.getByText('Q3 2026 · IFTA-ready')).toBeInTheDocument();
+    // LIVE-031 — "IFTA-ready" only once the summary shows fuel on file.
+    expect(await screen.findByText('Q3 2026 · IFTA-ready')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Download IFTA PDF' })).toBeInTheDocument();
     await screen.findByRole('row', { name: /Ohio/ });
     // Labels appear once as KPI and (for `Total miles`) again as a column header.
@@ -418,10 +419,10 @@ describe('W-12 Reports · IFTA', () => {
     expect(await dialog.findByText('Range exceeds 62 days.')).toBeInTheDocument();
   });
 
-  it('falls back to the current carrier-zone quarter for a malformed ?quarter=', () => {
+  it('falls back to the current carrier-zone quarter for a malformed ?quarter=', async () => {
     renderPage(<IftaReportPage />, '/reports/ifta?quarter=bogus');
     const current = quarterLabel(quarterOf(todayKey('America/New_York')));
-    expect(screen.getByText(`${current} · IFTA-ready`)).toBeInTheDocument();
+    expect(await screen.findByText(`${current} · IFTA-ready`)).toBeInTheDocument();
   });
 
   it('schedules a report by email only, validating the recipients', async () => {

@@ -37,7 +37,7 @@ const IPHONE =
 const PROFILE = {
   id: 'usr_fleet_manager',
   email: 'mike.torres@universal-logistics.example',
-  googleUid: null,
+  googleLinked: false,
   authProvider: 'PASSWORD',
   firstName: 'Mike',
   lastName: 'Torres',
@@ -196,7 +196,7 @@ describe('W-26 — states', () => {
 
   it('describes Google sign-in outside the dev build', async () => {
     vi.stubEnv('VITE_AUTH_MODE', 'production');
-    api({ profile: { ...PROFILE, authProvider: 'GOOGLE', googleUid: 'g-1' } });
+    api({ profile: { ...PROFILE, authProvider: 'GOOGLE', googleLinked: true } });
     renderPage();
     const security = await screen.findByRole('region', { name: 'Security & sign-in' });
     expect(await within(security).findByText('Google account')).toBeInTheDocument();

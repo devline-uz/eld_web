@@ -210,6 +210,7 @@ export const endpoints = {
     events: '/safety/events',
     event: (id: string) => `/safety/events/${id}`,
     scorecard: '/safety/scorecard',
+    summary: '/safety/summary',
     coaching: '/safety/coaching',
   },
   geofences: {

@@ -99,7 +99,8 @@ export function EditWorkOrderModal({ workOrder, onClose }: { workOrder: WorkOrde
         vendor: vendor.trim() || null,
         costUsd: cost.trim() ? Number(cost) : null,
         odometerMi: odometer.trim() ? Number(odometer) : null,
-        estimatedLaborHours: estimatedLaborHours.trim() ? Number(estimatedLaborHours) : undefined,
+        // CODE-077 — an emptied estimate clears too (the backend accepts `null` now).
+        estimatedLaborHours: estimatedLaborHours.trim() ? Number(estimatedLaborHours) : null,
         dueAt: dueDateToIso(dueDate, carrierTz) ?? null,
         keepOutOfService,
         notifyDriver,

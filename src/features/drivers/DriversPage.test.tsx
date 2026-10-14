@@ -2,7 +2,7 @@
 // served by MSW per web/backend-gaps.md).
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -81,6 +81,45 @@ beforeEach(() => {
 });
 
 describe('W-06 Drivers', () => {
+  it('LIVE-023 · DRIVER and HOME TERMINAL sort the whole roster on the server; the sort lives in the URL', async () => {
+    const sorts: Array<string | null> = [];
+    server.use(
+      http.get(url(endpoints.drivers.roster), ({ request }) => {
+        const params = new URL(request.url).searchParams;
+        if (params.get('limit') === '10') sorts.push(params.get('sort'));
+        return ok({ items: [rosterEntry('drv_a', 'Ada', 'DRIVING')], page: 1, limit: 10, total: 1, totalPages: 1 });
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    const driverHeader = await screen.findByRole('columnheader', { name: /DRIVER/ });
+    await user.click(within(driverHeader).getByRole('button'));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('sort=lastName%3Aasc'));
+    await waitFor(() => expect(sorts).toContain('lastName:asc'));
+    expect(screen.getByRole('columnheader', { name: /DRIVER/ })).toHaveAttribute('aria-sort', 'ascending');
+    // HOS clocks are computed per page — they are not offered as a sort.
+    expect(within(screen.getByRole('columnheader', { name: /CYCLE LEFT/ })).queryByRole('button')).toBeNull();
+  });
+
+  it('LIVE-034 · counts show placeholders, not zeros, while the roster loads', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.get(url(endpoints.drivers.roster), async () => {
+        await gate;
+        return ok({ items: [rosterEntry('drv_a', 'Ada', 'DRIVING')], page: 1, limit: 10, total: 1, totalPages: 1 });
+      }),
+    );
+    renderPage();
+    const allChip = await screen.findByRole('button', { name: /^All/ });
+    expect(allChip).not.toHaveTextContent('0');
+    expect(within(allChip).getByRole('status', { name: 'Loading count' })).toBeInTheDocument();
+    release();
+    await waitFor(() => expect(screen.getByRole('button', { name: /^All/ })).toHaveTextContent('All 1'));
+  });
+
   it('renders the exact §13.2 empty-state copy when the roster is empty', async () => {
     server.use(
       http.get(url(endpoints.drivers.roster), () =>
@@ -164,7 +203,8 @@ describe('W-06 Drivers', () => {
     expect(screen.getByText('Assign trip')).toBeInTheDocument();
     expect(screen.getByText('Compliance')).toBeInTheDocument();
     expect(screen.getByText('Request log edit')).toBeInTheDocument();
-    expect(screen.getByText('Certify on behalf')).toBeInTheDocument();
+    // CODE-029 — certification is driver-only: no carrier "Certify on behalf" action.
+    expect(screen.queryByText('Certify on behalf')).not.toBeInTheDocument();
     expect(screen.getByText('Export 8-day RODS')).toBeInTheDocument();
     expect(screen.getByText('Reset app password')).toBeInTheDocument();
     expect(screen.getByText('Deactivate driver')).toBeInTheDocument();
@@ -190,7 +230,6 @@ describe('W-06 Drivers', () => {
       'Send message',
       'Assign trip',
       'Request log edit',
-      'Certify on behalf',
       'Export 8-day RODS',
     ]) {
       await user.click(screen.getAllByRole('button', { name: 'Row actions' })[0]!);

@@ -1,7 +1,8 @@
 // The one switch for the screen-level demo-data fallbacks (DVIR & Maintenance, Safety, IFTA):
 // `VITE_DEMO_FALLBACK` in `eld_web/.env`.
-//   (unset)    `vite dev` → fallback (demo rows only while the API is empty or failing); vitest → off
-//   `fallback` demo rows while the API is empty or failing (also `true` / `1`)
+//   (unset)    `vite dev` → fallback (demo rows only while the API answers an empty list); vitest → off
+//   `fallback` demo rows while the API answers an EMPTY list (also `true` / `1`). A failed or
+//              forbidden (403) request shows the real ErrorState — never masked (CODE-086).
 //   `always`   ignore the API and always show the demo rows
 //   `off`      never show demo rows (also `false` / `0`)
 // PRODUCTION BUILDS ARE ALWAYS `off`, whatever the env says: `import.meta.env.PROD` is inlined as
@@ -36,3 +37,19 @@ export const DEMO_FALLBACK_MODE: MockMode = import.meta.env.PROD
 
 /** `false` in every production build (a compile-time constant there). */
 export const DEMO_FALLBACK_ENABLED: boolean = DEMO_FALLBACK_MODE !== 'off';
+
+/**
+ * CODE-086 — one rule for every demo-fallback screen: `always` shows demo rows, `fallback`
+ * only once the real request has SUCCEEDED with no rows. An error (incl. 401/403) is never
+ * hidden behind demo data — the screen shows its own ErrorState / ForbiddenState.
+ */
+export function shouldUseDemoRows(
+  real: { isLoading: boolean; isError: boolean },
+  realCount: number,
+  mode: MockMode = DEMO_FALLBACK_MODE,
+): boolean {
+  if (mode === 'off') return false;
+  if (mode === 'always') return true;
+  if (real.isLoading || real.isError) return false;
+  return realCount === 0;
+}

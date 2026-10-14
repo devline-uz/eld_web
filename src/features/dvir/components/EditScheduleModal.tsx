@@ -14,7 +14,7 @@ import { ApiError, formErrorMessage } from '@/shared/api/errors';
 import { formatDistance, formatNumber } from '@/shared/format/numbers';
 import { dateOnlyKey, dateOnlyToInstant, formatDateOnly, todayInTz } from '@/shared/format/datetime';
 import { useCarrierTimezone } from '@/shared/auth/useCarrierTimezone';
-import { computeDue, overdueReasons } from '../lib/maintenanceDue';
+import { computeDue, scheduleBaseline, overdueReasons } from '../lib/maintenanceDue';
 
 const inputClass = 'h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text';
 
@@ -164,24 +164,27 @@ export function EditScheduleModal({ schedule, onClose }: { schedule?: ScheduleTa
     !lastServiceMiAhead;
 
   // WD-112 — non-blocking preview of the state the server will compute on save, with the same
-  // inputs it uses: an emptied last-service field is not sent, so on edit the stored value stays
-  // (`dto.lastServiceMi ?? schedule.lastServiceMi`), on create it is null.
+  // inputs it uses: an emptied last-service field clears it (CODE-077), so it counts as none.
   const preview = (() => {
     if (!numbersValid || lastServiceMiAhead) return null;
     const mi = intervalMi.trim() ? Number(intervalMi) : null;
     const days = intervalDays.trim() ? Number(intervalDays) : null;
     if (mi == null && days == null) return null;
     if (mi != null && currentOdometerMi == null) return null;
-    const lastMi = lastServiceMi.trim() ? Number(lastServiceMi) : (schedule?.lastServiceMi ?? null);
+    const lastMi = lastServiceMi.trim() ? Number(lastServiceMi) : null;
     const pickedLastAt = dateOnlyToInstant(lastServiceAt, carrierTz);
-    const lastAt = pickedLastAt ? new Date(pickedLastAt) : schedule?.lastServiceAt ? new Date(schedule.lastServiceAt) : null;
+    const lastAt = pickedLastAt ? new Date(pickedLastAt) : null;
+    const now = new Date();
     const due = computeDue({
       intervalMi: mi,
       intervalDays: days,
       lastServiceMi: lastMi,
       lastServiceAt: lastAt,
       currentOdometerMi: currentOdometerMi ?? 0,
-      now: new Date(),
+      now,
+      // QA CODE-037 — same baseline the server uses: today's odometer/date on create, the stored
+      // creation point on edit.
+      ...(schedule ? scheduleBaseline(schedule) : { baselineMi: currentOdometerMi, baselineAt: now }),
     });
     return due.state === 'OVERDUE' ? { due, reasons: overdueReasons(due) } : null;
   })();
@@ -214,13 +217,25 @@ export function EditScheduleModal({ schedule, onClose }: { schedule?: ScheduleTa
       setServerFieldErrors(placed);
       setServerError(formErrorMessage(error, PLACED_FIELDS, FIELD_LABELS));
     };
-    // `lastServiceMi`/`lastServiceAt` are not nullable in `UpdateMaintenanceScheduleDto` — sending
-    // `null` for an emptied field was answered 422, so an empty one is left out instead.
+    // CODE-077 — on edit an emptied last-service field sends `null` and clears (the backend DTO
+    // accepts it now); an untouched one is not sent. On create an empty field is simply omitted.
+    const initialLastMi = initial.lastServiceMi != null ? String(initial.lastServiceMi) : '';
     const lastService = {
-      lastServiceMi: lastServiceMi.trim() ? Number(lastServiceMi) : undefined,
+      lastServiceMi: lastServiceMi.trim()
+        ? Number(lastServiceMi)
+        : !isCreate && initialLastMi !== ''
+          ? null
+          : undefined,
       // CODE-038 — midnight of the picked day in the carrier zone (never ahead of the clock, so
       // "today" is not refused as future); an unchanged day is not re-sent, keeping the stored time.
-      lastServiceAt: lastServiceAt !== initialLastServiceDay ? dateOnlyToInstant(lastServiceAt, carrierTz) : undefined,
+      lastServiceAt:
+        lastServiceAt === initialLastServiceDay
+          ? undefined
+          : lastServiceAt
+            ? dateOnlyToInstant(lastServiceAt, carrierTz)
+            : isCreate
+              ? undefined
+              : null,
     };
     if (isCreate) {
       createMutation.mutate(
@@ -229,7 +244,8 @@ export function EditScheduleModal({ schedule, onClose }: { schedule?: ScheduleTa
           name: name.trim(),
           intervalMi: intervalMi.trim() ? Number(intervalMi) : undefined,
           intervalDays: intervalDays.trim() ? Number(intervalDays) : undefined,
-          ...lastService,
+          lastServiceMi: lastService.lastServiceMi ?? undefined,
+          lastServiceAt: lastService.lastServiceAt ?? undefined,
           enabled,
         },
         {

@@ -125,7 +125,8 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
       vin: vehicle?.vin ?? '',
       make: vehicle?.make ?? '',
       model: vehicle?.model ?? '',
-      year: vehicle?.year ?? currentYear,
+      // Create pre-fills this year; editing a unit without a year keeps the input empty.
+      year: vehicle ? (vehicle.year ?? undefined) : currentYear,
       licensePlate: vehicle?.licensePlate ?? '',
       licenseState: vehicle?.plateState ?? '',
       odometer: vehicle?.odometerMi,
@@ -178,9 +179,10 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
     const payload = {
       unitNumber: values.unitNumber,
       vin: values.vin,
-      make: values.make,
-      model: values.model,
-      year: values.year,
+      // CODE-045 — optional; on edit an emptied Make / Model / Year is sent as `null` (cleared).
+      make: isEdit ? clearable(values.make, vehicle?.make) : values.make || undefined,
+      model: isEdit ? clearable(values.model, vehicle?.model) : values.model || undefined,
+      year: values.year ?? (isEdit && vehicle?.year != null ? null : undefined),
       // CODE-010 — on edit a field the user emptied is sent as `null` (cleared); create never
       // sends `null`. Clearing the ELD serial unpairs the unit's device.
       licensePlate: isEdit ? clearable(uniques.licensePlate, vehicle?.licensePlate) : uniques.licensePlate,
@@ -276,17 +278,17 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
           </Field>
         </div>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <Field label="Make" required error={errors.make?.message}>
+          <Field label="Make" error={errors.make?.message}>
             <input {...register('make')} maxLength={LIMITS.vehicleMakeModelMax} disabled={submitting} className={inputClass} />
           </Field>
-          <Field label="Model" required error={errors.model?.message}>
+          <Field label="Model" error={errors.model?.message}>
             <input {...register('model')} maxLength={LIMITS.vehicleMakeModelMax} disabled={submitting} className={inputClass} />
           </Field>
-          <Field label="Year" required error={errors.year?.message}>
+          <Field label="Year" error={errors.year?.message}>
             <input
               type="number"
               min={1970}
-              max={currentYear}
+              max={currentYear + 1}
               {...register('year', { valueAsNumber: true })}
               disabled={submitting}
               className={inputClass}

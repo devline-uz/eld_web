@@ -52,6 +52,7 @@ import { searchEmptyState } from '@/shared/ui/copy';
 import {
   applyUnitPatches,
   fleetHasUnit,
+  isStaleFrame,
   telemetryUnitPatch,
   type TelemetryPointPayload,
   type UnitPatch,
@@ -372,12 +373,18 @@ export default function LiveFleetPage() {
   }, []);
   const patchFleet = useThrottledPatch<LiveFleetResponse | undefined, Map<string, UnitPatch>>(qk.liveFleet(), applyPending);
   const invalidateFleet = useThrottledInvalidate(qk.liveFleet());
+  // CODE-023 — newest frame time applied per unit, so a replayed (older) fix never moves a marker back.
+  const lastFrameAtRef = useRef(new Map<string, number>());
   const onTelemetry = (payload: TelemetryPointPayload) => {
     const patch = telemetryUnitPatch(payload);
-    if (!patch || !fleetHasUnit(queryClient.getQueryData<LiveFleetResponse>(qk.liveFleet()), payload.vehicleId)) {
+    const fleet = queryClient.getQueryData<LiveFleetResponse>(qk.liveFleet());
+    if (!patch || !fleetHasUnit(fleet, payload.vehicleId)) {
       invalidateFleet();
       return;
     }
+    const unit = fleet?.items.find((u) => u.vehicleId === payload.vehicleId);
+    if (isStaleFrame(patch.lastSeenAt, unit?.lastSeenAt, lastFrameAtRef.current.get(payload.vehicleId))) return;
+    if (patch.lastSeenAt) lastFrameAtRef.current.set(payload.vehicleId, Date.parse(patch.lastSeenAt));
     const pending = pendingPatchesRef.current;
     pending.set(payload.vehicleId, { ...pending.get(payload.vehicleId), ...patch });
     patchFleet(pending);

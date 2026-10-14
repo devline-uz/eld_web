@@ -53,7 +53,7 @@ async function submitAssignment(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole('checkbox', { name: 'Select Unit 101 segment' }));
   await user.selectOptions(screen.getByRole('combobox', { name: 'Resolution for Unit 101' }), 'drv_1');
   await user.type(screen.getByRole('textbox'), 'Forgot to log in.');
-  await user.click(screen.getByRole('button', { name: 'Assign 1 segment' }));
+  await user.click(screen.getByRole('button', { name: 'Send 1 segment for confirmation' }));
 }
 
 function fail(error: Error) {

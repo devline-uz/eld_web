@@ -31,4 +31,24 @@ describe('searchPlaces', () => {
     expect(url.searchParams.get('key')).toBe('k');
     expect(url.searchParams.get('country')).toBe('us,ca');
   });
+
+  it('LIVE-029 drops whole countries and states/provinces (a stop must be a real place)', async () => {
+    vi.stubEnv('VITE_MAP_API_KEY', 'k');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            features: [
+              { place_name: 'Canada', center: [-106, 56], place_type: ['country'] },
+              { place_name: 'Ontario, Canada', center: [-85, 50], place_type: ['region'] },
+              { place_name: 'Toronto, Ontario, Canada', center: [-79.38, 43.65], place_type: ['place'] },
+            ],
+          }),
+        ),
+      ),
+    );
+    const { searchPlaces } = await import('./geocode');
+    expect(await searchPlaces('Canada')).toEqual([{ name: 'Toronto, Ontario, Canada', lat: 43.65, lon: -79.38 }]);
+  });
 });

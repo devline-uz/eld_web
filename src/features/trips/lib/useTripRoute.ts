@@ -43,20 +43,46 @@ function stopPoint(stop: RouteStop | null): LatLon | null {
 
 const coordsKey = (points: readonly LatLon[]): string => points.map((p) => `${p.lon},${p.lat}`).join(';');
 
+/** A road route: its geometry plus OSRM's length and drive time (LIVE-029). */
+export interface RoadRoute {
+  coordinates: [number, number][];
+  /** Metres; `null` when the router did not say. */
+  distanceM: number | null;
+  /** Seconds; `null` when the router did not say. */
+  durationS: number | null;
+}
+
+const METERS_PER_MILE = 1609.344;
+export const metersToMiles = (m: number): number => Math.round((m / METERS_PER_MILE) * 10) / 10;
+
+/** OSRM road route through `points` in order (pickup, waypoints…, delivery). */
+export async function fetchRoadRouteSummary(
+  points: readonly LatLon[],
+  signal?: AbortSignal,
+  base: string | null = ROUTING_BASE_URL,
+): Promise<RoadRoute> {
+  if (!base) throw new Error('Road routing is not configured');
+  const url = `${base}/route/v1/driving/${coordsKey(points)}?overview=full&geometries=geojson`;
+  const res = await fetch(url, { signal });
+  if (!res.ok) throw new Error(`Routing failed (${res.status})`);
+  const body = (await res.json()) as {
+    code?: string;
+    routes?: { geometry?: { coordinates?: [number, number][] }; distance?: number; duration?: number }[];
+  };
+  const first = body.routes?.[0];
+  const coords = first?.geometry?.coordinates;
+  if (body.code !== 'Ok' || !coords || coords.length < 2) throw new Error('No route found');
+  const finite = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null);
+  return { coordinates: coords, distanceM: finite(first?.distance), durationS: finite(first?.duration) };
+}
+
 /** OSRM road route through `points` in order (pickup, waypoints…, delivery) as [lon, lat] pairs. */
 export async function fetchRoadRoute(
   points: readonly LatLon[],
   signal?: AbortSignal,
   base: string | null = ROUTING_BASE_URL,
 ): Promise<[number, number][]> {
-  if (!base) throw new Error('Road routing is not configured');
-  const url = `${base}/route/v1/driving/${coordsKey(points)}?overview=full&geometries=geojson`;
-  const res = await fetch(url, { signal });
-  if (!res.ok) throw new Error(`Routing failed (${res.status})`);
-  const body = (await res.json()) as { code?: string; routes?: { geometry?: { coordinates?: [number, number][] } }[] };
-  const coords = body.routes?.[0]?.geometry?.coordinates;
-  if (body.code !== 'Ok' || !coords || coords.length < 2) throw new Error('No route found');
-  return coords;
+  return (await fetchRoadRouteSummary(points, signal, base)).coordinates;
 }
 
 export type TripRouteState =
@@ -73,6 +99,9 @@ export type TripRouteState =
       routing: boolean;
       /** CODE-057 — false when the build has no router (`VITE_ROUTING_URL` unset in production). */
       routingConfigured: boolean;
+      /** LIVE-029 — the road route's length (mi) and drive time (s); `null` without a road route. */
+      distanceMi: number | null;
+      durationSec: number | null;
     };
 
 const NO_WAYPOINTS: readonly RouteStop[] = [];
@@ -106,7 +135,7 @@ export function useTripRoute(
   const mid = points.slice(1, -1).filter((p): p is LatLon => p !== null);
   const route = useQuery({
     queryKey: qk.tripRoute(a && b ? coordsKey([a, ...mid, b]) : ''),
-    queryFn: ({ signal }) => fetchRoadRoute([a!, ...mid, b!], signal),
+    queryFn: ({ signal }) => fetchRoadRouteSummary([a!, ...mid, b!], signal),
     enabled: Boolean(a && b && ROUTING_BASE_URL),
     staleTime: Infinity,
     retry: 1,
@@ -118,16 +147,18 @@ export function useTripRoute(
   if (!a || !b) return { status: 'no-location' };
   const routingConfigured = ROUTING_BASE_URL !== null;
   if (route.isPending && route.fetchStatus !== 'idle') {
-    return { status: 'ready', pickup: a, delivery: b, waypoints: mid, line: null, approximate: true, routing: true, routingConfigured };
+    return { status: 'ready', pickup: a, delivery: b, waypoints: mid, line: null, approximate: true, routing: true, routingConfigured, distanceMi: null, durationSec: null };
   }
   return {
     status: 'ready',
     pickup: a,
     delivery: b,
     waypoints: mid,
-    line: route.data ?? null,
+    line: route.data?.coordinates ?? null,
     approximate: !route.data,
     routing: false,
     routingConfigured,
+    distanceMi: route.data?.distanceM != null ? metersToMiles(route.data.distanceM) : null,
+    durationSec: route.data?.durationS != null ? Math.round(route.data.durationS) : null,
   };
 }

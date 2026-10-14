@@ -20,8 +20,12 @@ export interface Place {
 }
 
 interface GeocodingResponse {
-  features?: { place_name?: string; center?: [number, number] }[];
+  features?: { place_name?: string; center?: [number, number]; place_type?: string[] }[];
 }
+
+/** LIVE-029 — a whole country or state/province is not a stop or a fence ("Canada" was accepted as
+ * a delivery address); only places at city level or finer are offered. */
+const TOO_BROAD_PLACE_TYPES = new Set(['country', 'region', 'subregion']);
 
 /** Up to 5 places in the US and Canada (the carrier's operating area) matching `query`. */
 export async function searchPlaces(query: string, signal?: AbortSignal): Promise<Place[]> {
@@ -36,7 +40,7 @@ export async function searchPlaces(query: string, signal?: AbortSignal): Promise
   if (!response.ok) throw new Error(`Geocoding failed (${response.status})`);
   const body = (await response.json()) as GeocodingResponse;
   return (body.features ?? []).flatMap((feature) =>
-    feature.place_name && feature.center
+    feature.place_name && feature.center && !(feature.place_type ?? []).some((t) => TOO_BROAD_PLACE_TYPES.has(t))
       ? [{ name: feature.place_name, lon: feature.center[0], lat: feature.center[1] }]
       : [],
   );

@@ -173,3 +173,18 @@ describe('11.11 refusals are never silent', () => {
     expect(input).toHaveValue('10000');
   });
 });
+
+describe('LIVE-020 — field errors clear when the field changes', () => {
+  it('drops the end-time order error once the end time is cleared', async () => {
+    const user = userEvent.setup();
+    const dialog = renderModal();
+    const end = within(dialog).getByLabelText(/End time/);
+    await user.type(end, '01:00:00');
+    await user.type(within(dialog).getByRole('textbox', { name: /Reason for the edit/ }), 'Fix the end.');
+    await user.click(within(dialog).getByRole('button', { name: 'Send edit request' }));
+    expect(within(dialog).getByText('End time must be after the start time.')).toBeInTheDocument();
+
+    await user.clear(end);
+    expect(within(dialog).queryByText('End time must be after the start time.')).not.toBeInTheDocument();
+  });
+});

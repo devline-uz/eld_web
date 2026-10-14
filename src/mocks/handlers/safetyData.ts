@@ -27,6 +27,32 @@ export const safetyDataHandlers = [
     return ok(serverPage<SafetyEventRow>(inWindow, request, ['locationName']));
   }),
 
+  // CODE-040 — KPI aggregate over the same seeded events (rolling 30 days + the 30 before).
+  http.get(url(endpoints.safety.summary), () => {
+    const now = Date.now();
+    const day = 24 * 60 * 60 * 1000;
+    const counts = (fromMs: number, toMs: number) => {
+      const rows = SAFETY_EVENTS.filter((e) => {
+        const t = new Date(e.occurredAt).getTime();
+        return t >= fromMs && t < toMs;
+      });
+      return {
+        total: rows.length,
+        harsh: rows.filter((e) => e.type.startsWith('HARSH_')).length,
+        speeding: rows.filter((e) => e.type === 'SPEEDING').length,
+        seatbelt: rows.filter((e) => e.type === 'SEATBELT').length,
+        coached: rows.filter((e) => e.status === 'COACHED').length,
+        pendingCoaching: rows.filter((e) => e.status === 'NEW').length,
+      };
+    };
+    return ok({
+      from: new Date(now - 30 * day).toISOString(),
+      to: new Date(now).toISOString(),
+      current: counts(now - 30 * day, now),
+      previous: counts(now - 60 * day, now - 30 * day),
+    });
+  }),
+
   http.get(url(endpoints.safety.scorecard), () =>
     // Phase 1 shape (backend D-133): latest rolling-30-day period, server-ranked rows (unscored
     // "Not enough miles" rows last) and the server-computed mile-weighted fleet block.

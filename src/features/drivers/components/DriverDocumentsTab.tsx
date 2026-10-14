@@ -12,7 +12,8 @@ import { Card, SectionHeader } from '@/shared/ui/Card';
 import { ConfirmDelete } from '@/shared/ui/Modal';
 import { useToast } from '@/shared/ui/Toast';
 import { ErrorState, LoadingState } from '@/shared/ui/states';
-import { formatLocal } from '@/shared/format/datetime';
+import { formatCarrier, formatDateOnly } from '@/shared/format/datetime';
+import { useCarrierTimezone } from '@/shared/auth/useCarrierTimezone';
 import { formErrorMessage } from '@/shared/api/errors';
 import {
   useDriverDocuments,
@@ -35,6 +36,9 @@ const TYPE_LABEL: Record<DriverDocumentType, string> = {
 const FILE_NAME_MAX = 200;
 
 export function DriverDocumentsTab({ driverId }: { driverId: string }) {
+  // LIVE-007 — company-context dates: the upload instant in the carrier zone; the expiry is a
+  // picked calendar day (stored as that day's UTC midnight), shown on that same day everywhere.
+  const carrierTz = useCarrierTimezone();
   const { toast } = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploadType, setUploadType] = useState<DriverDocumentType>('CDL');
@@ -199,9 +203,9 @@ export function DriverDocumentsTab({ driverId }: { driverId: string }) {
                   <td className="p-3">
                     <Badge tone="neutral">{TYPE_LABEL[doc.type]}</Badge>
                   </td>
-                  <td className="p-3 tabular-nums">{formatLocal(doc.uploadedAt, 'shortDate')}</td>
+                  <td className="p-3 tabular-nums">{formatCarrier(doc.uploadedAt, carrierTz, 'shortDate')}</td>
                   <td className="p-3 tabular-nums">
-                    {doc.expiresAt ? formatLocal(doc.expiresAt, 'shortDate') : '—'}
+                    {doc.expiresAt ? formatDateOnly(doc.expiresAt, carrierTz) : '—'}
                   </td>
                   <td className="p-3 text-right">
                     <Can perm="drivers" level="FULL">

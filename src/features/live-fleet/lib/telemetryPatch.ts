@@ -32,6 +32,25 @@ export function telemetryUnitPatch(payload: TelemetryPointPayload): UnitPatch | 
   return patch;
 }
 
+/** Slack for comparing a frame with the row's `lastSeenAt`, which may come from a device heartbeat
+ * newer than the unit's last GPS fix. */
+export const STALE_FRAME_SLACK_MS = 5 * 60_000;
+
+/**
+ * CODE-023 — true when a frame is older than what the marker already shows, so applying it would
+ * move the unit backwards (an offline backfill replays hours-old fixes). Compared with the newest
+ * frame already applied for the unit, else with the row's `lastSeenAt` minus a heartbeat slack.
+ * A frame without a time can't be ordered and is applied as before.
+ */
+export function isStaleFrame(frameAt: string | null | undefined, unitLastSeenAt: string | null | undefined, lastAppliedAt: number | undefined): boolean {
+  if (!frameAt) return false;
+  const at = Date.parse(frameAt);
+  if (!Number.isFinite(at)) return false;
+  if (lastAppliedAt !== undefined) return at < lastAppliedAt;
+  const seen = unitLastSeenAt ? Date.parse(unitLastSeenAt) : NaN;
+  return Number.isFinite(seen) && at < seen - STALE_FRAME_SLACK_MS;
+}
+
 /** True when the cached fleet holds the frame's unit, i.e. a patch has a row to land on. */
 export function fleetHasUnit(fleet: LiveFleetResponse | undefined, vehicleId: string): boolean {
   return Boolean(fleet?.items.some((unit) => unit.vehicleId === vehicleId));

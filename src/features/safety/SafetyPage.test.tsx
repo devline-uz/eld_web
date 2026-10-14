@@ -200,6 +200,7 @@ describe('SafetyPage', () => {
 
     it('defaults to Events and counts the 30-day window, not the server total', async () => {
       server.use(http.get(url(endpoints.safety.events), () => ok({ items, page: 1, limit: 500, total: 17440, totalPages: 1 })));
+      server.use(http.get(url(endpoints.safety.summary), () => new HttpResponse(null, { status: 500 })));
       renderPage();
       const events = await screen.findByRole('tab', { name: /^Events/ });
       expect(events).toHaveAttribute('aria-selected', 'true');
@@ -207,6 +208,21 @@ describe('SafetyPage', () => {
       expect(within(screen.getByRole('tab', { name: /^Coaching/ })).getByText('1')).toBeInTheDocument();
       expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', 'safety-tab-events');
       expect(await screen.findByText('2 events · 1 need review')).toBeInTheDocument();
+    });
+
+    it('CODE-040 — counts and KPIs come from the server summary, not the 500 loaded rows', async () => {
+      const counts = { total: 1234, harsh: 900, speeding: 300, seatbelt: 34, coached: 77, pendingCoaching: 640 };
+      server.use(http.get(url(endpoints.safety.events), () => ok({ items, page: 1, limit: 500, total: 17440, totalPages: 1 })));
+      server.use(
+        http.get(url(endpoints.safety.summary), () =>
+          ok({ from: '2026-09-14T00:00:00.000Z', to: '2026-10-14T00:00:00.000Z', current: counts, previous: { ...counts, harsh: 1000 } }),
+        ),
+      );
+      renderPage();
+      const events = await screen.findByRole('tab', { name: /^Events/ });
+      await within(events).findByText('1,234');
+      expect(within(screen.getByRole('tab', { name: /^Coaching/ })).getByText('77')).toBeInTheDocument();
+      expect(await screen.findByText('1,234 events · 640 need review')).toBeInTheDocument();
     });
 
     it('switches to Coaching on click and lists only coached events', async () => {
@@ -467,5 +483,68 @@ describe('SafetyPage — Phase 1 scorecard', () => {
     renderPage();
     expect((await screen.findAllByText('84')).length).toBeGreaterThan(0);
     expect(screen.queryByText(/pts$/)).not.toBeInTheDocument();
+  });
+});
+
+describe('SafetyPage — LIVE-025', () => {
+  const harsh = {
+    id: 'sfe_h',
+    type: 'HARSH_BRAKING',
+    status: 'NEW',
+    severity: 4,
+    occurredAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+    vehicleId: 'veh_1',
+    driverId: null,
+    speedMph: null,
+    speedLimitMph: null,
+    gForce: null,
+    latitude: 41.12345,
+    longitude: -87.98765,
+    locationName: null,
+  };
+
+  it('shows the detector severity and the coordinates when g-force and place name are missing', async () => {
+    server.use(http.get(url(endpoints.safety.events), () => ok({ items: [harsh], page: 1, limit: 500, total: 1, totalPages: 1 })));
+    renderPage();
+    const table = await screen.findByRole('table', { name: 'Safety events' });
+    expect(within(table).getByText('Critical')).toBeInTheDocument();
+    expect(within(table).getByText('41.1234, -87.9877')).toBeInTheDocument();
+  });
+
+  it('the coaching tile says events await review, not that a session is pending', async () => {
+    server.use(
+      http.get(url(endpoints.safety.events), () => ok({ items: [harsh], page: 1, limit: 500, total: 1, totalPages: 1 })),
+      http.get(url(endpoints.safety.summary), () =>
+        ok({
+          from: new Date(Date.now() - 30 * 86_400_000).toISOString(),
+          to: new Date().toISOString(),
+          current: { total: 1, harsh: 1, speeding: 0, seatbelt: 0, coached: 0, pendingCoaching: 1 },
+          previous: { total: 0, harsh: 0, speeding: 0, seatbelt: 0, coached: 0, pendingCoaching: 0 },
+        }),
+      ),
+    );
+    renderPage();
+    expect(await screen.findByText('1 event to review')).toBeInTheDocument();
+    expect(screen.queryByText('1 pending')).not.toBeInTheDocument();
+  });
+
+  it('pages a long scorecard and says the period ends yesterday', async () => {
+    const user = userEvent.setup();
+    const items = Array.from({ length: 72 }, (_, i) => ({
+      driverId: `drv_${i}`, rank: i + 1, score: 90, scored: true, harshCount: 0, speedingCount: 0, milesDriven: 1000,
+    }));
+    server.use(
+      http.get(url(endpoints.safety.scorecard), () =>
+        ok({
+          items, periodStart: '2026-09-13', periodEnd: '2026-10-12', minMiles: 100,
+          fleet: { score: 90, previousScore: null, trend: null, scoredDrivers: 72, unscoredDrivers: 0, belowThresholdCount: 0, milesDriven: 72000 },
+        }),
+      ),
+    );
+    renderPage();
+    await user.click(await screen.findByRole('tab', { name: /^Scorecards/ }));
+    const table = await screen.findByRole('table', { name: 'Driver scorecard' });
+    expect(within(table).getAllByRole('row')).toHaveLength(26);
+    expect(screen.getByText(/updated nightly, today counts tomorrow/)).toBeInTheDocument();
   });
 });

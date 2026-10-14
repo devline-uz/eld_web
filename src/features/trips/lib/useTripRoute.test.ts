@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OSRM_DEMO_URL, ROUTING_BASE_URL, resolveRoutingBaseUrl } from '@/shared/api/endpoints';
 import { tripRouteEnds, type StopType } from '@/shared/api/trips';
-import { fetchRoadRoute, intermediateTripStops, orderTripStops } from './useTripRoute';
+import { fetchRoadRoute, fetchRoadRouteSummary, intermediateTripStops, metersToMiles, orderTripStops } from './useTripRoute';
 
 const s = (type: StopType, sequence: number, name: string) => ({ type, sequence, name });
 
@@ -50,6 +50,23 @@ describe('fetchRoadRoute', () => {
     expect(fetchMock.mock.calls[0]![0]).toBe(
       `${ROUTING_BASE_URL}/route/v1/driving/-87.6,41.8;-86.2,41.6;-85.1,41.1;-83,39.9?overview=full&geometries=geojson`,
     );
+  });
+});
+
+describe('fetchRoadRouteSummary (LIVE-029)', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('returns the road length and drive time the router reports', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ code: 'Ok', routes: [{ geometry: { coordinates: [[-87.6, 41.8], [-83, 39.9]] }, distance: 482803, duration: 17100 }] }),
+      }),
+    );
+    const route = await fetchRoadRouteSummary([{ lat: 41.8, lon: -87.6 }, { lat: 39.9, lon: -83 }], undefined, 'https://osrm.example');
+    expect(route).toEqual({ coordinates: [[-87.6, 41.8], [-83, 39.9]], distanceM: 482803, durationS: 17100 });
+    expect(metersToMiles(482803)).toBe(300);
   });
 });
 

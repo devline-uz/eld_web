@@ -25,7 +25,7 @@ import { useVehiclesLookup, useDriversLookup } from '@/shared/api/lookups';
 import { client } from '@/shared/api/client';
 import { endpoints } from '@/shared/api/endpoints';
 import { Button } from '@/shared/ui/Button';
-import { Badge, DutyBadge, type DutyStatus } from '@/shared/ui/Badge';
+import { Badge, DUTY_LABEL, DutyBadge, type DutyStatus } from '@/shared/ui/Badge';
 import { Avatar } from '@/shared/ui/Avatar';
 import { DataTable } from '@/shared/ui/DataTable';
 import { Pagination } from '@/shared/ui/Pagination';
@@ -60,9 +60,13 @@ import {
   VEHICLE_SORT_FIELDS,
 } from './lib/filters';
 
-type Segment = 'ALL' | 'ACTIVE' | 'INACTIVE' | 'UNASSIGNED';
-const SEGMENT_LABEL: Record<Segment, string> = { ALL: 'All', ACTIVE: 'Active', INACTIVE: 'Inactive', UNASSIGNED: 'Unassigned' };
-const SEGMENT_NOUN: Record<Segment, string> = { ALL: '', ACTIVE: 'active', INACTIVE: 'inactive', UNASSIGNED: 'unassigned' };
+// LIVE-022 — an "Out of service" chip, so the status chips add up to "All".
+type Segment = 'ALL' | 'ACTIVE' | 'INACTIVE' | 'OUT_OF_SERVICE' | 'UNASSIGNED';
+const SEGMENT_LABEL: Record<Segment, string> = { ALL: 'All', ACTIVE: 'Active', INACTIVE: 'Inactive', OUT_OF_SERVICE: 'Out of service', UNASSIGNED: 'Unassigned' };
+const SEGMENT_NOUN: Record<Segment, string> = { ALL: '', ACTIVE: 'active', INACTIVE: 'inactive', OUT_OF_SERVICE: 'out-of-service', UNASSIGNED: 'unassigned' };
+type StatusSegment = 'ACTIVE' | 'INACTIVE' | 'OUT_OF_SERVICE';
+const isStatusSegment = (segment: Segment): segment is StatusSegment =>
+  segment === 'ACTIVE' || segment === 'INACTIVE' || segment === 'OUT_OF_SERVICE';
 
 /** UI-004 — the secondary line under the STATUS badge: what the unit's ELD link says. */
 const CONNECTIVITY_NOTE: Record<LiveConnectivity, string | undefined> = {
@@ -97,7 +101,8 @@ export default function VehiclesPage() {
   const [params, setParams] = useSearchParams();
   const canFull = can('vehicles', 'FULL');
 
-  const segment = (params.get('segment') as Segment) ?? 'ALL';
+  const rawSegment = params.get('segment');
+  const segment: Segment = rawSegment && rawSegment in SEGMENT_LABEL ? (rawSegment as Segment) : 'ALL';
   const q = params.get('q') ?? '';
   const [searchInput, setSearchInput] = useState(q);
   const debouncedSearch = useDebounced(searchInput, 300);
@@ -149,14 +154,13 @@ export default function VehiclesPage() {
       page,
       limit,
       q: debouncedSearch.trim() || undefined,
-      status: segment === 'ACTIVE' || segment === 'INACTIVE' ? segment : undefined,
+      status: isStatusSegment(segment) ? segment : undefined,
       sort: vehicleSortParam(sort),
     },
     useWindow,
     filter: (rows) => {
       let out = rows;
-      if (segment === 'ACTIVE') out = out.filter((r) => r.status === 'ACTIVE');
-      if (segment === 'INACTIVE') out = out.filter((r) => r.status === 'INACTIVE');
+      if (isStatusSegment(segment)) out = out.filter((r) => r.status === segment);
       if (segment === 'UNASSIGNED') out = out.filter((r) => !r.driver);
       if (debouncedSearch.trim()) {
         const needle = debouncedSearch.trim().toLowerCase();
@@ -164,7 +168,9 @@ export default function VehiclesPage() {
           (r) =>
             r.unitNumber.toLowerCase().includes(needle) ||
             r.vin.toLowerCase().includes(needle) ||
-            (r.licensePlate ?? '').toLowerCase().includes(needle),
+            (r.licensePlate ?? '').toLowerCase().includes(needle) ||
+            // LIVE-022 — the ELD SERIAL column is searchable too (the server `q` matches it as well).
+            (r.eldSerial ?? '').toLowerCase().includes(needle),
         );
       }
       return sortVehicleRows(
@@ -174,6 +180,7 @@ export default function VehiclesPage() {
     },
   });
   const counts = useVehicleCounts();
+  const isPressedSegment = (value: Segment) => segment === value && !(value === 'ALL' && activeFilterCount > 0);
 
   // Drawer option lists come from the whole fleet, which is only loaded once the drawer opens
   // (or a filter is already active) — never on a plain page visit.
@@ -333,9 +340,11 @@ export default function VehiclesPage() {
         // WD-073 — `/live/fleet` is the slowest call on this screen (~2 s server-side); the table
         // no longer waits for it. The duty badge fills in when the snapshot lands.
         if (!live && liveFleet.isLoading) return <span aria-label="Loading status" className="inline-block h-5 w-16 animate-pulse rounded-full bg-bg-subtle" />;
-        // An ELD_OFFLINE "duty" is the link, not the driver's status — it reads as the note below.
-        const headline = duty && duty !== 'ELD_OFFLINE' ? <DutyBadge status={duty} /> : <Badge tone="success" dot>Active</Badge>;
-        return <span className="flex flex-col items-start gap-0.5">{headline}{note}</span>;
+        // LIVE-022 — the headline is always the unit's own status; the driver's duty is a secondary
+        // line, never shown as if it were the vehicle's status. An ELD_OFFLINE "duty" is the link,
+        // not the driver's status — it reads as the link note.
+        const dutyNote = duty && duty !== 'ELD_OFFLINE' ? <span className="block text-caption text-text-muted">Driver: {DUTY_LABEL[duty]}</span> : null;
+        return <span className="flex flex-col items-start gap-0.5"><Badge tone="success" dot>Active</Badge>{dutyNote}{note}</span>;
       },
     },
     {
@@ -344,6 +353,8 @@ export default function VehiclesPage() {
       meta: { width: '17%' },
       cell: ({ row }) => {
         const driver = row.original.driver;
+        // LIVE-022 — no "Unassigned" flash while the `/drivers` join is still loading.
+        if (!driver && allVehicles.driversLookup.isLoading) return <span aria-label="Loading driver" className="inline-block h-4 w-20 animate-pulse rounded bg-bg-subtle" />;
         if (!driver) return <span className="text-text-muted">{orUnassigned(null)}</span>;
         const name = `${driver.firstName} ${driver.lastName}`;
         return (
@@ -379,11 +390,15 @@ export default function VehiclesPage() {
       id: 'eldSerial',
       header: 'ELD SERIAL',
       meta: { width: '11%' },
-      cell: ({ row }) => (
-        <span className={row.original.eldDeviceStatus && row.original.eldDeviceStatus !== 'ASSIGNED' ? 'text-text-muted' : 'text-text'}>
-          {orNotAssigned(row.original.eldSerial)}
-        </span>
-      ),
+      cell: ({ row }) =>
+        // LIVE-022 — no "Not assigned" flash while the `/devices` join is still loading.
+        !row.original.eldSerial && allVehicles.devicesLookup.isLoading ? (
+          <span aria-label="Loading ELD serial" className="inline-block h-4 w-16 animate-pulse rounded bg-bg-subtle" />
+        ) : (
+          <span className={row.original.eldDeviceStatus && row.original.eldDeviceStatus !== 'ASSIGNED' ? 'text-text-muted' : 'text-text'}>
+            {orNotAssigned(row.original.eldSerial)}
+          </span>
+        ),
     },
     {
       id: 'odometer',
@@ -467,16 +482,18 @@ export default function VehiclesPage() {
             ['ALL', `All ${counts.all}`],
             ['ACTIVE', `Active ${counts.active}`],
             ['INACTIVE', `Inactive ${counts.inactive}`],
+            ['OUT_OF_SERVICE', `Out of service ${counts.outOfService}`],
             ['UNASSIGNED', `Unassigned ${counts.unassigned}`],
           ] as [Segment, string][]
         ).map(([value, label]) => (
           <button
             key={value}
             type="button"
-            aria-pressed={segment === value}
+            // LIVE-022 — "All" is not the active chip while drawer filters narrow the list.
+            aria-pressed={isPressedSegment(value)}
             onClick={() => setParam('segment', value === 'ALL' ? null : value)}
             className={
-              segment === value
+              isPressedSegment(value)
                 ? 'shrink-0 whitespace-nowrap bg-bg-inverse px-3 text-body-strong text-text-inverse'
                 : 'shrink-0 whitespace-nowrap bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'
             }

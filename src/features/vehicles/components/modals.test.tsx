@@ -229,7 +229,8 @@ describe('11.2 Edit unit — clearing optional fields', () => {
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await screen.findByText('Unit 101 updated');
-    expect(body).toMatchObject({ licensePlate: '4821-JG', plateState: 'OH', deviceId: 'PT30_1C4F' });
+    // CODE-044 — the plate goes out in the API's canonical form (no spaces/dashes).
+    expect(body).toMatchObject({ licensePlate: '4821JG', plateState: 'OH', deviceId: 'PT30_1C4F' });
     expect(body).not.toHaveProperty('notes');
   });
 });

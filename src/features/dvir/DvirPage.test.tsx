@@ -87,6 +87,27 @@ describe('DvirPage', () => {
     expect(screen.queryByText(/Due in 48,699 mi/)).not.toBeInTheDocument();
   });
 
+  it('LIVE-028: a mileage overdue names the due odometer, not a future due date', async () => {
+    server.use(
+      http.get(url(endpoints.maintenanceSchedules.list), () =>
+        ok({
+          items: [
+            {
+              id: 'ms_over', vehicleId: 'veh_1', name: 'PM-B', intervalMi: 12000, intervalDays: 180, lastServiceMi: 0,
+              lastServiceAt: null, nextDueMi: 12000, nextDueAt: '2099-10-23T00:00:00.000Z', enabled: true,
+              due: { state: 'OVERDUE', nextDueMi: 12000, nextDueAt: '2099-10-23T00:00:00.000Z', milesRemaining: -38733, daysRemaining: 9 },
+            },
+          ],
+          page: 1, limit: 200, total: 1, totalPages: 1,
+        }),
+      ),
+    );
+    renderPage();
+    const overdue = await screen.findByRole('region', { name: 'Overdue maintenance' });
+    expect(within(overdue).getByText(/due at 12,000 mi/)).toBeInTheDocument();
+    expect(within(overdue).queryByText(/Oct 23/)).not.toBeInTheDocument();
+  });
+
   it('shows the DVIR empty-state copy verbatim when there are no recent inspections', async () => {
     server.use(http.get(url(endpoints.dvir.list), () => ok({ items: [], page: 1, limit: 25, total: 0, totalPages: 1 })));
     renderPage();
@@ -656,7 +677,7 @@ describe('DvirPage', () => {
       ];
     }
 
-    it('defaults to "Repair pending" while a defect on the DVIR is still OPEN', async () => {
+    it('defaults to "Repair pending" while a defect is OPEN, but blocks signing until a final status is chosen (QA CODE-035)', async () => {
       const user = userEvent.setup();
       let body: unknown;
       server.use(
@@ -665,17 +686,27 @@ describe('DvirPage', () => {
         ]),
         http.post(url(endpoints.dvir.mechanicSignoff('dvir_1')), async ({ request }) => {
           body = await request.json();
-          return ok({ id: 'dvir_1', mechanicName: 'J. Alvarez', repairStatus: 'PENDING', mechanicSignedAt: new Date().toISOString() });
+          return ok({ id: 'dvir_1', mechanicName: 'J. Alvarez', repairStatus: 'DEFERRED', mechanicSignedAt: new Date().toISOString() });
         }),
       );
       renderPage();
 
       await user.click(await screen.findByText('Pre-trip'));
       await user.type(await screen.findByPlaceholderText('Mechanic name'), 'J. Alvarez');
-      await user.click(await screen.findByRole('button', { name: 'Sign off' }));
+      const select = screen.getByRole('combobox', { name: 'Repair status' });
+      expect(select).toHaveValue('PENDING');
+      expect(screen.getByRole('button', { name: 'Sign off' })).toBeDisabled();
+      expect(screen.getByText(/cannot stay pending/)).toBeInTheDocument();
+
+      await user.selectOptions(select, 'REPAIRED');
+      expect(screen.getByRole('button', { name: 'Sign off' })).toBeDisabled();
+      expect(screen.getByText(/Resolve or defer every open defect/)).toBeInTheDocument();
+
+      await user.selectOptions(select, 'DEFERRED');
+      await user.click(screen.getByRole('button', { name: 'Sign off' }));
 
       await waitFor(() => expect(body).toBeTruthy());
-      expect((body as { repairStatus: string }).repairStatus).toBe('PENDING');
+      expect((body as { repairStatus: string }).repairStatus).toBe('DEFERRED');
     });
 
     it('defaults to "No repair required" when the DVIR raised no defects', async () => {
@@ -821,5 +852,44 @@ describe('WB-269 export icon', () => {
     const button = await screen.findByRole('button', { name: 'Export' });
     expect(button.querySelector('svg.lucide-upload')).not.toBeNull();
     expect(button.querySelector('svg.lucide-download')).toBeNull();
+  });
+});
+
+describe('CODE-075 DVIR KPIs', () => {
+  const schedule = (id: string, due: Record<string, unknown>) => ({
+    id, vehicleId: 'veh_1', name: id, intervalMi: null, intervalDays: 90, lastServiceMi: null, lastServiceAt: null,
+    nextDueMi: null, nextDueAt: '2026-10-20T00:00:00.000Z', enabled: true,
+    due: { nextDueMi: null, nextDueAt: '2026-10-20T00:00:00.000Z', milesRemaining: null, ...due },
+  });
+
+  it('"oldest" counts only OVERDUE services, by days past due — a DUE_SOON "in 5 d" is not "oldest 5 d"', async () => {
+    server.use(
+      http.get(url(endpoints.maintenanceSchedules.list), () =>
+        ok({
+          items: [schedule('soon', { state: 'DUE_SOON', daysRemaining: 5 }), schedule('late', { state: 'OVERDUE', daysRemaining: -3 })],
+          page: 1, limit: 200, total: 2, totalPages: 1,
+        }),
+      ),
+    );
+    renderPage();
+    expect(await screen.findByText('oldest 3 d')).toBeInTheDocument();
+    expect(screen.queryByText('oldest 5 d')).not.toBeInTheDocument();
+  });
+
+  it('a failed source shows "—" instead of 0', async () => {
+    server.use(
+      http.get(url(endpoints.maintenanceSchedules.list), () =>
+        HttpResponse.json({ statusCode: 403, code: 'FORBIDDEN', message: 'No access' }, { status: 403 }),
+      ),
+    );
+    renderPage();
+    const label = await screen.findByText('Overdue services');
+    const card = label.closest('[data-kpi]') ?? label.parentElement?.parentElement ?? label;
+    await waitFor(() => expect(within(card as HTMLElement).getByText('—')).toBeInTheDocument());
+  });
+
+  it('labels the upcoming card with the real server window', async () => {
+    renderPage();
+    expect(await screen.findByText('Due within 7 days or 500 mi')).toBeInTheDocument();
   });
 });

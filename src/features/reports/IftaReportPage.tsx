@@ -28,6 +28,7 @@ import {
 import { useIftaJurisdictions, useIftaSummary, useVehicleGroups } from './mock/useIftaMock';
 import { EMPTY } from '@/shared/format/empty';
 import { formatJurisdiction } from '@/shared/format/jurisdiction';
+import { iftaReadinessLabel, sortByJurisdictionName } from './lib/iftaDisplay';
 import { formatFuel, formatMoney, formatMpg, formatNumber, formatPercent } from '@/shared/format/numbers';
 import { Button } from '@/shared/ui/Button';
 import { Card, SectionHeader } from '@/shared/ui/Card';
@@ -129,7 +130,7 @@ export default function IftaReportPage() {
   const units = summary.data?.unitCount ?? vehicles.data?.total;
   const kpis = summary.data?.kpis;
   const tableRows: IftaTableRow[] = summary.data?.rows.length
-    ? [...summary.data.rows, { ...summary.data.totals, jurisdiction: 'Total', isTotal: true }]
+    ? [...sortByJurisdictionName(summary.data.rows), { ...summary.data.totals, jurisdiction: 'Total', isTotal: true }]
     : [];
   useDynamicSubtitle(
     `${quarterLabel(quarter)} · ${quarterSpanLabel(quarter)}${typeof units === 'number' ? ` · ${units} units` : ''}`,
@@ -152,7 +153,9 @@ export default function IftaReportPage() {
   const quarterOptions = previousQuarters(current, 5).map((q) => ({ value: q, label: quarterLabel(q) }));
   const jurisdictionOptions = [
     { value: ALL, label: 'All jurisdictions' },
-    ...(jurisdictions.data ?? []).map((j) => ({ value: j.code, label: formatJurisdiction(j.code) })),
+    ...(jurisdictions.data ?? [])
+      .map((j) => ({ value: j.code, label: formatJurisdiction(j.code) }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
   ];
   const groupOptions = [
     { value: ALL, label: 'All vehicle groups' },
@@ -265,7 +268,7 @@ export default function IftaReportPage() {
           <div className="p-card">
             <SectionHeader
               title="Miles by jurisdiction"
-              subtitle={`${quarterLabel(quarter)} · IFTA-ready`}
+              subtitle={[quarterLabel(quarter), iftaReadinessLabel(kpis)].filter(Boolean).join(' · ')}
               action={
                 <Button
                   variant="secondary"

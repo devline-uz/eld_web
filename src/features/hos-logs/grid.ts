@@ -124,14 +124,21 @@ const DAY_START_CACHE = new Map<string, number>();
 /**
  * The UTC instant that starts this RODS day in the driver's home terminal zone. Two offset probes
  * are enough for every IANA zone, including both DST edges (§23).
+ *
+ * CODE-065 — the same algorithm as the backend `zonedToUtc` (`hos/engine/timezone.ts`): in zones
+ * whose DST switch happens AT midnight (America/Havana, America/Santiago) local 00:00 does not
+ * exist on the spring-forward day, and the second probe lands on the last instant BEFORE the gap.
+ * Such a midnight resolves forward, to the later candidate, so the grid and the server agree.
  */
 export function rodsDayStart(date: string, timezone: string): number {
   const cacheKey = `${date}|${timezone}`;
   const cached = DAY_START_CACHE.get(cacheKey);
   if (cached !== undefined) return cached;
   const target = Date.parse(`${date}T00:00:00Z`);
-  let start = target - zoneOffsetMs(target, timezone);
-  start = target - zoneOffsetMs(start, timezone);
+  const first = target - zoneOffsetMs(target, timezone);
+  let start = target - zoneOffsetMs(first, timezone);
+  // The wall clock of `start`, read back in the zone, must be the midnight asked for.
+  if (start !== first && start + zoneOffsetMs(start, timezone) !== target) start = Math.max(first, start);
   DAY_START_CACHE.set(cacheKey, start);
   return start;
 }
@@ -408,6 +415,25 @@ export function unassignedInDay<T extends Pick<UnidentifiedSegment, 'startAt' | 
   );
 }
 
+/**
+ * QA CODE-031 — the units this driver could have driven on the viewed day: every unit their records
+ * (incl. the status carried in over midnight) or the day's recording ELDs name, plus their current
+ * assignment. Unidentified driving on any other unit is never this driver's to claim.
+ */
+export function driverDayVehicleIds(
+  events: ReadonlyArray<{ vehicleId: string | null }>,
+  extra: ReadonlyArray<string | null | undefined>,
+): Set<string> {
+  const ids = new Set<string>();
+  for (const id of [...events.map((event) => event.vehicleId), ...extra]) if (id) ids.add(id);
+  return ids;
+}
+
+/** QA CODE-031 — keeps only segments recorded on the driver's units (see `driverDayVehicleIds`). */
+export function unassignedForVehicles<T extends { vehicleId: string }>(segments: T[], vehicleIds: ReadonlySet<string>): T[] {
+  return segments.filter((segment) => vehicleIds.has(segment.vehicleId));
+}
+
 /** Grey hatched blocks — segments that overlap this RODS day, clamped to it. */
 export function plotUnassigned(
   segments: UnidentifiedSegment[],
@@ -424,27 +450,40 @@ export function plotUnassigned(
 
 /* ------------------------------------------------------------------ totals */
 
-/** §395.3(a)(3)(i) — 11 hours is the ONLY daily per-row ceiling; OFF/SB/ON have none. */
+/**
+ * §395.3(a)(3)(i) — 11 hours of driving per SHIFT (between 10-hour breaks), not per calendar day.
+ * Kept for reference and tests; the TOTAL column no longer judges the day total against it.
+ */
 export const DRIVING_LIMIT_SEC = 11 * 3600;
 
 export interface RowTotal {
   row: GridRow;
   seconds: number;
-  /** True only when the row has an FMCSA daily limit and the total passed it. */
+  /** True only for the driving row, when the engine filed an 11-hour violation on this day. */
   overLimit: boolean;
   label: string;
 }
 
-export function rowTotals(summary: {
-  offDutySec: number;
-  sleeperSec: number;
-  drivingSec: number;
-  onDutySec: number;
-}): RowTotal[] {
+/**
+ * CODE-066 — the 11-hour limit applies per shift: two legal shifts can put 12+ hours of driving on
+ * one calendar day (e.g. 6 h, a 10-hour break, 6 h). The driving total is therefore drawn in
+ * danger only when the HOS engine actually filed a DRIVING_11 violation for this day (or one is
+ * still in force from an earlier day), never by comparing the day total with 11 hours.
+ */
+export function rowTotals(
+  summary: {
+    offDutySec: number;
+    sleeperSec: number;
+    drivingSec: number;
+    onDutySec: number;
+  },
+  violations: ReadonlyArray<{ type: string }> = [],
+): RowTotal[] {
+  const drivingLimitBroken = violations.some((violation) => violation.type === 'DRIVING_11');
   return [
     { row: 'OFF' as const, seconds: summary.offDutySec, overLimit: false },
     { row: 'SB' as const, seconds: summary.sleeperSec, overLimit: false },
-    { row: 'D' as const, seconds: summary.drivingSec, overLimit: summary.drivingSec > DRIVING_LIMIT_SEC },
+    { row: 'D' as const, seconds: summary.drivingSec, overLimit: drivingLimitBroken && summary.drivingSec > 0 },
     { row: 'ON' as const, seconds: summary.onDutySec, overLimit: false },
   ].map((total) => ({ ...total, label: formatHosHours(total.seconds) }));
 }
@@ -468,10 +507,13 @@ export function segmentTooltip(
 ): string {
   const from = rodsClock(Date.parse(segment.startAt), timezone);
   const to = rodsClock(Date.parse(segment.endAt), timezone);
+  // LIVE-018 — a sub-minute record (OFF 05:47:06 → ON 05:47:13) read "05:47 – 05:47 · 0 min".
   const duration =
-    segment.durationSec < 3600
-      ? formatMinutes(segment.durationSec)
-      : formatHosHours(segment.durationSec);
+    segment.durationSec < 60
+      ? `${Math.max(0, Math.round(segment.durationSec))} s`
+      : segment.durationSec < 3600
+        ? formatMinutes(segment.durationSec)
+        : formatHosHours(segment.durationSec);
   const parts = [
     `${from} – ${to}`,
     `${ROW_LABELS[segment.row].caption}${SPECIAL_SUFFIX[segment.special]}`,

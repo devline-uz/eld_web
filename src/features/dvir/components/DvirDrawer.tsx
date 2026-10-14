@@ -23,6 +23,7 @@ import { orDash } from '@/shared/format/empty';
 import { useToast } from '@/shared/ui/Toast';
 import { formErrorMessage } from '@/shared/api/errors';
 import { printDvir } from '../lib/printDvir';
+import { signOffBlockReason } from '../lib/signOff';
 // DEMO DATA — answers `mock-*` DVIR ids locally (`VITE_DEMO_FALLBACK`, never in production). Remove: import `useDvir` from `@/shared/api/dvir` again.
 import { useDvir } from '../mock/useDvirMock';
 import { formatEnumLabel } from '@/shared/format/enumLabel';
@@ -146,6 +147,7 @@ export function DvirDrawer({
   const openDefects = (dvir?.defects ?? []).filter((d) => d.status === 'OPEN');
   const unresolvedCritical = openDefects.some((d) => d.severity === 'CRITICAL');
   const defaultRepairStatus = deriveRepairStatus(dvir?.defects ?? []);
+  const signOffBlocked = signOffBlockReason(dvir?.defects ?? [], repairStatus ?? defaultRepairStatus);
   // Stage 3 — a typed mechanic name / changed repair status used to vanish silently on close.
   const signoffDirty =
     mechanicName.trim() !== '' || (repairStatus !== null && repairStatus !== defaultRepairStatus);
@@ -337,10 +339,11 @@ export function DvirDrawer({
                       ))}
                     </select>
                   </label>
+                  {signOffBlocked && <p className="text-caption text-text-muted">{signOffBlocked}</p>}
                   <Button
                     variant="secondary"
                     size="sm"
-                    disabled={!mechanicName.trim()}
+                    disabled={!mechanicName.trim() || signOffBlocked !== null}
                     loading={signoff.isPending}
                     onClick={() => {
                       setSignoffError(null);

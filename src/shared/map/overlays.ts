@@ -25,6 +25,14 @@ function isLon(v: unknown): v is number {
   return typeof v === 'number' && Number.isFinite(v) && v >= -180 && v <= 180;
 }
 /** Same guard as FleetMap/`hasPosition`: `(0, 0)` is a missing fix, never a real place (WB-049). */
+/** CODE-061 — longitude folded into -180..180 (a map click on a repeated world copy can report
+ * e.g. 277 for -83). */
+export function wrapLongitude(lon: number): number {
+  if (!Number.isFinite(lon)) return lon;
+  const wrapped = ((((lon + 180) % 360) + 360) % 360) - 180;
+  return wrapped === -180 && lon > 0 ? 180 : wrapped;
+}
+
 function validPosition(lon: unknown, lat: unknown): Position | null {
   if (!isLon(lon) || !isLat(lat)) return null;
   if (lon === 0 && lat === 0) return null;

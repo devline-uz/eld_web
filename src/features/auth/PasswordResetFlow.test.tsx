@@ -7,7 +7,7 @@ import { http } from 'msw';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { server } from '@/mocks/server';
-import { fail, url } from '@/mocks/envelope';
+import { fail, ok, url } from '@/mocks/envelope';
 import { endpoints } from '@/shared/api/endpoints';
 import { ToastProvider } from '@/shared/ui/Toast';
 import type * as FirebaseModule from '@/shared/auth/firebase';
@@ -91,14 +91,14 @@ describe('W-00 · Forgot password?', () => {
     expect(await screen.findByText('Enter a valid email address.')).toBeInTheDocument();
   });
 
-  it('shows "No account found with this email" for an unknown address', async () => {
+  it('CODE-081: an unknown address goes to the same code step, worded "if an account uses this email"', async () => {
     const user = userEvent.setup();
     renderSignIn();
     await openReset(user, 'nobody@example.com');
     await user.click(screen.getByRole('button', { name: 'Send code' }));
-    expect(await screen.findByText('No account found with this email.')).toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: 'Email' })).toHaveAttribute('aria-invalid', 'true');
-    expect(screen.queryByRole('heading', { name: 'Check your email' })).not.toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Check your email' })).toBeInTheDocument();
+    expect(screen.getByText(/If an active OneBook ELD account uses/)).toBeInTheDocument();
+    expect(screen.queryByText(/No account found/)).not.toBeInTheDocument();
   });
 
   it('sends the email trimmed', async () => {
@@ -106,14 +106,14 @@ describe('W-00 · Forgot password?', () => {
     server.use(
       http.post(url(endpoints.auth.passwordResetCode), async ({ request }) => {
         sent = ((await request.json()) as { email: unknown }).email;
-        return fail(404, 'NOT_FOUND', 'No account found with this email.');
+        return ok({ success: true, email: 'nobody@example.com', expiresInSec: 900, resendAfterSec: 60 });
       }),
     );
     const user = userEvent.setup();
     renderSignIn();
     await openReset(user, '  Nobody@Example.com ');
     await user.click(screen.getByRole('button', { name: 'Send code' }));
-    expect(await screen.findByText('No account found with this email.')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Check your email' })).toBeInTheDocument();
     expect(sent).toBe('Nobody@Example.com');
   });
 

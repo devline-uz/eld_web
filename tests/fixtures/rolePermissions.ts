@@ -17,7 +17,7 @@ function matrix(overrides: Partial<Record<PermissionKey, PermissionMap[Permissio
 }
 
 export const ROLE_PERMISSIONS: Record<Role, PermissionMap> = {
-  ADMIN: matrix({}),
+  ADMIN: matrix({ hosCertifyOnBehalf: 'NONE' }), // CODE-029 — retired key, NONE for every role
   FLEET_MANAGER: matrix({
     hosCertifyOnBehalf: 'NONE',
     users: 'NONE',

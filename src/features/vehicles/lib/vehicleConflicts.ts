@@ -24,9 +24,10 @@ export const VEHICLE_CONFLICT_RULES: readonly ConflictRule<VehicleConflictField>
 export const unitNumberKey = (value: string | null | undefined): string =>
   String(value ?? '').trim().replace(/^#/, '').toUpperCase();
 export const vinKey = (value: string | null | undefined): string => String(value ?? '').trim().toUpperCase();
-/** ELD serial / plate / state: trimmed + upper-cased; empty -> '' (an empty value never conflicts). */
+/** ELD serial / state: trimmed + upper-cased; empty -> '' (an empty value never conflicts). */
 export const serialKey = (value: string | null | undefined): string => String(value ?? '').trim().toUpperCase();
-export const plateKey = (value: string | null | undefined): string => String(value ?? '').trim().toUpperCase();
+/** CODE-044 — plates compare without spaces/dashes ("ABC 123" = "ABC-123" = "ABC123"), like the API. */
+export const plateKey = (value: string | null | undefined): string => String(value ?? '').toUpperCase().replace(/[\s-]+/g, '');
 export const stateKey = (value: string | null | undefined): string => String(value ?? '').trim().toUpperCase();
 /** `PLATE|STATE` — `''` when there is no plate, so an unplated unit never conflicts. ABC123|OH and
  * ABC123|TX are different keys; the same plate with no state only equals itself. */

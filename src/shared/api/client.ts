@@ -254,6 +254,23 @@ export function isTransientRefreshFailure(error: unknown): boolean {
 
 const isTransientStatus = (status: number) => status >= 500 || status === 408 || status === 429;
 
+/** Server code for "this refresh token was rotated a moment ago by a concurrent request". */
+export const REFRESH_ROTATED_CODE = 'REFRESH_TOKEN_ROTATED';
+const REFRESH_LOCK_NAME = 'obk.refresh';
+
+/**
+ * CODE-019 — the refresh token in `obk.rt` is shared by every tab, but each tab refreshes on its
+ * own timer. Two tabs presenting the same token at once used to look like token theft to the
+ * server (`REFRESH_TOKEN_REUSED` → every session revoked). The Web Locks API serialises refreshes
+ * across tabs of the origin; where it is missing the server-side race grace + one retry
+ * (`REFRESH_TOKEN_ROTATED`) covers it.
+ */
+async function withCrossTabRefreshLock<T>(fn: () => Promise<T>): Promise<T> {
+  const locks = typeof navigator !== 'undefined' ? (navigator as Navigator & { locks?: LockManager }).locks : undefined;
+  if (!locks?.request) return fn();
+  return locks.request(REFRESH_LOCK_NAME, { mode: 'exclusive' }, fn) as Promise<T>;
+}
+
 /** One refresh at a time; every parallel 401 awaits the same promise (§6.2 rule 2). */
 export function refreshAccessToken(): Promise<string> {
   if (refreshPromise) return refreshPromise;
@@ -261,8 +278,10 @@ export function refreshAccessToken(): Promise<string> {
   const generation = refreshGeneration;
   const isCurrent = () => generation === refreshGeneration;
 
-  const tracked: Promise<string> = (async () => {
-    const refreshToken = bridge.getRefreshToken();
+  const tracked: Promise<string> = withCrossTabRefreshLock(async () => {
+    // CODE-019 — read the token INSIDE the cross-tab lock: if another tab rotated it while this
+    // one waited, the newest token is used instead of replaying a spent one.
+    let refreshToken = bridge.getRefreshToken();
 
     // Without a refresh token the DTO can never be satisfied (`refreshToken` is min 1), so the
     // request would come back 422 and cost a round trip to learn what we already know: this
@@ -277,13 +296,27 @@ export function refreshAccessToken(): Promise<string> {
 
     // A `NetworkError` from here propagates untouched — it is not a verdict on the refresh token,
     // so it never reaches `onSignOut` (WB-080).
-    const res = await fetchOnce({
-      method: 'POST',
-      path: endpoints.auth.refresh,
-      anonymous: true,
-      body: { refreshToken, subjectType: REFRESH_SUBJECT_TYPE },
-    });
-    const body = await readBody(res);
+    const send = async (token: string) => {
+      const response = await fetchOnce({
+        method: 'POST',
+        path: endpoints.auth.refresh,
+        anonymous: true,
+        body: { refreshToken: token, subjectType: REFRESH_SUBJECT_TYPE },
+      });
+      return { response, payload: await readBody(response) };
+    };
+    let { response: res, payload: body } = await send(refreshToken);
+
+    // CODE-019 — without the Web Locks API two tabs can still race the same token: the server
+    // refuses the loser with REFRESH_TOKEN_ROTATED (and keeps the session). The winner has stored
+    // the rotated token by now, so the loser retries once with it instead of signing out.
+    if (!res.ok && res.status === 401 && isCurrent() && toApiError(res.status, body).code === REFRESH_ROTATED_CODE) {
+      const latest = bridge.getRefreshToken();
+      if (latest && latest !== refreshToken) {
+        refreshToken = latest;
+        ({ response: res, payload: body } = await send(latest));
+      }
+    }
 
     if (!isCurrent()) {
       // Signed out while this was on the wire (WB-079): persist nothing, sign out nothing — but a
@@ -318,7 +351,7 @@ export function refreshAccessToken(): Promise<string> {
       expiresAt,
     });
     return data.accessToken;
-  })().finally(() => {
+  }).finally(() => {
     // Only clear our own slot: after `cancelRefresh()` a new session may already own it.
     if (refreshPromise === tracked) refreshPromise = null;
   });

@@ -137,7 +137,13 @@ export default function AlertRulesPage() {
           <div className="flex items-center justify-between rounded-md border border-border p-3">
             <div>
               <p className="text-body-strong text-text">Webhook</p>
-              <p className="text-caption text-text-muted">Configured under Settings · Integrations</p>
+              {/* CODE-084 — an org-level alert URL (PATCH /notification-channels) wins over the
+                  Settings › Integrations webhook; show where alerts actually go. */}
+              <p className="break-all text-caption text-text-muted">
+                {channelsQuery.data?.webhook.url
+                  ? `Alerts are sent to ${channelsQuery.data.webhook.url}`
+                  : 'Configured under Settings · Integrations'}
+              </p>
             </div>
             <button
               type="button"

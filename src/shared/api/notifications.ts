@@ -265,7 +265,7 @@ export function useNotificationChannels(enabled = true) {
 export function useUpdateNotificationChannels() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (dto: { email?: { enabled: boolean }; webhook?: { enabled: boolean; url?: string } }) =>
+    mutationFn: (dto: { email?: { enabled: boolean }; webhook?: { enabled: boolean; url?: string | null } }) =>
       client.patch<NotificationChannels>(endpoints.notificationChannels.root, dto),
     onSuccess: (data) => queryClient.setQueryData(qk.notificationChannels, data),
   });

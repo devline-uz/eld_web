@@ -1,7 +1,7 @@
 // W-02 — `telemetry.point` → one unit's row in the cached fleet (web/tz.md §7.2, WB-258).
 import { describe, expect, it } from 'vitest';
 import type { LiveFleetResponse, LiveFleetUnit } from '@/shared/api/liveFleet';
-import { applyUnitPatches, fleetHasUnit, telemetryUnitPatch, type TelemetryPointPayload } from './telemetryPatch';
+import { applyUnitPatches, fleetHasUnit, isStaleFrame, telemetryUnitPatch, type TelemetryPointPayload } from './telemetryPatch';
 
 const unit = (vehicleId: string): LiveFleetUnit => ({
   vehicleId,
@@ -65,5 +65,24 @@ describe('applyUnitPatches', () => {
     expect(fleetHasUnit(FLEET, 'v2')).toBe(true);
     expect(fleetHasUnit(FLEET, 'v9')).toBe(false);
     expect(fleetHasUnit(undefined, 'v1')).toBe(false);
+  });
+});
+
+describe('isStaleFrame (CODE-023)', () => {
+  const t = (iso: string) => `2026-10-14T${iso}:00.000Z`;
+
+  it('drops a frame older than the newest one already applied for the unit', () => {
+    expect(isStaleFrame(t('09:00'), t('12:00'), Date.parse(t('12:00')))).toBe(true);
+    expect(isStaleFrame(t('12:01'), t('12:00'), Date.parse(t('12:00')))).toBe(false);
+  });
+
+  it('before any frame, compares with lastSeenAt minus a heartbeat slack', () => {
+    expect(isStaleFrame(t('09:00'), t('12:00'), undefined)).toBe(true);
+    // a fix a minute older than the latest heartbeat is still the newest position
+    expect(isStaleFrame(t('11:59'), t('12:00'), undefined)).toBe(false);
+  });
+
+  it('applies untimed frames as before', () => {
+    expect(isStaleFrame(undefined, t('12:00'), Date.parse(t('12:00')))).toBe(false);
   });
 });

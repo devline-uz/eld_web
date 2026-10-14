@@ -76,12 +76,20 @@ export const odometer = () =>
  * 11.2 Add/Edit vehicle — `Year`. The upper bound is "not in the future", evaluated inside the
  * `refine` at validation time so a long-lived tab never freezes last year's cutoff (WD note).
  */
+/** CODE-045 — the latest model year a unit can carry: next calendar year (a 2027 truck is sold in 2026). */
+export const maxModelYear = (now: Date = new Date()): number => now.getFullYear() + 1;
+
+/** CODE-045 — optional like the backend; an empty number input (`NaN`) means "no year". */
 export const vehicleYear = () =>
-  z
-    .number({ required_error: M.yearMin, invalid_type_error: M.yearMin })
-    .int(M.yearMin)
-    .min(LIMITS.vehicleYearMin, M.yearMin)
-    .refine((value) => value <= new Date().getFullYear(), M.yearFuture);
+  z.preprocess(
+    (value) => (value === '' || value === null || (typeof value === 'number' && Number.isNaN(value)) ? undefined : value),
+    z
+      .number({ invalid_type_error: M.yearMin })
+      .int(M.yearMin)
+      .min(LIMITS.vehicleYearMin, M.yearMin)
+      .refine((value) => value <= maxModelYear(), M.yearFuture)
+      .optional(),
+  );
 
 /** Empty used to say "Maximum 60 characters." — the length rule, not the missing value. */
 export const outputFileComment = () =>

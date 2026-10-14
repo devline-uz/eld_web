@@ -9,9 +9,9 @@ const base: TripScheduleConflict = {
 
 describe('scheduleConflictMessage', () => {
   it('names the unit, driver or trailer and routes to the matching field', () => {
-    expect(scheduleConflictMessage(base)).toMatch(/^Unit 101 is already assigned to another trip \(TRP-1\)/);
-    expect(scheduleConflictMessage({ ...base, resource: 'driver', driverName: 'Ana Silva' })).toMatch(/^Driver Ana Silva is already/);
-    expect(scheduleConflictMessage({ ...base, resource: 'trailer', trailerNumber: 'T-7' })).toMatch(/^Trailer T-7 is already/);
+    expect(scheduleConflictMessage(base, 'America/New_York')).toMatch(/^Unit 101 is already assigned to another trip \(TRP-1\)/);
+    expect(scheduleConflictMessage({ ...base, resource: 'driver', driverName: 'Ana Silva' }, 'America/New_York')).toMatch(/^Driver Ana Silva is already/);
+    expect(scheduleConflictMessage({ ...base, resource: 'trailer', trailerNumber: 'T-7' }, 'America/New_York')).toMatch(/^Trailer T-7 is already/);
     expect(scheduleConflictField({ ...base, resource: 'driver' })).toBe('driverId');
     expect(scheduleConflictField({ ...base, resource: 'trailer' })).toBe('trailerId');
     expect(scheduleConflictField(base)).toBe('vehicleId');

@@ -1,6 +1,6 @@
 // owner: web-dispatch-messaging — W-16 Messages (web/tz.md §10 W-16).
 // Design: web/roles and screens/admin panel/Three-pane driver messaging with context panel.jpg
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ChevronLeft, Mic, Phone, Plus, Search, Send, Square, Trash2, User, X } from 'lucide-react';
@@ -17,7 +17,9 @@ import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
 import { EMPTY_STATE_COPY, searchEmptyState } from '@/shared/ui/copy';
 import { useToast } from '@/shared/ui/Toast';
 import { formatRelativeShort } from '@/shared/format/relative';
-import { formatLocal } from '@/shared/format/datetime';
+import { formatCarrier, formatCarrierDateTime } from '@/shared/format/datetime';
+import { messageDayKey, messageDayLabel, pickPanelTrip } from './lib/thread';
+import { useCarrierTimezone } from '@/shared/auth/useCarrierTimezone';
 import { formatHosHours } from '@/shared/format/hos';
 import { formatMediaTime } from '@/shared/format/duration';
 import { hosTone } from '@/shared/ui/ProgressBar';
@@ -132,6 +134,8 @@ function conversationPreview(conversation: ConversationListItem): string {
 export default function MessagesPage() {
   const navigate = useNavigate();
   const { can } = usePermission();
+  /** LIVE-007 — message and ETA times in the carrier zone, like the rest of the company context. */
+  const carrierTz = useCarrierTimezone();
   const { user } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -321,7 +325,9 @@ export default function MessagesPage() {
 
   const unreadCount = conversations.items.filter((c) => c.unread).length;
   const driverUnit = selected?.driver ? liveFleet.data?.items.find((u) => u.driverId === selected.driver!.id) : undefined;
-  const currentTrip = selected?.driver ? trips.rows.find((t) => t.driverId === selected.driver!.id && (t.status === 'IN_PROGRESS' || t.status === 'ASSIGNED')) : undefined;
+  // LIVE-026 — an upcoming ASSIGNED trip is shown as "Next trip", not as the current one.
+  const panelTrip = selected?.driver ? pickPanelTrip(trips.rows, selected.driver.id) : null;
+  const currentTrip = panelTrip?.trip;
 
   /** Sends `body` under `clientId` (a fresh one for a first send, the failed message's own for a
    * retry — same idempotency key, per §16 rule 2). On failure the optimistic row is marked
@@ -540,7 +546,7 @@ export default function MessagesPage() {
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center justify-between gap-2">
                       <span className="truncate text-body-strong text-text">{name}</span>
-                      <span className="shrink-0 text-caption text-text-muted">{formatRelativeShort(conversation.lastMessageAt)}</span>
+                      <span className="shrink-0 text-caption text-text-muted">{formatRelativeShort(conversation.lastMessageAt, undefined, carrierTz)}</span>
                     </span>
                     <span className="flex items-center justify-between gap-2">
                       <span className="truncate text-caption text-text-muted">{conversationPreview(conversation)}</span>
@@ -618,13 +624,24 @@ export default function MessagesPage() {
                   {(messagesQuery.data?.items ?? [])
                     .slice()
                     .sort((a, b) => new Date(a.sentAt).getTime() - new Date(b.sentAt).getTime())
-                    .map((message) => {
+                    .map((message, index, sorted) => {
                       const outgoing = Boolean(message.senderUserId);
                       const failed = message.status === 'failed';
                       const sending = message.status === 'sending';
                       const isAudio = message.type === 'AUDIO';
+                      // LIVE-026 — a day separator wherever the carrier-zone day changes.
+                      const dayKey = messageDayKey(message.sentAt, carrierTz);
+                      const newDay = index === 0 || messageDayKey(sorted[index - 1]?.sentAt ?? '', carrierTz) !== dayKey;
                       return (
-                        <div key={message.id} className={`flex flex-col ${outgoing ? 'items-end' : 'items-start'}`}>
+                        <Fragment key={message.id}>
+                        {newDay && (
+                          <div role="separator" aria-label={messageDayLabel(message.sentAt, carrierTz)} className="my-1 flex items-center gap-2 text-caption text-text-muted">
+                            <span className="h-px flex-1 bg-border" aria-hidden="true" />
+                            <span>{messageDayLabel(message.sentAt, carrierTz)}</span>
+                            <span className="h-px flex-1 bg-border" aria-hidden="true" />
+                          </div>
+                        )}
+                        <div className={`flex flex-col ${outgoing ? 'items-end' : 'items-start'}`}>
                           <div
                             className={`max-w-[85%] rounded-lg px-3 py-2 text-body sm:max-w-[70%] ${isAudio ? 'w-64' : ''} ${
                               outgoing ? 'bg-primary text-text-inverse' : 'border border-border bg-bg-surface text-text'
@@ -645,7 +662,7 @@ export default function MessagesPage() {
                               <p className="whitespace-pre-wrap break-words">{message.body}</p>
                             )}
                             <p className={`mt-1 text-right text-caption ${outgoing ? 'text-white/80' : 'text-text-muted'}`}>
-                              {formatLocal(message.sentAt, 'time')}{' '}
+                              {formatCarrier(message.sentAt, carrierTz, 'time')}{' '}
                               {outgoing && sending ? 'Sending…' : ''}
                             </p>
                           </div>
@@ -663,6 +680,7 @@ export default function MessagesPage() {
                             </div>
                           )}
                         </div>
+                        </Fragment>
                       );
                     })}
                 </div>
@@ -856,12 +874,17 @@ export default function MessagesPage() {
           </div>
 
           <div className="mt-4 flex flex-col gap-2">
-            <h3 className="text-nav-section font-semibold uppercase tracking-wide text-text-muted">Current trip</h3>
+            <h3 className="text-nav-section font-semibold uppercase tracking-wide text-text-muted">
+              {panelTrip?.kind === 'next' ? 'Next trip' : 'Current trip'}
+            </h3>
             {currentTrip ? (
               <dl className="flex flex-col gap-1.5 text-body">
                 <Row label="Trip">{currentTrip.number}</Row>
+                {panelTrip?.kind === 'next' && currentTrip.plannedStartAt && (
+                  <Row label="Starts">{formatCarrierDateTime(currentTrip.plannedStartAt, carrierTz)}</Row>
+                )}
                 <Row label="Destination">{currentTrip.delivery?.name ?? '—'}</Row>
-                <Row label="ETA">{currentTrip.etaAt ? formatLocal(currentTrip.etaAt, 'time') : '—'}</Row>
+                <Row label="ETA">{currentTrip.etaAt ? formatCarrier(currentTrip.etaAt, carrierTz, 'time') : '—'}</Row>
               </dl>
             ) : (
               <p className="text-caption text-text-muted">No active trip.</p>

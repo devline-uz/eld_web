@@ -960,3 +960,71 @@ describe('limit is capped at 200 and larger reads page (WB-030)', () => {
     expect(Math.max(...inFlight)).toBe(2);
   });
 });
+
+describe('CODE-019 · cross-tab refresh coordination', () => {
+  afterEach(() => {
+    Reflect.deleteProperty(navigator, 'locks');
+  });
+
+  it('serialises the refresh through the Web Locks API and reads the token inside the lock', async () => {
+    let stored = 'rt-1';
+    const sent: string[] = [];
+    const request = vi.fn(async (_name: string, _opts: unknown, fn: () => Promise<unknown>) => {
+      // Another tab rotated the shared token while this one waited for the lock.
+      stored = 'rt-2';
+      return fn();
+    });
+    Object.defineProperty(navigator, 'locks', { value: { request }, configurable: true });
+    setAuthBridge({
+      getAccessToken: () => null,
+      getRefreshToken: () => stored,
+      onTokens: ({ refreshToken }) => {
+        if (refreshToken) stored = refreshToken;
+      },
+      onSignOut: vi.fn(),
+    });
+    server.use(
+      http.post(url(endpoints.auth.refresh), async ({ request: req }) => {
+        sent.push(((await req.json()) as { refreshToken: string }).refreshToken);
+        return ok({ accessToken: 'a-3', refreshToken: 'rt-3' });
+      }),
+    );
+
+    await expect(refreshAccessToken()).resolves.toBe('a-3');
+    expect(request).toHaveBeenCalledWith('obk.refresh', { mode: 'exclusive' }, expect.any(Function));
+    expect(sent).toEqual(['rt-2']);
+  });
+
+  it('REFRESH_TOKEN_ROTATED (lost a race to another tab) retries once with the newer stored token', async () => {
+    let stored = 'rt-1';
+    const sent: string[] = [];
+    const onSignOut = vi.fn();
+    setAuthBridge({ getAccessToken: () => null, getRefreshToken: () => stored, onTokens: vi.fn(), onSignOut });
+    server.use(
+      http.post(url(endpoints.auth.refresh), async ({ request: req }) => {
+        const { refreshToken } = (await req.json()) as { refreshToken: string };
+        sent.push(refreshToken);
+        if (refreshToken === 'rt-1') {
+          stored = 'rt-2'; // the winning tab stored its rotated token
+          return fail(401, 'REFRESH_TOKEN_ROTATED', 'Refresh token was just rotated by another request.');
+        }
+        return ok({ accessToken: 'a-3', refreshToken: 'rt-3' });
+      }),
+    );
+
+    await expect(refreshAccessToken()).resolves.toBe('a-3');
+    expect(sent).toEqual(['rt-1', 'rt-2']);
+    expect(onSignOut).not.toHaveBeenCalled();
+  });
+
+  it('REFRESH_TOKEN_ROTATED with no newer token in storage still ends the session', async () => {
+    const onSignOut = vi.fn();
+    setAuthBridge({ getAccessToken: () => null, getRefreshToken: () => 'rt-1', onTokens: vi.fn(), onSignOut });
+    server.use(
+      http.post(url(endpoints.auth.refresh), () => fail(401, 'REFRESH_TOKEN_ROTATED', 'Rotated.')),
+    );
+
+    await expect(refreshAccessToken()).rejects.toBeInstanceOf(ApiError);
+    expect(onSignOut).toHaveBeenCalledWith('expired');
+  });
+});

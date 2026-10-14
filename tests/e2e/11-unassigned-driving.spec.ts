@@ -30,10 +30,10 @@ test('assigning 2 unassigned-driving segments shows a toast and decrements the c
   await selects.nth(1).selectOption({ index: 1 });
   await dialog.getByRole('textbox').fill('E2E bulk-assigned during scenario 11.');
 
-  await expect(dialog.getByRole('button', { name: 'Assign 2 segments' })).toBeEnabled();
-  await dialog.getByRole('button', { name: 'Assign 2 segments' }).click();
+  await expect(dialog.getByRole('button', { name: 'Send 2 segments for confirmation' })).toBeEnabled();
+  await dialog.getByRole('button', { name: 'Send 2 segments for confirmation' }).click();
 
-  await expect(page.getByText('2 segments assigned')).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText('2 segments sent for confirmation')).toBeVisible({ timeout: 10_000 });
   await expect(dialog).toBeHidden({ timeout: 10_000 });
 
   const after = page.getByText(/^\d+ unassigned segments?$/);

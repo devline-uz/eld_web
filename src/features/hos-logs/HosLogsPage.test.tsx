@@ -14,7 +14,6 @@ import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/cli
 import { ToastProvider } from '@/shared/ui/Toast';
 import type { PermissionKey } from '@/shared/auth/permissions';
 import HosLogsPage from './HosLogsPage';
-import { CertifyLogsModal } from './components/CertifyLogsModal';
 import { cycleRuleLabel, validDayKey } from './grid';
 
 const TZ = 'America/New_York';
@@ -237,17 +236,11 @@ describe('W-08 · header and timezone', () => {
 });
 
 describe('W-08 · role gating (§10 W-08 role table)', () => {
-  it('shows `Certify all` for an administrator', async () => {
+  // CODE-029 — the driver certifies in the app; no web role (not even ADMIN) gets a certify action.
+  it('offers no `Certify all` even to an administrator and says the driver certifies in the app', async () => {
     currentCan = () => true;
     renderPage();
-    expect(await screen.findByRole('button', { name: 'Certify all' })).toBeInTheDocument();
-  });
-
-  it('removes `Certify all` from the DOM for a fleet manager', async () => {
-    // FM has hosEdit FULL but hosCertifyOnBehalf NONE.
-    currentCan = (perm) => perm !== 'hosCertifyOnBehalf';
-    renderPage();
-    expect(await screen.findByRole('button', { name: /Add \/ edit event/ })).toBeInTheDocument();
+    expect(await screen.findByText('Drivers certify in the app')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Certify all' })).not.toBeInTheDocument();
   });
 
@@ -380,35 +373,6 @@ describe('11.11 · Request a log edit', () => {
   });
 });
 
-describe('11.12 · Certify logs', () => {
-  it('certifies only the selected uncertified days and disables an already-certified one', async () => {
-    let body: unknown = null;
-    server.use(
-      http.post(url(endpoints.logs.certify(DRIVER_ID)), async ({ request }) => {
-        body = await request.json();
-        return ok({ driverId: DRIVER_ID, certified: [{ date: DATE, certifiedAt: new Date().toISOString(), certifiedBy: 'u1', onBehalf: true, signatureCount: 1 }] });
-      }),
-    );
-    renderPage();
-    await userEvent.click(await screen.findByRole('button', { name: 'Certify all' }));
-    const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByLabelText('Certify 2026-09-09')).toBeDisabled();
-    expect(within(dialog).getByLabelText(`Certify ${DATE}`)).toBeChecked();
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Certify 1 selected day' }));
-    expect(body).toEqual({ dates: [DATE] });
-  });
-
-  it('WB-198 · a toggled day selection is not dropped silently on Esc', async () => {
-    renderPage();
-    await userEvent.click(await screen.findByRole('button', { name: 'Certify all' }));
-    const dialog = await screen.findByRole('dialog');
-    await userEvent.click(within(dialog).getByLabelText(`Certify ${DATE}`));
-    await userEvent.keyboard('{Escape}');
-
-    expect(await screen.findByText('Discard changes?')).toBeInTheDocument();
-  });
-});
-
 const UNASSIGNED = {
   id: 'seg-1',
   vehicleId: 'veh-1',
@@ -461,9 +425,9 @@ describe('11.13 · Unassigned driving', () => {
       within(dialog).getByRole('textbox'),
       'Yard movement at the home terminal.',
     );
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Assign 1 segment' }));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Send 1 segment for confirmation' }));
 
-    // B-83 — `Ask each driver to confirm` is drawn checked, so the assignment waits for the driver.
+    // CODE-029 — every assignment waits for the driver's confirmation in the app.
     await vi.waitFor(() =>
       expect(assigned).toEqual({
         driverId: DRIVER_ID,
@@ -480,7 +444,7 @@ describe('11.13 · Unassigned driving', () => {
     const dialog = await screen.findByRole('dialog');
     await userEvent.click(within(dialog).getByLabelText('Select Unit #101 segment'));
     await userEvent.type(within(dialog).getByRole('textbox'), 'ab');
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Assign 1 segment' }));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Send 1 segment for confirmation' }));
     expect(
       await within(dialog).findByText('An annotation must be at least 4 characters (FMCSA requirement).'),
     ).toBeInTheDocument();
@@ -662,7 +626,8 @@ describe('W-08 · empty and error states', () => {
         'No ELD records for this day. The driver may have been off duty or the app was not signed in.',
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText('● No violations today')).toBeInTheDocument();
+    // LIVE-017 — "today" only when the viewed day is today; a past day reads "on Oct 8".
+    expect(screen.getByText(/^● No violations (today|on [A-Z][a-z]{2} \d{1,2})$/)).toBeInTheDocument();
   });
 
   it('renders the error inside the grid card, not over the page', async () => {
@@ -713,22 +678,21 @@ describe('W-08 · Log events row menu (`hosEdit` FULL)', () => {
     expect(await screen.findByText('Superseded record')).toBeInTheDocument();
   });
 
-  it('closes 11.12 and 11.13 through Cancel without writing anything', async () => {
-    let certified = 0;
+  it('closes 11.13 through Cancel without writing anything', async () => {
+    let assigned = 0;
     server.use(
       http.get(url(endpoints.unidentified.list), () => ok({ items: [UNASSIGNED], total: 1, page: 1 })),
-      http.post(url(endpoints.logs.certify(DRIVER_ID)), () => {
-        certified += 1;
-        return ok({ driverId: DRIVER_ID, certified: [] });
+      http.post(url(endpoints.unidentified.assign(UNASSIGNED.id)), () => {
+        assigned += 1;
+        return ok({});
       }),
     );
     renderPage();
-    await userEvent.click(await screen.findByRole('button', { name: 'Certify all' }));
-    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Cancel' }));
     await userEvent.click(await screen.findByText('1 unassigned segment'));
     await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Cancel' }));
-    expect(certified).toBe(0);
+    expect(assigned).toBe(0);
   });
+
 });
 
 /** Renders the page on a real route table so navigation and search-param changes are observable. */
@@ -902,31 +866,6 @@ describe('overlay controls actually drive the payload', () => {
     expect(await within(dialog).findByText('End time must be after the start time.')).toBeInTheDocument();
   });
 
-  it('11.12 unticking the only uncertified day disables the submit button', async () => {
-    renderPage();
-    await userEvent.click(await screen.findByRole('button', { name: 'Certify all' }));
-    const dialog = await screen.findByRole('dialog');
-    await userEvent.click(within(dialog).getByLabelText(`Certify ${DATE}`));
-    expect(within(dialog).getByRole('button', { name: 'Certify 0 selected days' })).toBeDisabled();
-    await userEvent.click(within(dialog).getByLabelText(`Certify ${DATE}`));
-    expect(within(dialog).getByRole('button', { name: 'Certify 1 selected day' })).toBeEnabled();
-  });
-
-  it('11.12 shows RECERTIFICATION_REQUIRED verbatim', async () => {
-    server.use(
-      http.post(url(endpoints.logs.certify(DRIVER_ID)), () =>
-        fail(422, 'RECERTIFICATION_REQUIRED', 'The log changed after the last certification — it must be certified again.'),
-      ),
-    );
-    renderPage();
-    await userEvent.click(await screen.findByRole('button', { name: 'Certify all' }));
-    const dialog = await screen.findByRole('dialog');
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Certify 1 selected day' }));
-    expect(
-      await within(dialog).findByText('The log changed after the last certification — it must be certified again.'),
-    ).toBeInTheDocument();
-  });
-
   it('`Available hours` Retry refetches the B-2 clocks', async () => {
     let calls = 0;
     server.use(
@@ -996,65 +935,6 @@ describe('audited fixes WB-061 … WB-073', () => {
     expect(screen.getByTestId('hos-violation-mark')).toHaveAttribute('stroke', 'var(--color-text-muted)');
   });
 
-  it('WB-062 · a day that needs re-certification is selectable and pre-selected', async () => {
-    server.use(
-      http.get(url(endpoints.logs.day(DRIVER_ID)), () =>
-        ok({ ...dayPayload, certification: { ...dayPayload.certification, certified: true, recertificationRequired: true } }),
-      ),
-      http.get(url(endpoints.logs.range(DRIVER_ID)), () =>
-        ok({
-          driverId: DRIVER_ID,
-          from: '2026-09-03',
-          to: DATE,
-          days: [
-            { ...summary, date: '2026-09-08', certified: true, hasEdits: false },
-            { ...summary, date: '2026-09-09', certified: true, hasEdits: true },
-            { ...summary, date: DATE, certified: true, hasEdits: true },
-          ],
-        }),
-      ),
-    );
-    renderPage();
-    await screen.findByText('Log events');
-    await userEvent.click(await screen.findByRole('button', { name: 'Certify all' }));
-    const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByLabelText(`Certify ${DATE}`)).toBeChecked();
-    expect(within(dialog).getByLabelText(`Certify ${DATE}`)).toBeEnabled();
-    expect(within(dialog).getByText('Re-certification required')).toBeInTheDocument();
-    // Edited after signing, flag unknown from the range summary: enabled, not pre-selected.
-    expect(within(dialog).getByLabelText('Certify 2026-09-09')).toBeEnabled();
-    expect(within(dialog).getByLabelText('Certify 2026-09-09')).not.toBeChecked();
-    // Certified and untouched: still locked.
-    expect(within(dialog).getByLabelText('Certify 2026-09-08')).toBeDisabled();
-    expect(within(dialog).getByRole('button', { name: 'Certify 1 selected day' })).toBeEnabled();
-  });
-
-  it('WB-062 · the selection follows the latest days: late arrivals get their default, certified-elsewhere days drop out', async () => {
-    const queryClient = new QueryClient();
-    const day = (date: string, certified: boolean) => ({ ...summary, date, certified, hasEdits: false });
-    const ui = (days: ReturnType<typeof day>[]) => (
-      <QueryClientProvider client={queryClient}>
-        <ToastProvider>
-          <CertifyLogsModal
-            driverId={DRIVER_ID}
-            driverName="John Smith"
-            signerName="Sarah Chen"
-            timezone={TZ}
-            days={days}
-            onClose={() => undefined}
-          />
-        </ToastProvider>
-      </QueryClientProvider>
-    );
-    const { rerender } = render(ui([]));
-    expect(screen.getByRole('button', { name: 'Certify 0 selected days' })).toBeDisabled();
-    rerender(ui([day('2026-09-09', false), day(DATE, false)]));
-    expect(screen.getByRole('button', { name: 'Certify 2 selected days' })).toBeEnabled();
-    rerender(ui([day('2026-09-09', true), day(DATE, false)]));
-    expect(screen.getByRole('button', { name: 'Certify 1 selected day' })).toBeEnabled();
-    expect(screen.getByLabelText('Certify 2026-09-09')).not.toBeChecked();
-  });
-
   it('WB-063 · a partial batch says what was saved, refreshes the list and never re-posts it', async () => {
     const SECOND = { ...UNASSIGNED, id: 'seg-2', startAt: '2026-09-10T10:12:00.000Z', endAt: '2026-09-10T10:18:00.000Z' };
     let firstDone = false;
@@ -1084,7 +964,7 @@ describe('audited fixes WB-061 … WB-073', () => {
     }
     await userEvent.type(within(dialog).getByRole('textbox'), 'Driver forgot to log in.');
     const before = listCalls;
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Assign 2 segments' }));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Send 2 segments for confirmation' }));
 
     expect(
       // The refusal text itself is client.ts's mapping of 409 CONFLICT, shown verbatim.
@@ -1092,7 +972,7 @@ describe('audited fixes WB-061 … WB-073', () => {
     ).toBeInTheDocument();
     await vi.waitFor(() => expect(listCalls).toBeGreaterThan(before));
     // seg-1 left the list and the selection; only seg-2 is still offered.
-    expect(await within(dialog).findByRole('button', { name: 'Assign 1 segment' })).toBeInTheDocument();
+    expect(await within(dialog).findByRole('button', { name: 'Send 1 segment for confirmation' })).toBeInTheDocument();
     expect(posted).toEqual([UNASSIGNED.id, SECOND.id]);
   });
 
@@ -1117,7 +997,7 @@ describe('audited fixes WB-061 … WB-073', () => {
     await userEvent.selectOptions(select, 'Annotate as yard move or personal conveyance');
     expect(within(dialog).getByText(/state yard move or personal conveyance in the/)).toBeInTheDocument();
     await userEvent.type(within(dialog).getByRole('textbox'), 'Yard move at terminal.');
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Assign 1 segment' }));
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Send 1 segment for confirmation' }));
     await vi.waitFor(() => expect(body).toEqual({ annotation: 'Yard move at terminal.' }));
   });
 
@@ -1134,7 +1014,7 @@ describe('audited fixes WB-061 … WB-073', () => {
       ),
     );
     renderPage();
-    expect(await screen.findByText(/5 events today · 1 driver edit pending review/)).toBeInTheDocument();
+    expect(await screen.findByText(/5 events (today|on [A-Z][a-z]{2} \d{1,2}) · 1 driver edit pending review/)).toBeInTheDocument();
   });
 
   it('WB-066 · a malformed or impossible `?date=` falls back to today instead of crashing', async () => {
@@ -1275,33 +1155,13 @@ describe('W-08 · stage-2 dead controls', () => {
     expect(within(dialog).getByText('Event ID')).toBeInTheDocument();
   });
 
-  it('B-83 · 11.13 unchecking `Ask each driver to confirm` assigns immediately', async () => {
-    let assigned: unknown = null;
-    server.use(
-      http.get(url(endpoints.unidentified.list), () => ok({ items: [UNASSIGNED], total: 1, page: 1 })),
-      http.post(url(endpoints.unidentified.assign(UNASSIGNED.id)), async ({ request }) => {
-        assigned = await request.json();
-        return ok({ ...UNASSIGNED, status: 'ASSIGNED', assignedDriverId: DRIVER_ID });
-      }),
-    );
+  it('CODE-029 · 11.13 has no way to skip the driver confirmation', async () => {
+    server.use(http.get(url(endpoints.unidentified.list), () => ok({ items: [UNASSIGNED], total: 1, page: 1 })));
     renderPage();
     await userEvent.click(await screen.findByText('1 unassigned segment'));
     const dialog = await screen.findByRole('dialog');
-
-    const checkbox = within(dialog).getByLabelText('Ask each driver to confirm in the app');
-    expect(checkbox).toBeEnabled();
-    expect(checkbox).toBeChecked();
-    expect(within(dialog).queryByText(/Not available yet/)).not.toBeInTheDocument();
-    await userEvent.click(checkbox);
-    await userEvent.click(within(dialog).getByLabelText('Select Unit #101 segment'));
-    await userEvent.selectOptions(within(dialog).getByLabelText('Resolution for Unit #101'), DRIVER_ID);
-    await userEvent.type(within(dialog).getByRole('textbox'), 'Driver forgot to log in.');
-    await userEvent.click(within(dialog).getByRole('button', { name: 'Assign 1 segment' }));
-
-    await vi.waitFor(() =>
-      expect(assigned).toEqual({ driverId: DRIVER_ID, annotation: 'Driver forgot to log in.' }),
-    );
-    expect(await screen.findByText('1 segment assigned')).toBeInTheDocument();
+    expect(within(dialog).queryByLabelText('Ask each driver to confirm in the app')).not.toBeInTheDocument();
+    expect(within(dialog).getByText('Each driver confirms in the app before the hours move to their log.')).toBeInTheDocument();
   });
 
   it('B-39 · 11.11 sends YM as ON + proposedSpecial, a name-only location and notifyDriver', async () => {
@@ -1365,5 +1225,98 @@ describe('QA FE-013 · the calendar opens a date picker', () => {
     } finally {
       HTMLInputElement.prototype.showPicker = original;
     }
+  });
+});
+
+describe('LIVE-019 / CODE-064 / LIVE-031 · driver lookup, not-found and the URL date', () => {
+  const OTHER_ID = '22222222-2222-4222-8222-222222222222';
+  const MISSING_ID = '33333333-3333-4333-8333-333333333333';
+  const terminated = {
+    ...driver,
+    id: OTHER_ID,
+    firstName: 'Pat',
+    lastName: 'Doe',
+    status: 'TERMINATED',
+    homeTerminalName: 'Dallas, TX',
+    homeTerminalTimezone: 'America/Chicago',
+    assignedVehicleId: null,
+  };
+
+  it('a malformed driver id shows "Driver not found" and calls no log endpoint', async () => {
+    let logCalls = 0;
+    server.use(
+      http.get(url(endpoints.logs.day('not-a-uuid')), () => {
+        logCalls += 1;
+        return fail(404, 'NOT_FOUND', 'Not found.');
+      }),
+    );
+    renderAt('/hos-logs?driverId=not-a-uuid&date=2026-09-10');
+    expect(await screen.findByText('Driver not found', { selector: 'h3' })).toBeInTheDocument();
+    expect(screen.queryByText('Could not load this RODS day')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Export PDF' })).toBeDisabled();
+    expect(logCalls).toBe(0);
+  });
+
+  it('a well-formed id the API does not know is "Driver not found", not "service did not respond"', async () => {
+    server.use(
+      http.get(url(endpoints.drivers.detail(MISSING_ID)), () => fail(404, 'DRIVER_NOT_FOUND', 'Driver not found.')),
+    );
+    renderAt(`/hos-logs?driverId=${MISSING_ID}&date=2026-09-10`);
+    expect(await screen.findByText('Driver not found', { selector: 'h3' }, { timeout: 5_000 })).toBeInTheDocument();
+    expect(screen.queryByText(/did not respond/)).not.toBeInTheDocument();
+  });
+
+  it('a deep-linked driver outside the ACTIVE list is loaded with his own zone and status', async () => {
+    server.use(
+      http.get(url(endpoints.drivers.list), ({ request }) =>
+        new URL(request.url).searchParams.get('status') === 'ACTIVE'
+          ? ok({ items: [driver], page: 1, limit: 200, total: 1, totalPages: 1 })
+          : ok({ items: [driver], page: 1, limit: 200, total: 1, totalPages: 1 }),
+      ),
+      http.get(url(endpoints.drivers.detail(OTHER_ID)), () => ok(terminated)),
+      http.get(url(endpoints.logs.day(OTHER_ID)), () =>
+        ok({ ...dayPayload, driverId: OTHER_ID, timezone: 'America/Chicago', violations: [] }),
+      ),
+      http.get(url(endpoints.logs.events(OTHER_ID)), () =>
+        ok({ driverId: OTHER_ID, date: DATE, timezone: 'America/Chicago', events: [] }),
+      ),
+      http.get(url(endpoints.logs.range(OTHER_ID)), () => ok({ driverId: OTHER_ID, from: DATE, to: DATE, days: [] })),
+    );
+    renderAt(`/hos-logs?driverId=${OTHER_ID}&date=2026-09-10`);
+    expect(
+      await screen.findByText(/^Pat Doe \(Terminated\) · .* · Home terminal: Dallas, TX \(Central\)$/, undefined, {
+        timeout: 5_000,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it('keeps inactive and terminated drivers pickable after the active ones', async () => {
+    server.use(
+      http.get(url(endpoints.drivers.list), ({ request }) =>
+        new URL(request.url).searchParams.get('status') === 'ACTIVE'
+          ? ok({ items: [driver], page: 1, limit: 200, total: 1, totalPages: 1 })
+          : ok({ items: [driver, terminated], page: 1, limit: 200, total: 2, totalPages: 1 }),
+      ),
+      http.get(url(endpoints.logs.day(OTHER_ID)), () =>
+        ok({ ...dayPayload, driverId: OTHER_ID, timezone: 'America/Chicago', violations: [] }),
+      ),
+    );
+    renderAt(`/hos-logs?driverId=${OTHER_ID}&date=2026-09-10`);
+    // Listed (no single-driver fetch needed) and flagged with its status.
+    expect(await screen.findByText(/^Pat Doe \(Terminated\) · /, undefined, { timeout: 5_000 })).toBeInTheDocument();
+  });
+
+  it('a future ?date= is shown as today and the URL is corrected', async () => {
+    renderAt(`/hos-logs?driverId=${DRIVER_ID}&date=2999-01-01`);
+    await screen.findByText(/Home terminal: Columbus, OH/, undefined, { timeout: 5_000 });
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: TZ }).format(new Date());
+    await vi.waitFor(() => expect(currentLocation()).toContain(`date=${today}`));
+  });
+
+  it('the violations card never claims "No violations" when the day failed to load', async () => {
+    server.use(http.get(url(endpoints.logs.day(DRIVER_ID)), () => fail(500, 'INTERNAL_ERROR', 'boom')));
+    renderAt(`/hos-logs?driverId=${DRIVER_ID}&date=2026-09-10`);
+    expect(await screen.findByText(/Violations unavailable/, undefined, { timeout: 5_000 })).toBeInTheDocument();
+    expect(screen.queryByText(/No violations/)).not.toBeInTheDocument();
   });
 });

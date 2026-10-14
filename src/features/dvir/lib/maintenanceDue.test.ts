@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeDue, DUE_SOON_DAYS, DUE_SOON_MILES, overdueReasons, maintenanceDueLabel } from './maintenanceDue';
+import { computeDue, DUE_SOON_DAYS, DUE_SOON_MILES, overdueReasons, maintenanceDueLabel, scheduleBaseline } from './maintenanceDue';
 
 const NOW = new Date('2026-10-10T12:00:00.000Z');
 const base = { intervalMi: null, intervalDays: null, lastServiceMi: null, lastServiceAt: null, currentOdometerMi: 0, now: NOW };
@@ -45,11 +45,25 @@ describe('computeDue — mirrors eld_backend maintenance-due.ts', () => {
     expect(computeDue({ ...base, intervalDays: 8, lastServiceAt: at }).state).toBe('OK');
   });
 
-  it('missing last service falls back to 0 mi / epoch, like the backend', () => {
-    const due = computeDue({ ...base, intervalMi: 5000, intervalDays: 30, currentOdometerMi: 4000 });
-    expect(due.nextDueMi).toBe(5000);
-    expect(due.nextDueAt?.toISOString()).toBe('1970-01-31T00:00:00.000Z');
-    expect(due.state).toBe('OVERDUE');
+  it('QA CODE-037 — missing last service counts from the baseline, and an unknown baseline is not evaluated', () => {
+    const fromBaseline = computeDue({ ...base, intervalMi: 5000, intervalDays: 30, currentOdometerMi: 4000, baselineMi: 4000, baselineAt: NOW });
+    expect(fromBaseline.nextDueMi).toBe(9000);
+    expect(fromBaseline.nextDueAt?.toISOString()).toBe('2026-11-09T12:00:00.000Z');
+    expect(fromBaseline.state).toBe('OK');
+
+    const unknown = computeDue({ ...base, intervalMi: 5000, intervalDays: 30, currentOdometerMi: 4000 });
+    expect(unknown).toMatchObject({ state: 'OK', nextDueMi: null, nextDueAt: null });
+  });
+
+  it('QA CODE-037 — scheduleBaseline recovers the creation point and ignores legacy 0 mi / 1970 rows', () => {
+    expect(scheduleBaseline({ intervalMi: 5000, intervalDays: 30, nextDueMi: 9000, nextDueAt: '2026-11-09T12:00:00.000Z' })).toEqual({
+      baselineMi: 4000,
+      baselineAt: NOW,
+    });
+    expect(scheduleBaseline({ intervalMi: 5000, intervalDays: 30, nextDueMi: 5000, nextDueAt: '1970-01-31T00:00:00.000Z' })).toEqual({
+      baselineMi: null,
+      baselineAt: null,
+    });
   });
 
   it('no interval → OK with all nulls', () => {

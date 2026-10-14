@@ -23,7 +23,7 @@ colours and sizes from the token layer only.
 Hard rules this feature is held to:
 
 - **Every** timestamp is in `driver.homeTerminalTimezone`; `formatLocal` is an ESLint error here.
-- `Certify all` and 11.12 need `hosCertifyOnBehalf` FULL — **ADMIN only** (web/decisions.md WD-031).
+- CODE-029 — no web certification: only the driver certifies, in the app (§395.8(e)); 11.12 was removed and the card says "Drivers certify in the app". 11.13 assignments always wait for the driver's confirmation.
 - `Add / edit event`, `Request an edit`, `Resolve` and the unassigned actions need `hosEdit` FULL;
   a dispatcher sees the unassigned chip but it is not a button.
 - `DRIVING_TIME_IMMUTABLE` is rendered verbatim and never retried or worked around.

@@ -66,7 +66,7 @@ afterAll(() => server.close());
 interface SummaryOverrides {
   liveFleet?: { items: unknown[]; generatedAt?: string };
   violations?: { items: unknown[]; total: number };
-  unidentified?: { total: number; totalDurationSec: number };
+  unidentified?: { total: number; totalDurationSec: number; awaitingDriver?: number; awaitingDriverDurationSec?: number };
   vehicles?: { active: number; total: number; inactive?: number; outOfService?: number };
 }
 
@@ -181,6 +181,35 @@ describe('W-01 Fleet Dashboard', () => {
     // carrier-timezone subtitle is pushed into the topbar context, not this component's own DOM —
     // confirmed instead by the "Live fleet" card, which does render locally.
     expect(screen.getByText('Live fleet')).toBeInTheDocument();
+  });
+
+  it('CODE-054: Open HOS violations falls back to the summary count (never 0) while the table fails', async () => {
+    server.use(
+      http.get(url(endpoints.dashboard.summary), () => ok(buildSummary({ violations: { items: [], total: 7 } }))),
+      http.get(url(endpoints.violations.list), () => new Response(null, { status: 500 })),
+    );
+    renderPage();
+    const label = await screen.findByText('Open HOS violations', {}, { timeout: 8000 });
+    const card = label.parentElement!.parentElement!;
+    await waitFor(() => expect(within(card).getByText('7')).toBeInTheDocument());
+  });
+
+  it('CODE-029: the Unassigned driving tile names segments awaiting driver confirmation apart', async () => {
+    server.use(
+      http.get(url(endpoints.dashboard.summary), () =>
+        ok(buildSummary({ unidentified: { total: 3, totalDurationSec: 1800, awaitingDriver: 2, awaitingDriverDurationSec: 900 } })),
+      ),
+      violationsPage([]),
+    );
+    renderPage();
+    expect(await screen.findByText('3 segments · 2 awaiting driver', {}, { timeout: 8000 })).toBeInTheDocument();
+  });
+
+  it('CODE-029: no awaiting-driver hint when nothing waits for a driver', async () => {
+    server.use(http.get(url(endpoints.dashboard.summary), () => ok(buildSummary())), violationsPage([]));
+    renderPage();
+    expect(await screen.findByText('3 segments', {}, { timeout: 8000 })).toBeInTheDocument();
+    expect(screen.queryByText(/awaiting driver/)).not.toBeInTheDocument();
   });
 
   it('UI-015/UI-004: the duty card counts ASSIGNED drivers and the vehicles KPI names out-of-service units', async () => {
