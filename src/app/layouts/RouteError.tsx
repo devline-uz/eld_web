@@ -2,11 +2,12 @@
 // fall through to React Router's bare default "Unexpected Application Error!" page with no way
 // back. As a route `errorElement` this renders inside the AppShell's <Outlet>, so the sidebar and
 // topbar stay usable; `Retry` reloads the screen.
-import { isRouteErrorResponse, useNavigate, useRouteError } from 'react-router-dom';
+import { isRouteErrorResponse, useLocation, useNavigate, useParams, useRouteError } from 'react-router-dom';
 import { useEffect } from 'react';
 import { ErrorState } from '@/shared/ui/states';
 import { Button } from '@/shared/ui/Button';
 import { captureError } from '@/shared/observability/sentry';
+import { reportClientError, routePattern } from '@/shared/observability/clientErrors';
 
 /** Dynamic-import failures across browsers: Chrome, Firefox, Safari. */
 function isChunkLoadError(error: unknown): boolean {
@@ -19,10 +20,16 @@ function isChunkLoadError(error: unknown): boolean {
 export function RouteError({ fullPage = false }: { fullPage?: boolean }) {
   const error = useRouteError();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const params = useParams();
 
   useEffect(() => {
     console.error('[RouteError]', error);
     captureError(error, { boundary: fullPage ? 'shell' : 'route' });
+    // WD-119 — route responses (404 etc.) are filtered inside the reporter.
+    reportClientError(error, { level: fullPage ? 'fatal' : 'error', route: routePattern(pathname, params) });
+    // Reported once per error; a later param change must not re-send it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [error, fullPage]);
 
   const chunk = isChunkLoadError(error);

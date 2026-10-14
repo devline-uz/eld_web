@@ -1,7 +1,7 @@
 // MSW for the topbar overlays (11.27, 11.28). B-10 `GET /search`, B-56 `POST /notifications/:id/read`
 // and B-57/B-58 (`category`, `counts`, `kind`, `severity`) all shipped 2026-09-24; the shapes below
 // are held to openapi.json by tests/contract/phase13.contract.test.ts.
-import { http } from 'msw';
+import { http, HttpResponse } from 'msw';
 import { endpoints } from '@/shared/api/endpoints';
 import type { NotificationItem } from '@/shared/api/notifications';
 import type { SearchDriverHit, SearchVehicleHit } from '@/shared/api/search';
@@ -43,6 +43,8 @@ export const SEARCH_VEHICLES: SearchVehicleHit[] = [
 ];
 
 export const shellGapHandlers = [
+  // B-272 / WD-119 — public client-error intake (being built in parallel): accepts and drops the batch.
+  http.post(url(endpoints.clientErrors), () => new HttpResponse(null, { status: 202 })),
   http.get(url(endpoints.notifications.list), ({ request }) => {
     const search = new URL(request.url).searchParams;
     const limit = Number(search.get('limit') ?? '25');

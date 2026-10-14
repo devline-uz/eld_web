@@ -1518,3 +1518,29 @@ ends the fetch much sooner.
 - Follow: selecting a unit follows it (`jumpTo` per frame on the glide); a hand drag calls `onFollowChange(false)`; the `Follow` button re-enables. Selection changes still `easeTo` 300 ms.
 - Trail: last 40 fixes from `GET /vehicles/:id/telemetry` (exists), drawn as a line for the selected unit.
 **Limits.** No road snapping (no routing service) — extrapolation is a straight line along the heading.
+
+## WD-119 · Client-side errors go to `POST /client-errors` → Telegram, independent of Sentry (2026-10-14)
+**Problem:** client crashes in the admin panel were invisible (no Sentry DSN in any env). The
+backend is adding a public `POST /api/client-errors` (B-272) that forwards to the Telegram
+"admin panel errors" topic; the panel must feed it without spamming it or leaking secrets.
+**Options:** (a) route it through the Sentry wrapper (needs the SDK chunk + a DSN), (b) a small
+standalone reporter in `shared/observability/clientErrors.ts` that reuses `scrub.ts`.
+**Choice:** (b). Captured: window `error`, `unhandledrejection`, Vite `vite:preloadError` (failed
+lazy chunks), `RouteError` (level `fatal` for the shell boundary, `error` for a route; route
+pattern from `useParams`), React root `onCaughtError` (`error`) / `onUncaughtError` (`fatal`).
+Filtered: `ApiError`/`NetworkError`/`AbortError`/`CancelledError` (TanStack keeps `name='Error'`,
+matched by message)/`RefreshCancelledError`/`TimeoutError`, React Router route responses, bare
+`Failed to fetch`/`Load failed` network noise (but NOT `Failed to fetch dynamically imported
+module`), `ResizeObserver loop…`, opaque `Script error.` with no stack, and errors whose every URL
+(stack + `filename`) is `chrome-/moz-/safari(-web)-extension://`. Dedup message+first frame per
+60 s, ≤ 20 reports/min/tab, ~2 s batch window, ≤ 10 per request, body kept < 60 KB (keepalive
+cap). `sendBeacon` (JSON Blob) on `pagehide` / `visibilitychange→hidden`; if the beacon is refused
+or throws (Chromium can reject a non-safelisted Blob type cross-origin) it falls back to
+`fetch(..., { keepalive: true, credentials: 'omit' })` with the Bearer token when one exists.
+Every failure is swallowed; the reporter uses raw `fetch`, never `client.ts`, so no refresh,
+toast or retry can recurse. Strings are cut to the DTO limit *before* `scrubString` and again
+after — the scrubber is super-linear on long unbroken word runs (8 000 chars ≈ 150 ms), so it never
+sees unbounded input. URL is `location.href` minus query/hash; route ids become `:id`; `device` is
+`Chrome 129 / Windows`. Enabled when `MODE !== 'test'` and (`VITE_CLIENT_ERRORS=true` or a
+non-dev build); `VITE_CLIENT_ERRORS=false` disables it anywhere. Sentry wiring is untouched.
+**Why:** zero new dependencies, ~2 KB in the entry (initial 210.5 / 220 KB), works with no DSN.

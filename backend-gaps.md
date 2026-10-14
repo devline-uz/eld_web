@@ -386,3 +386,6 @@ table.
 
 ### Test PT30/40 mode (pt30_pt40/tz.md §10.1, 2026-10-12)
 - **No id yet — `GET /carrier` has no "who enabled it".** Contract (§9.3) gives only `virtualEldEnabled`, `virtualEldAvailable`, `virtualEldUpdatedAt`; the status line "enabled by <user>" needs `virtualEldUpdatedBy` (display name, or `{ fullName }`) — `Carrier.virtualEldUpdatedById` exists in §9.1 but is not resolved. Blocks: the user name in Settings · ELD devices status line (the time is shown without it). Web reads `virtualEldUpdatedBy` optionally.
+
+### Client error intake (WD-119, 2026-10-14)
+- **B-272 — `POST /client-errors`** (public; optional Bearer) — body `{ errors: [{ source: 'admin', level: 'error'|'fatal', message ≤1000, stack? ≤8000, url? ≤500, route? ≤200, appVersion? ≤40, platform?: 'web', device? ≤80, release? ≤80, occurredAt }] }` (≤ 10), `202`, ~30/min/IP, forwarded to Telegram. **Being built in parallel by the backend**; recorded in `tests/contract/endpoints.contract.test.ts` `KNOWN_GAPS` and stubbed in MSW (`shellGaps.ts`, `202`). Remove from `KNOWN_GAPS` once `backend/docs/openapi.json` documents it (the contract test fails until you do). The reporter also posts a `Content-Type: application/json` beacon — the CORS config must accept it.

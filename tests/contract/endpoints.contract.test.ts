@@ -8,7 +8,10 @@ import { openapi } from './openapi';
 /** Recorded in web/backend-gaps.md. Every former gap (B-4, B-5, B-7, B-8, B-9, B-10, B-11, B-56 and
  * the telemetry read path) shipped in backend Phase 13 (2026-09-24) and was removed; a new entry
  * needs a B-NN id in backend-gaps.md. */
-const KNOWN_GAPS = new Set<string>([]);
+const KNOWN_GAPS = new Set<string>([
+  // B-272 — client error intake, being built in parallel (WD-119).
+  '/api/client-errors',
+]);
 
 const SOURCE = readFileSync(
   fileURLToPath(new URL('../../src/shared/api/endpoints.ts', import.meta.url)),

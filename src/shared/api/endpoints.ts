@@ -347,6 +347,10 @@ export const endpoints = {
   // --- notifications panel (11.27) — appended by web-architect, Phase 9 ----------------------
   /** B-56 (shipped) — per-item `readAt`. */
   notificationItem: { markRead: (id: string) => `/notifications/${id}/read` },
+
+  // --- client error reporting (WD-119) — public, plain fetch or sendBeacon -----------
+  /** B-272 (in progress, backend) — `{ errors: ClientErrorReport[] }` → 202; forwarded to Telegram. */
+  clientErrors: '/client-errors',
 } as const;
 
 export type Endpoints = typeof endpoints;
