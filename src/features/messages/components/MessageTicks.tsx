@@ -1,5 +1,6 @@
 // owner: web-dispatch-messaging — outgoing (staff) message status ticks (backend D-146).
-// sent = one grey tick, delivered (`deliveredAt`) = two grey, read (`readAt`) = two brand ticks.
+// Telegram-style: not yet read (sent or `deliveredAt`) = one grey tick, read (`readAt`) = two brand ticks.
+// The tooltip still distinguishes Sent vs Delivered.
 // Shown only under the staff side's own, already-sent messages.
 import { Check, CheckCheck } from 'lucide-react';
 import { formatLocalDateTime } from '@/shared/format/datetime';
@@ -19,7 +20,7 @@ export function MessageTicks({ message }: { message: Pick<MessageRow, 'delivered
       : state === 'delivered'
         ? `Delivered ${formatLocalDateTime(message.deliveredAt)}`
         : 'Sent';
-  const Icon = state === 'sent' ? Check : CheckCheck;
+  const Icon = state === 'read' ? CheckCheck : Check;
   return (
     <span
       role="img"

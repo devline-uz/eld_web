@@ -29,7 +29,7 @@ describe('MessageTicks', () => {
     expect(el).toHaveAttribute('data-tick', 'sent');
     expect(el).toHaveClass('text-text-muted');
   });
-  it('delivered: grey double tick', () => {
+  it('delivered but unread: one grey tick', () => {
     render(<MessageTicks message={{ deliveredAt: '2026-09-12T10:01:00.000Z', readAt: null }} />);
     const el = screen.getByRole('img', { name: /^Delivered / });
     expect(el).toHaveAttribute('data-tick', 'delivered');
