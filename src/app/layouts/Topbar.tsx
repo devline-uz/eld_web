@@ -23,6 +23,7 @@ import { usePermission } from '@/shared/auth/usePermission';
 import { useReportReadyShell } from '@/shared/realtime/reportReady';
 import { useRealtimeEvent } from '@/shared/realtime/useRealtimeEvent';
 import { useToast } from '@/shared/ui/Toast';
+import { BRAND_NAME } from '../brand';
 import { buildPaletteConfig } from '../paletteCommands';
 import { AccountTriggerButton, BellButton } from './TopbarTriggers';
 
@@ -37,7 +38,7 @@ const KeyboardShortcutsModal = lazy(() =>
   import('./KeyboardShortcutsModal').then((module) => ({ default: module.KeyboardShortcutsModal })),
 );
 
-const APP_NAME = 'OneBook ELD';
+const APP_NAME = BRAND_NAME;
 
 /** The two always-visible overlays are fetched right after first paint, not on first click. */
 export const OVERLAY_PRELOAD_DELAY_MS = 1_000;

@@ -10,6 +10,7 @@ import { MOBILE_NAV_QUERY, useMediaQuery } from '@/shared/hooks';
 import { vehiclesCountQuery } from '@/shared/api/vehicleCounts';
 import { cn } from '@/shared/ui/cn';
 import { DevlineLogo } from '@/shared/ui/DevlineLogo';
+import { BRAND_NAME, BRAND_SUBTITLE } from '../brand';
 import { NAV_SECTIONS, isNavItemVisible } from '../navigation';
 import { createRouteWarmer } from '../routePrefetch';
 
@@ -65,9 +66,9 @@ function Brand({
       </span>
       {!collapsed && (
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-brand text-text">OneBook ELD</span>
-          {/* Product line, identical for every role — never the user's role. */}
-          <span className="block truncate text-card-sub text-text-muted">Fleet Manager</span>
+          <span className="block truncate text-brand text-text">{BRAND_NAME}</span>
+          {/* Product line, identical for every role — never the user's role (same as AuthLayout). */}
+          <span className="block truncate text-card-sub text-text-muted">{BRAND_SUBTITLE}</span>
         </span>
       )}
       {onClose ? (
