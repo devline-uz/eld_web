@@ -4,6 +4,10 @@
 // same `import()` the router's `React.lazy` boundary uses (router.tsx imports this table), so a
 // chunk is never duplicated. Prefetching is fire-and-forget; a failure is simply ignored.
 import type { QueryClient } from '@tanstack/react-query';
+import type { PermissionKey } from '@/shared/auth/permissions';
+
+type CanRead = (key: PermissionKey) => boolean;
+const canAll: CanRead = () => true;
 
 /** One `import()` per feature entry — shared by `router.tsx` (`lazy(...)`) and the sidebar. */
 export const ROUTE_LOADERS = {
@@ -26,7 +30,7 @@ export type PrefetchableRoute = keyof typeof ROUTE_LOADERS;
 const warmedChunks = new Set<string>();
 
 /** Idempotent per route for the chunk; the query prefetch is bounded by each query's staleTime. */
-export function warmRoute(to: string, queryClient: QueryClient): Promise<void> {
+export function warmRoute(to: string, queryClient: QueryClient, can: CanRead = canAll): Promise<void> {
   const loader = (ROUTE_LOADERS as Record<string, (() => Promise<unknown>) | undefined>)[to];
   if (loader && !warmedChunks.has(to)) {
     warmedChunks.add(to);
@@ -34,21 +38,22 @@ export function warmRoute(to: string, queryClient: QueryClient): Promise<void> {
   }
   // WB-249 — the prefetch table (and the query modules behind it) is its own lazy chunk.
   return import('./routeQueries')
-    .then(({ ROUTE_QUERIES }) => ROUTE_QUERIES[to]?.(queryClient))
+    .then(({ ROUTE_QUERIES }) => ROUTE_QUERIES[to]?.(queryClient, can))
     .catch(() => undefined);
 }
 
 /** Hover intent — a pointer sweeping across the sidebar must not fire every screen's requests. */
 export const WARM_DEBOUNCE_MS = 150;
 
-export function createRouteWarmer(queryClient: QueryClient) {
+/** `can` gates prefetches the user's role can't read (CODE-085), so hovering never fires a 403. */
+export function createRouteWarmer(queryClient: QueryClient, can: CanRead = canAll) {
   let timer: ReturnType<typeof setTimeout> | undefined;
   return {
     schedule(to: string) {
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
         timer = undefined;
-        void warmRoute(to, queryClient);
+        void warmRoute(to, queryClient, can);
       }, WARM_DEBOUNCE_MS);
     },
     cancel() {

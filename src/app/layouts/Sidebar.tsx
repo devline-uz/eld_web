@@ -171,7 +171,7 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps = {}
   // WD-073 — hover/focus intent warms the route chunk and its primary list query (debounced, so
   // sweeping the pointer down the sidebar fires only the link it settles on).
   const queryClient = useQueryClient();
-  const warmer = useMemo(() => createRouteWarmer(queryClient), [queryClient]);
+  const warmer = useMemo(() => createRouteWarmer(queryClient, (key) => can(key)), [queryClient, can]);
   useEffect(() => () => warmer.cancel(), [warmer]);
   const [storedCollapsed, toggleCollapsed] = useSidebarCollapsed();
   // Below `lg` the sidebar is an off-canvas drawer opened from the topbar's menu button; the

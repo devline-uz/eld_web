@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { RECORD_STATUS, withEffectiveRecordStatus, type LogEventView } from './hosLogs';
+import {
+  CERTIFICATION_EVENT_TYPE,
+  RECORD_ORIGIN,
+  RECORD_STATUS,
+  isCarrierCertificationRecord,
+  withEffectiveRecordStatus,
+  type LogEventView,
+} from './hosLogs';
 
 const base = { id: '1', recordStatus: RECORD_STATUS.active } as LogEventView;
 
@@ -15,5 +22,28 @@ describe('withEffectiveRecordStatus (QA CODE-027)', () => {
     expect(withEffectiveRecordStatus(base)).toBe(base);
     const same = { ...base, effectiveRecordStatus: RECORD_STATUS.active };
     expect(withEffectiveRecordStatus(same)).toBe(same);
+  });
+});
+
+describe('isCarrierCertificationRecord (LIVE-031, certify option c)', () => {
+  const cert = {
+    ...base,
+    eventType: CERTIFICATION_EVENT_TYPE,
+    eventCode: 1,
+    recordOrigin: RECORD_ORIGIN.carrier,
+    recordStatus: RECORD_STATUS.active,
+  } as LogEventView;
+
+  it('matches a carrier-written certification, active or proposed', () => {
+    expect(isCarrierCertificationRecord(cert)).toBe(true);
+    expect(isCarrierCertificationRecord({ ...cert, recordStatus: RECORD_STATUS.proposed, eventCode: 9 })).toBe(true);
+  });
+
+  it("never hides the driver's own certification or any non-certification record", () => {
+    expect(isCarrierCertificationRecord({ ...cert, recordOrigin: RECORD_ORIGIN.driver })).toBe(false);
+    expect(isCarrierCertificationRecord({ ...cert, eventType: 1 })).toBe(false);
+    expect(isCarrierCertificationRecord({ ...cert, eventType: 3 })).toBe(false);
+    expect(isCarrierCertificationRecord({ ...cert, eventCode: 0 })).toBe(false);
+    expect(isCarrierCertificationRecord({ ...cert, recordStatus: RECORD_STATUS.superseded })).toBe(false);
   });
 });

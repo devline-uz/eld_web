@@ -2,11 +2,10 @@
 // backend/src/modules/roles/permission-matrix.ts (DEFAULT_ROLE_MATRIX). Read-only reference:
 // backend/ is never edited, this is a test fixture copy for the RBAC suite and mockAuth.
 //
-// Two known, screenshot-confirmed design overrides on top of this raw matrix are handled in
-// rbacScreens.ts, not here: Dispatcher's `dvir`/`safety`/`reports·dvir` routes 403 despite READ
-// (web/tz.md §4.2), and Dispatcher additionally has no `Settings · ELD devices` and no
-// `Reports · IFTA` tab even though the backend grants `devices`/`reports` READ — a discrepancy
-// the design images show but web/tz.md §12.1's prose table does not call out (see web/bugs.md).
+// CODE-085 — Dispatcher's `dvir`, `maintenance`, `safety` and `devices` are NONE in the backend
+// matrix too, so its DVIR, Safety, DVIR report and ELD devices routes 403 by permission. One
+// role override remains in rbacScreens.ts: `Reports · IFTA` shares `reports` with the Activity
+// report Dispatcher keeps, so it is still blocked by role (see web/bugs.md WB-002).
 import type { PermissionKey, PermissionMap, Role } from '@/shared/auth/permissions';
 import { PERMISSION_KEYS } from '@/shared/auth/permissions';
 
@@ -32,12 +31,12 @@ export const ROLE_PERMISSIONS: Record<Role, PermissionMap> = {
     hos: 'READ',
     hosEdit: 'NONE',
     hosCertifyOnBehalf: 'NONE',
-    dvir: 'READ',
-    maintenance: 'READ',
-    safety: 'READ',
+    dvir: 'NONE',
+    maintenance: 'NONE',
+    safety: 'NONE',
     reports: 'READ',
     reportsTransfer: 'NONE',
-    devices: 'READ',
+    devices: 'NONE',
     alertRules: 'NONE',
     users: 'NONE',
     roles: 'NONE',

@@ -6,6 +6,8 @@
 import { lazy, useMemo } from 'react';
 import { createBrowserRouter, Navigate, RouterProvider, type RouteObject } from 'react-router-dom';
 import { useAuth } from '@/shared/auth/AuthProvider';
+import { usePermission } from '@/shared/auth/usePermission';
+import { visibleReportRoutes } from '@/features/reports/reportMeta';
 import {
   hasPermission,
   type PermissionKey,
@@ -66,7 +68,10 @@ interface GuardedRoute {
   element: RouteObject['element'];
   perm?: PermissionKey;
   level?: 'READ' | 'FULL';
-  /** Design omissions that outrank the backend matrix: Dispatcher gets /403 on DVIR + Safety. */
+  /** CODE-085 — a second key the backend also enforces (DVIR report → `dvir`). */
+  alsoPerm?: PermissionKey;
+  /** Only IFTA is left here: it has no permission key of its own, and `reports` also covers the
+   * Activity report DISPATCHER keeps (web/bugs.md WB-002). Everything else is permission-based. */
   blockedRoles?: Role[];
   handle?: RouteHandle;
 }
@@ -118,14 +123,12 @@ const SHELL_ROUTES: GuardedRoute[] = [
     path: 'dvir',
     element: <DvirPage />,
     perm: 'dvir',
-    blockedRoles: ['DISPATCHER'],
     handle: { title: 'DVIR & Maintenance' },
   },
   {
     path: 'safety',
     element: <SafetyPage />,
     perm: 'safety',
-    blockedRoles: ['DISPATCHER'],
     handle: { title: 'Safety' },
   },
   { path: 'reports', element: <ReportsIndexRedirect />, perm: 'reports' },
@@ -134,7 +137,7 @@ const SHELL_ROUTES: GuardedRoute[] = [
     element: <IftaReportPage />,
     perm: 'reports',
     // web/bugs.md WB-002 — the screenshots give DISPATCHER the Activity report only; `reports` =
-    // READ still covers /reports/activity, so IFTA is blocked by role like DVIR/Safety above.
+    // READ still covers /reports/activity and IFTA has no key of its own, so it is blocked by role.
     blockedRoles: ['DISPATCHER'],
     handle: { title: 'Reports · IFTA' },
   },
@@ -148,7 +151,8 @@ const SHELL_ROUTES: GuardedRoute[] = [
     path: 'reports/dvir',
     element: <DvirReportPage />,
     perm: 'reports',
-    blockedRoles: ['DISPATCHER'],
+    // CODE-085 — the backend refuses DVIR reports without `dvir` READ (reports.service.ts).
+    alsoPerm: 'dvir',
     handle: { title: 'Reports · DVIR report' },
   },
   {
@@ -179,10 +183,6 @@ const SETTINGS_ROUTES: GuardedRoute[] = [
     path: 'devices',
     element: <DevicesPage />,
     perm: 'devices',
-    // Design-vs-backend gap: `devices` = READ for DISPATCHER, but no dispatcher screenshot
-    // exists for this screen (web/bugs.md) — a direct URL 403s, matching the DVIR/Safety
-    // pattern above.
-    blockedRoles: ['DISPATCHER'],
     handle: { title: 'ELD devices' },
   },
   {
@@ -207,10 +207,14 @@ const SETTINGS_ROUTES: GuardedRoute[] = [
   },
 ];
 
-/** `/reports` → IFTA, except DISPATCHER, whose only report screen is Activity (WB-002). */
+/** `/reports` → the first report screen this caller may open: IFTA, else Activity (DISPATCHER,
+ * WB-002), else DVIR / FMCSA. */
 export function ReportsIndexRedirect() {
   const { user } = useAuth();
-  return <Navigate to={user?.role === 'DISPATCHER' ? '/reports/activity' : '/reports/ifta'} replace />;
+  const { can } = usePermission();
+  const visible = new Set(visibleReportRoutes(can, user?.role).map((r) => r.to));
+  const target = ['/reports/ifta', '/reports/activity', '/reports/dvir', '/reports/fmcsa'].find((to) => visible.has(to));
+  return <Navigate to={target ?? '/403'} replace />;
 }
 
 /** `/settings` → the first permitted item (ADMIN → company, FM → devices, others → support). */
@@ -235,7 +239,8 @@ function toRouteObject(
 ): RouteObject {
   const blocked =
     (def.blockedRoles && role && def.blockedRoles.includes(role)) ||
-    (def.perm ? !hasPermission(permissions, def.perm, def.level ?? 'READ') : false);
+    (def.perm ? !hasPermission(permissions, def.perm, def.level ?? 'READ') : false) ||
+    (def.alsoPerm ? !hasPermission(permissions, def.alsoPerm, 'READ') : false);
 
   // Permission-less route: the lazy feature element is dropped entirely, never imported.
   const element = blocked ? <ForbiddenPage /> : def.element;

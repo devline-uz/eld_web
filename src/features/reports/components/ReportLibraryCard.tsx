@@ -22,6 +22,9 @@ interface LibraryItem {
   icon: ComponentType<{ size?: number; strokeWidth?: number; className?: string }>;
   perm: PermissionKey;
   level?: 'READ' | 'FULL';
+  /** CODE-085 — a second key the backend also requires (DVIR report → `dvir`). */
+  alsoPerm?: PermissionKey;
+  /** IFTA only — no permission key of its own (see reportMeta.ts). */
   blockedRoles?: Role[];
   /** Either a report screen, or a PDF job generated from the library itself. */
   target: { to: string } | { generate: LibraryReportType };
@@ -31,7 +34,7 @@ const LIBRARY_ITEMS: LibraryItem[] = [
   { name: 'IFTA mileage report', description: 'Quarterly fuel tax by jurisdiction', icon: FileText, target: { to: '/reports/ifta' }, perm: 'reports', blockedRoles: ['DISPATCHER'] },
   { name: 'FMCSA / DOT audit pack', description: 'Logs, DVIRs and unassigned driving', icon: ShieldCheck, target: { to: '/reports/fmcsa' }, perm: 'reportsTransfer' },
   { name: 'Activity report', description: 'Duty status totals per driver', icon: Clock, target: { to: '/reports/activity' }, perm: 'reports' },
-  { name: 'DVIR report', description: 'Inspections and defect history', icon: ClipboardCheck, target: { to: '/reports/dvir' }, perm: 'reports', blockedRoles: ['DISPATCHER'] },
+  { name: 'DVIR report', description: 'Inspections and defect history', icon: ClipboardCheck, target: { to: '/reports/dvir' }, perm: 'reports', alsoPerm: 'dvir' },
   { name: 'Driver logs (RODS)', description: 'Printable 8-day log sheets', icon: Users, target: { generate: 'RODS' }, perm: 'reports', level: 'FULL' },
   { name: 'Idle & fuel report', description: 'Idle time, fuel burn and MPG', icon: Fuel, target: { generate: 'IDLE_FUEL' }, perm: 'reports', level: 'FULL' },
 ];
@@ -48,7 +51,9 @@ export function ReportLibraryCard({ timezone }: ReportLibraryCardProps) {
   const role = user?.role;
   const [generating, setGenerating] = useState<LibraryReportType | null>(null);
   const job = useTrackedReport();
-  const items = LIBRARY_ITEMS.filter((item) => can(item.perm, item.level) && !(role && item.blockedRoles?.includes(role)));
+  const items = LIBRARY_ITEMS.filter(
+    (item) => can(item.perm, item.level) && (!item.alsoPerm || can(item.alsoPerm)) && !(role && item.blockedRoles?.includes(role)),
+  );
 
   return (
     <Card padded={false}>

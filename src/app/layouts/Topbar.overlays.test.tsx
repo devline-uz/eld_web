@@ -224,6 +224,12 @@ describe('11.27 Notifications panel', () => {
 
     await user.click(within(panel).getByRole('button', { name: /Maintenance\s*1/ }));
     await waitFor(() => expect(within(panel).getAllByRole('listitem')).toHaveLength(1));
+    expect(within(panel).queryByText('ELD disconnected')).not.toBeInTheDocument();
+
+    // ELD connection trouble has its own segment — it is not maintenance.
+    await user.click(within(panel).getByRole('button', { name: /ELD\s*1/ }));
+    expect(await within(panel).findByText('ELD disconnected')).toBeInTheDocument();
+    await waitFor(() => expect(within(panel).getAllByRole('listitem')).toHaveLength(1));
 
     await user.click(within(panel).getByRole('button', { name: 'Mark all read' }));
     await waitFor(() => expect(within(panel).queryByText('4 new')).not.toBeInTheDocument());

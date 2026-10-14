@@ -12,7 +12,8 @@ import { endpoints } from './endpoints';
 import { qk, qkRoot } from './queryKeys';
 import { typedCachePolicy } from './queryPolicy';
 
-export type NotificationCategory = 'VIOLATIONS' | 'MAINTENANCE';
+/** `CONNECTIVITY` — ELD connection lost / disconnected / malfunction (no longer under Maintenance). */
+export type NotificationCategory = 'VIOLATIONS' | 'MAINTENANCE' | 'CONNECTIVITY';
 
 export interface NotificationItem {
   id: string;
@@ -36,6 +37,8 @@ export interface NotificationCounts {
   all: number;
   violations: number;
   maintenance: number;
+  /** ELD connectivity segment; absent on an API older than the segment. */
+  connectivity?: number;
 }
 
 export interface NotificationsPage {
@@ -185,6 +188,9 @@ export function applyNotificationNew(queryClient: QueryClient, incoming: Incomin
           all: data.counts.all + 1,
           violations: data.counts.violations + (item.category === 'VIOLATIONS' ? 1 : 0),
           maintenance: data.counts.maintenance + (item.category === 'MAINTENANCE' ? 1 : 0),
+          ...(data.counts.connectivity !== undefined && {
+            connectivity: data.counts.connectivity + (item.category === 'CONNECTIVITY' ? 1 : 0),
+          }),
         }
       : undefined;
     queryClient.setQueryData<NotificationsPage>(key, {
