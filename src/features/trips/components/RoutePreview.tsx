@@ -37,7 +37,9 @@ export function RoutePreview({
         <RouteMap pickup={route.pickup} delivery={route.delivery} waypoints={route.waypoints} line={route.line} approximate={route.approximate} />
       </Suspense>
       {!route.routing && route.approximate && (
-        <span className="absolute bottom-1 left-1 rounded bg-bg-surface px-1.5 py-0.5 text-caption text-text-muted">Approximate route (straight line)</span>
+        <span className="absolute bottom-1 left-1 rounded bg-bg-surface px-1.5 py-0.5 text-caption text-text-muted">
+          {route.routingConfigured ? 'Approximate route (straight line)' : 'Straight line — road routing is not configured'}
+        </span>
       )}
     </div>
   );

@@ -5,7 +5,7 @@
 //   company context → carrier.timezone             (formatCarrier*)
 //   user locale     → the browser                  (formatLocal*, relative time only)
 // formatLocal is banned on log screens by ESLint; use formatRods there.
-import { formatInTimeZone } from 'date-fns-tz';
+import { formatInTimeZone, fromZonedTime } from 'date-fns-tz';
 import { EMPTY } from './empty';
 
 export type DateInput = string | number | Date | null | undefined;
@@ -83,6 +83,51 @@ export function formatCarrier(
   format: DateFormatName | string = 'dateTime',
 ): string {
   return formatInTz(value, carrierTimezone, format);
+}
+
+/**
+ * LIVE-007 — company-context instant (DVIR lists, unit activity, audit, reports): carrier zone,
+ * year shown only when it differs from `now`'s year (like `formatLocalDateTime`). One formatter so
+ * the same record reads the same on every page whatever zone the browser is in.
+ */
+export function formatCarrierDateTime(value: DateInput, carrierTimezone: string, now: Date = new Date()): string {
+  const sameYear = formatInTz(value, carrierTimezone, 'yyyy') === formatInTz(now, carrierTimezone, 'yyyy');
+  return formatInTz(value, carrierTimezone, sameYear ? 'dateTime' : 'dateTimeYear');
+}
+
+/** CODE-038 — today's calendar day (`yyyy-MM-dd`) in `timeZone`: the default / max of a date input. */
+export function todayInTz(timeZone: string, now: Date = new Date()): string {
+  return formatInTimeZone(now, timeZone, DATE_FORMATS.isoDate);
+}
+
+/**
+ * CODE-038 — a date-only pick (`yyyy-MM-dd`) as the instant the API stores: midnight of that day in
+ * `timeZone`. Midnight of today is never in the future, so "today" is never refused as a future
+ * date (`new Date('2026-10-14')` is UTC midnight — ahead of the clock east of UTC). `''` → undefined.
+ */
+export function dateOnlyToInstant(day: string, timeZone: string): string | undefined {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return undefined;
+  return fromZonedTime(`${day}T00:00:00`, timeZone).toISOString();
+}
+
+/**
+ * CODE-038 — the calendar day a date-only value stands for, in `timeZone`. Values saved before
+ * `dateOnlyToInstant` are UTC midnight (`2026-10-14T00:00:00.000Z`); read in a zone west of UTC
+ * they fell on the previous day, so an exact UTC midnight is read as a UTC date.
+ */
+export function dateOnlyKey(value: DateInput, timeZone: string): string {
+  const date = toDate(value);
+  if (!date) return '';
+  const legacyUtcMidnight = date.getUTCHours() === 0 && date.getUTCMinutes() === 0 && date.getUTCSeconds() === 0 && date.getUTCMilliseconds() === 0;
+  return formatInTimeZone(date, legacyUtcMidnight ? 'UTC' : timeZone, DATE_FORMATS.isoDate);
+}
+
+/** CODE-038 — display a date-only value (`Oct 14, 2026`) on the day it was picked; `—` when empty. */
+export function formatDateOnly(value: DateInput, timeZone: string, format: DateFormatName | string = 'shortDate'): string {
+  const key = dateOnlyKey(value, timeZone);
+  if (!key) return EMPTY.dash;
+  // Noon UTC of that day formats to the same calendar day in UTC.
+  return formatInTimeZone(new Date(`${key}T12:00:00Z`), 'UTC', pattern(format));
 }
 
 /** The `en-US` short zone name (`EDT`, `MST`, `HST`, `GMT+5`) in force at `date`. */

@@ -7,6 +7,7 @@ import { hosRulesetLabel } from '@/shared/lib/hosRuleset';
 import type { HosRuleset } from '@/shared/api/carrier';
 import type {
   HosViolation,
+  RodsDaySummary,
   RodsDutyStatus,
   RodsGraphSegment,
   UnidentifiedSegment,
@@ -201,6 +202,36 @@ export interface PlottedSegment {
   color: string;
 }
 
+/**
+ * LIVE-006 — §395.8(a): time before a day's first record is off duty. The server counts that
+ * leading gap in `offDutySec` (rods.ts) but sends no segment for it, so an empty day showed
+ * "OFF 24:00" in TOTAL above a blank grid. The gap is rebuilt from those same totals, so the
+ * line and the TOTAL column can never disagree.
+ */
+export function withImplicitOffDuty(
+  graph: RodsGraphSegment[],
+  summary: Pick<RodsDaySummary, 'offDutySec' | 'sleeperSec' | 'drivingSec' | 'onDutySec'>,
+  dayStartMs: number,
+): RodsGraphSegment[] {
+  const totalSec = summary.offDutySec + summary.sleeperSec + summary.drivingSec + summary.onDutySec;
+  const coveredSec = graph.reduce((sum, segment) => sum + segment.durationSec, 0);
+  let gapSec = Math.round(totalSec - coveredSec);
+  const first = graph[0];
+  if (first) gapSec = Math.min(gapSec, Math.round((Date.parse(first.startAt) - dayStartMs) / 1000));
+  if (gapSec <= 0) return graph;
+  return [
+    {
+      status: 'OFF',
+      effective: 'OFF',
+      special: 'NONE',
+      startAt: new Date(dayStartMs).toISOString(),
+      endAt: new Date(dayStartMs + gapSec * 1000).toISOString(),
+      durationSec: gapSec,
+    },
+    ...graph,
+  ];
+}
+
 /** `effective` is the row (PC ⇒ OFF, YM ⇒ ON); `special` decides the dash. */
 export function plotSegments(
   graph: RodsGraphSegment[],
@@ -318,7 +349,11 @@ export interface PlottedViolation {
   id: string;
   /** The instant the limit was crossed — the red dashed vertical line. */
   at: number;
-  /** The light red band covering the interval that ran over. */
+  /**
+   * The light red band covering the interval that ran over: it STARTS at the crossing and runs for
+   * `exceededBySec` (LIVE-004 / CODE-026 — the engine sets `occurredAt` to the crossing instant),
+   * clipped to this RODS day.
+   */
   from: number;
   to: number;
   title: string;
@@ -339,8 +374,8 @@ export function plotViolations(
     return {
       id: violation.id,
       at: fractionOf(atMs, dayStartMs, dayLengthSec),
-      from: fractionOf(atMs - violation.exceededBySec * 1000, dayStartMs, dayLengthSec),
-      to: fractionOf(atMs, dayStartMs, dayLengthSec),
+      from: fractionOf(atMs, dayStartMs, dayLengthSec),
+      to: fractionOf(atMs + Math.max(0, violation.exceededBySec) * 1000, dayStartMs, dayLengthSec),
       title:
         violation.status === 'OPEN'
           ? VIOLATION_TITLE[violation.type]

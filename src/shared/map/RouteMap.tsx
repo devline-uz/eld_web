@@ -89,6 +89,20 @@ function install(map: maplibregl.Map, p: RouteMapProps) {
   });
 }
 
+const pointKey = (p: LatLon): string => `${p.lon},${p.lat}`;
+
+/** CODE-050 — the stops as a value: `useTripRoute` hands new objects/arrays on every render, so the
+ * map compares these strings instead of references. */
+function stopsKey(p: Pick<RouteMapProps, 'pickup' | 'delivery' | 'waypoints'>): string {
+  return [p.pickup, ...(p.waypoints ?? []), p.delivery].map(pointKey).join(';');
+}
+
+/** The drawn geometry as a value — the stops, the road line (length and ends) and its style. */
+function geometryKey(p: Pick<RouteMapProps, 'pickup' | 'delivery' | 'waypoints' | 'line' | 'approximate'>): string {
+  const line = p.line && p.line.length >= 2 ? `${p.line.length}:${p.line[0]!.join(',')}:${p.line[p.line.length - 1]!.join(',')}` : '-';
+  return `${stopsKey(p)}|${line}|${p.approximate ? 1 : 0}`;
+}
+
 function fit(map: maplibregl.Map, p: RouteMapProps) {
   const coords = routeCoords(p);
   const first = coords[0]!;
@@ -149,15 +163,23 @@ export default function RouteMap(props: RouteMapProps) {
     };
   }, [hasStyle]);
 
-  const { pickup, delivery, waypoints, line, approximate } = props;
+  // CODE-050 — redraw only when the geometry really changed, and re-fit only when the stops moved
+  // or the road line for them arrived — never on a plain re-render (typing elsewhere in the Create
+  // trip form, a board poll), which used to throw away the dispatcher's pan/zoom every time.
+  const geometry = geometryKey(props);
+  const fitKey = `${stopsKey(props)}|${props.line && props.line.length >= 2 ? 'road' : 'straight'}`;
+  const fittedRef = useRef<string | null>(null);
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
-    const p = { pickup, delivery, waypoints, line, approximate };
+    const p = propsRef.current;
     (map.getSource(SOURCE) as maplibregl.GeoJSONSource | undefined)?.setData(routeFeatures(p));
-    map.setPaintProperty(LINE_LAYER, 'line-dasharray', approximate ? [2, 2] : [1, 0]);
-    fit(map, p);
-  }, [pickup, delivery, waypoints, line, approximate, ready]);
+    map.setPaintProperty(LINE_LAYER, 'line-dasharray', p.approximate ? [2, 2] : [1, 0]);
+    if (fittedRef.current !== fitKey) {
+      fittedRef.current = fitKey;
+      fit(map, p);
+    }
+  }, [geometry, fitKey, ready]);
 
   if (!hasStyle || failed) {
     return (

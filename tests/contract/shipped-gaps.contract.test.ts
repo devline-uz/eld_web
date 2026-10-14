@@ -28,6 +28,8 @@ const NULLABLE = {
   liveUnit: new Set([
     'driverId', 'driverName', 'driverPhone', 'speedMph', 'headingDeg', 'odometerMi', 'lat', 'lon',
     'locationLabel', 'lastSeenAt', 'driveRemainingSec', 'shiftEndsAt', 'eldSerial', 'bleState',
+    // QA LIVE-002 — `DriverDutyStatus | null`: null with no driver or no HOS state.
+    'driverDutyStatus',
     // UI-003 — `string | null`: null whenever the unit is live (`isStale: false`).
     'staleSince',
   ]),

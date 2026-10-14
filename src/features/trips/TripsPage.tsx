@@ -16,6 +16,10 @@ import {
   useAutoAssignTrips,
   usePublishTrip,
   useDeleteTrip,
+  useTripStatusAction,
+  canCancelTrip,
+  canDeliverTrip,
+  canStartTrip,
   isTripDeletable,
   isTripEditable,
   isTripInProgress,
@@ -25,6 +29,7 @@ import {
   tripsKpiQuery,
   type TripTableRow,
   type TripRow,
+  type TripStatus,
 } from '@/shared/api/trips';
 import { qkRoot } from '@/shared/api/queryKeys';
 import { useDebouncedValue } from '@/shared/hooks/useDebouncedValue';
@@ -38,18 +43,23 @@ import { Pagination } from '@/shared/ui/Pagination';
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
 import { EMPTY_STATE_COPY, searchEmptyState } from '@/shared/ui/copy';
 import { useToast } from '@/shared/ui/Toast';
-import { ConfirmDelete } from '@/shared/ui/Modal';
+import { ConfirmDelete, Modal } from '@/shared/ui/Modal';
 import { formErrorMessage } from '@/shared/api/errors';
 import { formatLocal, formatLocalDateTime } from '@/shared/format/datetime';
 import { formatWeight } from '@/shared/format/numbers';
 import { orDash } from '@/shared/format/empty';
 import { CreateTripModal } from './components/CreateTripModal';
 import { AssignLoadModal } from './components/AssignLoadModal';
+import { MarkDeliveredModal } from './components/MarkDeliveredModal';
 import { TripFiltersDrawer, TripFilterChips } from './components/TripFiltersDrawer';
 import { RoutePreview } from './components/RoutePreview';
 import { intermediateTripStops, orderTripStops } from './lib/useTripRoute';
 import { PeriodDropdown } from './components/PeriodDropdown';
 import {
+  CANCEL_TRIP_DESCRIPTION,
+  cancelTripTitle,
+  tripCancelledToast,
+  tripStartedToast,
   DELETE_TRIP_DESCRIPTION,
   TRIP_IN_PROGRESS,
   TRIP_NOT_EDITABLE,
@@ -78,6 +88,8 @@ export default function TripsPage() {
   const [assignLoad, setAssignLoad] = useState<TripRow | null>(null);
   const [editTrip, setEditTrip] = useState<TripRow | null>(null);
   const [deleteTrip, setDeleteTrip] = useState<TripRow | null>(null);
+  const [deliverTrip, setDeliverTrip] = useState<TripRow | null>(null);
+  const [cancelTrip, setCancelTrip] = useState<TripRow | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filtersRevision, setFiltersRevision] = useState(0);
   const [params, setParams] = useSearchParams();
@@ -97,6 +109,12 @@ export default function TripsPage() {
   // Completed are one server page each (`q`/`status` real params); the 11.23 groups the API has
   // no params for (B-59) switch a history segment to the bounded newest-first window.
   const filterRows = useCallback((rows: TripTableRow[]) => rows.filter((t) => matchesTripFilters(t, filters)), [filters]);
+  // CODE-047 — cancelled trips live under Completed; they are fetched only when the status filter
+  // asks for them (alone, or next to Delivered).
+  const completedStatuses = useMemo<TripStatus[]>(() => {
+    if (!filters.status.includes('Cancelled')) return ['DELIVERED'];
+    return filters.status.includes('Delivered') ? ['DELIVERED', 'CANCELLED'] : ['CANCELLED'];
+  }, [filters.status]);
   const trips = useTripsBoard({
     segment,
     page,
@@ -104,6 +122,7 @@ export default function TripsPage() {
     search: debouncedSearch,
     useWindow: activeFilterCount > 0,
     filter: filterRows,
+    completedStatuses,
   });
   const unassigned = useUnassignedLoads();
   const autoAssign = useAutoAssignTrips();
@@ -114,6 +133,41 @@ export default function TripsPage() {
   const deleteMutation = useDeleteTrip({
     onDeleted: (tripId) => setSelectedTripId((current) => (current === tripId ? null : current)),
   });
+
+  // LIVE-003 — the dispatcher moves a trip through its lifecycle from the board (backend
+  // `ALLOWED_TRANSITIONS`); a 409 means the driver app or another dispatcher moved it first — the
+  // mutation refetches the board either way.
+  const statusAction = useTripStatusAction();
+  const [startingId, setStartingId] = useState<string | null>(null);
+  function startTrip(trip: TripRow) {
+    if (statusAction.isPending) return;
+    setStartingId(trip.id);
+    statusAction.mutate(
+      { tripId: trip.id, status: 'IN_PROGRESS' },
+      {
+        onSuccess: () => toast({ kind: 'success', title: tripStartedToast(trip.number) }),
+        onError: (error) => toast({ kind: 'error', title: isTripNotFound(error) ? TRIP_NOT_FOUND : formErrorMessage(error) }),
+        onSettled: () => setStartingId(null),
+      },
+    );
+  }
+  function confirmCancel() {
+    const target = cancelTrip;
+    if (!target || statusAction.isPending) return;
+    statusAction.mutate(
+      { tripId: target.id, status: 'CANCELLED' },
+      {
+        onSuccess: () => {
+          toast({ kind: 'success', title: tripCancelledToast(target.number) });
+          setCancelTrip(null);
+        },
+        onError: (error) => {
+          toast({ kind: 'error', title: isTripNotFound(error) ? TRIP_NOT_FOUND : formErrorMessage(error) });
+          setCancelTrip(null);
+        },
+      },
+    );
+  }
 
   function confirmDelete() {
     const target = deleteTrip;
@@ -148,6 +202,16 @@ export default function TripsPage() {
         const deletable = isTripDeletable(row);
         return (
           <Can perm="trips" level="FULL">
+            {canStartTrip(row) && (
+              <DropdownMenu.Item onSelect={() => startTrip(row)} className={itemClass}>
+                Start trip
+              </DropdownMenu.Item>
+            )}
+            {canDeliverTrip(row) && (
+              <DropdownMenu.Item onSelect={() => setDeliverTrip(row)} className={itemClass}>
+                Mark delivered
+              </DropdownMenu.Item>
+            )}
             <DropdownMenu.Item
               disabled={!editable}
               title={editable ? undefined : TRIP_NOT_EDITABLE}
@@ -156,6 +220,11 @@ export default function TripsPage() {
             >
               Edit trip
             </DropdownMenu.Item>
+            {canCancelTrip(row) && (
+              <DropdownMenu.Item onSelect={() => setCancelTrip(row)} className={`${itemClass} text-danger hover:bg-danger-soft`}>
+                Cancel trip
+              </DropdownMenu.Item>
+            )}
             <DropdownMenu.Item
               disabled={!deletable}
               title={deletable ? undefined : TRIP_IN_PROGRESS}
@@ -341,10 +410,25 @@ export default function TripsPage() {
                 : status === 'Upcoming'
                   ? 'info'
                   : 'success';
-        return (
+        const badge = (
           <Badge tone={tone} className="whitespace-nowrap">
             {status}
           </Badge>
+        );
+        // QA LIVE-003 — a scheduled (draft / planned) trip whose planned start has passed keeps its
+        // status (nothing changes it for the dispatcher) but is flagged so it is not missed.
+        if (!row.original.startOverdue || !row.original.plannedStartAt) return badge;
+        const overdueTitle = `Planned start ${formatLocalDateTime(row.original.plannedStartAt)} has passed and the trip has not started.`;
+        return (
+          <span className="inline-flex items-center gap-1.5">
+            {badge}
+            <span title={overdueTitle}>
+              <Badge tone="danger" className="whitespace-nowrap">
+                Overdue
+              </Badge>
+              <span className="sr-only"> — {overdueTitle}</span>
+            </span>
+          </span>
         );
       },
     },
@@ -629,6 +713,27 @@ export default function TripsPage() {
             {selectedTrip ? (
               <>
                 <SectionHeader title={`Route · ${selectedTrip.number}`} subtitle={`${selectedTrip.pickup?.name ?? '—'} → ${selectedTrip.delivery?.name ?? '—'}`} />
+                {(canStartTrip(selectedTrip) || canDeliverTrip(selectedTrip)) && (
+                  <Can perm="trips" level="FULL">
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {canStartTrip(selectedTrip) && (
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          loading={statusAction.isPending && startingId === selectedTrip.id}
+                          onClick={() => startTrip(selectedTrip)}
+                        >
+                          Start trip
+                        </Button>
+                      )}
+                      {canDeliverTrip(selectedTrip) && (
+                        <Button variant="primary" size="sm" onClick={() => setDeliverTrip(selectedTrip)}>
+                          Mark delivered
+                        </Button>
+                      )}
+                    </div>
+                  </Can>
+                )}
                 <RoutePreview pickup={selectedTrip.pickup} delivery={selectedTrip.delivery} waypoints={intermediateTripStops(selectedTrip.stops)} />
                 <ol className="mt-4 flex flex-col gap-3">
                   {orderTripStops(selectedTrip.stops).map((stop) => {
@@ -676,6 +781,28 @@ export default function TripsPage() {
         confirmLabel="Delete permanently"
         loading={deleteMutation.isPending}
       />
+      {deliverTrip && <MarkDeliveredModal key={deliverTrip.id} trip={deliverTrip} onClose={() => setDeliverTrip(null)} />}
+      {/* Not `ConfirmDelete`: its fixed "Cancel" button next to "Cancel trip" would read as two cancels. */}
+      <Modal
+        open={cancelTrip !== null}
+        onClose={() => {
+          if (!statusAction.isPending) setCancelTrip(null);
+        }}
+        title={cancelTrip ? cancelTripTitle(cancelTrip.number) : 'Cancel trip?'}
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" size="lg" onClick={() => setCancelTrip(null)} disabled={statusAction.isPending}>
+              Keep trip
+            </Button>
+            <Button variant="danger" size="lg" onClick={confirmCancel} loading={statusAction.isPending}>
+              Cancel trip
+            </Button>
+          </>
+        }
+      >
+        <p className="text-body text-text-secondary">{CANCEL_TRIP_DESCRIPTION}</p>
+      </Modal>
       {assignLoad && <AssignLoadModal load={assignLoad} onClose={() => setAssignLoad(null)} />}
       <TripFiltersDrawer
         key={filtersRevision}

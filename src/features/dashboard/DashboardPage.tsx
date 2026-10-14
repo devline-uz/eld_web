@@ -38,6 +38,7 @@ import { messagesHref } from '@/shared/lib/messagesHref';
 
 // WB-257 — a ~2 KB hand-written SVG now (was Recharts, 97 KB gzip), so it ships in this chunk.
 import DutyDonut from './components/DutyDonut';
+import { summarizeDriverDuty } from './lib/driverDuty';
 import { LazyOnVisible } from '@/shared/ui/LazyOnVisible';
 
 /** Same box as `DashboardMapPreview`'s wrapper, so the swap from placeholder to map never shifts. */
@@ -137,11 +138,13 @@ export default function DashboardPage() {
 
   const units: LiveFleetUnit[] = summary.data?.liveFleet.items ?? [];
   const counts = summary.data?.liveFleet.counts;
-  const onDutyCount = counts?.onDuty ?? 0;
-  // QA-B — the live feed has one row per unit; a unit with no driver is not a driver, so the
-  // subtitle no longer disagrees with the donut's own total. UI-015 — that is the number of
-  // units with a driver signed in, not the carrier's driver headcount: it reads "assigned drivers".
-  const driverCount = units.filter((u) => u.driverId).length;
+  // QA LIVE-002 — the KPI, the donut's centre and its subtitle are one computation over the
+  // assigned drivers' own HOS status (the Drivers list's source and "on duty" definition), so an
+  // ELD-offline or out-of-service unit's driving / on-duty driver is no longer dropped.
+  // QA-B / UI-015 — a unit with no driver is not a driver: "assigned drivers" = units with one.
+  const driverDuty = summarizeDriverDuty(units);
+  const onDutyCount = driverDuty.onDuty;
+  const driverCount = driverDuty.assigned;
   const movingCount = counts?.moving ?? 0;
   const idleCount = counts?.idle ?? 0;
   const offlineCount = counts?.offline ?? 0;
@@ -257,7 +260,9 @@ export default function DashboardPage() {
               subtitle={
                 summary.isError
                   ? undefined
-                  : `${movingCount} moving · ${idleCount} idle · ${offlineCount} ELD offline`
+                  : // QA LIVE-011 — units whose paired ELD is silent > 30 min; Settings › ELD
+                    // devices counts devices (incl. unpaired ones), hence "units with".
+                    `${movingCount} moving · ${idleCount} idle · ${offlineCount} ${offlineCount === 1 ? 'unit' : 'units'} with ELD offline`
               }
               action={
                 <button

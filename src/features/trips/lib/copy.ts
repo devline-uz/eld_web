@@ -51,3 +51,16 @@ export const deleteTripTitle = (number: string): string => `Delete trip ${number
 /** §5.9 destructive confirm — says the delete is permanent and nothing survives it. */
 export const DELETE_TRIP_DESCRIPTION =
   'This permanently deletes the trip and its stops. It cannot be undone, and the trip will not be kept for history or reports.';
+
+/* --------------------------------------------- Start / Mark delivered / Cancel (QA LIVE-003) */
+
+export const tripStartedToast = (number: string): string => `Trip ${number} started`;
+export const tripDeliveredToast = (number: string): string => `Trip ${number} marked delivered`;
+export const tripCancelledToast = (number: string): string => `Trip ${number} cancelled`;
+export const cancelTripTitle = (number: string): string => `Cancel trip ${number}?`;
+/** §5.9 destructive confirm — unlike Delete, the trip is kept (Completed segment, `Cancelled` filter). */
+export const CANCEL_TRIP_DESCRIPTION =
+  'The trip is kept for history (filter Completed by “Cancelled”) and its driver, unit and trailer are freed for other trips. A cancelled trip cannot be reopened or edited.';
+export const DELIVERED_AT_INVALID = 'Enter a valid date and time.';
+export const DELIVERED_AT_FUTURE = 'Delivery time cannot be in the future.';
+export const DELIVERED_AT_BEFORE_START = 'Delivery time cannot be before the trip started.';

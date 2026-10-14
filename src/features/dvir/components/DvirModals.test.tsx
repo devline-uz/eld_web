@@ -102,6 +102,21 @@ function workOrdersListHandler() {
 /* ------------------------------------------------------------------ 11.17 Resolve defect */
 
 describe('ResolveDefectModal — 11.17', () => {
+  it('QA CODE-008 — on an out-of-service defect, Deferred says the unit stays out of service until repaired', async () => {
+    const user = userEvent.setup();
+    server.use(workOrdersListHandler());
+    renderModal(
+      <ResolveDefectModal
+        defect={{ ...DEFECT, outOfService: true, vehicle: { unitNumber: '101' } as DefectTableRow['vehicle'] }}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/resolved returns the unit to service unless another critical defect is still open or deferred/)).toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: /Deferred/ }));
+    expect(screen.getByText(/deferred keeps the unit out of service until the defect is repaired/)).toBeInTheDocument();
+  });
+
   it('sends exactly what `ResolveDefectDto` accepts and nothing else (B-68 resolutionType)', async () => {
     const user = userEvent.setup();
     let body: unknown;

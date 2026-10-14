@@ -26,6 +26,7 @@ import {
   hourRulesPath,
   pct,
   plotSegments,
+  withImplicitOffDuty,
   plotUnassigned,
   plotViolations,
   quarterHourTicksPath,
@@ -76,7 +77,7 @@ export function GraphGrid({
 }: GraphGridProps) {
   const model = useMemo(() => {
     const dayStartMs = rodsDayStart(summary.date, timezone);
-    const segments = plotSegments(graph, dayStartMs, summary.dayLengthSec);
+    const segments = plotSegments(withImplicitOffDuty(graph, summary, dayStartMs), dayStartMs, summary.dayLengthSec);
     return {
       dayStartMs,
       segments,

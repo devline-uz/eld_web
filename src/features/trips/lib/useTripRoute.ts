@@ -2,14 +2,15 @@
 // in route order — and a road route through them. Coordinates come from the stop's own
 // latitude/longitude; trips created from the panel may carry none, so the stop's address/name is
 // geocoded through the shared MapTiler helper (needs VITE_MAP_API_KEY). Road geometry comes from OSRM
-// (`ROUTING_BASE_URL`) with the intermediate stops as waypoints; when routing fails the caller gets
-// `line: null` + `approximate` and draws straight segments.
+// (`ROUTING_BASE_URL`) with the intermediate stops as waypoints; when routing fails — or no router is
+// configured (`routingConfigured: false`, CODE-057) — the caller gets `line: null` + `approximate` and
+// draws straight segments.
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { ROUTING_BASE_URL } from '@/shared/api/endpoints';
 import { qk } from '@/shared/api/queryKeys';
 import { geocodingEnabled, searchPlaces } from '@/shared/map/geocode';
 import type { LatLon } from '@/shared/map/overlays';
-import type { TripStopRow } from '@/shared/api/trips';
+import { tripRouteEnds, type TripStopRow } from '@/shared/api/trips';
 
 /** What the preview reads from a stop — a saved `TripStopRow` or a stop still in the Create trip form. */
 export type RouteStop = Pick<TripStopRow, 'name' | 'address' | 'latitude' | 'longitude'>;
@@ -21,17 +22,19 @@ export function validLatLon(lat: unknown, lon: unknown): boolean {
   );
 }
 
-const routeRank = (type: TripStopRow['type']): number => (type === 'PICKUP' ? 0 : type === 'DELIVERY' ? 2 : 1);
-
-/** Route order of a saved trip's stops: the pickup always first, the delivery always last, every
- * other stop between them by `sequence`. */
+/** Route order of a saved trip's stops: the route's pickup (first PICKUP) first, its delivery (last
+ * DELIVERY) last, every other stop — further pickups and drops included (CODE-051) — between them
+ * by `sequence`. */
 export function orderTripStops<T extends Pick<TripStopRow, 'type' | 'sequence'>>(stops: readonly T[]): T[] {
-  return [...stops].sort((a, b) => routeRank(a.type) - routeRank(b.type) || a.sequence - b.sequence);
+  const { pickup, delivery } = tripRouteEnds(stops);
+  const middle = [...stops].filter((s) => s !== pickup && s !== delivery).sort((a, b) => a.sequence - b.sequence);
+  return [...(pickup ? [pickup] : []), ...middle, ...(delivery ? [delivery] : [])];
 }
 
-/** The stops between the pickup and the delivery, in route order. */
+/** The stops between the route's pickup and its delivery, in route order (the waypoints). */
 export function intermediateTripStops<T extends Pick<TripStopRow, 'type' | 'sequence'>>(stops: readonly T[]): T[] {
-  return orderTripStops(stops).filter((s) => routeRank(s.type) === 1);
+  const { pickup, delivery } = tripRouteEnds(stops);
+  return orderTripStops(stops).filter((s) => s !== pickup && s !== delivery);
 }
 
 function stopPoint(stop: RouteStop | null): LatLon | null {
@@ -41,8 +44,13 @@ function stopPoint(stop: RouteStop | null): LatLon | null {
 const coordsKey = (points: readonly LatLon[]): string => points.map((p) => `${p.lon},${p.lat}`).join(';');
 
 /** OSRM road route through `points` in order (pickup, waypoints…, delivery) as [lon, lat] pairs. */
-export async function fetchRoadRoute(points: readonly LatLon[], signal?: AbortSignal): Promise<[number, number][]> {
-  const url = `${ROUTING_BASE_URL}/route/v1/driving/${coordsKey(points)}?overview=full&geometries=geojson`;
+export async function fetchRoadRoute(
+  points: readonly LatLon[],
+  signal?: AbortSignal,
+  base: string | null = ROUTING_BASE_URL,
+): Promise<[number, number][]> {
+  if (!base) throw new Error('Road routing is not configured');
+  const url = `${base}/route/v1/driving/${coordsKey(points)}?overview=full&geometries=geojson`;
   const res = await fetch(url, { signal });
   if (!res.ok) throw new Error(`Routing failed (${res.status})`);
   const body = (await res.json()) as { code?: string; routes?: { geometry?: { coordinates?: [number, number][] } }[] };
@@ -63,6 +71,8 @@ export type TripRouteState =
       line: [number, number][] | null;
       approximate: boolean;
       routing: boolean;
+      /** CODE-057 — false when the build has no router (`VITE_ROUTING_URL` unset in production). */
+      routingConfigured: boolean;
     };
 
 const NO_WAYPOINTS: readonly RouteStop[] = [];
@@ -97,7 +107,7 @@ export function useTripRoute(
   const route = useQuery({
     queryKey: qk.tripRoute(a && b ? coordsKey([a, ...mid, b]) : ''),
     queryFn: ({ signal }) => fetchRoadRoute([a!, ...mid, b!], signal),
-    enabled: Boolean(a && b),
+    enabled: Boolean(a && b && ROUTING_BASE_URL),
     staleTime: Infinity,
     retry: 1,
   });
@@ -106,8 +116,18 @@ export function useTripRoute(
   const pending = geocoded.some((q) => q.isFetching);
   if (pending) return { status: 'loading' };
   if (!a || !b) return { status: 'no-location' };
+  const routingConfigured = ROUTING_BASE_URL !== null;
   if (route.isPending && route.fetchStatus !== 'idle') {
-    return { status: 'ready', pickup: a, delivery: b, waypoints: mid, line: null, approximate: true, routing: true };
+    return { status: 'ready', pickup: a, delivery: b, waypoints: mid, line: null, approximate: true, routing: true, routingConfigured };
   }
-  return { status: 'ready', pickup: a, delivery: b, waypoints: mid, line: route.data ?? null, approximate: !route.data, routing: false };
+  return {
+    status: 'ready',
+    pickup: a,
+    delivery: b,
+    waypoints: mid,
+    line: route.data ?? null,
+    approximate: !route.data,
+    routing: false,
+    routingConfigured,
+  };
 }

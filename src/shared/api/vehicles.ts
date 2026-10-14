@@ -476,13 +476,15 @@ export interface CreateVehiclePayload {
   make: string;
   model: string;
   year: number;
-  licensePlate?: string;
-  plateState?: string;
+  /** `null` (edit only) clears the field — CODE-010. */
+  licensePlate?: string | null;
+  plateState?: string | null;
   fuelType?: string;
   sleeperBerth?: boolean;
   odometerMi?: number;
-  notes?: string;
-  deviceId?: string;
+  notes?: string | null;
+  /** ELD serial; `null` on edit unpairs the unit's device. */
+  deviceId?: string | null;
 }
 
 export function useCreateVehicle() {

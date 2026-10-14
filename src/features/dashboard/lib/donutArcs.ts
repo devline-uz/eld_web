@@ -1,4 +1,4 @@
-import type { DutyStatus } from '@/shared/ui/Badge';
+import type { DonutDutyStatus } from './driverDuty';
 
 /** SVG user units — the same 180 box, 58/78 inner/outer radius and 1° gap Recharts drew. */
 export const DONUT_SIZE = 180;
@@ -10,7 +10,7 @@ export const CIRCUMFERENCE = 2 * Math.PI * DONUT_RADIUS;
 const GAP = CIRCUMFERENCE / 360;
 
 export interface DonutArc {
-  status: DutyStatus;
+  status: DonutDutyStatus;
   count: number;
   /** Visible stroke length along the ring. */
   length: number;
@@ -19,7 +19,7 @@ export interface DonutArc {
 }
 
 /** Ring arcs for the non-zero counts, in legend order; a lone segment is a full ring (no gap). */
-export function donutArcs(counted: { status: DutyStatus; count: number }[]): DonutArc[] {
+export function donutArcs(counted: { status: DonutDutyStatus; count: number }[]): DonutArc[] {
   const total = counted.reduce((sum, s) => sum + s.count, 0);
   if (total === 0) return [];
   const present = counted.filter((s) => s.count > 0);

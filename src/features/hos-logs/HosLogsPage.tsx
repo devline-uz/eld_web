@@ -23,6 +23,7 @@ import { useAuth } from '@/shared/auth/AuthProvider';
 import { useRoom } from '@/shared/realtime/useRoom';
 import { HOS_LOGS_POLL_MS, useVisiblePolling } from '@/shared/realtime/polling';
 import { EMPTY } from '@/shared/format';
+import { recordedBySubtitle } from './recordedBy';
 import { qk, qkRoot } from '@/shared/api/queryKeys';
 import { useDriversList } from '@/shared/api/drivers';
 import { useVehiclesPicker } from '@/shared/api/vehicles';
@@ -355,7 +356,7 @@ export default function HosLogsPage() {
           <Card className="print:break-inside-avoid print:shadow-none">
             <SectionHeader
               title="24-hour graph grid"
-              subtitle={`Recorded by ELD ${EMPTY.notAssigned} · all times ${zone}`}
+              subtitle={recordedBySubtitle(day?.recordedBy, zone)}
               action={
                 // Never claim "No unassigned segments" before the answer is in: while the query is
                 // pending the chip is a skeleton, and a failed query says the count is unknown.

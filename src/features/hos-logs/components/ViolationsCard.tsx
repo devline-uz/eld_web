@@ -121,11 +121,12 @@ export function ViolationsCard({
                 <p className="tabular text-caption text-text-muted">
                   {isWarning(violation)
                     ? violation.detail
-                    : `Exceeded by ${formatHosHours(violation.exceededBySec)} at ${formatInTimeZone(
+                    : // LIVE-004 — `occurredAt` is the crossing, `exceededBySec` the overrun after it.
+                      `Limit exceeded at ${formatInTimeZone(
                         new Date(violation.occurredAt),
                         timezone,
                         'HH:mm',
-                      )}`}
+                      )} · over by ${formatHosHours(violation.exceededBySec)}`}
                 </p>
               </div>
               {isOpen && (

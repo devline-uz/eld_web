@@ -296,6 +296,9 @@ describe('form schemas', () => {
     expect(deviceSchema.safeParse({ model: 'PT40', serial: 'PT40_9A1B', firmware: 'L113' }).success).toBe(
       true,
     );
+    // CODE-009 — the serial is sent in the API's canonical form (trim + upper).
+    const parsed = deviceSchema.safeParse({ model: 'PT30', serial: '  pt30_1c4f ' });
+    expect(parsed.success && parsed.data.serial).toBe('PT30_1C4F');
     // The ELD identifier is the carrier's (W-17), never a device field.
     expect('eldIdentifier' in deviceSchema.shape).toBe(false);
     expect(firstError(deviceSchema, { model: 'PT30', serial: '' })).toBe(M.deviceSerial);

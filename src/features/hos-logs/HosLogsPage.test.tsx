@@ -290,7 +290,7 @@ describe('W-08 · Violations card', () => {
   it('titles the violation and states how far over the limit it ran, in the driver zone', async () => {
     renderPage();
     expect((await screen.findAllByText('11-hour driving limit')).length).toBeGreaterThan(0);
-    expect(screen.getByText('Exceeded by 00:26 at 14:26')).toBeInTheDocument();
+    expect(screen.getByText('Limit exceeded at 14:26 · over by 00:26')).toBeInTheDocument();
   });
 });
 

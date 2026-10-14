@@ -73,4 +73,22 @@ describe('RouteMap', () => {
     const opts = map.fitBounds.mock.calls[0]![1] as { padding: number };
     expect(opts.padding).toBeGreaterThanOrEqual(56);
   });
+
+  it('CODE-050: a re-render with equal (but new) props keeps the pan/zoom; moved stops re-fit', () => {
+    const { rerender } = render(<RouteMap {...PROPS} />);
+    const map = FakeMap.instances.at(-1)!;
+    act(() => map.fire('load'));
+    const fits = map.fitBounds.mock.calls.length;
+    // useTripRoute hands fresh objects every render — same coordinates must not re-fit.
+    rerender(<RouteMap pickup={{ lat: 40, lon: -83 }} delivery={{ lat: 41, lon: -84 }} waypoints={[]} line={null} />);
+    rerender(<RouteMap pickup={{ lat: 40, lon: -83 }} delivery={{ lat: 41, lon: -84 }} waypoints={[]} line={null} />);
+    expect(map.fitBounds).toHaveBeenCalledTimes(fits);
+    rerender(<RouteMap pickup={{ lat: 40, lon: -83 }} delivery={{ lat: 42, lon: -85 }} line={null} />);
+    expect(map.fitBounds).toHaveBeenCalledTimes(fits + 1);
+    // The road line for the same stops arriving re-fits once (it can reach past the stops).
+    const road: [number, number][] = [[-83, 40], [-84.5, 41.5], [-85, 42]];
+    rerender(<RouteMap pickup={{ lat: 40, lon: -83 }} delivery={{ lat: 42, lon: -85 }} line={road} />);
+    rerender(<RouteMap pickup={{ lat: 40, lon: -83 }} delivery={{ lat: 42, lon: -85 }} line={[...road]} />);
+    expect(map.fitBounds).toHaveBeenCalledTimes(fits + 2);
+  });
 });

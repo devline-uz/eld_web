@@ -142,6 +142,14 @@ export interface OngoingViolation {
   detail: string;
 }
 
+/** LIVE-005 — one ELD a RODS day was recorded on; `serial` is null when the unit had no device. */
+export interface RecordingEld {
+  deviceId: string | null;
+  serial: string | null;
+  vehicleId: string | null;
+  unitNumber: string | null;
+}
+
 export interface LogDayResponse {
   driverId: string;
   date: string;
@@ -152,6 +160,11 @@ export interface LogDayResponse {
   violations: HosViolation[];
   /** Web `GET /logs/:driverId` only; absent from older servers. */
   ongoingViolations?: OngoingViolation[];
+  /**
+   * LIVE-005 — the ELD(s) this RODS day was recorded on (Appendix A §4.8). Web `GET /logs/:driverId`
+   * only; absent from older servers.
+   */
+  recordedBy?: RecordingEld[];
   certification: RodsCertification;
 }
 

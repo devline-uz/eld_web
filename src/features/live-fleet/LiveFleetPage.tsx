@@ -20,6 +20,7 @@ import { useLiveFleet, hasPosition, type LiveFleetResponse, type LiveFleetUnit }
 import { useGeofences } from '@/shared/api/geofences';
 import { useVehicleTelemetry } from '@/shared/api/vehicles';
 import { trailFromTelemetry } from '@/shared/map/trail';
+import { useCarrierTimezone } from '@/shared/auth/useCarrierTimezone';
 import { useActiveTripRows } from '@/shared/api/trips';
 import {
   MAP_LAYERS,
@@ -112,7 +113,9 @@ export const UnitListRow = memo(function UnitListRow({
   selected: boolean;
   onSelect: (vehicleId: string) => void;
 }) {
-  const lastSeen = useRelativeTime(unit.lastSeenAt, 'short');
+  // LIVE-007 — an older "last seen" is the carrier's date, not the browser's.
+  const carrierTz = useCarrierTimezone();
+  const lastSeen = useRelativeTime(unit.lastSeenAt, 'short', carrierTz);
   // UI-003 — a stale unit's speed is not live either.
   const offline = unit.dutyStatus === 'ELD_OFFLINE' || unit.isStale;
   return (
