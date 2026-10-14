@@ -402,3 +402,46 @@ describe('W-07 Driver profile — long values stay inside the profile card', () 
     });
   });
 });
+
+describe('W-07 Driver profile — pending email change', () => {
+  const PENDING = { ...DRIVER, pendingEmail: 'new@example.com', pendingEmailRequestedAt: '2026-10-13T10:00:00.000Z' };
+
+  it('shows "Pending: … — awaiting confirmation" with Resend and Cancel; the current email stays', async () => {
+    server.use(http.get(url(endpoints.drivers.detail('drv_1')), () => ok(PENDING)));
+    renderPage();
+    expect(await screen.findByText('Pending: new@example.com — awaiting confirmation')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Resend' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Cancel change' })).toBeInTheDocument();
+    // Verified current address: no "not verified" badge just because a change is pending.
+    expect(screen.queryByText('Email not verified')).toBeNull();
+  });
+
+  it('Resend posts to the resend endpoint; Cancel deletes the pending change', async () => {
+    const calls: string[] = [];
+    server.use(
+      http.get(url(endpoints.drivers.detail('drv_1')), () => ok(PENDING)),
+      http.post(url(endpoints.drivers.emailChangeResend('drv_1')), () => {
+        calls.push('resend');
+        return ok({ pendingEmail: 'new@example.com', emailedTo: 'new@example.com', emailDelivered: true }, 202);
+      }),
+      http.delete(url(endpoints.drivers.emailChange('drv_1')), () => {
+        calls.push('cancel');
+        return ok({ ...DRIVER, pendingEmail: null });
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByRole('button', { name: 'Resend' }));
+    expect(await screen.findByText('Confirmation link resent')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Cancel change' }));
+    expect(await screen.findByText('Email change cancelled')).toBeInTheDocument();
+    expect(calls).toEqual(['resend', 'cancel']);
+  });
+
+  it('no banner without a pending change; an unverified current email keeps its badge', async () => {
+    server.use(http.get(url(endpoints.drivers.detail('drv_1')), () => ok({ ...DRIVER, emailVerifiedAt: null })));
+    renderPage();
+    expect(await screen.findByText('Email not verified')).toBeInTheDocument();
+    expect(screen.queryByText(/awaiting confirmation/)).toBeNull();
+  });
+});

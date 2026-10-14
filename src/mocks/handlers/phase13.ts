@@ -84,6 +84,34 @@ export const phase13Handlers = [
       emailVerifiedAt: new Date().toISOString(),
     });
   }),
+  // Driver email change — resend / cancel the pending change, and the two public link landings.
+  http.post(url(endpoints.drivers.emailChangeResend(':id')), ({ params }) => {
+    const driver = DRIVERS.find((d) => d.id === params.id);
+    if (!driver?.pendingEmail) return fail(404, 'EMAIL_CHANGE_NOT_PENDING', 'This driver has no pending email change.');
+    return ok({ pendingEmail: driver.pendingEmail, emailedTo: driver.pendingEmail, emailDelivered: true }, 202);
+  }),
+  http.delete(url(endpoints.drivers.emailChange(':id')), ({ params }) => {
+    const driver = DRIVERS.find((d) => d.id === params.id);
+    if (!driver?.pendingEmail) return fail(404, 'EMAIL_CHANGE_NOT_PENDING', 'This driver has no pending email change.');
+    Object.assign(driver, { pendingEmail: null, pendingEmailRequestedAt: null });
+    return ok(driver);
+  }),
+  http.post(url(endpoints.auth.driverEmailConfirm), () => {
+    const driver = DRIVERS.find((d) => d.pendingEmail);
+    if (!driver?.pendingEmail) return fail(401, 'TOKEN_INVALID', 'This confirmation link is no longer valid.');
+    const email = driver.pendingEmail;
+    Object.assign(driver, { email, emailVerifiedAt: new Date().toISOString(), pendingEmail: null, pendingEmailRequestedAt: null });
+    return ok({ success: true, email });
+  }),
+  http.post(url(endpoints.auth.driverEmailCancel), () => ok({ success: true, result: 'CANCELLED' })),
+  // B-29/B-31 — public verify link (the driver id lives in the signed token; the mock takes the first driver with an email).
+  http.post(url(endpoints.auth.driverEmailVerify), () => {
+    const driver = DRIVERS.find((d) => d.email);
+    if (!driver?.email) return fail(401, 'TOKEN_INVALID', 'This verification link is no longer valid.');
+    const alreadyVerified = Boolean(driver.emailVerifiedAt);
+    if (!alreadyVerified) Object.assign(driver, { emailVerifiedAt: new Date().toISOString() });
+    return ok({ success: true, email: driver.email, alreadyVerified });
+  }),
   http.get(url(endpoints.drivers.documents(':id')), ({ params }) => ok(driverDocuments.get(String(params.id)) ?? [])),
   http.post(url(endpoints.drivers.documents(':id')), async ({ params, request }) => {
     const dto = await body(request);
@@ -193,5 +221,9 @@ export const phase13Handlers = [
   http.post(url(endpoints.me.avatar), () => ok(doc('POST /api/me/avatar'))),
   http.delete(url(endpoints.me.avatar), () => ok(doc('DELETE /api/me/avatar'))),
   http.delete(url(endpoints.me.sessions), () => ok(doc('DELETE /api/me/sessions'))),
-  http.post(url(endpoints.auth.emailVerify), () => ok(doc('POST /api/auth/email/verify'))),
+  http.post(url(endpoints.auth.emailVerify), () =>
+    ok({ ...doc('POST /api/auth/email/verify'), email: 'new.address@universal-logistics.example', alreadyVerified: false }),
+  ),
+  // B-84 — "this wasn't me" link of a web user's email change (cancel, or revert inside the hold).
+  http.post(url(endpoints.auth.emailCancel), () => ok({ success: true, result: 'CANCELLED' })),
 ];

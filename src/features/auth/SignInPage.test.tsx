@@ -176,6 +176,22 @@ describe('W-00 · the dev block (VITE_AUTH_MODE=dev)', () => {
     );
   });
 
+  it('trims the typed email before signing in (case is left to the backend)', async () => {
+    const user = userEvent.setup();
+    const ctx = mockAuth();
+    renderSignIn();
+    await user.type(screen.getByLabelText('Email'), '  Sarah.Chen@Universal-Logistics.example  ');
+    await user.type(screen.getByLabelText('Password'), 'Onebook2026');
+    await user.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    await waitFor(() =>
+      expect(ctx.signInWithPassword).toHaveBeenCalledWith(
+        'Sarah.Chen@Universal-Logistics.example',
+        'Onebook2026',
+      ),
+    );
+  });
+
   it('submits on Enter from the password field, once even when Enter is pressed twice (stage 3)', async () => {
     const user = userEvent.setup();
     const ctx = mockAuth({

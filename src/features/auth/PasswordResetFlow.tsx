@@ -89,6 +89,11 @@ function bannerMessage(cause: unknown): string {
   if (failure.status === 503) {
     return "We couldn't send the email right now. Try again later or contact your administrator.";
   }
+  if (failure.status === 409 && failure.code === 'EMAIL_CHANGE_ON_HOLD') {
+    // B-84 — the address was changed recently: no code is mailed to it during the security hold;
+    // the server notified the org administrators.
+    return 'The email on this account was changed recently, so a reset code cannot be emailed yet. Your administrator has been notified — contact them to regain access.';
+  }
   return errorMessage(failure.code);
 }
 

@@ -27,6 +27,14 @@ export const personName = () => requiredString().regex(PERSON_NAME_RE, M.personN
 /** RFC-lite — the backend does the authoritative check. */
 export const email = () => requiredString(M.email).regex(EMAIL_RE, M.email);
 
+/** Same rule, but blank (after trim) is allowed and comes out as `''` — for an email the backend
+ * stores as nullable (e.g. a driver's). The caller decides what `''` means (no value / clear). */
+export const optionalEmail = () =>
+  z
+    .string()
+    .trim()
+    .refine((value) => value === '' || EMAIL_RE.test(value), M.email);
+
 /**
  * 11.14 — an eRODS transfer only goes to a government address. The domain must be `fmcsa.dot.gov`
  * itself or one of its subdomains; a lookalike that merely *ends with* those characters

@@ -100,33 +100,109 @@ describe('EditUserModal', () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it('B-84 (shipped): changing the email shows the re-verification notice instead of closing', async () => {
+  it('B-84: changing the email asks for the acting user\'s password first, then sends it with the new address', async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    const bodies: unknown[] = [];
+    server.use(
+      http.patch(url(endpoints.users.update('usr_5')), async ({ request }) => {
+        bodies.push(await request.json());
+        return ok({
+          ...USER,
+          pendingEmail: 'jo.park@example.com',
+          emailVerification: { pendingEmail: 'jo.park@example.com', emailDelivered: true },
+        });
+      }),
+    );
+    renderModal(
+      <EditUserModal user={USER} roles={ROLES} mode="profile" activeAdminCount={2} onClose={onClose} />,
+    );
+
+    expect(screen.queryByLabelText(/your password/i)).toBeNull();
+    const email = screen.getByDisplayValue('jo@example.com');
+    await user.clear(email);
+    await user.type(email, 'jo.park@example.com');
+    const password = screen.getByLabelText(/your password/i);
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(await screen.findByText('Enter your password to change the email.')).toBeInTheDocument();
+    expect(bodies).toHaveLength(0);
+
+    await user.type(password, 'Onebook2026');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(bodies[0]).toMatchObject({ email: 'jo.park@example.com', currentPassword: 'Onebook2026' });
+    expect(await screen.findByText('Confirmation link sent')).toBeInTheDocument();
+  });
+
+  it('B-84: a wrong password is shown under the password field and the modal stays open', async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
     server.use(
       http.patch(url(endpoints.users.update('usr_5')), () =>
-        ok({ ...USER, emailVerification: { pendingEmail: 'jo.park@example.com' } }),
+        fail(401, 'REAUTH_FAILED', 'Password is incorrect.', { currentPassword: 'Password is incorrect.' }),
       ),
     );
     renderModal(
-      <EditUserModal
-        user={USER}
-        roles={ROLES}
-        mode="profile"
-        activeAdminCount={2}
-        onClose={onClose}
-      />,
+      <EditUserModal user={USER} roles={ROLES} mode="profile" activeAdminCount={2} onClose={onClose} />,
     );
-
     const email = screen.getByDisplayValue('jo@example.com');
     await user.clear(email);
     await user.type(email, 'jo.park@example.com');
+    await user.type(screen.getByLabelText(/your password/i), 'wrong');
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
-
-    expect(
-      await screen.findByText(/A verification link was sent to jo\.park@example\.com/),
-    ).toBeInTheDocument();
+    expect(await screen.findByText('Password is incorrect.')).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('B-84: an address taken by another user is shown on the email field', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.patch(url(endpoints.users.update('usr_5')), () =>
+        fail(409, 'EMAIL_TAKEN', 'A user with this email address already exists.', {
+          email: 'A user with this email address already exists.',
+        }),
+      ),
+    );
+    renderModal(
+      <EditUserModal user={USER} roles={ROLES} mode="profile" activeAdminCount={2} onClose={() => {}} />,
+    );
+    const email = screen.getByDisplayValue('jo@example.com');
+    await user.clear(email);
+    await user.type(email, 'taken@example.com');
+    await user.type(screen.getByLabelText(/your password/i), 'pw');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(await screen.findByText('A user with this email address already exists.')).toBeInTheDocument();
+  });
+
+  it('B-84: a pending change shows a banner with Resend and Cancel change', async () => {
+    const user = userEvent.setup();
+    const calls: string[] = [];
+    server.use(
+      http.post(url(endpoints.users.emailChangeResend('usr_5')), () => {
+        calls.push('resend');
+        return ok({ pendingEmail: 'jo.new@example.com', emailedTo: 'jo.new@example.com', emailDelivered: true }, 202);
+      }),
+      http.delete(url(endpoints.users.emailChange('usr_5')), () => {
+        calls.push('cancel');
+        return ok({ ...USER, pendingEmail: null });
+      }),
+    );
+    renderModal(
+      <EditUserModal
+        user={{ ...USER, pendingEmail: 'jo.new@example.com', pendingEmailRequestedAt: '2026-10-14T08:00:00.000Z' }}
+        roles={ROLES}
+        mode="profile"
+        activeAdminCount={2}
+        onClose={() => {}}
+      />,
+    );
+    expect(screen.getByText(/Pending: jo\.new@example\.com — awaiting confirmation/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Resend' }));
+    expect(await screen.findByText('Confirmation link resent')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Cancel change' }));
+    expect(await screen.findByText('Email change cancelled')).toBeInTheDocument();
+    expect(screen.queryByText(/Pending: jo\.new@example\.com/)).toBeNull();
+    expect(calls).toEqual(['resend', 'cancel']);
   });
 
   it('sends exactly one PATCH on a double click and toasts the role change', async () => {

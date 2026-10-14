@@ -2,7 +2,7 @@
 // account is created — the driver never signs in to the web panel. `drivers` FULL only.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Controller, useForm } from 'react-hook-form';
+import { Controller, useForm, useWatch } from 'react-hook-form';
 import { Eye, EyeOff } from 'lucide-react';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
@@ -234,6 +234,8 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
   // The submit guard is the mutation, not RHF: `isSubmitting` is already false again while the
   // POST is in flight, so a double click used to create two drivers.
   const isPending = mutation.isPending;
+  // The email is optional: with none, `Send invitation now` has nothing to send to.
+  const hasEmail = (useWatch({ control, name: 'email' }) ?? '').trim() !== '';
 
   // Honest dirty tracking: the checkboxes, the unit and the exemption reason all
   // live outside RHF, so a real edit to any of them must confirm on close.
@@ -272,7 +274,8 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
         lastName: values.lastName,
         username: values.username,
         password: values.password,
-        email: values.email,
+        // Optional: blank → not sent (no email on file, so the backend sends no invitation).
+        email: values.email || undefined,
         // Already E.164 (`+998901234567`) — the schema's transform; empty → not sent.
         phone: values.phone || undefined,
         cdlNumber: values.cdlNumber,
@@ -292,9 +295,11 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
       },
       {
         onSuccess: () => {
-          const addedToast = sendInvitation
-            ? TOAST_COPY.driverAdded(values.email)
-            : DRIVER_TOAST.driverAddedNoInvitation();
+          const addedToast = !sendInvitation
+            ? DRIVER_TOAST.driverAddedNoInvitation()
+            : values.email
+              ? TOAST_COPY.driverAdded(values.email)
+              : DRIVER_TOAST.driverAddedNoEmail();
           toast({ kind: 'success', ...addedToast });
           onClose();
         },
@@ -465,7 +470,7 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
                 <span className="text-caption text-danger">{errors.password.message}</span>
               )}
             </div>
-            <Field label="Email address" required error={errors.email?.message}>
+            <Field label="Email address" error={errors.email?.message}>
               <input
                 {...register('email')}
                 aria-invalid={errors.email ? true : undefined}
@@ -655,9 +660,11 @@ export function AddDriverModal({ onClose }: { onClose: () => void }) {
         </div>
 
         <p className="rounded-md bg-info-soft p-3 text-body text-info">
-          {sendInvitation
+          {sendInvitation && hasEmail
             ? 'The driver receives an email with the app download link and a one-time sign-in code.'
-            : 'No invitation email is sent — share the mobile password with the driver directly.'}
+            : sendInvitation
+              ? 'No email address — no invitation is sent. Share the mobile password with the driver directly.'
+              : 'No invitation email is sent — share the mobile password with the driver directly.'}
         </p>
       </form>
     </Modal>

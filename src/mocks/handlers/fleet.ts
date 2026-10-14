@@ -159,6 +159,9 @@ export const GEOFENCES: { items: GeofenceRow[] } = {
       radiusMeters: 4000,
       radiusMi: 2.49,
       alertOnEnter: true,
+      countAsYardMove: false,
+      vehicleGroupId: null,
+      vehicleGroupName: null,
     },
     {
       // Unit #101 is fuelling inside it.
@@ -180,6 +183,9 @@ export const GEOFENCES: { items: GeofenceRow[] } = {
       },
       radiusMi: 0,
       alertOnEnter: false,
+      countAsYardMove: false,
+      vehicleGroupId: null,
+      vehicleGroupName: null,
     },
     {
       // trp_1002 delivery.
@@ -192,6 +198,9 @@ export const GEOFENCES: { items: GeofenceRow[] } = {
       radiusMeters: 16000,
       radiusMi: 9.94,
       alertOnEnter: true,
+      countAsYardMove: false,
+      vehicleGroupId: null,
+      vehicleGroupName: null,
     },
     {
       // trp_1005 delivery.
@@ -214,6 +223,9 @@ export const GEOFENCES: { items: GeofenceRow[] } = {
       },
       radiusMi: 0,
       alertOnEnter: true,
+      countAsYardMove: false,
+      vehicleGroupId: null,
+      vehicleGroupName: null,
     },
     {
       // Unit #103's yard and trp_1006 pickup.
@@ -226,6 +238,9 @@ export const GEOFENCES: { items: GeofenceRow[] } = {
       radiusMeters: 3000,
       radiusMi: 1.86,
       alertOnEnter: false,
+      countAsYardMove: false,
+      vehicleGroupId: null,
+      vehicleGroupName: null,
     },
   ],
 };

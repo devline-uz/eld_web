@@ -50,7 +50,9 @@ export function DeveloperSignIn({
     setErrors(next);
     if (next.email || next.password) return;
     submittingRef.current = true;
-    onSubmit(email, password);
+    // Surrounding spaces (a paste, autofill) are never part of the address; the backend matches
+    // the rest case-insensitively.
+    onSubmit(email.trim(), password);
   }
 
   return (

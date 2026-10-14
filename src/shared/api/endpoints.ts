@@ -26,6 +26,14 @@ export const endpoints = {
     passwordResetCodeConfirm: '/auth/password/reset-code/confirm',
     /** B-84 (shipped) — completes a `PATCH /users/:id { email }` re-verification link. */
     emailVerify: '/auth/email/verify',
+    /** B-84 — public "this wasn't me" landing of the notice mailed to a web user's OLD address. */
+    emailCancel: '/auth/email/cancel',
+    /** Driver email change — public landing of the link mailed to the NEW address. */
+    driverEmailConfirm: '/auth/driver/email/confirm',
+    /** Driver email change — public "this wasn't me" landing of the notice mailed to the OLD address. */
+    driverEmailCancel: '/auth/driver/email/cancel',
+    /** B-29/B-31 — public landing of the verify link mailed by `POST /drivers/:id/send-verification`. */
+    driverEmailVerify: '/auth/driver/email/verify',
   },
 
   // --- carrier and account (W-17, W-26) ------------------------------------------------------
@@ -109,6 +117,10 @@ export const endpoints = {
     /** B-29/B-30 (shipped) — emails a verification token to `Driver.email`. */
     sendVerification: (id: string) => `/drivers/${id}/send-verification`,
     verifyEmail: (id: string) => `/drivers/${id}/verify-email`,
+    /** Driver email change — re-mail the confirm link of the pending change (`drivers` FULL). */
+    emailChangeResend: (id: string) => `/drivers/${id}/email-change/resend`,
+    /** Driver email change — DELETE drops the pending change (`drivers` FULL). */
+    emailChange: (id: string) => `/drivers/${id}/email-change`,
     /** B-94 (shipped) — GET list / POST metadata → presigned PUT `uploadUrl`. */
     documents: (id: string) => `/drivers/${id}/documents`,
     document: (id: string, docId: string) => `/drivers/${id}/documents/${docId}`,
@@ -262,6 +274,10 @@ export const endpoints = {
     update: (id: string) => `/users/${id}`,
     remove: (id: string) => `/users/${id}`,
     resendInvite: (id: string) => `/users/${id}/resend-invite`,
+    /** B-84 — re-mail the confirm link of the pending email change (`users` FULL). */
+    emailChangeResend: (id: string) => `/users/${id}/email-change/resend`,
+    /** B-84 — DELETE drops the pending email change (`users` FULL). */
+    emailChange: (id: string) => `/users/${id}/email-change`,
   },
   roles: {
     list: '/roles',

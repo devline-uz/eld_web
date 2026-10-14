@@ -19,6 +19,7 @@ import { useNotificationChannels, useUpdateNotificationChannels } from '@/shared
 import { NewAlertRuleModal } from './components/NewAlertRuleModal';
 import { SETTINGS_TOAST, countLabel } from './lib/copy';
 import { describeCondition } from './lib/alertConditions';
+import { describeAlertTestResult } from './lib/alertTestResult';
 import { usePageHeader } from '@/app/layouts/Topbar';
 
 type Segment = 'ALL' | 'ACTIVE' | 'MUTED';
@@ -270,11 +271,8 @@ export default function AlertRulesPage() {
                           <DropdownMenu.Item
                             onSelect={() =>
                               testRule.mutate(rule.id, {
-                                onSuccess: (result) =>
-                                  toast({
-                                    kind: result.triggered ? 'success' : 'warning',
-                                    title: result.triggered ? 'Test alert sent' : 'Rule is muted — no test alert sent',
-                                  }),
+                                // Per-channel truth: an email SMTP did not deliver is never "sent".
+                                onSuccess: (result) => toast(describeAlertTestResult(result)),
                                 onError: (error) =>
                                   toast({ kind: 'error', title: formErrorMessage(error) }),
                               })

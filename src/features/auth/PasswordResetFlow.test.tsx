@@ -101,6 +101,22 @@ describe('W-00 · Forgot password?', () => {
     expect(screen.queryByRole('heading', { name: 'Check your email' })).not.toBeInTheDocument();
   });
 
+  it('sends the email trimmed', async () => {
+    let sent: unknown;
+    server.use(
+      http.post(url(endpoints.auth.passwordResetCode), async ({ request }) => {
+        sent = ((await request.json()) as { email: unknown }).email;
+        return fail(404, 'NOT_FOUND', 'No account found with this email.');
+      }),
+    );
+    const user = userEvent.setup();
+    renderSignIn();
+    await openReset(user, '  Nobody@Example.com ');
+    await user.click(screen.getByRole('button', { name: 'Send code' }));
+    expect(await screen.findByText('No account found with this email.')).toBeInTheDocument();
+    expect(sent).toBe('Nobody@Example.com');
+  });
+
   it('maps 429 to a banner with the retry time', async () => {
     server.use(
       http.post(url(endpoints.auth.passwordResetCode), () =>
@@ -112,6 +128,20 @@ describe('W-00 · Forgot password?', () => {
     await openReset(user, EMAIL);
     await user.click(screen.getByRole('button', { name: 'Send code' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Too many attempts. Try again in 42 seconds.');
+  });
+
+  it('B-84 — inside the email-change hold no code is sent and the banner says why', async () => {
+    server.use(
+      http.post(url(endpoints.auth.passwordResetCode), () =>
+        fail(409, 'EMAIL_CHANGE_ON_HOLD', 'held', { holdUntil: '2026-10-16T08:00:00.000Z' }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderSignIn();
+    await openReset(user, EMAIL);
+    await user.click(screen.getByRole('button', { name: 'Send code' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('The email on this account was changed recently');
+    expect(screen.queryByRole('heading', { name: 'Check your email' })).not.toBeInTheDocument();
   });
 
   it('goes to the code step, with Resend code on a cooldown', async () => {

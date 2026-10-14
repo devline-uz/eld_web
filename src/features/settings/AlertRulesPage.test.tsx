@@ -285,7 +285,7 @@ describe('AlertRulesPage — stage-2 row actions', () => {
       http.get(url(endpoints.alertRules.list), () => ok([RULE])),
       http.post(url(endpoints.alertRules.test(RULE.id)), () => {
         called = true;
-        return ok({ triggered: true });
+        return ok({ triggered: true, channels: [{ channel: 'IN_APP', status: 'SENT' }] });
       }),
     );
     renderPage();
@@ -294,5 +294,30 @@ describe('AlertRulesPage — stage-2 row actions', () => {
     await user.click(screen.getByRole('button', { name: 'Rule actions' }));
     await user.click(await screen.findByText('Test rule'));
     await waitFor(() => expect(called).toBe(true));
+    expect(await screen.findByText('Test alert sent')).toBeInTheDocument();
+  });
+
+  it('Test rule reports an undelivered email truthfully, not as "sent"', async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(url(endpoints.alertRules.list), () => ok([RULE])),
+      http.post(url(endpoints.alertRules.test(RULE.id)), () =>
+        ok({
+          triggered: true,
+          channels: [
+            { channel: 'IN_APP', status: 'SENT' },
+            { channel: 'EMAIL', status: 'FAILED', reason: 'SMTP_SEND_FAILED' },
+          ],
+        }),
+      ),
+    );
+    renderPage();
+    await screen.findByText('HOS violation');
+
+    await user.click(screen.getByRole('button', { name: 'Rule actions' }));
+    await user.click(await screen.findByText('Test rule'));
+    expect(await screen.findByText('Test alert partly sent')).toBeInTheDocument();
+    expect(screen.getByText('Email not sent: the mail server rejected the message.')).toBeInTheDocument();
+    expect(screen.queryByText('Test alert sent')).toBeNull();
   });
 });

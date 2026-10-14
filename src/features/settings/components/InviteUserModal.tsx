@@ -164,9 +164,12 @@ export function InviteUserModal({ onClose }: { onClose: () => void }) {
     if (inviteMutation.isPending) return;
     if (terminalsError) return;
     setBanner(null);
+    // `POST /users` stores the address trimmed + lower-cased and compares case-insensitively;
+    // send it in that form so the toast and the stored row agree.
+    const email = values.email.trim().toLowerCase();
     inviteMutation.mutate(
       {
-        email: values.email,
+        email,
         firstName: values.firstName,
         lastName: values.lastName,
         roleId: values.roleKey,
@@ -179,16 +182,20 @@ export function InviteUserModal({ onClose }: { onClose: () => void }) {
             toast({
               kind: 'success',
               title: 'Invitation sent',
-              description: `An invitation was sent to ${values.email}.`,
+              description: `An invitation was sent to ${email}.`,
             });
           } else {
-            toast({ kind: 'warning', ...SETTINGS_TOAST.invitationNotEmailed(values.email) });
+            toast({ kind: 'warning', ...SETTINGS_TOAST.invitationNotEmailed(email) });
           }
           onClose();
         },
         onError: (error) => {
-          if (error instanceof ApiError && error.status === 409) {
-            setError('email', { message: 'A user with this email already exists.' });
+          // 409 EMAIL_TAKEN — an existing user (any case, pending invites included) or another
+          // user's unconfirmed email change holds the address. The server's `details.email` says
+          // which; same mapping as `EditUserModal`.
+          if (error instanceof ApiError && (error.code === 'EMAIL_TAKEN' || error.status === 409)) {
+            const detail = error.details.email;
+            setError('email', { message: typeof detail === 'string' ? detail : 'A user with this email already exists.' });
             return;
           }
           const placed = placeServerFieldErrors(error, SERVER_FIELDS, (field, msg) =>

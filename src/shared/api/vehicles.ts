@@ -185,6 +185,12 @@ export interface DriverRow {
   registeredAt: string;
   /** B-31 (shipped) — null until `send-verification` + `verify-email` complete. */
   emailVerifiedAt: string | null;
+  /** Driver email change — the requested address, waiting for its owner to confirm the emailed
+   * link. `email` keeps the current address until then. Absent on rows from older mocks. */
+  pendingEmail?: string | null;
+  pendingEmailRequestedAt?: string | null;
+  /** When the last change was confirmed (starts the reset hold). */
+  emailChangedAt?: string | null;
 }
 
 export interface DeviceRow {

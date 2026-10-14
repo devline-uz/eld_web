@@ -451,11 +451,27 @@ export const fleetWriteHandlers = [
     const driver = findDriver(String(params.id));
     if (!driver) return NOT_FOUND('Driver');
     // `assignedVehicleId` is create-only; the unit link changes through `assign-driver`.
-    const { assignedVehicleId: _ignored, ...dto } = await body(request);
-    const uniqueFail = driverUniqueConflict(dto, driver.id);
+    const { assignedVehicleId: _ignored, currentPassword, reauthIdToken: _reauth, email, ...dto } = await body(request);
+    // Driver email change (mirrors the backend): an unchanged email is a no-op; a changed one needs
+    // the acting user's password (`wrong-password` fails) and only becomes `pendingEmail`.
+    const nextEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+    const changingEmail = nextEmail !== '' && nextEmail !== (driver.email ?? '').trim().toLowerCase();
+    const uniqueFail = driverUniqueConflict({ ...dto, ...(changingEmail ? { email: nextEmail } : {}) }, driver.id);
     if (uniqueFail) return uniqueFail;
+    if (changingEmail) {
+      if (!currentPassword) {
+        return fail(401, 'REAUTH_REQUIRED', 'Enter your password to change this email.', {
+          currentPassword: 'Enter your password to confirm this change.',
+        });
+      }
+      if (currentPassword === 'wrong-password') {
+        return fail(401, 'REAUTH_FAILED', 'Password is incorrect.', { currentPassword: 'Password is incorrect.' });
+      }
+    }
     Object.assign(driver, dto);
-    return ok(driver);
+    if (!changingEmail) return ok(driver);
+    Object.assign(driver, { pendingEmail: nextEmail, pendingEmailRequestedAt: new Date().toISOString() });
+    return ok({ ...driver, emailVerification: { pendingEmail: nextEmail, emailDelivered: true } });
   }),
 
   http.delete(url(endpoints.drivers.remove(':id')), ({ params }) => {

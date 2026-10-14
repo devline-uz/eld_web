@@ -13,10 +13,12 @@ import { endpoints } from '@/shared/api/endpoints';
 import { resetAuthBridge, setAccessToken, setAuthBridge } from '@/shared/api/client';
 import { Sidebar } from './Sidebar';
 
+const authRole = vi.hoisted(() => ({ current: 'ADMIN' as 'ADMIN' | 'FLEET_MANAGER' | 'DISPATCHER' | 'VIEWER' }));
+
 vi.mock('@/shared/auth/AuthProvider', async (importOriginal) => {
   const actual = await importOriginal<typeof AuthProviderModule>();
   const { buildMockAuthContext } = await import('../../../tests/fixtures/mockAuth');
-  return { ...actual, useAuth: () => buildMockAuthContext('ADMIN') };
+  return { ...actual, useAuth: () => buildMockAuthContext(authRole.current) };
 });
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'bypass' }));
@@ -30,6 +32,7 @@ beforeEach(() => {
   );
 });
 afterEach(() => {
+  authRole.current = 'ADMIN';
   server.resetHandlers();
   resetAuthBridge();
   window.localStorage.clear();
@@ -48,6 +51,17 @@ function renderSidebar() {
 }
 
 describe('Sidebar', () => {
+  it.each(['ADMIN', 'FLEET_MANAGER', 'DISPATCHER', 'VIEWER'] as const)(
+    '%s sees the product brand line, never a role name under the brand',
+    (role) => {
+      authRole.current = role;
+      renderSidebar();
+      expect(screen.getByText('OneBook ELD')).toBeInTheDocument();
+      expect(screen.getByText('Electronic logging device')).toBeInTheDocument();
+      expect(screen.queryByText('Fleet Manager')).toBeNull();
+    },
+  );
+
   it('reads the carrier and the real unit count instead of the hardcoded line', async () => {
     renderSidebar();
     expect(await screen.findByText('DOT #7654321 · 24 units')).toBeInTheDocument();

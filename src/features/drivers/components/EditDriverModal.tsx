@@ -4,9 +4,16 @@
 // the subset that `PATCH /drivers/:id` really accepts — identity, contact, licence, terminal and
 // the HOS allowances. The username and the password are deliberately not here: the username is the
 // driver's sign-in identity, and there is no carrier-side password reset at all (gap B-81).
+//
+// Driver email change: the email is sent only when it really changed (trim + lower-case), and then
+// the acting user must re-enter their OWN password (inline field below the email). The backend does
+// not apply it: it becomes `pendingEmail` until the driver confirms the link mailed to the new address.
+// The email is optional (the column is nullable): blank on a driver without one is simply "no email";
+// blanking an existing one is a clear — sent as `''`, it needs the same password and the backend
+// tells the old address (with a link to restore it).
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Controller, useForm, type Resolver } from 'react-hook-form';
+import { Controller, useForm, useWatch, type Resolver } from 'react-hook-form';
 import { z } from 'zod';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
@@ -24,7 +31,13 @@ import { useUpdateDriver } from '@/shared/api/drivers';
 import type { DriverRow } from '@/shared/api/drivers';
 import { ApiError, formErrorMessage } from '@/shared/api/errors';
 import { conflictField } from '@/shared/api/conflicts';
-import { DRIVER_CONFLICT_RULES, CONFLICT_MESSAGES, findCachedDriverConflicts } from '../lib/driverConflicts';
+import {
+  DRIVER_CONFLICT_RULES,
+  CONFLICT_MESSAGES,
+  emailKey,
+  findCachedDriverConflicts,
+} from '../lib/driverConflicts';
+import { signInWithGoogle } from '@/shared/auth/firebase';
 import { DRIVER_TOAST } from '../lib/copy';
 import { DRIVER_DTO_LIMITS, DRIVER_FIELD_LABELS, tooLongMessage } from '../lib/driverFormLimits';
 import { HOME_TERMINAL_TIMEZONES } from '../lib/terminals';
@@ -94,7 +107,8 @@ const editDriverSchema = z.object({
   lastName: f
     .personName()
     .max(DRIVER_DTO_LIMITS.lastName, tooLongMessage('Last name', DRIVER_DTO_LIMITS.lastName)),
-  email: f.email(),
+  /** Optional — blank on a driver without one = none; blank on one with an email = clear it. */
+  email: f.optionalEmail(),
   /** Same international rule as Add driver: per-country validation, E.164 out. */
   phone: internationalPhone(),
   /** Trimmed, upper-cased, `[A-Z0-9-]`, 4–20; the issuing-state format is checked by the resolver. */
@@ -176,6 +190,11 @@ export function EditDriverModal({ driver, onClose }: EditDriverModalProps) {
   // i.e. nothing is sent. The ruleset is sent only when the dispatcher actually changes it.
   const [hosRuleset, setHosRuleset] = useState<HosRuleset | ''>(driver.hosRuleset ?? '');
   const [exemptReasonError, setExemptReasonError] = useState<string | null>(null);
+  // Driver email change re-auth — the acting user's own password; kept only in this modal's state.
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  // A Google-only account has no password: the backend asks for a fresh Google sign-in instead.
+  const [googleReauth, setGoogleReauth] = useState(false);
   // The banner sits at the top of this tall `lg` modal while Save is in the footer — bring it into
   // view when it appears, or a refused PATCH looks like nothing happened.
   const bannerRef = useRef<HTMLParagraphElement>(null);
@@ -226,6 +245,10 @@ export function EditDriverModal({ driver, onClose }: EditDriverModalProps) {
     },
   });
 
+  const watchedEmail = useWatch({ control, name: 'email' });
+  const emailChanged = emailKey(watchedEmail) !== emailKey(driver.email);
+  // Blanking an address the driver has: applied at once (nothing to confirm), still re-authenticated.
+  const emailCleared = emailChanged && emailKey(watchedEmail) === '';
   const isPending = mutation.isPending;
   const extrasDirty =
     allowPersonalConveyance !== driver.allowPersonalConveyance ||
@@ -237,7 +260,7 @@ export function EditDriverModal({ driver, onClose }: EditDriverModalProps) {
     eldExemptReason !== (driver.eldExemptReason ?? '') ||
     hosRuleset !== (driver.hosRuleset ?? '');
 
-  function onSubmit(values: EditDriverValues) {
+  function onSubmit(values: EditDriverValues, reauthIdToken?: string) {
     if (isPending) return;
     if (eldExempt && !eldExemptReason.trim()) {
       setExemptReasonError('An exemption reason is required while ELD exempt is checked.');
@@ -253,12 +276,26 @@ export function EditDriverModal({ driver, onClose }: EditDriverModalProps) {
       for (const field of dupes) setError(field as 'email' | 'phone' | 'cdlNumber', { message: CONFLICT_MESSAGES[field as 'email' | 'phone' | 'cdlNumber'] });
       return;
     }
+    // After the duplicate pre-check: a taken address is reported before any password is asked for.
+    const changingEmail = emailKey(values.email) !== emailKey(driver.email);
+    if (changingEmail && !reauthIdToken && !currentPassword) {
+      const action = emailKey(values.email) === '' ? 'remove' : 'change';
+      setPasswordError(
+        googleReauth ? `Confirm with Google to ${action} the email.` : `Enter your password to ${action} the email.`,
+      );
+      return;
+    }
+    setPasswordError(null);
     setBanner(null);
     mutation.mutate(
       {
         firstName: values.firstName,
         lastName: values.lastName,
-        email: values.email,
+        // Only a real change is sent (compared trim + lower-case, like the backend), and only then
+        // the re-auth proof. An unchanged email is never re-sent; a cleared one goes as `''`.
+        ...(changingEmail
+          ? { email: values.email, ...(reauthIdToken ? { reauthIdToken } : { currentPassword }) }
+          : {}),
         // E.164 from the schema; empty or an untouched legacy value → not sent (unchanged).
         phone: values.phone || undefined,
         cdlNumber: values.cdlNumber,
@@ -277,14 +314,29 @@ export function EditDriverModal({ driver, onClose }: EditDriverModalProps) {
         ...(hosRuleset && hosRuleset !== driver.hosRuleset ? { hosRuleset } : {}),
       },
       {
-        onSuccess: () => {
+        onSuccess: (result) => {
+          const pending = result?.emailVerification;
           toast({
             kind: 'success',
-            ...DRIVER_TOAST.driverUpdated(`${values.firstName} ${values.lastName}`),
+            ...(pending
+              ? DRIVER_TOAST.emailChangeRequested(pending.pendingEmail, pending.emailDelivered)
+              : DRIVER_TOAST.driverUpdated(`${values.firstName} ${values.lastName}`)),
           });
           onClose();
         },
         onError: (error) => {
+          if (error instanceof ApiError && (error.code === 'REAUTH_FAILED' || error.code === 'REAUTH_REQUIRED')) {
+            const wantsGoogle = typeof error.details.reauthIdToken === 'string';
+            setGoogleReauth(wantsGoogle);
+            const detail = error.details.currentPassword ?? error.details.reauthIdToken;
+            setPasswordError(typeof detail === 'string' ? detail : error.message);
+            return;
+          }
+          if (error instanceof ApiError && error.code === 'EMAIL_CHANGE_ON_HOLD') {
+            const detail = error.details.email;
+            setError('email', { message: typeof detail === 'string' ? detail : error.message });
+            return;
+          }
           if (error instanceof ApiError && error.status === 409) {
             const field = conflictField(error, DRIVER_CONFLICT_RULES);
             // `assignedVehicleId` is create-only and the username is not editable here.
@@ -313,6 +365,15 @@ export function EditDriverModal({ driver, onClose }: EditDriverModalProps) {
     );
   }
 
+  async function confirmWithGoogle(values: EditDriverValues) {
+    try {
+      const outcome = await signInWithGoogle();
+      if (outcome.kind === 'idToken') onSubmit(values, outcome.idToken);
+    } catch (error) {
+      setPasswordError(error instanceof Error ? error.message : 'Google sign-in failed.');
+    }
+  }
+
   return (
     <Modal
       open
@@ -320,7 +381,7 @@ export function EditDriverModal({ driver, onClose }: EditDriverModalProps) {
       title="Edit driver"
       subtitle={`@${driver.username} · the sign-in username cannot be changed`}
       size="lg"
-      isDirty={isDirty || extrasDirty}
+      isDirty={isDirty || extrasDirty || currentPassword !== ''}
       footer={
         <>
           <ModalCancelButton disabled={isPending} />
@@ -329,14 +390,14 @@ export function EditDriverModal({ driver, onClose }: EditDriverModalProps) {
             size="lg"
             loading={isPending}
             disabled={isPending}
-            onClick={handleSubmit(onSubmit)}
+            onClick={handleSubmit((values) => onSubmit(values))}
           >
             Save changes
           </Button>
         </>
       }
     >
-      <form className="flex flex-col gap-5" onSubmit={handleSubmit(onSubmit)}>
+      <form className="flex flex-col gap-5" onSubmit={handleSubmit((values) => onSubmit(values))}>
         {banner && (
           <p ref={bannerRef} role="alert" className="rounded-md bg-danger-soft p-3 text-body text-danger">
             {banner}
@@ -361,7 +422,7 @@ export function EditDriverModal({ driver, onClose }: EditDriverModalProps) {
               className={inputClass}
             />
           </Field>
-          <Field label="Email address" required error={errors.email?.message}>
+          <Field label="Email address" error={errors.email?.message}>
             <input
               {...register('email')}
               type="email"
@@ -370,6 +431,57 @@ export function EditDriverModal({ driver, onClose }: EditDriverModalProps) {
               className={inputClass}
             />
           </Field>
+          {emailChanged && (
+            <div className="flex flex-col gap-1 sm:col-span-3">
+              {driver.pendingEmail && (
+                <p className="text-caption text-text-muted">
+                  A change to {driver.pendingEmail} is already awaiting confirmation; saving{' '}
+                  {emailCleared ? 'cancels' : 'replaces'} it.
+                </p>
+              )}
+              {googleReauth ? (
+                <div className="flex flex-col gap-1">
+                  <span className="text-label text-text">Confirm it&apos;s you</span>
+                  <Button
+                    variant="secondary"
+                    disabled={isPending}
+                    onClick={handleSubmit((values) => void confirmWithGoogle(values))}
+                  >
+                    Confirm with Google and save
+                  </Button>
+                  {passwordError && <span className="text-caption text-danger">{passwordError}</span>}
+                </div>
+              ) : (
+                <Field label="Your password" required error={passwordError ?? undefined}>
+                  <input
+                    type="password"
+                    autoComplete="current-password"
+                    value={currentPassword}
+                    onChange={(e) => {
+                      setCurrentPassword(e.target.value);
+                      if (passwordError) setPasswordError(null);
+                    }}
+                    disabled={isPending}
+                    aria-invalid={passwordError ? true : undefined}
+                    className={inputClass}
+                  />
+                </Field>
+              )}
+              {emailCleared ? (
+                <p className="text-caption text-text-muted">
+                  Removing the driver&apos;s email needs your own password. It is removed when you save; the
+                  current address is told and can restore it during the security hold, when no new email can
+                  be added.
+                </p>
+              ) : (
+                <p className="text-caption text-text-muted">
+                  Changing the driver&apos;s email needs your own password. The new address only takes effect
+                  after the driver confirms the link we email to it
+                  {driver.email ? '; the current address is told about the change.' : '.'}
+                </p>
+              )}
+            </div>
+          )}
           <Field label="Phone number" error={errors.phone?.message}>
             <Controller
               control={control}

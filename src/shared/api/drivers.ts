@@ -270,7 +270,8 @@ export interface CreateDriverPayload {
   username: string;
   /** Optional since B-82: with `sendInvitation: true` the driver sets it from the emailed code. */
   password?: string;
-  email: string;
+  /** Optional — `Driver.email` is nullable; omitted (or blank) = no email, so no invitation. */
+  email?: string;
   phone?: string;
   cdlNumber: string;
   cdlState: string;
@@ -307,11 +308,28 @@ export function useCreateDriver() {
   });
 }
 
+/** `PATCH /drivers/:id` — a changed `email` is never applied directly: it becomes `pendingEmail`
+ * and the response carries `emailVerification`. Changing it needs the acting user's own
+ * `currentPassword` (or `reauthIdToken` for a Google-only account); never store either. */
+export interface UpdateDriverPayload extends Partial<CreateDriverPayload> {
+  status?: string;
+  currentPassword?: string;
+  reauthIdToken?: string;
+}
+
+export interface DriverEmailVerification {
+  pendingEmail: string;
+  emailDelivered: boolean;
+  /** DEV_ECHO_SECRETS only — never log or render it. */
+  verifyToken?: string;
+}
+
+export type UpdateDriverResult = DriverRow & { emailVerification?: DriverEmailVerification };
+
 export function useUpdateDriver(id: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (payload: Partial<CreateDriverPayload> & { status?: string }) =>
-      client.patch<DriverRow>(endpoints.drivers.update(id), payload),
+    mutationFn: (payload: UpdateDriverPayload) => client.patch<UpdateDriverResult>(endpoints.drivers.update(id), payload),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qkRoot.drivers });
       void queryClient.invalidateQueries({ queryKey: qk.driver(id) });
@@ -363,6 +381,8 @@ export function useImportDrivers() {
 export interface DriverOneTimeCodeResult {
   emailedTo: string | null;
   code?: string;
+  /** Set when the driver's email was changed recently: the code was NOT emailed (security hold). */
+  emailHoldUntil?: string;
 }
 
 /** `POST /drivers/:id/reset-password` — `drivers` FULL, audited. */
@@ -392,6 +412,61 @@ export function useVerifyDriverEmail(driverId: string) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qkRoot.drivers });
     },
+  });
+}
+
+/* ---- driver email change: resend / cancel from the profile, public link landings */
+
+/** `POST /drivers/:id/email-change/resend` — `drivers` FULL. */
+export function useResendDriverEmailChange(driverId: string) {
+  return useMutation({
+    mutationFn: () =>
+      client.post<DriverEmailVerification & { emailedTo: string }>(endpoints.drivers.emailChangeResend(driverId)),
+  });
+}
+
+/** `DELETE /drivers/:id/email-change` — `drivers` FULL; the current email stays. */
+export function useCancelDriverEmailChange(driverId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => client.delete<DriverRow>(endpoints.drivers.emailChange(driverId)),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: qkRoot.drivers });
+      void queryClient.invalidateQueries({ queryKey: qk.driver(driverId) });
+    },
+  });
+}
+
+/** Public — the confirm link (new address). Anonymous: the driver is not a panel user. */
+export function useConfirmDriverEmailChange() {
+  return useMutation({
+    mutationFn: (token: string) =>
+      client.post<{ success: true; email: string }>(endpoints.auth.driverEmailConfirm, { token }, { anonymous: true }),
+  });
+}
+
+/** Public — the "this wasn't me" link (old address): cancels, or reverts inside the hold window. */
+export function useCancelDriverEmailChangeLink() {
+  return useMutation({
+    mutationFn: (token: string) =>
+      client.post<{ success: true; result: 'CANCELLED' | 'REVERTED' }>(
+        endpoints.auth.driverEmailCancel,
+        { token },
+        { anonymous: true },
+      ),
+  });
+}
+
+/** Public — the verify link mailed by `POST /drivers/:id/send-verification`. The driver id is
+ * inside the signed token; `alreadyVerified` on a repeat click. Anonymous: no panel session. */
+export function useVerifyDriverEmailLink() {
+  return useMutation({
+    mutationFn: (token: string) =>
+      client.post<{ success: true; email: string; alreadyVerified: boolean }>(
+        endpoints.auth.driverEmailVerify,
+        { token },
+        { anonymous: true },
+      ),
   });
 }
 

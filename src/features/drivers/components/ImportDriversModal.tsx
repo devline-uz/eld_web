@@ -94,8 +94,13 @@ function planImport(parsed: CsvRow[], defaultTerminal: string): ImportPlan {
     let attention = false;
     let skip = false;
     const email = typeof row.email === 'string' ? row.email.toLowerCase() : '';
-    if (!email || (emailCounts.get(email) ?? 0) > 1) {
-      plan.warnings.push(`Row ${line}  Missing or duplicate email — driver cannot sign in`);
+    // Email is optional (`Driver.email` is nullable): a blank cell imports the driver with no
+    // email and no invitation. A repeated address is still flagged — the server 409s that row.
+    if (!email) {
+      plan.warnings.push(`Row ${line}  No email — imported without one; no invitation is sent`);
+      attention = true;
+    } else if ((emailCounts.get(email) ?? 0) > 1) {
+      plan.warnings.push(`Row ${line}  Duplicate email in this file — a new driver reusing it is refused`);
       attention = true;
     }
     const missing = REQUIRED_COLUMNS.filter(([key]) => !row[key]).map(([, label]) => label);

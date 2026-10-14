@@ -9,6 +9,7 @@ import { ok, fail, url } from '@/mocks/envelope';
 import { endpoints } from '@/shared/api/endpoints';
 import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/client';
 import { ToastProvider } from '@/shared/ui/Toast';
+import { resetMockState, USERS } from '@/mocks/handlers/mockState';
 import { InviteUserModal } from './InviteUserModal';
 
 // Current-user role for the super-admin guard (`roleKey` is what `/auth/me` returned).
@@ -160,6 +161,60 @@ describe('InviteUserModal — 11.18', () => {
     await user.click(screen.getByRole('button', { name: 'Send invitation' }));
 
     expect(await screen.findByText('A user with this email already exists.')).toBeInTheDocument();
+  });
+
+  it('maps 409 EMAIL_TAKEN details.email onto the email field and sends the address trimmed + lower-cased', async () => {
+    const user = userEvent.setup();
+    let body: { email?: string } | null = null;
+    server.use(
+      http.post(url(endpoints.users.create), async ({ request }) => {
+        body = (await request.json()) as { email?: string };
+        return fail(409, 'EMAIL_TAKEN', 'This email address is already waiting for confirmation on another account.', {
+          email: 'This email address is already waiting for confirmation on another account.',
+        });
+      }),
+    );
+
+    renderModal();
+
+    await rolesReady();
+    await user.type(screen.getByPlaceholderText('Anna Weiss'), 'Anna Weiss');
+    await user.type(screen.getByPlaceholderText('anna.weiss@example.com'), '  Anna.Weiss@Example.COM ');
+    await user.click(screen.getByRole('button', { name: 'Send invitation' }));
+
+    const message = await screen.findByText('This email address is already waiting for confirmation on another account.');
+    expect(body).toMatchObject({ email: 'anna.weiss@example.com' });
+    // On the email field (inside its Field), not in the banner.
+    expect(screen.getByPlaceholderText('anna.weiss@example.com').closest('label, div')).toContainElement(message);
+    expect(screen.getAllByText(/waiting for confirmation/)).toHaveLength(1);
+  });
+
+  describe('default MSW handler', () => {
+    afterEach(() => resetMockState());
+
+    it('refuses a case variant of an existing user with 409 on the email field', async () => {
+      const user = userEvent.setup();
+      renderModal();
+      await rolesReady();
+      await user.type(screen.getByPlaceholderText('Anna Weiss'), 'Anna Weiss');
+      await user.type(screen.getByPlaceholderText('anna.weiss@example.com'), USERS[0]!.email.toUpperCase());
+      await user.click(screen.getByRole('button', { name: 'Send invitation' }));
+      expect(await screen.findByText('A user with this email address already exists.')).toBeInTheDocument();
+    });
+
+    it("refuses another user's unexpired pendingEmail", async () => {
+      USERS[1]!.pendingEmail = 'moving@fleet.example';
+      USERS[1]!.pendingEmailRequestedAt = new Date().toISOString();
+      const user = userEvent.setup();
+      renderModal();
+      await rolesReady();
+      await user.type(screen.getByPlaceholderText('Anna Weiss'), 'Anna Weiss');
+      await user.type(screen.getByPlaceholderText('anna.weiss@example.com'), 'Moving@Fleet.example');
+      await user.click(screen.getByRole('button', { name: 'Send invitation' }));
+      expect(
+        await screen.findByText('This email address is already waiting for confirmation on another account.'),
+      ).toBeInTheDocument();
+    });
   });
 
   it('maps a 422 field error onto the matching input', async () => {

@@ -10,5 +10,7 @@ export const settingsGapHandlers = [
   http.get(url(endpoints.devices.diagnostics(':id')), () =>
     ok({ signalStrength: 'good', gpsLock: true, responded: true }),
   ),
-  http.post(url(endpoints.alertRules.test(':id')), () => ok({ triggered: true })),
+  http.post(url(endpoints.alertRules.test(':id')), () =>
+    ok({ triggered: true, channels: [{ channel: 'IN_APP', status: 'SENT' }] }),
+  ),
 ];

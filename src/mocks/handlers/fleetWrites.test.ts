@@ -106,8 +106,22 @@ describe('PATCH /drivers/:id mock', () => {
   it('a deleted driver\'s values are free to take', async () => {
     const [a, b] = [DRIVERS[0]!, DRIVERS[1]!];
     b.status = 'TERMINATED';
-    const res = await patchDriver(a.id, { email: b.email, cdlNumber: b.cdlNumber });
+    const res = await patchDriver(a.id, { email: b.email, cdlNumber: b.cdlNumber, currentPassword: 'pw' });
     expect(res.status).toBe(200);
+  });
+
+  it('a changed email needs the acting user\'s password and only becomes pendingEmail', async () => {
+    const a = DRIVERS[0]!;
+    const before = a.email;
+    expect((await patchDriver(a.id, { email: 'brand.new@example.com' })).status).toBe(401);
+    expect((await patchDriver(a.id, { email: 'brand.new@example.com', currentPassword: 'wrong-password' })).status).toBe(401);
+    const res = await patchDriver(a.id, { email: 'brand.new@example.com', currentPassword: 'pw' });
+    const body = (await res.json()) as { data?: Record<string, unknown> } & Record<string, unknown>;
+    const row = (body.data ?? body) as { email: string; pendingEmail: string; emailVerification: { pendingEmail: string } };
+    expect(res.status).toBe(200);
+    expect(row.email).toBe(before);
+    expect(row.pendingEmail).toBe('brand.new@example.com');
+    expect(row.emailVerification.pendingEmail).toBe('brand.new@example.com');
   });
 });
 
