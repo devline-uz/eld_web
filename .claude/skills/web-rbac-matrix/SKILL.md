@@ -19,12 +19,18 @@ Runtime source is **only** `GET /auth/me` → `permissions` (22 keys → `NONE|R
 Hidden ⇒ **absent from the DOM**, never disabled (exception: `Admin cannot be edited` chip).
 
 ## Keys
-`dashboard liveFleet vehicles drivers hos hosEdit hosCertifyOnBehalf(ADMIN only: Certify all, 11.12) dvir maintenance safety trips reports reportsTransfer(Send to inspector, Generate pack, transfers) messaging devices alertRules users roles integrations auditLog support carrierSettings`.
+`dashboard liveFleet vehicles drivers hos hosEdit hosCertifyOnBehalf(retired, CODE-029: always NONE, drivers certify in the app) dvir maintenance safety trips reports reportsTransfer(Send to inspector, Generate pack, transfers) messaging devices alertRules users roles integrations auditLog support carrierSettings`.
 Never hardcode a role name where a permission check works (custom roles exist).
 
-## Nav by role (§4.2) — the design wins over the backend matrix
+## Nav by role (§4.2) — permission-based, backend agrees (CODE-085)
 All four see Dashboard, Live Fleet, Vehicles, Drivers, HOS Logs, Reports, Settings.
-VIEWER: no Trips, no Messages. **DISPATCHER: no DVIR, no Safety** (backend grants READ; direct URL → `/403`; backend unchanged).
+VIEWER: no Trips, no Messages. **DISPATCHER: no DVIR, no Safety, no ELD devices, no DVIR report** —
+its backend matrix has `dvir`/`maintenance`/`safety`/`devices` = NONE, so nav, route guard and API all
+say no; the same applies to any custom role. The DVIR report needs `reports` **and** `dvir`
+(`alsoPerm` in router.tsx / reportMeta.ts; backend `reports.service.ts`). The one role block left is
+`/reports/ifta` for DISPATCHER (`blockedRoles`): IFTA has no key of its own and `reports` also covers
+the Activity report DISPATCHER keeps. The paired ELD serial reaches the Vehicles list via `vehicles`
+(`eldSerial` on the row) — `/devices` is only fetched with `devices` READ.
 Settings sub-nav: Company profile / Users / Roles & permissions / Integrations / Audit log → ADMIN · ELD devices, Alert rules → ADMIN+FM · Support → all. `/settings` → first permitted item.
 Role chip: ADMIN none · FM `● Fleet manager` primary-soft · DISPATCHER `● Dispatcher` success-soft · VIEWER `● Read-only · Viewer` neutral-soft.
 

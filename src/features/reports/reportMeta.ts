@@ -35,9 +35,12 @@ export interface ReportRoute {
   label: string;
   to: string;
   perm: PermissionKey;
+  /** CODE-085 — a second key the backend also requires (DVIR report → `dvir`), as `alsoPerm` in
+   * app/router.tsx. */
+  alsoPerm?: PermissionKey;
   /**
-   * Mirrors `blockedRoles` in app/router.tsx: the screenshots give DISPATCHER only the Activity
-   * report (web/bugs.md WB-002), even though the backend grants `reports` READ.
+   * Mirrors `blockedRoles` in app/router.tsx. Only IFTA is left: it has no permission key of its
+   * own (it shares `reports` with the Activity report DISPATCHER keeps — web/bugs.md WB-002).
    */
   blockedRoles?: Role[];
 }
@@ -46,7 +49,7 @@ export const REPORT_ROUTES: ReportRoute[] = [
   { label: 'IFTA mileage report', to: '/reports/ifta', perm: 'reports', blockedRoles: ['DISPATCHER'] },
   { label: 'FMCSA / DOT audit pack', to: '/reports/fmcsa', perm: 'reportsTransfer' },
   { label: 'Activity report', to: '/reports/activity', perm: 'reports' },
-  { label: 'DVIR report', to: '/reports/dvir', perm: 'reports', blockedRoles: ['DISPATCHER'] },
+  { label: 'DVIR report', to: '/reports/dvir', perm: 'reports', alsoPerm: 'dvir' },
 ];
 
 export function visibleReportRoutes(
@@ -54,7 +57,7 @@ export function visibleReportRoutes(
   role: Role | null | undefined,
 ): ReportRoute[] {
   return REPORT_ROUTES.filter(
-    (r) => can(r.perm) && !(role && r.blockedRoles?.includes(role)),
+    (r) => can(r.perm) && (!r.alsoPerm || can(r.alsoPerm)) && !(role && r.blockedRoles?.includes(role)),
   );
 }
 

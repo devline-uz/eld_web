@@ -23,8 +23,10 @@ function DvirStub() {
 }
 
 let permission = true;
+// CODE-085 — keys the current test's role lacks (e.g. DISPATCHER: maintenance, devices, dvir).
+let denied = new Set<string>();
 vi.mock('@/shared/auth/usePermission', () => ({
-  usePermission: () => ({ can: (key: string) => (key === 'vehicles' ? permission : true) }),
+  usePermission: () => ({ can: (key: string) => (key === 'vehicles' ? permission : !denied.has(key)) }),
 }));
 
 const VEHICLE = {
@@ -80,6 +82,7 @@ afterEach(() => {
   server.resetHandlers();
   resetAuthBridge();
   permission = true;
+  denied = new Set();
 });
 afterAll(() => server.close());
 
@@ -316,6 +319,32 @@ describe('W-04 Unit profile — active DTC badge (WB-105)', () => {
 
     await user.click(screen.getByRole('button', { name: 'Diagnostics' }));
     expect(await screen.findByText('1 active DTCs')).toBeInTheDocument();
+  });
+
+  it('CODE-085: without `maintenance` READ the Diagnostics tab is hidden and /dtc is never requested', async () => {
+    denied = new Set(['maintenance', 'devices', 'dvir']);
+    const dtcCalls = vi.fn();
+    const deviceCalls = vi.fn();
+    server.use(
+      http.get(url(endpoints.vehicles.detail('0f3c2a1e-0000-4000-8000-000000000001')), () => ok(VEHICLE)),
+      http.get(url(endpoints.vehicles.activities('0f3c2a1e-0000-4000-8000-000000000001')), () => ok({ items: [] })),
+      http.get(url(endpoints.vehicles.dtc('0f3c2a1e-0000-4000-8000-000000000001')), () => {
+        dtcCalls();
+        return fail(403, 'FORBIDDEN', 'Forbidden');
+      }),
+      http.get(url(endpoints.devices.list), () => {
+        deviceCalls();
+        return fail(403, 'FORBIDDEN', 'Forbidden');
+      }),
+    );
+    // A deep link straight to the tab falls back to the overview.
+    renderPage('/vehicles/0f3c2a1e-0000-4000-8000-000000000001?tab=diagnostics');
+    await screen.findByText('Unit #101');
+    expect(screen.queryByRole('button', { name: 'Diagnostics' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Overview' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.queryByText(/Could not load/i)).not.toBeInTheDocument();
+    expect(dtcCalls).not.toHaveBeenCalled();
+    expect(deviceCalls).not.toHaveBeenCalled();
   });
 });
 

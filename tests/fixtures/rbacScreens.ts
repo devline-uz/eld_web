@@ -120,7 +120,8 @@ export const RBAC_SCREENS: RbacScreen[] = [
     route: '/reports/ifta',
     perm: 'reports',
     designImage: 'IFTA by jurisdiction and the report library.jpg',
-    // Screenshot-confirmed: Dispatcher has no IFTA screenshot even though `reports` = READ.
+    // Screenshot-confirmed: Dispatcher has no IFTA screenshot even though `reports` = READ. IFTA
+    // has no permission key of its own, so this is the one remaining role block (router.tsx).
     visibleForRole: { ADMIN: true, FLEET_MANAGER: true, DISPATCHER: false, VIEWER: true },
   },
   {
@@ -185,8 +186,7 @@ export const RBAC_SCREENS: RbacScreen[] = [
     route: '/settings/devices',
     perm: 'devices',
     designImage: 'Settings — ELD devices, firmware, heartbeats.jpg',
-    // Screenshot-confirmed: Dispatcher has no devices screenshot even though `devices` = READ
-    // (web/bugs.md — router.tsx SETTINGS_ROUTES needs a blockedRoles: ['DISPATCHER'] entry).
+    // CODE-085 — Dispatcher's `devices` is NONE in the backend matrix, so this is a permission 403.
     visibleForRole: { ADMIN: true, FLEET_MANAGER: true, DISPATCHER: false, VIEWER: false },
   },
   {
