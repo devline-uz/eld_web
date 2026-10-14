@@ -164,11 +164,15 @@ export function PageHeading({
 
   return (
     <div className="min-w-0 flex-1">
-      <div className="flex items-center gap-2">
-        <h1 className="truncate text-page-title text-text">{title}</h1>
+      <div className="flex min-w-0 items-center gap-2">
+        {/* LIVE-030 — at phone width the title steps down a size (it read "Fleet Das…") and keeps
+            its full text as a tooltip; the TEST ELD chip never wraps onto two lines. */}
+        <h1 title={title} className="min-w-0 truncate text-card-title text-text sm:text-page-title">
+          {title}
+        </h1>
         <RoleChip role={role} />
         {testEld ? (
-          <span className="inline-flex items-center gap-1 rounded-full bg-warning-soft px-2 py-1 text-badge text-warning">
+          <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-warning-soft px-2 py-1 text-badge text-warning">
             TEST ELD
           </span>
         ) : null}

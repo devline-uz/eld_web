@@ -13,17 +13,12 @@ export const authHandlers = [
     return ok(fixture('POST /api/auth/login'));
   }),
 
-  // Sign-in "Forgot password?" — any `@universal-logistics.example` address is an account (the
-  // demo users); anything else is the documented 404. The mock code is always `123456`;
-  // `000000` is a wrong code and `111111` an expired one.
+  // Sign-in "Forgot password?" — like the API (CODE-081) every address gets the same 200, whether
+  // or not an account uses it. The mock code is always `123456`; `000000` is a wrong code and
+  // `111111` an expired one.
   http.post(url(endpoints.auth.passwordResetCode), async ({ request }) => {
     const body = (await request.json().catch(() => ({}))) as { email?: string };
     const email = (body.email ?? '').trim().toLowerCase();
-    if (!email.endsWith('@universal-logistics.example')) {
-      return fail(404, 'NOT_FOUND', 'No account found with this email.', {
-        email: 'No account found with this email.',
-      });
-    }
     return ok({ ...(fixture('POST /api/auth/password/reset-code') as Record<string, unknown>), email });
   }),
   http.post(url(endpoints.auth.passwordResetCodeConfirm), async ({ request }) => {

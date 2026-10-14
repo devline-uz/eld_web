@@ -27,7 +27,8 @@ import { qk, qkRoot } from '@/shared/api/queryKeys';
 import { Badge } from '@/shared/ui/Badge';
 import { Button } from '@/shared/ui/Button';
 import { Card, SectionHeader } from '@/shared/ui/Card';
-import { ErrorState, LoadingState, ForbiddenState } from '@/shared/ui/states';
+import { ErrorState, LoadingState, ForbiddenState, NotFoundState } from '@/shared/ui/states';
+import { isNotFoundError, validRouteId } from '@/shared/lib/routeIds';
 import { formatOdometer, formatEngineHoursLong } from '@/shared/format/numbers';
 import { formatCarrier, formatCarrierDateTime, timezoneAbbreviation } from '@/shared/format/datetime';
 import { useCarrierTimezone } from '@/shared/auth/useCarrierTimezone';
@@ -82,7 +83,9 @@ function latestOf(a: string | null | undefined, b: string | null | undefined): s
 export default function UnitProfilePage() {
   // LIVE-007 — company context: carrier zone, the same instant as on the DVIR, reports and audit pages.
   const carrierTz = useCarrierTimezone();
-  const { id } = useParams<{ id: string }>();
+  const { id: routeId } = useParams<{ id: string }>();
+  // LIVE-019 — a malformed id never reaches the API (every query below stays disabled).
+  const id = validRouteId(routeId);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { can } = usePermission();
@@ -142,8 +145,13 @@ export default function UnitProfilePage() {
   const now = useNowTick();
 
   if (!can('vehicles')) return <ForbiddenState screenName="Unit profile" />;
+  if (!id || isNotFoundError(vehicleQuery.error)) {
+    return <NotFoundState title="Unit not found" backLabel="Back to vehicles" onBack={() => navigate('/vehicles')} />;
+  }
   if (vehicleQuery.isLoading) return <LoadingState rows={8} />;
-  if (vehicleQuery.isError || !vehicleQuery.data) return <ErrorState onRetry={() => vehicleQuery.refetch()} />;
+  if (vehicleQuery.isError || !vehicleQuery.data) {
+    return <ErrorState title="Could not load this unit" onRetry={() => vehicleQuery.refetch()} />;
+  }
 
   const vehicle = vehicleQuery.data;
   const driver = driverQuery.data;
@@ -157,6 +165,10 @@ export default function UnitProfilePage() {
     : null;
   const coDriverName = coDriver ? `${coDriver.firstName} ${coDriver.lastName}` : null;
   const num = (v: number | string | null | undefined) => (v == null ? null : typeof v === 'string' ? Number(v) : v);
+  // LIVE-008 — the ECU's engine hours from the newest telemetry point; `Vehicle.engineHours` is a
+  // manual field ingest never fills, so it is only a fallback when it was actually set.
+  const storedEngineHours = num(vehicle.engineHours);
+  const engineHours = num(telemetry?.engineHours) ?? (storedEngineHours ? storedEngineHours : null);
 
   function setTab(next: Tab) {
     const nextParams = new URLSearchParams(params);
@@ -280,7 +292,7 @@ export default function UnitProfilePage() {
               {/* `GET /vehicles/:id/telemetry?limit=1` (Phase 13) — newest point for the live cells. */}
               <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
                 <TelemetryCell label="Odometer" value={`${formatOdometer(total)} mi`} />
-                <TelemetryCell label="Engine hours" value={formatEngineHoursLong(Number(vehicle.engineHours))} />
+                <TelemetryCell label="Engine hours" value={engineHours != null ? formatEngineHoursLong(engineHours) : '—'} />
                 <TelemetryCell label="Fuel level" value={telemetry?.fuelPct != null ? `${telemetry.fuelPct}%` : '—'} />
                 <TelemetryCell
                   label="Coolant temp"

@@ -202,10 +202,12 @@ export const tripsPageQuery = (params: TripsPageParams): PageQueryOptions<TripRo
 
 /** The `Active` segment is ASSIGNED ∪ IN_PROGRESS, and `Scheduled` is DRAFT ∪ PLANNED (B-73);
  * `status` takes one value (B-59), so each pair is fetched side by side. Every slice is a bounded
- * working set (a dispatch board, not history) — 200 rows each is the API maximum and far above any
- * real active/scheduled count. */
+ * working set (a dispatch board, not history). CODE-048 — a slice used to stop at one 200-row API
+ * page while the tab counter showed the full `total`, so rows past 200 silently vanished;
+ * `client.list` now walks the 200-row pages (in parallel) up to this cap, and the board counts the
+ * rows it actually holds (`truncated` says when the cap was hit). */
 export const TRIPS_ACTIVE_STATUSES = ['ASSIGNED', 'IN_PROGRESS'] as const satisfies readonly TripStatus[];
-export const ACTIVE_SLICE_LIMIT = 200;
+export const ACTIVE_SLICE_LIMIT = 2000;
 export const tripsActiveSliceQuery = (status: TripStatus) =>
   tripsPageQuery({ page: 1, limit: ACTIVE_SLICE_LIMIT, status });
 
@@ -376,8 +378,12 @@ export function useTripsBoard({ segment, page, limit, search, useWindow, filter,
 
   const delivered = kpiQuery.data?.items ?? [];
   const onTimeDelivered = delivered.filter(deliveredOnTime).length;
-  const activeTotal = (assignedQuery.data?.total ?? 0) + (inProgressQuery.data?.total ?? 0) - futureAssigned.length;
-  const scheduledTotal = (draftQuery.data?.total ?? 0) + (plannedQuery.data?.total ?? 0) + futureAssigned.length;
+  // CODE-048 — the counters count the rows the board holds, so a tab never promises rows it can't list.
+  const activeTotal = activeRows.length;
+  const scheduledTotal = scheduledRows.length;
+  const sliceTruncated = [assignedQuery, inProgressQuery, draftQuery, plannedQuery].some(
+    (q) => q.data !== undefined && q.data.items.length < q.data.total,
+  );
 
   const isActiveLoading = assignedQuery.isLoading || inProgressQuery.isLoading;
   const isScheduledLoading = draftQuery.isLoading || plannedQuery.isLoading;
@@ -389,6 +395,8 @@ export function useTripsBoard({ segment, page, limit, search, useWindow, filter,
     activeRows,
     /** Every DRAFT ∪ PLANNED trip (joined) — the route panel reads from it too. */
     scheduledRows,
+    /** CODE-048 — an Active/Scheduled slice holds more than `ACTIVE_SLICE_LIMIT` trips. */
+    truncated: sliceTruncated,
     counts: {
       active: activeTotal,
       scheduled: scheduledTotal,
@@ -552,9 +560,35 @@ export function useAssignTrip(tripId: string) {
   });
 }
 
+/** CODE-055 — `skipped`: loads left unassigned (no driver free at that time; `noStart` of them have
+ * no planned start). `failed`: loads another error stopped, each with its reason. There is no
+ * HOS-hours check. `noStart` / `failed` are optional for an older backend. */
 export interface AutoAssignResult {
   assigned: Array<{ tripId: string; driverId: string }>;
   skipped: number;
+  noStart?: number;
+  failed?: Array<{ tripId: string; number: string; reason: string }>;
+}
+
+/** CODE-055 — the toast for an auto-assign run: what happened, never an invented reason. */
+export function autoAssignSummary(result: AutoAssignResult): { kind: 'success' | 'warning'; title: string; description?: string } {
+  const assigned = result.assigned.length;
+  const failed = result.failed ?? [];
+  const noStart = result.noStart ?? 0;
+  const parts = [`${assigned} ${assigned === 1 ? 'load' : 'loads'} assigned`];
+  if (result.skipped > 0) {
+    const reasons = [
+      result.skipped - noStart > 0 ? `${result.skipped - noStart} with no driver free at that time` : null,
+      noStart > 0 ? `${noStart} without a planned start` : null,
+    ].filter(Boolean);
+    parts.push(`${result.skipped} left unassigned (${reasons.join(', ')})`);
+  }
+  if (failed.length > 0) parts.push(`${failed.length} failed`);
+  return {
+    kind: failed.length > 0 || (assigned === 0 && result.skipped > 0) ? 'warning' : 'success',
+    title: parts.join(' · '),
+    description: failed.length > 0 ? failed.map((f) => `${f.number}: ${f.reason}`).slice(0, 3).join(' ') : undefined,
+  };
 }
 
 export function useAutoAssignTrips() {

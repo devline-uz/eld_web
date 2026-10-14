@@ -102,7 +102,12 @@ export interface LogEventView {
   eventCode: number;
   eventSequenceId: number;
   eventDateTime: string;
+  /** QA CODE-027 — after `useLogEvents` this is the EFFECTIVE status (a retired original reads 2, a
+   * resolved proposal 2/4); the stored row value is kept in `storedRecordStatus`. */
   recordStatus: number;
+  /** QA CODE-027 — what the server computed from the append-only markers (absent on older servers). */
+  effectiveRecordStatus?: number;
+  storedRecordStatus?: number;
   recordOrigin: number;
   status: RodsDutyStatus | null;
   locationName: string | null;
@@ -212,14 +217,27 @@ export function useLogRange(driverId: string | undefined, from: string, to: stri
   });
 }
 
+/** QA CODE-027 — every screen filter (`recordStatus === active`, "N edits pending") reads the
+ * effective status, so a retired original or a resolved proposal stops counting as live. */
+export function withEffectiveRecordStatus(event: LogEventView): LogEventView {
+  if (event.effectiveRecordStatus === undefined || event.effectiveRecordStatus === event.recordStatus) return event;
+  return { ...event, storedRecordStatus: event.recordStatus, recordStatus: event.effectiveRecordStatus };
+}
+
 export function useLogEvents(driverId: string | undefined, date: string) {
   return useQuery({
     queryKey: qk.logEvents(driverId ?? '', date),
-    queryFn: ({ signal }) =>
-      client.get<LogEventsResponse>(endpoints.logs.events(driverId as string), {
+    queryFn: async ({ signal }) => {
+      const response = await client.get<LogEventsResponse>(endpoints.logs.events(driverId as string), {
         params: { date },
         signal,
-      }),
+      });
+      return {
+        ...response,
+        events: response.events.map(withEffectiveRecordStatus),
+        carriedIn: response.carriedIn ? withEffectiveRecordStatus(response.carriedIn) : response.carriedIn,
+      };
+    },
     enabled: Boolean(driverId) && Boolean(date),
     ...typedCachePolicy<LogEventsResponse>('hosDay'),
   });
@@ -326,32 +344,9 @@ export function useProposeLogEvent(driverId: string) {
 }
 
 /* ------------------------------------------------------------------ 11.12 · certification */
-
-export interface CertifyResult {
-  driverId: string;
-  certified: Array<{
-    date: string;
-    certifiedAt: string;
-    certifiedBy: string;
-    onBehalf: boolean;
-    signatureCount: number;
-  }>;
-}
-
-/**
- * There is no `certification.*` realtime event (§7.4), so the caller invalidates by hand — that
- * is what this `onSuccess` is.
- */
-export function useCertifyLogs(driverId: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (dates: string[]) =>
-      client.post<CertifyResult>(endpoints.logs.certify(driverId), { dates }),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: qkRoot.logs });
-    },
-  });
-}
+// CODE-029 — there is no web certification: a RODS day is certified only by the driver in the
+// app (§395.8(e)); `POST /logs/:driverId/certify` answers 403 CERTIFY_DRIVER_ONLY to any web user.
+// The web only reads the certification state (`RodsCertification`, `RodsDaySummary`).
 
 /* ------------------------------------------------------------------ 11.13 · unassigned driving */
 

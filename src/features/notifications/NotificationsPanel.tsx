@@ -38,6 +38,8 @@ import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
 import { useToast } from '@/shared/ui/Toast';
 import { MARK_ALL_FAILED_TITLE, MARK_ONE_UNAVAILABLE_DESCRIPTION, MARK_ONE_UNAVAILABLE_TITLE } from './lib/copy';
 import { claimMarkReadNotice } from './lib/markReadNotice';
+import { humanizeTimestamps } from './lib/bodyText';
+import { useCarrierTimezone } from '@/shared/auth/useCarrierTimezone';
 
 export interface NotificationsPanelProps {
   onClose: () => void;
@@ -62,6 +64,7 @@ function notificationVisual(type: string): { icon: LucideIcon; tone: string } {
 
 function NotificationRow({ item, onOpen }: { item: NotificationItem; onOpen: (item: NotificationItem) => void }) {
   const { icon: Icon, tone } = notificationVisual(item.type);
+  const carrierTz = useCarrierTimezone();
   const unread = !item.readAt;
   return (
     <button
@@ -84,7 +87,7 @@ function NotificationRow({ item, onOpen }: { item: NotificationItem; onOpen: (it
             </time>
           ) : null}
         </span>
-        <span className="line-clamp-2 break-words text-caption text-text-secondary">{item.body}</span>
+        <span className="line-clamp-2 break-words text-caption text-text-secondary">{humanizeTimestamps(item.body, carrierTz)}</span>
         {unread ? <span className="sr-only">Unread</span> : null}
       </span>
     </button>

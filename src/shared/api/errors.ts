@@ -139,6 +139,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   EDIT_ALREADY_RESOLVED: 'This edit request has already been answered.',
   UNIDENTIFIED_ALREADY_ASSIGNED: 'That segment has already been assigned.',
   UNIDENTIFIED_OVERLAPS_DRIVER_LOG: "This driver's own log overlaps this unidentified driving. Correct the driver's log first or assign it to another driver.",
+  CERTIFY_DRIVER_ONLY: 'Only the driver can certify their log, in the driver app.',
   HOS_ENGINE_VERSION_MISMATCH: 'The log was recalculated. Reload the page.',
 
   // --- transfers / eRODS ----------------------------------------------------------------------

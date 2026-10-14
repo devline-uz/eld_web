@@ -177,6 +177,31 @@ export function sortScorecardRows<T extends DriverScoreRow>(rows: T[]): T[] {
   });
 }
 
+/** CODE-040 — `GET /safety/summary`: KPI counts over the rolling 30 days and the 30 days before. */
+export interface SafetySummaryCounts {
+  total: number;
+  harsh: number;
+  speeding: number;
+  seatbelt: number;
+  coached: number;
+  pendingCoaching: number;
+}
+export interface SafetySummary {
+  from: string;
+  to: string;
+  current: SafetySummaryCounts;
+  previous: SafetySummaryCounts;
+}
+
+export function useSafetySummary(options: { enabled?: boolean } = {}) {
+  return useQuery({
+    queryKey: qk.safetySummary(),
+    queryFn: ({ signal }) => client.get<SafetySummary>(endpoints.safety.summary, { signal }),
+    enabled: options.enabled ?? true,
+    ...typedCachePolicy<SafetySummary>('list'),
+  });
+}
+
 export function useScorecard(params: ScorecardParams = {}) {
   const scorecardQuery = useQuery({
     queryKey: qk.scorecard(params),

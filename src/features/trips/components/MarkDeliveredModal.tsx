@@ -6,7 +6,8 @@ import { Button } from '@/shared/ui/Button';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { useToast } from '@/shared/ui/Toast';
 import { formErrorMessage } from '@/shared/api/errors';
-import { formatLocalDateTime } from '@/shared/format/datetime';
+import { formatCarrierDateTime, timezoneAbbreviation } from '@/shared/format/datetime';
+import { useCarrierTimezone } from '@/shared/auth/useCarrierTimezone';
 import { useTripStatusAction, type TripRow } from '@/shared/api/trips';
 import { tripDeliveredToast } from '../lib/copy';
 import { deliveredAtError, parseLocalInput, toLocalInput } from '../lib/deliveredAt';
@@ -14,12 +15,13 @@ import { deliveredAtError, parseLocalInput, toLocalInput } from '../lib/delivere
 export function MarkDeliveredModal({ trip, onClose }: { trip: TripRow; onClose: () => void }) {
   const { toast } = useToast();
   const action = useTripStatusAction();
-  const [deliveredAt, setDeliveredAt] = useState(() => toLocalInput(new Date()));
+  const tz = useCarrierTimezone();
+  const [deliveredAt, setDeliveredAt] = useState(() => toLocalInput(new Date(), tz));
   const [touched, setTouched] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
-  const error = deliveredAtError(deliveredAt, trip);
+  const error = deliveredAtError(deliveredAt, trip, tz);
   const late = (() => {
-    const at = parseLocalInput(deliveredAt);
+    const at = parseLocalInput(deliveredAt, tz);
     const end = trip.plannedEndAt ? Date.parse(trip.plannedEndAt) : NaN;
     return at && Number.isFinite(end) ? at.getTime() > end : null;
   })();
@@ -27,7 +29,7 @@ export function MarkDeliveredModal({ trip, onClose }: { trip: TripRow; onClose: 
   function submit() {
     setTouched(true);
     if (error || action.isPending) return;
-    const at = parseLocalInput(deliveredAt) as Date;
+    const at = parseLocalInput(deliveredAt, tz) as Date;
     // A time in the skew window is "now", and the start's own minute is the start itself: never send
     // an instant the server could read as future or as before the start (the input has no seconds).
     const started = trip.startedAt ? Date.parse(trip.startedAt) : NaN;
@@ -67,13 +69,13 @@ export function MarkDeliveredModal({ trip, onClose }: { trip: TripRow; onClose: 
       <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-1">
           <label htmlFor="delivered-at" className="text-body-strong text-text">
-            Delivered at
+            Delivered at ({timezoneAbbreviation(tz)})
           </label>
           <input
             id="delivered-at"
             type="datetime-local"
             value={deliveredAt}
-            max={toLocalInput(new Date())}
+            max={toLocalInput(new Date(), tz)}
             aria-invalid={Boolean(shownError)}
             aria-describedby="delivered-at-hint"
             onChange={(e) => {
@@ -89,7 +91,7 @@ export function MarkDeliveredModal({ trip, onClose }: { trip: TripRow; onClose: 
         </div>
         {trip.plannedEndAt && (
           <p className="text-caption text-text-secondary">
-            Planned end {formatLocalDateTime(trip.plannedEndAt)}
+            Planned end {formatCarrierDateTime(trip.plannedEndAt, tz)}
             {late === null ? '' : late ? ' · will count as late' : ' · will count as on time'}
           </p>
         )}

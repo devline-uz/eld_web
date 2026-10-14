@@ -21,19 +21,20 @@ import { Pagination } from '@/shared/ui/Pagination';
 import { KpiCard, KpiRowSkeleton } from '@/shared/ui/KpiCard';
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
 import { EMPTY_STATE_COPY, searchEmptyState } from '@/shared/ui/copy';
-import { formatDateRange, formatLocal } from '@/shared/format/datetime';
+import { formatCarrier, formatDateRange } from '@/shared/format/datetime';
+import { useCarrierTimezone } from '@/shared/auth/useCarrierTimezone';
 import { useNowTick } from '@/shared/format/useRelativeTime';
 import { formatGForce } from '@/shared/format/numbers';
 import { orDash } from '@/shared/format/empty';
 import { toCsv } from '@/shared/lib/csv';
-import { isScored, useSafetyEventsList, useScorecard, type SafetyEventTableRow, type ScorecardFleet, type ScorecardTableRow } from '@/shared/api/safety';
+import { isScored, useSafetyEventsList, useSafetySummary, useScorecard, type SafetyEventTableRow, type ScorecardFleet, type ScorecardTableRow } from '@/shared/api/safety';
 import { useDriversLookup } from '@/shared/api/lookups';
 import { AssignCoachingModal, type CoachingTarget } from './components/AssignCoachingModal';
 import { SafetyFiltersDrawer, SafetyFilterChips } from './components/SafetyFiltersDrawer';
-import { parseSafetyFilters, writeSafetyFilters, matchesSafetyFilters, EMPTY_SAFETY_FILTERS, countActiveSafetyFilters, safetyEventLabel } from './lib/filters';
+import { parseSafetyFilters, writeSafetyFilters, matchesSafetyFilters, EMPTY_SAFETY_FILTERS, countActiveSafetyFilters, safetyEventLabel, severityBucket } from './lib/filters';
 // safetyMock — TEMPORARY demo fallback; delete this import and the `safetyMock` block below to remove.
 import { MOCK_SAFETY_EVENTS, MOCK_SCORECARD, MOCK_SCORECARD_FLEET, MOCK_SCORECARD_PERIOD } from './lib/mockData';
-import { DEMO_FALLBACK_ENABLED, DEMO_FALLBACK_MODE } from '@/shared/lib/mockMode';
+import { DEMO_FALLBACK_ENABLED, shouldUseDemoRows } from '@/shared/lib/mockMode';
 
 /** Fleet-score verdict bands — the same 90 / 70 cut-offs as the driver SCORE badge. */
 const FLEET_VERDICT = {
@@ -58,6 +59,23 @@ function fleetTrendChip(trend: number | null | undefined): { text: string; tone:
 
 /** Period labels are calendar dates (each driver's home-terminal day), so they are rendered as
  * dates in UTC — never shifted by the browser or carrier zone. */
+const SEVERITY_TEXT: Record<ReturnType<typeof severityBucket>, string> = {
+  CRITICAL: 'Critical',
+  MAJOR: 'Major',
+  MINOR: 'Minor',
+};
+
+/** LIVE-025 — the place of an event: its geocoded name, else its coordinates, else a dash. */
+function eventLocation(row: { locationName: string | null; latitude: number | string | null; longitude: number | string | null }): string {
+  if (row.locationName) return row.locationName;
+  const lat = toNum(row.latitude);
+  const lon = toNum(row.longitude);
+  return lat != null && lon != null ? `${lat.toFixed(4)}, ${lon.toFixed(4)}` : '—';
+}
+
+/** Below this many rows the scorecard needs no pager. */
+const SCORECARD_PAGE_SIZES_MIN = 25;
+
 const periodLabel = (start: string | null | undefined, end: string | null | undefined): string | null =>
   start && end ? formatDateRange(`${start}T00:00:00Z`, `${end}T00:00:00Z`, 'UTC') : null;
 
@@ -177,6 +195,12 @@ function SafetyTabs({ tab, counts, onChange }: { tab: SafetyTab; counts: Record<
 }
 
 // ---- table columns ---------------------------------------------------------------------------
+/** LIVE-007 — event times in the carrier zone, the same on every page whatever the browser zone. */
+function CarrierDateTime({ value }: { value: string }) {
+  const tz = useCarrierTimezone();
+  return <>{formatCarrier(value, tz, 'dateTime')}</>;
+}
+
 const EVENT_BASE_COLUMNS: ColumnDef<SafetyEventTableRow, unknown>[] = [
   {
     id: 'event',
@@ -202,13 +226,14 @@ const EVENT_BASE_COLUMNS: ColumnDef<SafetyEventTableRow, unknown>[] = [
   {
     id: 'dateTime',
     header: 'DATE & TIME',
-    cell: ({ row }) => <span className="tabular-nums text-text-muted">{formatLocal(row.original.occurredAt, 'dateTime')}</span>,
+    cell: ({ row }) => <span className="tabular-nums text-text-muted"><CarrierDateTime value={row.original.occurredAt} /></span>,
   },
 ];
 
 const EVENT_COLUMNS: ColumnDef<SafetyEventTableRow, unknown>[] = [
   ...EVENT_BASE_COLUMNS,
-  { id: 'location', header: 'LOCATION', cell: ({ row }) => <span className="text-text">{orDash(row.original.locationName, (v) => v)}</span> },
+  // LIVE-025 — an event without a geocoded name still has its fix: show the coordinates.
+  { id: 'location', header: 'LOCATION', cell: ({ row }) => <span className="text-text">{eventLocation(row.original)}</span> },
   {
     id: 'severity',
     header: 'SEVERITY',
@@ -219,7 +244,12 @@ const EVENT_COLUMNS: ColumnDef<SafetyEventTableRow, unknown>[] = [
       const g = toNum(row.original.gForce);
       return (
         <span className="tabular-nums text-danger">
-          {speed != null && limitMph != null ? `${speed} / ${limitMph} mph` : g != null ? formatGForce(g) : '—'}
+          {/* LIVE-025 — a harsh event without a g-force reading still has the detector's severity. */}
+          {speed != null && limitMph != null
+            ? `${speed} / ${limitMph} mph`
+            : g != null
+              ? formatGForce(g)
+              : SEVERITY_TEXT[severityBucket(row.original.severity)]}
         </span>
       );
     },
@@ -233,7 +263,7 @@ const COACHING_COLUMNS: ColumnDef<SafetyEventTableRow, unknown>[] = [
   {
     id: 'coachedAt',
     header: 'COACHED',
-    cell: ({ row }) => <span className="tabular-nums text-text-muted">{row.original.coachedAt ? formatLocal(row.original.coachedAt, 'dateTime') : '—'}</span>,
+    cell: ({ row }) => <span className="tabular-nums text-text-muted">{row.original.coachedAt ? <CarrierDateTime value={row.original.coachedAt} /> : '—'}</span>,
   },
   {
     id: 'note',
@@ -363,14 +393,17 @@ export default function SafetyPage() {
   });
 
   const eventsQuery = useSafetyEventsList({ limit: 500 });
+  const carrierTz = useCarrierTimezone();
+  const summaryQuery = useSafetySummary();
   const scorecardQuery = useScorecard();
-  // safetyMock — while the API returns no rows (empty or failed), show demo data from
+  // safetyMock — while the API answers an empty list, show demo data from
   // `./lib/mockData` instead. Real rows always win (unless `VITE_DEMO_FALLBACK=always`).
   // Never in production: `DEMO_FALLBACK_ENABLED` is the literal `false` there, so both flags fold to
   // `false`, the page shows its own error / empty states, and `./lib/mockData` is tree-shaken out.
   // Remove: `const events = eventsQuery;` etc.
-  const shouldMockSafety = (q: { isLoading: boolean; rows: unknown[] }) =>
-    DEMO_FALLBACK_MODE === 'always' || (DEMO_FALLBACK_MODE === 'fallback' && !q.isLoading && q.rows.length === 0);
+  // CODE-086 — a failed / forbidden request is never masked by demo rows (`always` excepted).
+  const shouldMockSafety = (q: { isLoading: boolean; isError: boolean; rows: unknown[] }) =>
+    shouldUseDemoRows(q, q.rows.length);
   const eventsMock = DEMO_FALLBACK_ENABLED && shouldMockSafety(eventsQuery);
   const scorecardMock = DEMO_FALLBACK_ENABLED && shouldMockSafety(scorecardQuery);
   const events = eventsMock
@@ -410,12 +443,16 @@ export default function SafetyPage() {
     [events.rows, prev30, last30],
   );
   const harshTypes = new Set(['HARSH_BRAKING', 'HARSH_ACCEL', 'HARSH_TURN']);
-  const harshNow = currentEvents.filter((e) => harshTypes.has(e.type)).length;
-  const harshPrev = previousEvents.filter((e) => harshTypes.has(e.type)).length;
-  const speedingNow = currentEvents.filter((e) => e.type === 'SPEEDING').length;
-  const speedingPrev = previousEvents.filter((e) => e.type === 'SPEEDING').length;
-  const coachedNow = currentEvents.filter((e) => e.status === 'COACHED').length;
-  const pendingCoaching = currentEvents.filter((e) => e.status === 'NEW').length;
+  // CODE-040 — the KPIs come from the server's aggregate over every event in the window; the
+  // loaded rows (newest 500) are only a fallback while it loads, fails, or the page shows demo data.
+  const serverSummary = summaryQuery.data && !eventsMock ? summaryQuery.data : null;
+  const harshNow = serverSummary?.current.harsh ?? currentEvents.filter((e) => harshTypes.has(e.type)).length;
+  const harshPrev = serverSummary?.previous.harsh ?? previousEvents.filter((e) => harshTypes.has(e.type)).length;
+  const speedingNow = serverSummary?.current.speeding ?? currentEvents.filter((e) => e.type === 'SPEEDING').length;
+  const speedingPrev = serverSummary?.previous.speeding ?? previousEvents.filter((e) => e.type === 'SPEEDING').length;
+  const coachedNow = serverSummary?.current.coached ?? currentEvents.filter((e) => e.status === 'COACHED').length;
+  const pendingCoaching = serverSummary?.current.pendingCoaching ?? currentEvents.filter((e) => e.status === 'NEW').length;
+  const eventsInWindow = serverSummary?.current.total ?? currentEvents.length;
 
   // Phase 1 (backend D-133) — the fleet score is the server's MILE-WEIGHTED mean of scored drivers
   // ("Not enough miles" drivers excluded) with its trend vs the previous 30-day period. Never
@@ -426,6 +463,8 @@ export default function SafetyPage() {
   const rankedCount = useMemo(() => scorecard.rows.filter((r) => isScored(r)).length, [scorecard.rows]);
   const unrankedCount = scorecard.rows.length - rankedCount;
   const scorecardPeriod = periodLabel(scorecard.periodStart, scorecard.periodEnd);
+  const [scorecardPage, setScorecardPage] = useState(1);
+  const [scorecardLimit, setScorecardLimit] = useState(25);
 
   const needle = search.trim().toLowerCase();
   const filteredEvents = useMemo(
@@ -449,6 +488,7 @@ export default function SafetyPage() {
         : scorecard.rows,
     [tab, needle, scorecard.rows],
   );
+  const scorecardPageSafe = Math.min(scorecardPage, Math.max(1, Math.ceil(visibleScorecard.length / scorecardLimit)));
 
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(10);
@@ -506,8 +546,8 @@ export default function SafetyPage() {
                 safetyEventLabel(r.type),
                 driverOf(r),
                 r.vehicle?.unitNumber ?? '',
-                formatLocal(r.occurredAt, 'dateTime'),
-                r.coachedAt ? formatLocal(r.coachedAt, 'dateTime') : '',
+                formatCarrier(r.occurredAt, carrierTz, 'dateTime'),
+                r.coachedAt ? formatCarrier(r.coachedAt, carrierTz, 'dateTime') : '',
                 r.coachingNote ?? '',
               ]),
             ]
@@ -517,7 +557,7 @@ export default function SafetyPage() {
                 safetyEventLabel(r.type),
                 driverOf(r),
                 r.vehicle?.unitNumber ?? '',
-                formatLocal(r.occurredAt, 'dateTime'),
+                formatCarrier(r.occurredAt, carrierTz, 'dateTime'),
                 r.locationName ?? '',
                 r.speedMph != null && r.speedLimitMph != null
                   ? `${r.speedMph} / ${r.speedLimitMph} mph`
@@ -538,7 +578,7 @@ export default function SafetyPage() {
   const hasFilters = countActiveSafetyFilters(filters) > 0;
   // Tab counts match what each tab lists: the 30-day event window (not the all-time server
   // `total`), the coached events in that window (= the `Coaching sessions` KPI), the ranked drivers.
-  const tabCounts: Record<SafetyTab, number> = { events: currentEvents.length, coaching: coachedNow, scorecards: scorecard.rows.length };
+  const tabCounts: Record<SafetyTab, number> = { events: eventsInWindow, coaching: coachedNow, scorecards: scorecard.rows.length };
 
   function eventsTableBody(rows: SafetyEventTableRow[], columns: ColumnDef<SafetyEventTableRow, unknown>[], caption: string, emptyKey: 'safety' | 'safetyCoaching') {
     if (events.isLoading) return <LoadingState />;
@@ -610,7 +650,9 @@ export default function SafetyPage() {
           subtitle={[
             `${rankedCount} drivers ranked`,
             unrankedCount > 0 ? `${unrankedCount} not enough miles` : null,
-            scorecardPeriod,
+            // LIVE-025 — the scorecard is computed nightly over the 30 days ENDING YESTERDAY, so
+            // today's events (already in the events list) count from tomorrow. Said, not hidden.
+            scorecardPeriod ? `${scorecardPeriod} · updated nightly, today counts tomorrow` : null,
           ]
             .filter(Boolean)
             .join(' · ')}
@@ -651,7 +693,29 @@ export default function SafetyPage() {
         ) : visibleScorecard.length === 0 ? (
           <EmptyState {...searchEmptyState(search)} actions={[{ label: 'Clear search', onClick: () => setSearch('') }]} />
         ) : (
-          <DataTable caption="Driver scorecard" data={visibleScorecard} getRowId={(r) => r.driverId} columns={SCORECARD_COLUMNS} />
+          <>
+            {/* LIVE-025 — 72 drivers on one page; paged like the events table. */}
+            <DataTable
+              caption="Driver scorecard"
+              data={visibleScorecard.slice((scorecardPageSafe - 1) * scorecardLimit, scorecardPageSafe * scorecardLimit)}
+              getRowId={(r) => r.driverId}
+              columns={SCORECARD_COLUMNS}
+            />
+            {visibleScorecard.length > SCORECARD_PAGE_SIZES_MIN && (
+              <Pagination
+                page={scorecardPageSafe}
+                limit={scorecardLimit}
+                total={visibleScorecard.length}
+                totalPages={Math.max(1, Math.ceil(visibleScorecard.length / scorecardLimit))}
+                itemLabel="drivers"
+                onPageChange={setScorecardPage}
+                onLimitChange={(l) => {
+                  setScorecardLimit(l);
+                  setScorecardPage(1);
+                }}
+              />
+            )}
+          </>
         )}
       </div>
     </Card>
@@ -733,7 +797,8 @@ export default function SafetyPage() {
                 <KpiCard
                   label="Coaching sessions"
                   value={coachedNow}
-                  chip={pendingCoaching > 0 ? { text: `${pendingCoaching} pending`, tone: 'warning' } : undefined}
+                  // LIVE-025 — "0 · 1 pending" read as a pending SESSION; it is an event awaiting review.
+                  chip={pendingCoaching > 0 ? { text: `${pendingCoaching} event${pendingCoaching === 1 ? '' : 's'} to review`, tone: 'warning' } : undefined}
                   icon={Users}
                   iconTone="warning"
                 />
@@ -743,7 +808,7 @@ export default function SafetyPage() {
             <div className="grid grid-cols-1 gap-card-gap xl:grid-cols-[1fr_348px]">
               <Card padded={false}>
                 <div className="p-card pb-0">
-                  <SectionHeader title="Safety events" subtitle={`${currentEvents.length.toLocaleString('en-US')} events · ${pendingCoaching} need review`} />
+                  <SectionHeader title="Safety events" subtitle={`${eventsInWindow.toLocaleString('en-US')} events · ${pendingCoaching} need review`} />
                 </div>
                 <div className="p-card">{eventsTableBody(filteredEvents, EVENT_COLUMNS, 'Safety events', 'safety')}</div>
               </Card>

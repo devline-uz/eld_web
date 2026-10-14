@@ -44,11 +44,7 @@ export const PERMISSION_MATRIX_GROUPS: MatrixGroup[] = [
     rows: [
       { id: 'hos', label: 'View HOS logs', keys: ['hos'] },
       { id: 'hosEdit', label: 'Request driver log edit', keys: ['hosEdit'] },
-      {
-        id: 'hosCertifyOnBehalf',
-        label: 'Certify on behalf of driver',
-        keys: ['hosCertifyOnBehalf'],
-      },
+      // CODE-029 — certification is driver-only; `hosCertifyOnBehalf` is retired (always NONE).
       { id: 'reports', label: 'View & generate reports', keys: ['reports'] },
       { id: 'reportsTransfer', label: ROLE_COPY.transferMatrixRow, keys: ['reportsTransfer'] },
       // B-95 (shipped 2026-09-24) — `dataTransfer` is its own 23rd permission key.

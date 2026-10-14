@@ -3,7 +3,8 @@
 // The tooltip still distinguishes Sent vs Delivered.
 // Shown only under the staff side's own, already-sent messages.
 import { Check, CheckCheck } from 'lucide-react';
-import { formatLocalDateTime } from '@/shared/format/datetime';
+import { formatCarrierDateTime } from '@/shared/format/datetime';
+import { useCarrierTimezone } from '@/shared/auth/useCarrierTimezone';
 import type { MessageRow } from '@/shared/api/messaging';
 
 type TickState = 'sent' | 'delivered' | 'read';
@@ -14,11 +15,12 @@ function tickState(message: Pick<MessageRow, 'deliveredAt' | 'readAt'>): TickSta
 
 export function MessageTicks({ message }: { message: Pick<MessageRow, 'deliveredAt' | 'readAt'> }) {
   const state = tickState(message);
+  const carrierTz = useCarrierTimezone();
   const label =
     state === 'read'
-      ? `Read ${formatLocalDateTime(message.readAt)}`
+      ? `Read ${formatCarrierDateTime(message.readAt, carrierTz)}`
       : state === 'delivered'
-        ? `Delivered ${formatLocalDateTime(message.deliveredAt)}`
+        ? `Delivered ${formatCarrierDateTime(message.deliveredAt, carrierTz)}`
         : 'Sent';
   const Icon = state === 'read' ? CheckCheck : Check;
   return (

@@ -19,16 +19,11 @@ import {
   type IftaFilters,
 } from '@/shared/api/reports';
 import { useVehicleGroups as useVehicleGroupsApi } from '@/shared/api/vehicles';
-import { DEMO_FALLBACK_ENABLED, DEMO_FALLBACK_MODE } from '@/shared/lib/mockMode';
+import { DEMO_FALLBACK_ENABLED, shouldUseDemoRows } from '@/shared/lib/mockMode';
 import { buildIftaMockSummary, MOCK_IFTA_JURISDICTIONS, MOCK_VEHICLE_GROUPS } from './iftaMockData';
 
-/** Use demo data? Never while the real request is still in flight. */
-function shouldMock(real: { isLoading: boolean; isError: boolean }, realCount: number): boolean {
-  if (DEMO_FALLBACK_MODE === 'off') return false;
-  if (DEMO_FALLBACK_MODE === 'always') return true;
-  if (real.isLoading) return false;
-  return real.isError || realCount === 0;
-}
+/** CODE-086 — demo rows only on an empty successful answer (or `always`); errors stay visible. */
+const shouldMock = shouldUseDemoRows;
 
 /** KPI row + `Miles by jurisdiction` — the demo summary honours quarter, jurisdiction and group. */
 function useIftaSummaryDemo(filters: IftaFilters) {

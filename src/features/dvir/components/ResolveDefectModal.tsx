@@ -6,7 +6,6 @@ import { SeverityBadge } from '@/shared/ui/Badge';
 import { useToast } from '@/shared/ui/Toast';
 import {
   useResolveDefect,
-  useLinkDefectWorkOrder,
   useWorkOrdersList,
   type DefectResolutionType,
   type DefectTableRow,
@@ -64,7 +63,6 @@ export function ResolveDefectModal({ defect, onClose }: { defect: DefectTableRow
   const authCarrierTz = useCarrierTimezone();
   const carrierTz = carrier.data?.timezone ?? authCarrierTz;
   const mutation = useResolveDefect(defect.id);
-  const linkWorkOrder = useLinkDefectWorkOrder(defect.id);
   const workOrders = useWorkOrdersList({ vehicleId: defect.vehicleId, status: 'OPEN', limit: 50 });
 
   const initialWorkOrderId = defect.workOrderId ?? '';
@@ -101,7 +99,7 @@ export function ResolveDefectModal({ defect, onClose }: { defect: DefectTableRow
     completedAt !== '' ||
     laborHours !== '' ||
     partsCostUsd !== '';
-  const isPending = mutation.isPending || linkWorkOrder.isPending;
+  const isPending = mutation.isPending;
 
   function submit() {
     // B-68 (shipped 2026-09-24, WD-121) — `resolutionType` carries the choice itself, so "No repair
@@ -113,27 +111,21 @@ export function ResolveDefectModal({ defect, onClose }: { defect: DefectTableRow
     setServerError(null);
     if (!valid) return;
 
-    const link =
-      workOrderId !== initialWorkOrderId
-        ? // `PATCH /defects/:id/work-order` is the real endpoint that carries the link — the
-          // resolve DTO has no `workOrderId`, so the select is applied through it first: if it
-          // fails nothing is resolved, and the banner says why.
-          linkWorkOrder.mutateAsync(workOrderId === '' ? null : workOrderId)
-        : Promise.resolve(null);
-
-    void link
-      .then(() =>
-        mutation.mutateAsync({
-          resolutionType,
-          resolutionNote,
-          correctedBy: correctedBy.trim() || undefined,
-          // CODE-038 — midnight of the picked day in the carrier zone: never ahead of the clock, so
-          // "today" is not refused as a future date east of UTC.
-          completedAt: dateOnlyToInstant(completedAt, carrierTz),
-          laborHours: laborHours.trim() ? Number(laborHours) : undefined,
-          partsCostUsd: partsCostUsd.trim() ? Number(partsCostUsd) : undefined,
-        }),
-      )
+    // CODE-077 — the work-order choice travels IN the resolve request: the backend validates the
+    // link and applies it in the same write, so a refused resolve never leaves a link behind
+    // (it used to be `PATCH /defects/:id/work-order` first, then the resolve).
+    void mutation
+      .mutateAsync({
+        resolutionType,
+        resolutionNote,
+        correctedBy: correctedBy.trim() || undefined,
+        // CODE-038 — midnight of the picked day in the carrier zone: never ahead of the clock, so
+        // "today" is not refused as a future date east of UTC.
+        completedAt: dateOnlyToInstant(completedAt, carrierTz),
+        laborHours: laborHours.trim() ? Number(laborHours) : undefined,
+        partsCostUsd: partsCostUsd.trim() ? Number(partsCostUsd) : undefined,
+        ...(workOrderId !== initialWorkOrderId && { workOrderId: workOrderId === '' ? null : workOrderId }),
+      })
       .then(() => {
         toast({
           kind: 'success',

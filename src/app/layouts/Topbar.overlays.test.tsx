@@ -27,7 +27,9 @@ const state = vi.hoisted(() => ({
 
 vi.mock('@/shared/auth/AuthProvider', async () => {
   const { buildMockAuthContext } = await import('../../../tests/fixtures/mockAuth');
-  return { useAuth: () => buildMockAuthContext(state.role, { signOut: state.signOut }) };
+  const ctx = () => buildMockAuthContext(state.role, { signOut: state.signOut });
+  // LIVE-027 — the panel formats body timestamps in the carrier zone (`useCarrierTimezone`).
+  return { useAuth: ctx, useOptionalAuth: ctx };
 });
 
 // `useMatches` needs a data router, and a data router hands jsdom's AbortSignal to MSW's undici

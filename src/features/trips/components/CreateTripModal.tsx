@@ -7,14 +7,15 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm, useWatch } from 'react-hook-form';
 import { z } from 'zod';
-import { addYears, endOfDay, format, startOfToday } from 'date-fns';
 import { AlertTriangle } from 'lucide-react';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { Select, type SelectOption } from '@/shared/ui/Select';
 import { geocodingEnabled, type Place } from '@/shared/map/geocode';
 import { PlaceInput } from './PlaceInput';
-import { RoutePreview } from './RoutePreview';
+import { RoutePreview, type RouteSummary } from './RoutePreview';
+import { isoToZonedInput, parseZonedInput, toZonedInput, zonedInputToIso, zonedPickupRange } from '../lib/zonedInput';
+import { useCarrierTimezone } from '@/shared/auth/useCarrierTimezone';
 import type { RouteStop } from '../lib/useTripRoute';
 import {
   DriverPicker,
@@ -60,8 +61,6 @@ import {
 /** Rows the trailer picker loads per search (`ListQueryDto` caps `limit` at 200). */
 const TRAILER_PICKER_LIMIT = 50;
 
-/** What `datetime-local` emits — `YYYY-MM-DDTHH:mm[:ss[.sss]]`, and never more than a 4-digit year. */
-const LOCAL_DATETIME_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?$/;
 /** Stands in for a date the browser itself rejected (Feb 30, a 5-digit year): its `value` is `''`,
  * which would otherwise read as "left blank" and hide the real problem. */
 const BAD_DATE = 'invalid-date';
@@ -69,6 +68,9 @@ const INVALID_DATE_MESSAGE = 'Enter a valid date and time.';
 const DISTANCE_MESSAGE = 'Enter a distance greater than 0.';
 const RATE_MESSAGE = 'Enter a rate greater than 0.';
 const RATE_DECIMALS_MESSAGE = 'Use at most 2 decimal places.';
+/** CODE-058 — mirrors the API's 422 `plannedEndAt` for a trip that puts a unit on the schedule. */
+const DELIVERY_REQUIRED_MESSAGE = 'Set a delivery time — without one the unit and driver stay booked indefinitely.';
+
 /** `CreateTripDto` limits (backend trips.dto.ts) the shared `tripSchema` does not carry. */
 const TRIP_LIMITS = {
   number: 40,
@@ -81,37 +83,9 @@ const TRIP_LIMITS = {
   weightLbs: 200_000,
 } as const;
 
-/** Parses a local `datetime-local` value, or `null` if that calendar date doesn't exist. */
-function parseLocalDateTime(value: string): Date | null {
-  const m = LOCAL_DATETIME_RE.exec(value);
-  if (!m) return null;
-  const [year, month, day, hour, minute, second] = [m[1], m[2], m[3], m[4], m[5], m[6] ?? '0'].map(
-    Number,
-  ) as [number, number, number, number, number, number];
-  if (month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59) return null;
-  const date = new Date(year, month - 1, day, hour, minute, second);
-  // `Date` silently rolls Feb 29 2027 / Apr 31 over into March / May — a round-trip mismatch means
-  // the day doesn't exist (leap years included).
-  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day)
-    return null;
-  return date;
-}
-
-/** The pickup window: today (local, not UTC) through the same day one year from now. Computed on
- * every call so a modal left open past midnight doesn't validate against yesterday. */
-function pickupRange(): { min: Date; max: Date } {
-  const min = startOfToday();
-  return { min, max: endOfDay(addYears(min, 1)) };
-}
-
-const toLocalInput = (d: Date) => format(d, "yyyy-MM-dd'T'HH:mm");
-
-/** An ISO instant as the `datetime-local` value the form edits (browser zone); `''` for none. */
-const isoToLocalInput = (iso: string | null | undefined): string => {
-  if (!iso) return '';
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? '' : toLocalInput(d);
-};
+/** LIVE-007 — the windows are typed in the carrier's zone (helpers in `../lib/zonedInput`): the
+ * pickup window runs from today through the same day one year from now, both in that zone,
+ * recomputed on every call so a modal left open past midnight doesn't validate against yesterday. */
 
 /** Decimal columns serialise as strings (`"412.50"`) — the form edits numbers. */
 function toNumber(value: number | string | null | undefined): number | undefined {
@@ -127,14 +101,14 @@ interface OriginalWindows {
   end: string;
 }
 
-function buildTripSchema(original?: OriginalWindows) {
+function buildTripSchema(original: OriginalWindows | undefined, timeZone: string, { draft = false }: { draft?: boolean } = {}) {
   const base = tripSchema.extend({
     // Edit mode: the pickup window is only required if the trip had one (PATCH cannot clear it).
     scheduledStart: (original && !original.start ? z.string() : requiredString()).superRefine(
       (value, ctx) => {
         if (!value || value === original?.start) return;
-        const start = parseLocalDateTime(value);
-        const { min, max } = pickupRange();
+        const start = parseZonedInput(value, timeZone);
+        const { min, max } = zonedPickupRange(timeZone);
         if (!start) ctx.addIssue({ code: z.ZodIssueCode.custom, message: INVALID_DATE_MESSAGE });
         else if (start < min)
           ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Pickup cannot be before today.' });
@@ -150,9 +124,9 @@ function buildTripSchema(original?: OriginalWindows) {
       .optional()
       .superRefine((value, ctx) => {
         if (!value || value === original?.end) return;
-        const end = parseLocalDateTime(value);
+        const end = parseZonedInput(value, timeZone);
         if (!end) ctx.addIssue({ code: z.ZodIssueCode.custom, message: INVALID_DATE_MESSAGE });
-        else if (end > pickupRange().max)
+        else if (end > zonedPickupRange(timeZone).max)
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
             message: 'Delivery must be within one year from today.',
@@ -195,7 +169,17 @@ function buildTripSchema(original?: OriginalWindows) {
       .optional(),
   });
   // Edit mode renders the trip ID, stops and assignment read-only, so they are never required.
-  const shaped = original
+  // CODE-059 — "Save as draft" needs only the trip ID (the API accepts a sparse draft; it is
+  // checked in full when published). Whatever IS filled in is still validated.
+  const shaped = draft
+    ? base.extend({
+        driverId: z.string().optional(),
+        vehicleId: z.string().optional(),
+        origin: z.string().trim().max(TRIP_LIMITS.stopName, `Location must be ${TRIP_LIMITS.stopName} characters or fewer.`).optional(),
+        destination: z.string().trim().max(TRIP_LIMITS.stopName, `Location must be ${TRIP_LIMITS.stopName} characters or fewer.`).optional(),
+        scheduledStart: z.string().optional(),
+      })
+    : original
     ? base.extend({
         reference: z.string(),
         driverId: z.string(),
@@ -206,8 +190,8 @@ function buildTripSchema(original?: OriginalWindows) {
     : base;
   return shaped.refine(
     (v) => {
-      const start = parseLocalDateTime(v.scheduledStart);
-      const end = v.scheduledEnd ? parseLocalDateTime(v.scheduledEnd) : null;
+      const start = v.scheduledStart ? parseZonedInput(v.scheduledStart, timeZone) : null;
+      const end = v.scheduledEnd ? parseZonedInput(v.scheduledEnd, timeZone) : null;
       // Strictly after — the API refuses `plannedEndAt <= plannedStartAt` (422).
       return !start || !end || end > start;
     },
@@ -215,15 +199,7 @@ function buildTripSchema(original?: OriginalWindows) {
   );
 }
 
-const createTripSchema = buildTripSchema();
-type CreateTripValues = z.infer<typeof createTripSchema>;
-
-/** `datetime-local` gives a zone-less `YYYY-MM-DDTHH:mm` in the dispatcher's local time — send ISO. */
-function toIso(local: string | undefined): string | undefined {
-  if (!local) return undefined;
-  const d = new Date(local);
-  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
-}
+type CreateTripValues = z.infer<ReturnType<typeof buildTripSchema>>;
 
 /** Backend payload field → form field, so a 422 lands under the input the user actually typed in. */
 const SERVER_FIELD_MAP: Record<string, keyof CreateTripValues> = {
@@ -384,22 +360,25 @@ export function CreateTripModal({
   /** Edit this trip instead of creating one. */ trip?: TripRow;
 }) {
   const { toast } = useToast();
+  const carrierTz = useCarrierTimezone();
+  const toIso = (local: string | undefined) => zonedInputToIso(local, carrierTz);
   const editing = trip !== undefined;
   // Computed once: what the edited trip held when the modal opened — the PATCH diff and the
   // "unchanged window skips the date-range rules" check both compare against it.
   const [original] = useState(() =>
     trip
       ? {
-          start: isoToLocalInput(trip.plannedStartAt),
-          end: isoToLocalInput(trip.plannedEndAt),
+          start: isoToZonedInput(trip.plannedStartAt, carrierTz),
+          end: isoToZonedInput(trip.plannedEndAt, carrierTz),
           hours: secToHours(trip.estimatedDriveSec),
         }
       : null,
   );
   const schema = useMemo(
-    () => (original ? buildTripSchema(original) : createTripSchema),
-    [original],
+    () => buildTripSchema(original ?? undefined, carrierTz),
+    [original, carrierTz],
   );
+  const draftSchema = useMemo(() => buildTripSchema(undefined, carrierTz, { draft: true }), [carrierTz]);
   const tripStops = useMemo(
     () => [...(trip?.stops ?? [])].sort((a, b) => a.sequence - b.sequence),
     [trip],
@@ -433,6 +412,8 @@ export function CreateTripModal({
     handleSubmit,
     setValue,
     setError,
+    clearErrors,
+    getValues,
     control,
     formState: { errors, isDirty },
   } = useForm<CreateTripValues>({
@@ -514,16 +495,16 @@ export function CreateTripModal({
   const scheduledStart = useWatch({ control, name: 'scheduledStart' });
 
   // Native min/max also stop the picker offering (and Chrome typing) a 5-digit year.
-  const { min: pickupMin, max: pickupMax } = pickupRange();
+  const { min: pickupMin, max: pickupMax } = zonedPickupRange(carrierTz);
   // An edited trip whose window already passed keeps it selectable (the browser greys out dates
   // below `min`); the zod rule above still refuses moving it to another past date.
   const pickupMinInput =
-    original?.start && original.start < toLocalInput(pickupMin)
+    original?.start && original.start < toZonedInput(pickupMin, carrierTz)
       ? original.start
-      : toLocalInput(pickupMin);
-  const pickupMaxInput = toLocalInput(pickupMax);
+      : toZonedInput(pickupMin, carrierTz);
+  const pickupMaxInput = toZonedInput(pickupMax, carrierTz);
   const deliveryMinInput =
-    scheduledStart && parseLocalDateTime(scheduledStart) ? scheduledStart : pickupMinInput;
+    scheduledStart && parseZonedInput(scheduledStart, carrierTz) ? scheduledStart : pickupMinInput;
 
   /** `register` for the stop windows: a browser-rejected date (Feb 30, a 5-digit year) reports
    * `value === ''` with `validity.badInput` — submit the `BAD_DATE` sentinel instead so zod says
@@ -648,6 +629,38 @@ export function CreateTripModal({
     driverHos.data &&
     estimatedDriveSec > driverHos.data.driveRemainingSec;
 
+  // LIVE-029 — Distance and Estimated drive time come from the computed road route, unless the
+  // dispatcher typed their own: a value is only replaced while it is empty or still the one filled
+  // in from an earlier route.
+  const autoDistance = useRef<number | null>(null);
+  const autoHours = useRef<string | null>(null);
+  function applyRouteSummary(summary: RouteSummary) {
+    const currentDistance = getValues('distanceMi');
+    if (currentDistance === undefined || currentDistance === autoDistance.current) {
+      setValue('distanceMi', summary.distanceMi, { shouldDirty: true, shouldValidate: true });
+      autoDistance.current = summary.distanceMi;
+    }
+    if (summary.durationSec != null && (estimatedDriveHours === '' || estimatedDriveHours === autoHours.current)) {
+      const hours = String(Math.round((summary.durationSec / 3600) * 10) / 10);
+      setEstimatedDriveHours(hours);
+      autoHours.current = hours;
+    }
+  }
+
+  /** CODE-059 — "Save as draft" validates against the sparse draft rules, not the full form. */
+  function submitDraft() {
+    clearErrors();
+    const parsed = draftSchema.safeParse(getValues());
+    if (!parsed.success) {
+      for (const issue of parsed.error.issues) {
+        const field = issue.path[0];
+        if (typeof field === 'string') setError(field as keyof CreateTripValues, { message: issue.message });
+      }
+      return;
+    }
+    onSubmit(parsed.data as CreateTripValues, true);
+  }
+
   function onSubmit(values: CreateTripValues, draft: boolean) {
     // mutate() returns immediately, so RHF's isSubmitting never covered the request — guard on the
     // mutation itself or a double click creates two trips. `isPending` only flips on the next
@@ -655,13 +668,21 @@ export function CreateTripModal({
     if (submitInFlight.current || createMutation.isPending || assignmentBlocked) return;
     // With a geocoder configured, pickup and delivery must be picked places (coordinates), not
     // free text. Without one (`VITE_MAP_API_KEY` unset) free text stays the only option.
+    // CODE-058 — a dispatched trip puts its unit (and driver/trailer) on the schedule; without a
+    // delivery time it would hold them indefinitely. The API refuses it too (422 plannedEndAt).
+    if (!draft && !values.scheduledEnd) {
+      setError('scheduledEnd', { message: DELIVERY_REQUIRED_MESSAGE });
+      return;
+    }
     if (geocodingEnabled) {
       const unplaced = (
         [
-          ['origin', originCoords],
-          ['destination', destinationCoords],
+          ['origin', originCoords, values.origin],
+          ['destination', destinationCoords, values.destination],
         ] as const
-      ).filter(([, coords]) => !validCoords(coords));
+      )
+        // A sparse draft may leave a location empty (CODE-059) — only typed text must be a place.
+        .filter(([, coords, text]) => !(draft && !text?.trim()) && !validCoords(coords));
       for (const [field] of unplaced) setError(field, { message: PICK_PLACE_MESSAGE });
       if (unplaced.length > 0) return;
     }
@@ -671,14 +692,17 @@ export function CreateTripModal({
     const plannedStartAt = toIso(values.scheduledStart);
     const plannedEndAt = toIso(values.scheduledEnd);
     const named = intermediateStops.filter((stop) => stop.name.trim() !== '');
-    const stops: CreateTripStopInput[] = [
-      {
-        sequence: 1,
-        type: 'PICKUP',
-        name: values.origin,
-        scheduledAt: plannedStartAt,
-        ...validCoords(originCoords),
-      },
+    const allStops: Array<CreateTripStopInput | null> = [
+      // CODE-059 — a sparse draft sends only the stops it has.
+      values.origin?.trim()
+        ? {
+            sequence: 1,
+            type: 'PICKUP',
+            name: values.origin,
+            scheduledAt: plannedStartAt,
+            ...validCoords(originCoords),
+          }
+        : null,
       ...named.map((stop, index) => ({
         sequence: index + 2,
         // `StopType` has no INTERMEDIATE member; CHECKPOINT is the API's stop between the
@@ -688,14 +712,17 @@ export function CreateTripModal({
         scheduledAt: toIso(stop.scheduledAt),
         ...validCoords(stop.coords),
       })),
-      {
-        sequence: named.length + 2,
-        type: 'DELIVERY' as const,
-        name: values.destination,
-        scheduledAt: plannedEndAt,
-        ...validCoords(destinationCoords),
-      },
+      values.destination?.trim()
+        ? {
+            sequence: named.length + 2,
+            type: 'DELIVERY' as const,
+            name: values.destination,
+            scheduledAt: plannedEndAt,
+            ...validCoords(destinationCoords),
+          }
+        : null,
     ];
+    const stops = allStops.filter((stop): stop is CreateTripStopInput => stop !== null);
     createMutation.mutate(
       {
         number: values.reference,
@@ -732,7 +759,7 @@ export function CreateTripModal({
           const conflict = tripScheduleConflict(error);
           if (conflict) {
             setError(scheduleConflictField(conflict), {
-              message: scheduleConflictMessage(conflict),
+              message: scheduleConflictMessage(conflict, carrierTz),
             });
             setError('scheduledStart', { message: scheduleConflictWindowHint(conflict) });
             return;
@@ -857,7 +884,7 @@ export function CreateTripModal({
         if (conflict) {
           setError(
             'scheduledStart',
-            { message: scheduleConflictMessage(conflict) },
+            { message: scheduleConflictMessage(conflict, carrierTz) },
             { shouldFocus: true },
           );
           return;
@@ -914,7 +941,7 @@ export function CreateTripModal({
               size="lg"
               disabled={submitting || savingDraft}
               loading={savingDraft}
-              onClick={(e) => void handleSubmit((values) => onSubmit(values, true))(e)}
+              onClick={submitDraft}
             >
               Save as draft
             </Button>
@@ -1019,7 +1046,7 @@ export function CreateTripModal({
                 />
               )}
             </Field>
-            <Field label="Delivery window" error={errors.scheduledEnd?.message}>
+            <Field label="Delivery window" required={!editing} error={errors.scheduledEnd?.message}>
               <input
                 {...registerDate('scheduledEnd')}
                 type="datetime-local"
@@ -1132,7 +1159,7 @@ export function CreateTripModal({
             </button>
           )}
           {!editing && route.pickup && route.delivery && (
-            <RoutePreview pickup={route.pickup} delivery={route.delivery} waypoints={route.waypoints} />
+            <RoutePreview pickup={route.pickup} delivery={route.delivery} waypoints={route.waypoints} onSummary={applyRouteSummary} />
           )}
         </div>
 

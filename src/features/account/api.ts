@@ -19,7 +19,8 @@ export interface MyProfile {
   jobTitle: string | null;
   phone: string | null;
   authProvider: 'PASSWORD' | 'GOOGLE';
-  googleUid: string | null;
+  /** CODE-087 — the API no longer returns the Google account id, only whether one is linked. */
+  googleLinked?: boolean;
   role: { key: string; name: string };
   /** B-51 — presigned URL of the uploaded photo, `null` when there is none. */
   avatarUrl?: string | null;

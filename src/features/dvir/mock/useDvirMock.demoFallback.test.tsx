@@ -1,5 +1,5 @@
 // `VITE_DEMO_FALLBACK=fallback` (dev only — production builds force it off): the DVIR & Maintenance
-// hooks swap in demo rows when the API answers empty or fails. The flag-off side (real error / empty
+// hooks swap in demo rows when the API answers empty (never on a failure — CODE-086). The flag-off side (real error / empty
 // states) is covered by `DvirPage.test.tsx` and `@/shared/lib/mockMode.test.ts`.
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
@@ -48,14 +48,14 @@ describe('DVIR demo fallback — flag on', () => {
     expect(result.current.isError).toBe(false);
   });
 
-  it('shows demo work orders instead of the error when the list fails', async () => {
+  it('CODE-086: keeps the real error (no demo rows) when the list fails', async () => {
     server.use(
       http.get(url(endpoints.workOrders.list), () =>
         HttpResponse.json({ statusCode: 404, code: 'NOT_FOUND', message: 'Not found' }, { status: 404 }),
       ),
     );
     const { result } = renderHook(() => useWorkOrdersList({ page: 1, limit: 10 }), { wrapper: wrapper() });
-    await waitFor(() => expect(result.current.rows.length).toBeGreaterThan(0));
-    expect(result.current.isError).toBe(false);
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.rows.length).toBe(0);
   });
 });

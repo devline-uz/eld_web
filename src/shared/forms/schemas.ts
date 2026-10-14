@@ -5,15 +5,27 @@ import * as f from './fields';
 import { LIMITS, VALIDATION_MESSAGES as M } from './messages';
 import { PLATE_JURISDICTIONS } from './usStates';
 
+/** LIVE-021 — a plate has at least one letter/digit; only spaces and dashes in between. */
+const PLATE_RE = /^[A-Za-z0-9](?:[A-Za-z0-9 -]*[A-Za-z0-9])?$/;
+/** LIVE-021 — ELD serials such as `PT30_1C4F` or a MAC-like `00:1B:44:11:3A:B7`. */
+const ELD_SERIAL_RE = /^[A-Za-z0-9][A-Za-z0-9_:.-]*$/;
+
 /** 11.2 · Add vehicle — `CreateVehicleDto`: `make` / `model` ≤ 60, `eldSerial` ≤ 60, `notes` ≤ 500. */
 export const vehicleSchema = z
   .object({
     unitNumber: f.unitNumber(),
     vin: f.vin(),
-    make: f.requiredString().max(LIMITS.vehicleMakeModelMax, M.vehicleMakeMax),
-    model: f.requiredString().max(LIMITS.vehicleMakeModelMax, M.vehicleModelMax),
+    // CODE-045 — Make / Model / Year are optional, as in `CreateVehicleDto`.
+    make: z.string().trim().max(LIMITS.vehicleMakeModelMax, M.vehicleMakeMax).optional(),
+    model: z.string().trim().max(LIMITS.vehicleMakeModelMax, M.vehicleModelMax).optional(),
     year: f.vehicleYear(),
-    licensePlate: z.string().trim().max(20).optional(),
+    /** LIVE-021 — letters, digits, spaces and dashes (the API compares plates without spaces/dashes). */
+    licensePlate: z
+      .string()
+      .trim()
+      .max(20)
+      .refine((v) => v === '' || PLATE_RE.test(v), M.licensePlateFormat)
+      .optional(),
     /** US state, DC or Canadian province, upper-cased (QA FE-012: any two letters used to pass). */
     licenseState: z
       .string()
@@ -23,7 +35,12 @@ export const vehicleSchema = z
       .optional(),
     odometer: f.odometer().optional(),
     /** The `ELD serial` input — sent as `eldSerial`. */
-    deviceId: z.string().trim().max(LIMITS.vehicleEldSerialMax, M.vehicleEldSerialMax).optional(),
+    deviceId: z
+      .string()
+      .trim()
+      .max(LIMITS.vehicleEldSerialMax, M.vehicleEldSerialMax)
+      .refine((v) => v === '' || ELD_SERIAL_RE.test(v), M.vehicleEldSerialFormat)
+      .optional(),
     notes: z.string().trim().max(LIMITS.vehicleNotesMax, M.vehicleNotesMax).optional(),
   })
   // A plate means nothing without the jurisdiction that issued it.

@@ -148,7 +148,8 @@ export function CreateRoleModal({
     // inspector transfer are two independent checkboxes again.
     base.reportsTransfer = canExportFmcsa ? 'FULL' : 'NONE';
     base.dataTransfer = canSendDataTransfer ? 'FULL' : 'NONE';
-    base.hosCertifyOnBehalf = base.hosCertifyOnBehalf ?? 'NONE';
+    // CODE-029 — retired key: certification is driver-only, the server stores NONE regardless.
+    base.hosCertifyOnBehalf = 'NONE';
     base.carrierSettings = base.carrierSettings ?? 'NONE';
 
     const key = roleKeyFor(values.name);

@@ -150,6 +150,9 @@ export default function DashboardPage() {
   const offlineCount = counts?.offline ?? 0;
 
   const unassignedTotalSec = summary.data?.unidentified.totalDurationSec ?? 0;
+  // CODE-054 — the KPI is the table's own total once it loads (the summary's count before that);
+  // with neither (loading the table after a summary error, or both failed) it reads "—", never 0.
+  const openViolationsKpi = violations.data ? violationsTotal : (summary.data?.violations.total ?? null);
 
   const kpiLoading = summary.isLoading;
   const activeVehicles = summary.data?.vehicles.active;
@@ -157,6 +160,7 @@ export default function DashboardPage() {
   const outOfServiceVehicles = summary.data?.vehicles.outOfService ?? 0;
   const violationItems = violations.data?.items ?? [];
   const unidentifiedTotal = summary.data?.unidentified.total;
+  const awaitingDriver = summary.data?.unidentified.awaitingDriver ?? 0;
 
   const columns: ColumnDef<DashboardViolation, unknown>[] = [
     {
@@ -234,7 +238,7 @@ export default function DashboardPage() {
           />
           <KpiCard
             label="Open HOS violations"
-            value={summary.isError ? '—' : formatNumber(violationsTotal)}
+            value={openViolationsKpi != null ? formatNumber(openViolationsKpi) : '—'}
             icon={AlertTriangle}
             iconTone="danger"
           />
@@ -244,7 +248,15 @@ export default function DashboardPage() {
             chip={
               summary.isError
                 ? undefined
-                : { text: `${formatNumber(unidentifiedTotal)} segments`, tone: 'warning' }
+                : {
+                    // CODE-029 — carrier-assigned segments the driver has not confirmed yet are
+                    // named apart: they are no longer unassigned, but not on a driver's log either.
+                    text:
+                      awaitingDriver > 0
+                        ? `${formatNumber(unidentifiedTotal)} segments · ${formatNumber(awaitingDriver)} awaiting driver`
+                        : `${formatNumber(unidentifiedTotal)} segments`,
+                    tone: 'warning',
+                  }
             }
             icon={Clock}
             iconTone="warning"

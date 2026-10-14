@@ -14,6 +14,8 @@ import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/cli
 import { ToastProvider } from '@/shared/ui/Toast';
 import * as RealtimeProviderModule from '@/shared/realtime/RealtimeProvider';
 import TripsPage from './TripsPage';
+import { fromZonedTime } from 'date-fns-tz';
+import { DEFAULT_CARRIER_TIMEZONE } from '@/shared/auth/useCarrierTimezone';
 
 vi.mock('@/shared/auth/usePermission', () => ({ usePermission: () => ({ can: () => true }) }));
 
@@ -241,6 +243,30 @@ describe('W-11 Dispatch & Trips', () => {
     expect(screen.getByText('Overdue')).toBeInTheDocument();
   });
 
+  it('LIVE-029: the route panel follows the tab — an Active trip is not kept on Scheduled', async () => {
+    const past = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
+    const activeTrip = { ...TRIP, id: 'trp_7', number: 'TR-7000', status: 'ASSIGNED', plannedStartAt: past(1), plannedEndAt: past(-1), startedAt: null, etaAt: null, onTime: null, stops: [] };
+    const plannedTrip = { ...TRIP, id: 'trp_8', number: 'TR-8000', driverId: null, status: 'PLANNED', plannedStartAt: past(-2), plannedEndAt: past(-3), startedAt: null, etaAt: null, onTime: null, stops: [] };
+    server.use(
+      http.get(url(endpoints.trips.list), ({ request }) => {
+        const status = new URL(request.url).searchParams.get('status');
+        const items = status === 'ASSIGNED' ? [activeTrip] : status === 'PLANNED' ? [plannedTrip] : [];
+        return ok({ items, page: 1, limit: 25, total: items.length, totalPages: 1 });
+      }),
+      http.get(url(endpoints.drivers.list), () => ok({ items: [DRIVER], page: 1, limit: 500, total: 1, totalPages: 1 })),
+      http.get(url(endpoints.vehicles.list), () => ok({ items: [VEHICLE], page: 1, limit: 500, total: 1, totalPages: 1 })),
+      http.get(url(endpoints.trips.unassignedLoads), () => ok({ items: [] })),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByText('TR-7000'));
+    expect(await screen.findByText('Route · TR-7000')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Scheduled 1' }));
+    expect(await screen.findByText('Route · TR-8000')).toBeInTheDocument();
+    expect(screen.queryByText('Route · TR-7000')).not.toBeInTheDocument();
+  });
+
   it('selecting a trip updates the route timeline card', async () => {
     usePopulatedTrips();
     const user = userEvent.setup();
@@ -265,10 +291,19 @@ describe('W-11 Dispatch & Trips', () => {
     expect(screen.getByText('Every load has a driver assigned.')).toBeInTheDocument();
   });
 
-  it('Auto-assign shows the exact §10 toast wording', async () => {
+  // CODE-055 — tz.md §10 worded the toast "(no driver with enough hours)", but the backend runs no
+  // HOS-hours check; the toast now says what the run actually did.
+  it('Auto-assign reports what it did, without an invented HOS reason (CODE-055)', async () => {
     usePopulatedTrips();
     server.use(
-      http.post(url(endpoints.trips.autoAssign), () => ok({ assigned: [{ tripId: 'trp_2', driverId: 'drv_1' }], skipped: 1 })),
+      http.post(url(endpoints.trips.autoAssign), () =>
+        ok({
+          assigned: [{ tripId: 'trp_2', driverId: 'drv_1' }],
+          skipped: 1,
+          noSchedule: 0,
+          failed: [{ tripId: 'trp_9', number: 'TR-9', reason: 'Only a planned or assigned trip can be (re)assigned.' }],
+        }),
+      ),
     );
     const user = userEvent.setup();
     renderPage();
@@ -277,7 +312,11 @@ describe('W-11 Dispatch & Trips', () => {
     await user.click(screen.getByRole('button', { name: /Unassigned 0/ }));
     await user.click(await screen.findByRole('button', { name: 'Auto-assign' }));
 
-    expect(await screen.findByText('1 loads assigned · 1 skipped (no driver with enough hours)')).toBeInTheDocument();
+    expect(
+      await screen.findByText('1 load assigned · 1 left unassigned (1 with no driver free at that time) · 1 failed'),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/TR-9: Only a planned or assigned trip/)).toBeInTheDocument();
+    expect(screen.queryByText(/enough hours/)).not.toBeInTheDocument();
   });
 
   it('Auto-assign names the refusal instead of a bare "Something went wrong."', async () => {
@@ -522,7 +561,7 @@ describe('W-11 Start trip / Mark delivered / Cancel trip (QA LIVE-003, CODE-047)
     await screen.findByText('Route · TR-4821');
     await user.click(screen.getByRole('button', { name: 'Mark delivered' }));
     expect(await screen.findByText('Mark trip TR-4821 delivered?')).toBeInTheDocument();
-    const input = screen.getByLabelText('Delivered at');
+    const input = screen.getByLabelText(/^Delivered at/);
 
     await user.clear(input);
     await user.type(input, '2099-01-01T10:00');
@@ -534,7 +573,8 @@ describe('W-11 Start trip / Mark delivered / Cancel trip (QA LIVE-003, CODE-047)
     await user.click(screen.getByRole('button', { name: 'Mark delivered' }));
 
     await waitFor(() => expect(patches).toHaveLength(1));
-    expect(patches[0]!.body).toEqual({ status: 'DELIVERED', completedAt: new Date('2026-09-10T18:00').toISOString() });
+    // LIVE-007 — typed in the carrier zone (no session → the default zone), not the runner's.
+    expect(patches[0]!.body).toEqual({ status: 'DELIVERED', completedAt: fromZonedTime('2026-09-10T18:00', DEFAULT_CARRIER_TIMEZONE).toISOString() });
     expect(await screen.findByText('Trip TR-4821 marked delivered')).toBeInTheDocument();
     expect(await screen.findByText('No active trips')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Completed 1' })).toBeInTheDocument();

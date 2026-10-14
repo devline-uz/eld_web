@@ -16,7 +16,8 @@ import { KpiCard } from '@/shared/ui/KpiCard';
 import { ErrorState, LoadingState } from '@/shared/ui/states';
 import { formatDistance, formatSpeed, formatFuelWasted } from '@/shared/format/numbers';
 import { formatDuration } from '@/shared/format/duration';
-import { formatLocal } from '@/shared/format/datetime';
+import { formatInTz, formatLocal, timezoneAbbreviation, todayInTz } from '@/shared/format/datetime';
+import { useCarrierTimezone } from '@/shared/auth/useCarrierTimezone';
 import { toCsv } from '@/shared/lib/csv';
 
 type SegmentFilter = 'ALL' | 'DRIVE' | 'STOP' | 'IDLE';
@@ -32,11 +33,16 @@ const REPLAY_SPEEDS = [1, 2, 4] as const;
 export default function UnitHistoriesPage() {
   const { id } = useParams<{ id: string }>();
   const [params, setParams] = useSearchParams();
-  const date = params.get('date') ?? new Date().toISOString().slice(0, 10);
+  const carrierTz = useCarrierTimezone();
+  // "Today" is the carrier's calendar day, not the UTC one (a UTC date is tomorrow in the US evening).
+  const date = params.get('date') ?? todayInTz(carrierTz);
   const [segmentFilter, setSegmentFilter] = useState<SegmentFilter>('ALL');
 
   const vehicleQuery = useVehicle(id);
   const historiesQuery = useVehicleHistories(id, date);
+  // LIVE-007 — times in the zone the server cut the day in (driver home terminal, else carrier).
+  const tz = historiesQuery.data?.timezone ?? carrierTz;
+  const fmt = (value: string | null | undefined, format: string) => formatInTz(value, tz, format);
 
   function setDate(next: string) {
     const nextParams = new URLSearchParams(params);
@@ -45,8 +51,9 @@ export default function UnitHistoriesPage() {
   }
 
   function shiftDay(delta: number) {
-    const d = new Date(`${date}T00:00:00`);
-    d.setDate(d.getDate() + delta);
+    // Pure calendar arithmetic: local midnight + toISOString() never moved the day east of UTC.
+    const d = new Date(`${date}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + delta);
     setDate(d.toISOString().slice(0, 10));
   }
 
@@ -193,7 +200,7 @@ export default function UnitHistoriesPage() {
         </Link>
         <Crumb size={12} strokeWidth={1.75} />
         <span>
-          Histories · {formatLocal(`${date}T00:00:00`, 'longDate')} · Eastern
+          Histories · {formatLocal(`${date}T00:00:00`, 'longDate')} · {timezoneAbbreviation(tz)}
         </span>
       </div>
 
@@ -288,7 +295,7 @@ export default function UnitHistoriesPage() {
           <Card>
             <SectionHeader
               title="Route replay"
-              subtitle={`${formatLocal(historiesQuery.data.firstMovementAt, 'monthDay')} · ${formatLocal(historiesQuery.data.firstMovementAt, 'time')} → ${formatLocal(historiesQuery.data.lastMovementAt, 'time')} · ${formatDistance(historiesQuery.data.distanceMi)}`}
+              subtitle={`${fmt(historiesQuery.data.firstMovementAt, 'monthDay')} · ${fmt(historiesQuery.data.firstMovementAt, 'time')} → ${fmt(historiesQuery.data.lastMovementAt, 'time')} · ${formatDistance(historiesQuery.data.distanceMi)}`}
               action={
                 <div className="flex items-center gap-2">
                   <div className="flex h-8 overflow-hidden rounded-md border border-border">
@@ -394,7 +401,7 @@ export default function UnitHistoriesPage() {
                     <span className="size-2 rounded-full bg-danger" /> End
                   </span>
                   <span className="ml-auto tabular-nums">
-                    {formatLocal(new Date(currentTimeMs).toISOString(), 'time')}
+                    {fmt(new Date(currentTimeMs).toISOString(), 'time')}
                   </span>
                 </div>
               </>
@@ -447,8 +454,8 @@ export default function UnitHistoriesPage() {
                         </span>
                         <Badge tone={SEGMENT_TONE[s.type]}>{s.type.charAt(0) + s.type.slice(1).toLowerCase()}</Badge>
                       </td>
-                      <td className="p-3 tabular-nums">{formatLocal(s.startAt, 'time')}</td>
-                      <td className="p-3 tabular-nums">{formatLocal(s.endAt, 'time')}</td>
+                      <td className="p-3 tabular-nums">{fmt(s.startAt, 'time')}</td>
+                      <td className="p-3 tabular-nums">{fmt(s.endAt, 'time')}</td>
                       <td className="p-3 tabular-nums">{formatDuration(s.durationSec)}</td>
                       <td className="p-3 text-text-secondary">{s.location}</td>
                       <td className="p-3 text-right tabular-nums">{s.distanceMi != null ? formatDistance(s.distanceMi) : '—'}</td>
@@ -466,11 +473,11 @@ export default function UnitHistoriesPage() {
               <dl className="mt-2 flex flex-col gap-2 text-body">
                 <div className="flex justify-between">
                   <dt className="text-text-muted">First movement</dt>
-                  <dd className="tabular-nums text-text">{formatLocal(historiesQuery.data.firstMovementAt, 'timeSeconds')}</dd>
+                  <dd className="tabular-nums text-text">{fmt(historiesQuery.data.firstMovementAt, 'timeSeconds')}</dd>
                 </div>
                 <div className="flex justify-between">
                   <dt className="text-text-muted">Last movement</dt>
-                  <dd className="tabular-nums text-text">{formatLocal(historiesQuery.data.lastMovementAt, 'timeSeconds')}</dd>
+                  <dd className="tabular-nums text-text">{fmt(historiesQuery.data.lastMovementAt, 'timeSeconds')}</dd>
                 </div>
                 <div className="flex justify-between">
                   <dt className="text-text-muted">Engine on time</dt>
@@ -495,7 +502,7 @@ export default function UnitHistoriesPage() {
                 <div className="flex justify-between">
                   <dt className="text-text-muted">Max speed</dt>
                   <dd className="tabular-nums text-text">
-                    {formatSpeed(historiesQuery.data.maxSpeedMph)} at {formatLocal(historiesQuery.data.maxSpeedAt, 'time')}
+                    {formatSpeed(historiesQuery.data.maxSpeedMph)} at {fmt(historiesQuery.data.maxSpeedAt, 'time')}
                   </dd>
                 </div>
               </dl>

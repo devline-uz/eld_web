@@ -64,7 +64,8 @@ export function hasPermission(
  * nothing in `AuthProvider` reads this table and the JWT is never decoded.
  */
 export const ROLE_PERMISSIONS: Record<Role, PermissionMap> = {
-  ADMIN: Object.fromEntries(PERMISSION_KEYS.map((key) => [key, 'FULL'])) as PermissionMap,
+  // CODE-029 — `hosCertifyOnBehalf` is retired (certification is driver-only): NONE for every role.
+  ADMIN: { ...(Object.fromEntries(PERMISSION_KEYS.map((key) => [key, 'FULL'])) as PermissionMap), hosCertifyOnBehalf: 'NONE' },
   FLEET_MANAGER: {
     dashboard: 'FULL',
     liveFleet: 'FULL',

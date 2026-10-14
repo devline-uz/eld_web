@@ -1,5 +1,5 @@
 // owner: web-dispatch-messaging — reasons shown on controls W-11 deliberately disables.
-import { formatLocal } from '@/shared/format/datetime';
+import { formatInTz } from '@/shared/format/datetime';
 import { ERROR_MESSAGES } from '@/shared/api/errors';
 import type { TripScheduleConflict } from '@/shared/api/trips';
 
@@ -7,9 +7,9 @@ import type { TripScheduleConflict } from '@/shared/api/trips';
  * `GET /trailers` itself failing to return any rows — shown only if that call errors. */
 export const TRAILER_LOOKUP_ERROR = 'Trailers unavailable — try again.';
 
-/** 409 `TRIP_SCHEDULE_CONFLICT`, in the browser zone — the same zone the modal's
- * `datetime-local` windows and the board's dates use. */
-export function scheduleConflictMessage(c: TripScheduleConflict): string {
+/** 409 `TRIP_SCHEDULE_CONFLICT`, in the carrier zone — the same zone the modal's
+ * `datetime-local` windows and the board's dates use (LIVE-007). */
+export function scheduleConflictMessage(c: TripScheduleConflict, timeZone: string): string {
   const unit =
     c.resource === 'driver'
       ? c.driverName ? `Driver ${c.driverName}` : 'This driver'
@@ -17,8 +17,8 @@ export function scheduleConflictMessage(c: TripScheduleConflict): string {
         ? c.trailerNumber ? `Trailer ${c.trailerNumber}` : 'This trailer'
         : c.unitNumber ? `Unit ${c.unitNumber}` : 'This unit';
   const range = c.end
-    ? `from ${formatLocal(c.start, 'dateTime')} to ${formatLocal(c.end, 'dateTime')}`
-    : `from ${formatLocal(c.start, 'dateTime')} onward (no planned end)`;
+    ? `from ${formatInTz(c.start, timeZone, 'dateTime')} to ${formatInTz(c.end, timeZone, 'dateTime')}`
+    : `from ${formatInTz(c.start, timeZone, 'dateTime')} onward (no planned end)`;
   // e.g. `Unit 1 is already assigned to another trip (TRP-500) from Oct 10, 12:00 to Oct 20, 12:00.`
   return `${unit} is already assigned to another trip (${c.number}) ${range}.`;
 }

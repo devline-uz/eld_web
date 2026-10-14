@@ -371,7 +371,7 @@ describe('SupportPage — stage-2', () => {
     server.use(http.get(url(endpoints.support.tickets), () => fail(500, 'INTERNAL_ERROR', 'Boom')));
     renderPage();
     expect(await screen.findByText('Could not load your tickets')).toBeInTheDocument();
-    expect(screen.queryByText('Could not load the fleet')).not.toBeInTheDocument();
+    expect(screen.queryByText('Could not load this page')).not.toBeInTheDocument();
   });
 });
 

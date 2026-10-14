@@ -6,7 +6,7 @@ import * as reportsApi from '@/shared/api/reports';
 import * as vehiclesApi from '@/shared/api/vehicles';
 import * as dvirDemo from '@/features/dvir/mock/useDvirMock';
 import * as iftaDemo from '@/features/reports/mock/useIftaMock';
-import { DEMO_FALLBACK_ENABLED, DEMO_FALLBACK_MODE, resolveMockMode } from './mockMode';
+import { DEMO_FALLBACK_ENABLED, DEMO_FALLBACK_MODE, resolveMockMode, shouldUseDemoRows } from './mockMode';
 
 const PROD = { PROD: true, DEV: false, MODE: 'production' };
 const DEV = { PROD: false, DEV: true, MODE: 'development' };
@@ -57,5 +57,20 @@ describe('flag off (the vitest default, like every production build)', () => {
     expect(dvirDemo.useDueSchedules).toBe(dvirApi.useDueSchedules);
     expect(dvirDemo.useVehiclesLookup).toBe(lookupsApi.useVehiclesLookup);
     expect(dvirDemo.useDvir).toBe(dvirApi.useDvir);
+  });
+});
+
+describe('shouldUseDemoRows (CODE-086 — errors are never masked by demo rows)', () => {
+  const idle = { isLoading: false, isError: false };
+  it('off: never', () => expect(shouldUseDemoRows(idle, 0, 'off')).toBe(false));
+  it('always: even over real rows or an error', () => {
+    expect(shouldUseDemoRows(idle, 5, 'always')).toBe(true);
+    expect(shouldUseDemoRows({ isLoading: false, isError: true }, 0, 'always')).toBe(true);
+  });
+  it('fallback: only an empty successful answer', () => {
+    expect(shouldUseDemoRows(idle, 0, 'fallback')).toBe(true);
+    expect(shouldUseDemoRows(idle, 3, 'fallback')).toBe(false);
+    expect(shouldUseDemoRows({ isLoading: true, isError: false }, 0, 'fallback')).toBe(false);
+    expect(shouldUseDemoRows({ isLoading: false, isError: true }, 0, 'fallback')).toBe(false);
   });
 });

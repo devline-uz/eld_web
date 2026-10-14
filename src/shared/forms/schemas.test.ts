@@ -252,13 +252,33 @@ describe('form schemas', () => {
     expect(driverSchema.parse({ ...base, firstName: '  Marcus ', lastName: 'Webb' }).firstName).toBe('Marcus');
   });
 
-  it('bounds the vehicle year to 1970 through the current year', () => {
+  it('bounds the vehicle year to 1970 through next model year (CODE-045)', () => {
     const base = { unitNumber: '#101', vin: '1FUJA6CV88LW12345', make: 'Freightliner', model: 'Cascadia' };
     const currentYear = new Date().getFullYear();
     expect(vehicleSchema.safeParse({ ...base, year: 1970 }).success).toBe(true);
     expect(vehicleSchema.safeParse({ ...base, year: currentYear }).success).toBe(true);
+    expect(vehicleSchema.safeParse({ ...base, year: currentYear + 1 }).success).toBe(true);
     expect(firstError(vehicleSchema, { ...base, year: 1969 })).toBe(M.yearMin);
-    expect(firstError(vehicleSchema, { ...base, year: currentYear + 1 })).toBe(M.yearFuture);
+    expect(firstError(vehicleSchema, { ...base, year: currentYear + 2 })).toBe(M.yearFuture);
+  });
+
+  it('makes Make / Model / Year optional like CreateVehicleDto (CODE-045)', () => {
+    const parsed = vehicleSchema.safeParse({ unitNumber: '#101', vin: '1FUJA6CV88LW12345', make: '', model: '', year: Number.NaN });
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.year).toBeUndefined();
+  });
+
+  it('accepts real plates and ELD serials and refuses symbols (LIVE-021)', () => {
+    const base = { unitNumber: '#101', vin: '1FUJA6CV88LW12345', licenseState: 'OH' };
+    for (const licensePlate of ['ABC123', 'ABC-123', 'AB 1234']) {
+      expect(vehicleSchema.safeParse({ ...base, licensePlate }).success).toBe(true);
+    }
+    expect(firstError(vehicleSchema, { ...base, licensePlate: '@@##$$%%^^&&**((' })).toBe(M.licensePlateFormat);
+    expect(firstError(vehicleSchema, { ...base, licensePlate: '-ABC' })).toBe(M.licensePlateFormat);
+    for (const deviceId of ['PT30_1C4F', 'pt40-9a1b', '00:1B:44:11:3A:B7']) {
+      expect(vehicleSchema.safeParse({ ...base, deviceId }).success).toBe(true);
+    }
+    expect(firstError(vehicleSchema, { ...base, deviceId: 'bad serial!!' })).toBe(M.vehicleEldSerialFormat);
   });
 
   it('holds an FMCSA transfer to 8 days and a government address (11.14)', () => {

@@ -15,6 +15,7 @@ import { endpoints } from '@/shared/api/endpoints';
 import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/client';
 import { ToastProvider } from '@/shared/ui/Toast';
 import UnitProfilePage from './UnitProfilePage';
+import { formatEngineHoursLong } from '@/shared/format/numbers';
 
 function DvirStub() {
   const [params] = useSearchParams();
@@ -27,7 +28,7 @@ vi.mock('@/shared/auth/usePermission', () => ({
 }));
 
 const VEHICLE = {
-  id: 'veh_1',
+  id: '0f3c2a1e-0000-4000-8000-000000000001',
   unitNumber: '#101',
   vin: '1FUJGLDR8LLLL1234',
   make: 'Freightliner',
@@ -54,12 +55,12 @@ function LiveFleetStub() {
   return <div>Live fleet · unit={params.get('unit')}</div>;
 }
 
-function renderPage() {
+function renderPage(path = '/vehicles/0f3c2a1e-0000-4000-8000-000000000001') {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
-        <MemoryRouter initialEntries={['/vehicles/veh_1']}>
+        <MemoryRouter initialEntries={[path]}>
           <Routes>
             <Route path="/vehicles/:id" element={<UnitProfilePage />} />
             {/* Stand-in for W-03 so a navigation away from the profile is observable. */}
@@ -94,14 +95,14 @@ beforeEach(() => {
 describe('W-04 Unit profile — four states', () => {
   it('forbidden: renders <ForbiddenState> and never fetches the vehicle without `vehicles`', async () => {
     permission = false;
-    server.use(http.get(url(endpoints.vehicles.detail('veh_1')), () => ok(VEHICLE)));
+    server.use(http.get(url(endpoints.vehicles.detail('0f3c2a1e-0000-4000-8000-000000000001')), () => ok(VEHICLE)));
     renderPage();
     expect(await screen.findByText(/forbidden|do not have permission|do not have access/i)).toBeInTheDocument();
   });
 
   it('loading: shows a skeleton before the vehicle resolves', async () => {
     server.use(
-      http.get(url(endpoints.vehicles.detail('veh_1')), async () => {
+      http.get(url(endpoints.vehicles.detail('0f3c2a1e-0000-4000-8000-000000000001')), async () => {
         await new Promise((r) => setTimeout(r, 50));
         return ok(VEHICLE);
       }),
@@ -113,31 +114,55 @@ describe('W-04 Unit profile — four states', () => {
 
   it('error: renders <ErrorState> with Retry when the vehicle fetch fails', async () => {
     server.use(
-      http.get(url(endpoints.vehicles.detail('veh_1')), () => HttpResponse.json({ statusCode: 404, code: 'NOT_FOUND', message: 'Not found' }, { status: 404 })),
+      http.get(url(endpoints.vehicles.detail('0f3c2a1e-0000-4000-8000-000000000001')), () => HttpResponse.json({ statusCode: 500, code: 'INTERNAL_ERROR', message: 'Boom' }, { status: 500 })),
     );
     renderPage();
     expect(await screen.findByRole('button', { name: /retry/i })).toBeInTheDocument();
   });
 
+  it('LIVE-019: a 404 shows "Unit not found" (no Retry) with a way back to the list', async () => {
+    server.use(
+      http.get(url(endpoints.vehicles.detail('0f3c2a1e-0000-4000-8000-000000000001')), () => HttpResponse.json({ statusCode: 404, code: 'VEHICLE_NOT_FOUND', message: 'Not found' }, { status: 404 })),
+    );
+    renderPage();
+    expect(await screen.findByText('Unit not found')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /retry/i })).toBeNull();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Back to vehicles' }));
+    expect(await screen.findByText('Vehicles list screen')).toBeInTheDocument();
+  });
+
+  it('LIVE-019: a malformed id shows "Unit not found" without calling the API', async () => {
+    let called = false;
+    server.use(
+      http.get(url(endpoints.vehicles.detail('not-a-uuid')), () => {
+        called = true;
+        return HttpResponse.json({}, { status: 404 });
+      }),
+    );
+    renderPage('/vehicles/not-a-uuid');
+    expect(await screen.findByText('Unit not found')).toBeInTheDocument();
+    expect(called).toBe(false);
+  });
+
   // WB-161 / WB-163 — the header's dead `New work order` button and the `?driverId=` navigation.
   // UI-003 — the BLE badge is the EFFECTIVE link, "Updated" is the unit's own last signal, and a
   // speed older than 30 min is not shown as the truck's speed now.
-  function useUnitSignals(device: Record<string, unknown>, telemetryAgoMs: number) {
+  function useUnitSignals(device: Record<string, unknown>, telemetryAgoMs: number, point: Record<string, unknown> = {}) {
     const time = new Date(Date.now() - telemetryAgoMs).toISOString();
     server.use(
-      http.get(url(endpoints.vehicles.detail('veh_1')), () => ok(VEHICLE)),
-      http.get(url(endpoints.vehicles.activities('veh_1')), () => ok({ items: [] })),
+      http.get(url(endpoints.vehicles.detail('0f3c2a1e-0000-4000-8000-000000000001')), () => ok(VEHICLE)),
+      http.get(url(endpoints.vehicles.activities('0f3c2a1e-0000-4000-8000-000000000001')), () => ok({ items: [] })),
       http.get(url(endpoints.devices.list), () =>
         ok({
-          items: [{ id: 'dev_1', serial: 'PT30_A86E', model: 'PT30', status: 'ASSIGNED', vehicleId: 'veh_1', firmwareVersion: null, firmwareOutdated: false, lastHeartbeatAt: null, ...device }],
+          items: [{ id: 'dev_1', serial: 'PT30_A86E', model: 'PT30', status: 'ASSIGNED', vehicleId: '0f3c2a1e-0000-4000-8000-000000000001', firmwareVersion: null, firmwareOutdated: false, lastHeartbeatAt: null, ...device }],
           page: 1,
           limit: 5,
           total: 1,
           totalPages: 1,
         }),
       ),
-      http.get(url(endpoints.vehicles.telemetry('veh_1')), () =>
-        ok({ items: [{ time, vehicleId: 'veh_1', driverId: null, latitude: 40, longitude: -83, speedMph: 58, headingDeg: 90, odometerMi: null, engineHours: null, idleHours: null, engineOn: true, rpm: null, fuelPct: null, defPct: null }] }),
+      http.get(url(endpoints.vehicles.telemetry('0f3c2a1e-0000-4000-8000-000000000001')), () =>
+        ok({ items: [{ time, vehicleId: '0f3c2a1e-0000-4000-8000-000000000001', driverId: null, latitude: 40, longitude: -83, speedMph: 58, headingDeg: 90, odometerMi: null, engineHours: null, idleHours: null, engineOn: true, rpm: null, fuelPct: null, defPct: null, ...point }] }),
       ),
     );
   }
@@ -150,6 +175,12 @@ describe('W-04 Unit profile — four states', () => {
     expect(screen.queryByText('58 mph')).not.toBeInTheDocument();
   });
 
+  it('LIVE-008: engine hours come from the newest telemetry point, not the stored vehicle field', async () => {
+    useUnitSignals({ bleState: 'CONNECTED', connection: 'CONNECTED', lastSeenAt: new Date().toISOString() }, 5 * 60_000, { engineHours: '1203.35' });
+    renderPage();
+    expect(await screen.findByText(formatEngineHoursLong(1203.35))).toBeInTheDocument();
+  });
+
   it('UI-003: a live box reads "BLE connected" and a fresh point shows its speed', async () => {
     useUnitSignals({ bleState: 'CONNECTED', connection: 'CONNECTED', lastSeenAt: new Date().toISOString() }, 5 * 60_000);
     renderPage();
@@ -160,20 +191,20 @@ describe('W-04 Unit profile — four states', () => {
 
   it('"Track on map" opens Live fleet with this unit selected (stage 3)', async () => {
     server.use(
-      http.get(url(endpoints.vehicles.detail('veh_1')), () => ok(VEHICLE)),
-      http.get(url(endpoints.vehicles.activities('veh_1')), () => ok({ items: [] })),
+      http.get(url(endpoints.vehicles.detail('0f3c2a1e-0000-4000-8000-000000000001')), () => ok(VEHICLE)),
+      http.get(url(endpoints.vehicles.activities('0f3c2a1e-0000-4000-8000-000000000001')), () => ok({ items: [] })),
     );
     const user = userEvent.setup();
     renderPage();
     await screen.findByText('Unit #101');
     await user.click(screen.getByRole('button', { name: 'Track on map' }));
-    expect(await screen.findByText('Live fleet · unit=veh_1')).toBeInTheDocument();
+    expect(await screen.findByText('Live fleet · unit=0f3c2a1e-0000-4000-8000-000000000001')).toBeInTheDocument();
   });
 
   it('"New work order" deep-links to W-09 and "View logs" is disabled without a driver', async () => {
     server.use(
-      http.get(url(endpoints.vehicles.detail('veh_1')), () => ok(VEHICLE)),
-      http.get(url(endpoints.vehicles.activities('veh_1')), () => ok({ items: [] })),
+      http.get(url(endpoints.vehicles.detail('0f3c2a1e-0000-4000-8000-000000000001')), () => ok(VEHICLE)),
+      http.get(url(endpoints.vehicles.activities('0f3c2a1e-0000-4000-8000-000000000001')), () => ok({ items: [] })),
     );
     const user = userEvent.setup();
     renderPage();
@@ -184,13 +215,13 @@ describe('W-04 Unit profile — four states', () => {
     expect(viewLogs).toHaveAttribute('title', 'No driver is assigned to this unit.');
 
     await user.click(screen.getByRole('button', { name: /New work order/ }));
-    expect(await screen.findByText('DVIR screen · newWorkOrder=veh_1')).toBeInTheDocument();
+    expect(await screen.findByText('DVIR screen · newWorkOrder=0f3c2a1e-0000-4000-8000-000000000001')).toBeInTheDocument();
   });
 
   it('empty: the Unit activity card shows "No activity recorded." when there are none', async () => {
     server.use(
-      http.get(url(endpoints.vehicles.detail('veh_1')), () => ok(VEHICLE)),
-      http.get(url(endpoints.vehicles.activities('veh_1')), () => ok({ items: [] })),
+      http.get(url(endpoints.vehicles.detail('0f3c2a1e-0000-4000-8000-000000000001')), () => ok(VEHICLE)),
+      http.get(url(endpoints.vehicles.activities('0f3c2a1e-0000-4000-8000-000000000001')), () => ok({ items: [] })),
     );
     renderPage();
     expect(await screen.findByText('No activity recorded.')).toBeInTheDocument();
@@ -206,8 +237,8 @@ describe('W-04 Unit profile — long values stay inside the unit details card', 
 
   it('wraps a long make / model inside its row instead of overflowing the card', async () => {
     server.use(
-      http.get(url(endpoints.vehicles.detail('veh_1')), () => ok({ ...VEHICLE, model: LONG_MODEL })),
-      http.get(url(endpoints.vehicles.activities('veh_1')), () => ok({ items: [] })),
+      http.get(url(endpoints.vehicles.detail('0f3c2a1e-0000-4000-8000-000000000001')), () => ok({ ...VEHICLE, model: LONG_MODEL })),
+      http.get(url(endpoints.vehicles.activities('0f3c2a1e-0000-4000-8000-000000000001')), () => ok({ items: [] })),
     );
     renderPage();
     await screen.findByText('Unit #101');
@@ -226,8 +257,8 @@ describe('W-04 Unit profile — long values stay inside the unit details card', 
 
   it('leaves short values untouched in the same row layout', async () => {
     server.use(
-      http.get(url(endpoints.vehicles.detail('veh_1')), () => ok(VEHICLE)),
-      http.get(url(endpoints.vehicles.activities('veh_1')), () => ok({ items: [] })),
+      http.get(url(endpoints.vehicles.detail('0f3c2a1e-0000-4000-8000-000000000001')), () => ok(VEHICLE)),
+      http.get(url(endpoints.vehicles.activities('0f3c2a1e-0000-4000-8000-000000000001')), () => ok({ items: [] })),
     );
     renderPage();
     await screen.findByText('Unit #101');
@@ -246,8 +277,8 @@ describe('W-04 Unit profile — Assign driver stays clickable when OUT_OF_SERVIC
   it('opens AssignDriverModal, which states the refusal, instead of disabling the button', async () => {
     const user = userEvent.setup();
     server.use(
-      http.get(url(endpoints.vehicles.detail('veh_1')), () => ok({ ...VEHICLE, status: 'OUT_OF_SERVICE' })),
-      http.get(url(endpoints.vehicles.activities('veh_1')), () => ok({ items: [] })),
+      http.get(url(endpoints.vehicles.detail('0f3c2a1e-0000-4000-8000-000000000001')), () => ok({ ...VEHICLE, status: 'OUT_OF_SERVICE' })),
+      http.get(url(endpoints.vehicles.activities('0f3c2a1e-0000-4000-8000-000000000001')), () => ok({ items: [] })),
     );
     renderPage();
     await screen.findByText('Unit #101');
@@ -268,13 +299,13 @@ describe('W-04 Unit profile — active DTC badge (WB-105)', () => {
   it('shows the count of uncleared DTCs once the Diagnostics tab has loaded them', async () => {
     const user = userEvent.setup();
     server.use(
-      http.get(url(endpoints.vehicles.detail('veh_1')), () => ok(VEHICLE)),
-      http.get(url(endpoints.vehicles.activities('veh_1')), () => ok({ items: [] })),
-      http.get(url(endpoints.vehicles.dtc('veh_1')), () =>
+      http.get(url(endpoints.vehicles.detail('0f3c2a1e-0000-4000-8000-000000000001')), () => ok(VEHICLE)),
+      http.get(url(endpoints.vehicles.activities('0f3c2a1e-0000-4000-8000-000000000001')), () => ok({ items: [] })),
+      http.get(url(endpoints.vehicles.dtc('0f3c2a1e-0000-4000-8000-000000000001')), () =>
         ok({
           items: [
-            { id: 'dtc_1', vehicleId: 'veh_1', spn: 100, fmi: 1, occurrence: 1, source: 'ENGINE', description: null, firstSeenAt: '2025-04-18T00:00:00.000Z', lastSeenAt: '2025-04-18T00:00:00.000Z', clearedAt: null },
-            { id: 'dtc_2', vehicleId: 'veh_1', spn: 101, fmi: 2, occurrence: 1, source: 'ENGINE', description: null, firstSeenAt: '2025-04-18T00:00:00.000Z', lastSeenAt: '2025-04-18T00:00:00.000Z', clearedAt: '2025-04-19T00:00:00.000Z' },
+            { id: 'dtc_1', vehicleId: '0f3c2a1e-0000-4000-8000-000000000001', spn: 100, fmi: 1, occurrence: 1, source: 'ENGINE', description: null, firstSeenAt: '2025-04-18T00:00:00.000Z', lastSeenAt: '2025-04-18T00:00:00.000Z', clearedAt: null },
+            { id: 'dtc_2', vehicleId: '0f3c2a1e-0000-4000-8000-000000000001', spn: 101, fmi: 2, occurrence: 1, source: 'ENGINE', description: null, firstSeenAt: '2025-04-18T00:00:00.000Z', lastSeenAt: '2025-04-18T00:00:00.000Z', clearedAt: '2025-04-19T00:00:00.000Z' },
           ],
         }),
       ),
@@ -294,8 +325,8 @@ describe('W-04 Unit profile — active DTC badge (WB-105)', () => {
 describe('W-04 Unit profile — cancelling the delete modal stays on the unit', () => {
   function useVehicle() {
     server.use(
-      http.get(url(endpoints.vehicles.detail('veh_1')), () => ok(VEHICLE)),
-      http.get(url(endpoints.vehicles.activities('veh_1')), () => ok({ items: [] })),
+      http.get(url(endpoints.vehicles.detail('0f3c2a1e-0000-4000-8000-000000000001')), () => ok(VEHICLE)),
+      http.get(url(endpoints.vehicles.activities('0f3c2a1e-0000-4000-8000-000000000001')), () => ok({ items: [] })),
     );
   }
 
@@ -319,7 +350,7 @@ describe('W-04 Unit profile — cancelling the delete modal stays on the unit', 
     const user = userEvent.setup();
     useVehicle();
     server.use(
-      http.delete(url(endpoints.vehicles.remove('veh_1')), () =>
+      http.delete(url(endpoints.vehicles.remove('0f3c2a1e-0000-4000-8000-000000000001')), () =>
         fail(409, 'CONFLICT', 'This unit still has open trips (TRP-1001, TRP-1002). Reassign or cancel them first.', {
           openTrips: [
             { id: 'trp_1', number: 'TRP-1001', status: 'ASSIGNED' },
@@ -346,7 +377,7 @@ describe('W-04 Unit profile — cancelling the delete modal stays on the unit', 
   it('a confirmed delete still navigates back to the vehicles list', async () => {
     const user = userEvent.setup();
     useVehicle();
-    server.use(http.delete(url(endpoints.vehicles.remove('veh_1')), () => ok({ id: 'veh_1', status: 'INACTIVE' })));
+    server.use(http.delete(url(endpoints.vehicles.remove('0f3c2a1e-0000-4000-8000-000000000001')), () => ok({ id: '0f3c2a1e-0000-4000-8000-000000000001', status: 'INACTIVE' })));
     renderPage();
     await screen.findByText('Unit #101');
 

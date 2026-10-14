@@ -14,6 +14,11 @@ import { VALIDATION_MESSAGES } from '@/shared/forms/messages';
 import type * as GeocodeModule from '@/shared/map/geocode';
 import type { TripRow } from '@/shared/api/trips';
 import { CreateTripModal } from './CreateTripModal';
+import { formatInTimeZone, fromZonedTime } from 'date-fns-tz';
+import { DEFAULT_CARRIER_TIMEZONE } from '@/shared/auth/useCarrierTimezone';
+
+/** LIVE-007 — the modal reads its `datetime-local` windows in the carrier zone (no session here → the default). */
+const carrierIso = (local: string) => fromZonedTime(local, DEFAULT_CARRIER_TIMEZONE).toISOString();
 
 // Place suggestions: only the exact queries below find a place; everything else is free text.
 const COLUMBUS = { name: 'Columbus, Ohio, United States', lat: 39.96, lon: -83 };
@@ -291,10 +296,43 @@ describe('CreateTripModal — submit', () => {
       number: 'TR-1',
       driverId: 'drv_verified',
       vehicleId: 'veh_1',
-      plannedStartAt: new Date(`${tomorrow}T08:00`).toISOString(),
-      plannedEndAt: new Date(`${tomorrow}T14:00`).toISOString(),
+      plannedStartAt: carrierIso(`${tomorrow}T08:00`),
+      plannedEndAt: carrierIso(`${tomorrow}T14:00`),
     });
     expect(posts[0]!.weightLbs).toBeUndefined();
+  });
+
+  it('CODE-058: Create trip refuses an empty delivery time (the unit would stay booked indefinitely)', async () => {
+    const posts = await fillRequiredAndSubmit(`${tomorrow}T08:00`, '', { noPost: true });
+    expect(await screen.findByText(/Set a delivery time/)).toBeInTheDocument();
+    expect(posts).toHaveLength(0);
+  });
+
+  it('CODE-059: Save as draft posts with only a trip ID (sparse draft), no stops', async () => {
+    const posts: Record<string, unknown>[] = [];
+    renderModal();
+    server.use(
+      http.post(url(endpoints.trips.create), async ({ request }) => {
+        posts.push((await request.json()) as Record<string, unknown>);
+        return ok({ id: 'trp_d', number: 'DRAFT-1' });
+      }),
+    );
+    const user = userEvent.setup();
+    const [reference] = Array.from(document.querySelectorAll<HTMLInputElement>('form input'));
+    await user.type(reference!, 'DRAFT-1');
+    await user.click(screen.getByRole('button', { name: 'Save as draft' }));
+
+    await vi.waitFor(() => expect(posts).toHaveLength(1));
+    expect(posts[0]).toMatchObject({ number: 'DRAFT-1', draft: true, stops: [] });
+    expect(posts[0]).not.toHaveProperty('vehicleId');
+    expect(screen.queryByText(VALIDATION_REQUIRED)).toBeNull();
+  });
+
+  it('CODE-059: Save as draft still needs the trip ID', async () => {
+    renderModal();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Save as draft' }));
+    expect(await screen.findByText(VALIDATION_REQUIRED)).toBeInTheDocument();
   });
 
   // WD-110 — Driver is optional: a driverless trip is PLANNED and lands in Unassigned loads.
@@ -309,9 +347,9 @@ describe('CreateTripModal — submit', () => {
     const posts = await fillRequiredAndSubmit(`${tomorrow}T08:00`, `${tomorrow}T14:00`, { intermediate: 'Springfield, OH' });
 
     expect(posts[0]!.stops).toEqual([
-      { sequence: 1, type: 'PICKUP', name: 'Columbus, OH', scheduledAt: new Date(`${tomorrow}T08:00`).toISOString(), latitude: 39.96, longitude: -83 },
+      { sequence: 1, type: 'PICKUP', name: 'Columbus, OH', scheduledAt: carrierIso(`${tomorrow}T08:00`), latitude: 39.96, longitude: -83 },
       { sequence: 2, type: 'CHECKPOINT', name: 'Springfield, OH', scheduledAt: undefined },
-      { sequence: 3, type: 'DELIVERY', name: 'Dayton, OH', scheduledAt: new Date(`${tomorrow}T14:00`).toISOString(), latitude: 39.76, longitude: -84.19 },
+      { sequence: 3, type: 'DELIVERY', name: 'Dayton, OH', scheduledAt: carrierIso(`${tomorrow}T14:00`), latitude: 39.76, longitude: -84.19 },
     ]);
   });
 
@@ -756,7 +794,7 @@ describe('CreateTripModal — dirty close, payload and 422 mapping', () => {
       .getByText((content, el) => el?.tagName === 'SPAN' && el.classList.contains('text-label') && content.trim().startsWith('Unit'))
       .closest('label')!;
     expect(await within(unitLabel).findByRole('alert')).toHaveTextContent(
-      `Unit 101 is already assigned to another trip (TRP-500) from ${format(start, 'MMM dd, HH:mm')} to ${format(end, 'MMM dd, HH:mm')}.`,
+      `Unit 101 is already assigned to another trip (TRP-500) from ${formatInTimeZone(start, DEFAULT_CARRIER_TIMEZONE, 'MMM dd, HH:mm')} to ${formatInTimeZone(end, DEFAULT_CARRIER_TIMEZONE, 'MMM dd, HH:mm')}.`,
     );
     expect(screen.getByText('Overlaps trip TRP-500 on this unit.')).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();

@@ -205,7 +205,7 @@ describe('AuditLogPage — stage-2', () => {
     server.use(http.get(url(endpoints.auditLog.list), () => fail(500, 'INTERNAL_ERROR', 'Boom')));
     renderPage();
     expect(await screen.findByText('Could not load the audit log')).toBeInTheDocument();
-    expect(screen.queryByText('Could not load the fleet')).not.toBeInTheDocument();
+    expect(screen.queryByText('Could not load this page')).not.toBeInTheDocument();
     expect(screen.getByRole('searchbox', { name: 'Search action, object or user' })).toBeInTheDocument();
   });
 

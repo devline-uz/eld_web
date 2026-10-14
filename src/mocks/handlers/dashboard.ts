@@ -35,6 +35,8 @@ export const dashboardHandlers = [
       unidentified: {
         total: unidentified.total,
         totalDurationSec: unidentified.items.reduce((sum, s) => sum + (s.durationSec ?? 0), 0),
+        awaitingDriver: 0,
+        awaitingDriverDurationSec: 0,
       },
       notifications: { unreadCount: 4 },
       carrier: { id: carrier.id, name: carrier.name, timezone: carrier.timezone ?? 'America/New_York' },

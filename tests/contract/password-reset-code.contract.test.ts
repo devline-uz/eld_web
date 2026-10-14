@@ -2,7 +2,7 @@
 // `/confirm`, through the real authApi calls against the default MSW handlers, validated against
 // backend/docs/openapi.json (success payloads and the documented error codes).
 import { describe, expect, it } from 'vitest';
-import { ApiError } from '../../src/shared/api/errors';
+import type { ApiError } from '../../src/shared/api/errors';
 import { confirmPasswordResetCode, requestPasswordResetCode } from '../../src/shared/auth/authApi';
 import { assertMatchesOpenApi, operation } from './openapi';
 
@@ -22,14 +22,14 @@ describe('/api/auth/password/reset-code', () => {
     expect(sent.email).toBe(EMAIL);
   });
 
-  it('POST is a documented 404 NOT_FOUND for an unknown email', async () => {
-    const error = await requestPasswordResetCode('nobody@example.com').catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(ApiError);
-    expect((error as ApiError).status).toBe(404);
-    expect((error as ApiError).code).toBe('NOT_FOUND');
-    expect(documentedErrorCodes('/api/auth/password/reset-code')).toEqual(
-      expect.arrayContaining(['NOT_FOUND', 'RATE_LIMITED', 'PASSWORD_LOGIN_DISABLED']),
-    );
+  it('CODE-081 — POST answers an unknown email with the same documented 200 payload (no account enumeration)', async () => {
+    const sent = await requestPasswordResetCode('nobody@example.com');
+    assertMatchesOpenApi('POST', '/api/auth/password/reset-code', sent);
+    expect(sent.email).toBe('nobody@example.com');
+    const codes = documentedErrorCodes('/api/auth/password/reset-code');
+    expect(codes).toEqual(expect.arrayContaining(['RATE_LIMITED', 'PASSWORD_LOGIN_DISABLED']));
+    expect(codes).not.toContain('NOT_FOUND');
+    expect(codes).not.toContain('EMAIL_CHANGE_ON_HOLD');
   });
 });
 
