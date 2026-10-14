@@ -4,8 +4,7 @@
 // server). The keys that would type a sign, an exponent or (odometer only) a decimal separator into
 // a `type="number"` input are blocked, and anything pasted is sanitized before it reaches state.
 import type { KeyboardEvent } from 'react';
-import { isValid, parse } from 'date-fns';
-import { formatLocal } from '@/shared/format/datetime';
+import { dateOnlyKey, dateOnlyToInstant } from '@/shared/format/datetime';
 
 const COST_BLOCKED_KEYS = new Set(['-', '+', 'e', 'E']);
 const ODOMETER_BLOCKED_KEYS = new Set(['-', '+', 'e', 'E', '.', ',']);
@@ -93,16 +92,14 @@ export function getDueDateError(value: string, today: string): string | null {
 /**
  * `Due date` input (`yyyy-MM-dd`) → `dueAt` ISO instant. `new Date('yyyy-MM-dd')` reads a date-only
  * string as UTC midnight, which is the previous evening anywhere west of UTC, so the list showed
- * the day before the one picked. The instant is local midnight of the picked day instead — the
- * same browser zone `formatLocal` renders `dueAt` in.
+ * the day before the one picked. CODE-038 — the instant is midnight of the picked day in the
+ * carrier zone, the zone every DVIR & Maintenance list renders dates in (not the browser's).
  */
-export function dueDateToIso(value: string): string | undefined {
-  if (value === '') return undefined;
-  const date = parse(value, 'yyyy-MM-dd', new Date());
-  return isValid(date) ? date.toISOString() : undefined;
+export function dueDateToIso(value: string, timeZone: string): string | undefined {
+  return dateOnlyToInstant(value, timeZone);
 }
 
-/** `dueAt` ISO instant → `Due date` input value, as the browser-local calendar day. */
-export function isoToDueDate(iso: string | null | undefined): string {
-  return iso ? formatLocal(iso, 'yyyy-MM-dd') : '';
+/** `dueAt` ISO instant → `Due date` input value: the carrier-zone calendar day (CODE-038). */
+export function isoToDueDate(iso: string | null | undefined, timeZone: string): string {
+  return dateOnlyKey(iso, timeZone);
 }

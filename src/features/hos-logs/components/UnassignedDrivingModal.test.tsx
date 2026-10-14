@@ -96,4 +96,16 @@ describe('11.13 Unassigned driving — refusals', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('That segment has already been assigned.');
   });
+
+  it("CODE-007: a segment that overlaps the driver's own log is refused with actionable copy", async () => {
+    mutate.mockClear();
+    const user = userEvent.setup();
+    renderModal();
+    await submitAssignment(user);
+    fail(new ApiError(409, { code: 'UNIDENTIFIED_OVERLAPS_DRIVER_LOG' }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      "This driver's own log overlaps this unidentified driving. Correct the driver's log first or assign it to another driver.",
+    );
+  });
 });

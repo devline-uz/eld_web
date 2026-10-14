@@ -74,9 +74,10 @@ export interface TripRow {
 }
 
 /** The design's STATUS column — computed, not a `Trip.status` value (web/tz.md §10 W-11).
- * `Loading` wins while the driver is stopped at the pickup; otherwise `onTime` (or a passed
- * `etaAt`) decides `Late` vs `On time` (web/decisions.md WD-029). `Draft` (B-73) is its own state:
- * a draft never has a driver yet, so it never reaches the pickup/onTime branches below. */
+ * An active trip that is running late (`isRunningLate`) is `Late`, even while it sits at the
+ * pickup; otherwise `Loading` wins while the driver is stopped at the pickup, else `On time`
+ * (web/decisions.md WD-029). `Draft` (B-73) is its own state: a draft is not dispatched, so it
+ * never reaches the pickup/late branches below. */
 export type TripDisplayStatus = 'On time' | 'Late' | 'Loading' | 'Delivered' | 'Cancelled' | 'Planned' | 'Draft' | 'Upcoming';
 
 /** An ASSIGNED trip whose planned pickup is still ahead — dispatched, not started (QA FE-007). */
@@ -86,18 +87,61 @@ export function isUpcoming(trip: Pick<TripRow, 'status' | 'plannedStartAt'>, now
   return Number.isFinite(start) && start > now;
 }
 
+function instant(iso: string | null | undefined): number | null {
+  if (!iso) return null;
+  const at = Date.parse(iso);
+  return Number.isFinite(at) ? at : null;
+}
+
+/** QA LIVE-003 — an active (ASSIGNED / IN_PROGRESS) trip is late when the backend says so
+ * (`onTime: false`), its ETA has passed, its ETA lands after the planned end, or the planned end
+ * itself has passed while the trip is still not delivered. Before, only the first two counted —
+ * `onTime` is never set while a trip is open and `etaAt` is rarely sent, so a trip a week past
+ * its end still read `On time`. */
+export function isRunningLate(
+  trip: Pick<TripRow, 'status' | 'onTime' | 'etaAt'> & Partial<Pick<TripRow, 'plannedEndAt'>>,
+  now: number = Date.now(),
+): boolean {
+  if (trip.status !== 'ASSIGNED' && trip.status !== 'IN_PROGRESS') return false;
+  if (trip.onTime === false) return true;
+  const eta = instant(trip.etaAt);
+  const end = instant(trip.plannedEndAt);
+  if (eta !== null && now > eta) return true;
+  if (end !== null && now > end) return true;
+  return eta !== null && end !== null && eta > end;
+}
+
+/** QA LIVE-003 — a `Scheduled` trip (DRAFT / PLANNED: not dispatched, so the driver cannot have
+ * started it) whose planned start has already passed. Only flagged on the board — the status is
+ * never changed for the dispatcher. */
+export function isStartOverdue(trip: Pick<TripRow, 'status' | 'plannedStartAt'>, now: number = Date.now()): boolean {
+  if (trip.status !== 'DRAFT' && trip.status !== 'PLANNED') return false;
+  const start = instant(trip.plannedStartAt);
+  return start !== null && start < now;
+}
+
+/** QA LIVE-003 — the on-time KPI's verdict for one DELIVERED trip: the backend's `onTime` when it
+ * set one, else `completedAt` vs `plannedEndAt`; a delivery with neither counts as on time (as
+ * before — nothing says it was late). */
+export function deliveredOnTime(trip: Pick<TripRow, 'onTime' | 'completedAt' | 'plannedEndAt'>): boolean {
+  if (trip.onTime !== null && trip.onTime !== undefined) return trip.onTime;
+  const done = instant(trip.completedAt);
+  const end = instant(trip.plannedEndAt);
+  return done === null || end === null || done <= end;
+}
+
 export function computeDisplayStatus(
-  trip: Pick<TripRow, 'status' | 'onTime' | 'etaAt' | 'stops'> & Partial<Pick<TripRow, 'plannedStartAt'>>,
+  trip: Pick<TripRow, 'status' | 'onTime' | 'etaAt' | 'stops'> & Partial<Pick<TripRow, 'plannedStartAt' | 'plannedEndAt'>>,
+  now: number = Date.now(),
 ): TripDisplayStatus {
   if (trip.status === 'DELIVERED') return 'Delivered';
   if (trip.status === 'CANCELLED') return 'Cancelled';
   if (trip.status === 'DRAFT') return 'Draft';
   if (trip.status === 'PLANNED') return 'Planned';
-  if (isUpcoming({ status: trip.status, plannedStartAt: trip.plannedStartAt ?? null })) return 'Upcoming';
+  if (isUpcoming({ status: trip.status, plannedStartAt: trip.plannedStartAt ?? null }, now)) return 'Upcoming';
+  if (isRunningLate(trip, now)) return 'Late';
   const pickup = trip.stops.find((s) => s.type === 'PICKUP');
   if (pickup && pickup.arrivedAt && !pickup.departedAt) return 'Loading';
-  if (trip.onTime === false) return 'Late';
-  if (trip.etaAt && Date.now() > new Date(trip.etaAt).getTime()) return 'Late';
   return 'On time';
 }
 
@@ -107,18 +151,34 @@ export interface TripTableRow extends TripRow {
   pickup: TripStopRow | null;
   delivery: TripStopRow | null;
   displayStatus: TripDisplayStatus;
+  /** QA LIVE-003 — DRAFT / PLANNED and the planned start has passed (`isStartOverdue`). */
+  startOverdue: boolean;
+}
+
+/** CODE-051 — a trip's route endpoints: the first PICKUP and the LAST DELIVERY by `sequence`. A
+ * multi-pickup / multi-drop trip ends at its final drop — the first DELIVERY is just one of the
+ * stops along the way (it used to be drawn as the end, and the later drops were dropped). */
+export function tripRouteEnds<T extends Pick<TripStopRow, 'type' | 'sequence'>>(
+  stops: readonly T[],
+): { pickup: T | null; delivery: T | null } {
+  const ordered = [...stops].sort((a, b) => a.sequence - b.sequence);
+  let delivery: T | null = null;
+  for (const stop of ordered) if (stop.type === 'DELIVERY') delivery = stop;
+  return { pickup: ordered.find((s) => s.type === 'PICKUP') ?? null, delivery };
 }
 
 function joinTrip(trip: TripRow, driverById: Map<string, DriverRow>, vehicleById: Map<string, VehicleRow>): TripTableRow {
   const stops = [...(trip.stops ?? [])].sort((a, b) => a.sequence - b.sequence);
+  const { pickup, delivery } = tripRouteEnds(stops);
   return {
     ...trip,
     stops,
     driver: trip.driverId ? driverById.get(trip.driverId) ?? null : null,
     vehicle: trip.vehicleId ? vehicleById.get(trip.vehicleId) ?? null : null,
-    pickup: stops.find((s) => s.type === 'PICKUP') ?? null,
-    delivery: stops.find((s) => s.type === 'DELIVERY') ?? null,
+    pickup,
+    delivery,
     displayStatus: computeDisplayStatus(trip),
+    startOverdue: isStartOverdue(trip),
   };
 }
 
@@ -213,12 +273,17 @@ export interface TripsBoardInput {
   /** Runs against joined rows — the whole active set, or the newest `FILTER_WINDOW` rows of a
    * history segment. */
   filter: (rows: TripTableRow[]) => TripTableRow[];
+  /** CODE-047 — what the `Completed` segment lists: `DELIVERED` by default; `CANCELLED` (alone or
+   * with `DELIVERED`) when the status filter asks for cancelled trips, which no segment showed. */
+  completedStatuses?: readonly TripStatus[];
 }
+
+const DEFAULT_COMPLETED_STATUSES: readonly TripStatus[] = ['DELIVERED'];
 
 /** W-11 board (WD-073): Active = two bounded slices (exact, filtered in memory); Scheduled is the
  * same pattern over `DRAFT ∪ PLANNED` (B-73 — the status param takes one value, B-59); Completed =
  * one server page per render; driver/unit names from the session-wide lookups. */
-export function useTripsBoard({ segment, page, limit, search, useWindow, filter }: TripsBoardInput) {
+export function useTripsBoard({ segment, page, limit, search, useWindow, filter, completedStatuses }: TripsBoardInput) {
   const { map: driverById, query: driversQuery } = useDriverMap();
   const { map: vehicleById, query: vehiclesQuery } = useVehicleMap();
 
@@ -275,15 +340,19 @@ export function useTripsBoard({ segment, page, limit, search, useWindow, filter 
     [draftQuery.data, plannedQuery.data, futureAssigned, driverById, vehicleById],
   );
 
-  const historyStatus = segment === 'COMPLETED' ? 'DELIVERED' : undefined;
+  // `status` takes one value (B-59): two statuses read the newest `FILTER_WINDOW` trips of any
+  // status and keep only those two in memory.
+  const historyStatuses = completedStatuses?.length ? completedStatuses : DEFAULT_COMPLETED_STATUSES;
+  const historyStatus = historyStatuses.length === 1 ? historyStatuses[0] : undefined;
   const history = usePagedQuery<TripRow>({
     server: tripsPageQuery({ page, limit, status: historyStatus, q: needle || undefined }),
     window: tripsPageQuery({ page: 1, limit: FILTER_WINDOW, status: historyStatus }),
-    useWindow,
+    useWindow: useWindow || historyStatus === undefined,
     page,
     limit,
-    enabled: historyStatus !== undefined,
-    filter: (rows) => filter(joinTrips(rows, driverById, vehicleById).filter(matchesSearch)),
+    enabled: segment === 'COMPLETED',
+    filter: (rows) =>
+      filter(joinTrips(rows, driverById, vehicleById).filter((t) => historyStatuses.includes(t.status) && matchesSearch(t))),
   });
 
   const activeFiltered = useMemo(() => filter(activeRows.filter(matchesSearch)), [activeRows, filter, matchesSearch]);
@@ -306,7 +375,7 @@ export function useTripsBoard({ segment, page, limit, search, useWindow, filter 
   }
 
   const delivered = kpiQuery.data?.items ?? [];
-  const onTimeDelivered = delivered.filter((t) => t.onTime !== false).length;
+  const onTimeDelivered = delivered.filter(deliveredOnTime).length;
   const activeTotal = (assignedQuery.data?.total ?? 0) + (inProgressQuery.data?.total ?? 0) - futureAssigned.length;
   const scheduledTotal = (draftQuery.data?.total ?? 0) + (plannedQuery.data?.total ?? 0) + futureAssigned.length;
 
@@ -519,6 +588,8 @@ export interface UpdateTripPayload {
   rateUsd?: number;
   customer?: string;
   estimatedDriveSec?: number;
+  /** LIVE-003 — only with `status: 'DELIVERED'`: the actual delivery time (default now). */
+  completedAt?: string;
 }
 
 export function useUpdateTrip(tripId: string) {
@@ -581,6 +652,34 @@ export function useDeleteTrip({ onDeleted }: { onDeleted?: (tripId: string) => v
     },
   });
 }
+
+/** LIVE-003 — the dispatcher's lifecycle moves on the board: `Start trip` (ASSIGNED → IN_PROGRESS),
+ * `Mark delivered` (IN_PROGRESS → DELIVERED, optionally with the actual `completedAt`) and
+ * `Cancel trip`. All are `PATCH /trips/:id { status }` (backend `ALLOWED_TRANSITIONS`); a trip
+ * whose status moved meanwhile (the driver app, another dispatcher) answers 409 and the board
+ * refetches. */
+export type TripLifecycleStatus = Extract<TripStatus, 'IN_PROGRESS' | 'DELIVERED' | 'CANCELLED'>;
+export interface TripStatusActionInput {
+  tripId: string;
+  status: TripLifecycleStatus;
+  completedAt?: string;
+}
+
+export function useTripStatusAction() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ tripId, status, completedAt }: TripStatusActionInput) =>
+      client.patch<TripRow>(endpoints.trips.update(tripId), { status, ...(completedAt && { completedAt }) } satisfies UpdateTripPayload),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: qkRoot.trips });
+    },
+  });
+}
+
+/** Which lifecycle buttons a trip offers (the backend's allowed transitions, from the web). */
+export const canStartTrip = (trip: Pick<TripRow, 'status'>): boolean => trip.status === 'ASSIGNED';
+export const canDeliverTrip = (trip: Pick<TripRow, 'status'>): boolean => trip.status === 'IN_PROGRESS';
+export const canCancelTrip = (trip: Pick<TripRow, 'status'>): boolean => isTripEditable(trip);
 
 /** B-73 — publishing a draft is `PATCH /trips/:id { status: 'PLANNED' }` (no dedicated route, D-098). */
 export function usePublishTrip() {

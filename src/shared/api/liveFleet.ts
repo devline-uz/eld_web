@@ -1,5 +1,5 @@
 // B-3 `GET /live/fleet` (shipped 2026-09-14) — identical to backend `live-fleet.mapper.ts`
-// `LiveFleetResponse` (21 fields per unit + `generatedAt`), wrapped in the global `{ data }`
+// `LiveFleetResponse` (22 fields per unit + `generatedAt`), wrapped in the global `{ data }`
 // envelope that `client.ts` unwraps.
 // Both W-01 Fleet Dashboard and W-02 Live Fleet import from here — never from each other
 // (features/* never imports another features/*).
@@ -17,6 +17,13 @@ export interface LiveFleetUnit {
   driverName: string | null;
   driverPhone: string | null;
   dutyStatus: DutyStatus;
+  /**
+   * QA LIVE-002 — the assigned driver's own HOS duty status, in the Drivers roster's vocabulary
+   * (`DriverRosterEntry.dutyStatus`): last known even when the ELD is offline or the unit is out of
+   * service. `null` = no driver, or their HOS state is unavailable. Optional only for fixtures /
+   * an older API; the backend always sends it.
+   */
+  driverDutyStatus?: DriverDutyStatus | null;
   speedMph: number | null;
   headingDeg: number | null;
   odometerMi: number | null;
@@ -40,6 +47,8 @@ export interface LiveFleetUnit {
 }
 
 export type LiveRecordStatus = 'ACTIVE' | 'INACTIVE' | 'OUT_OF_SERVICE';
+/** Backend `live-fleet.mapper.ts#DriverDutyStatus` — the HOS engine's effective status (PC = OFF, YM = ON). */
+export type DriverDutyStatus = 'DRIVING' | 'ON_DUTY' | 'SLEEPER' | 'OFF_DUTY';
 export type LiveConnectivity = 'NO_DEVICE' | 'ELD_OFFLINE' | 'ONLINE';
 
 export interface LiveFleetResponse {

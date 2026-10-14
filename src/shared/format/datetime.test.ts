@@ -2,7 +2,11 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   BROWSER_TIMEZONE,
   DATE_FORMATS,
+  dateOnlyKey,
+  dateOnlyToInstant,
   formatCarrier,
+  formatCarrierDateTime,
+  formatDateOnly,
   formatDateRange,
   formatDaysRemaining,
   formatDueBy,
@@ -10,6 +14,7 @@ import {
   formatLocal,
   formatLocalDateTime,
   timezoneAbbreviation,
+  todayInTz,
 } from './datetime';
 
 const ET = 'America/New_York';
@@ -171,5 +176,52 @@ describe('formatLocalDateTime (QA UI-018)', () => {
     expect(formatLocalDateTime('2026-06-10T12:00:00Z', now)).not.toMatch(/2026/);
     expect(formatLocalDateTime('2025-06-10T12:00:00Z', now)).toMatch(/^Jun \d{2}, 2025, \d{2}:\d{2}$/);
     expect(formatLocalDateTime(null, now)).toBe('—');
+  });
+});
+
+// LIVE-007 — one company-context instant reads the same whatever the browser zone.
+describe('formatCarrierDateTime', () => {
+  const now = new Date('2026-10-14T12:00:00Z');
+  it('renders the carrier zone, adding the year only for another year', () => {
+    // The QA DVIR: 2026-10-13T21:15:54Z is Oct 13 15:15 in Denver (and Oct 14 02:15 in Tashkent).
+    expect(formatCarrierDateTime('2026-10-13T21:15:54Z', 'America/Denver', now)).toBe('Oct 13, 15:15');
+    expect(formatCarrierDateTime('2025-10-26T19:41:00Z', 'America/Denver', now)).toBe('Oct 26, 2025, 13:41');
+    expect(formatCarrierDateTime(null, 'America/Denver', now)).toBe('—');
+  });
+
+  it('defaults now to the current clock', () => {
+    expect(formatCarrierDateTime(new Date(), 'UTC')).not.toMatch(/\d{4},/);
+  });
+});
+
+// CODE-038 — date-only fields: never a day early west of UTC, "today" never in the future.
+describe('date-only helpers', () => {
+  it('todayInTz is the calendar day in that zone', () => {
+    const at = new Date('2026-10-14T03:00:00Z');
+    expect(todayInTz('America/Denver', at)).toBe('2026-10-13');
+    expect(todayInTz('Asia/Tashkent', at)).toBe('2026-10-14');
+    expect(todayInTz('UTC')).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('dateOnlyToInstant is midnight of that day in the zone, so today is never ahead of the clock', () => {
+    expect(dateOnlyToInstant('2026-10-14', 'America/Denver')).toBe('2026-10-14T06:00:00.000Z');
+    expect(dateOnlyToInstant('2026-10-14', 'Asia/Tashkent')).toBe('2026-10-13T19:00:00.000Z');
+    const today = todayInTz('Asia/Tashkent');
+    expect(new Date(dateOnlyToInstant(today, 'Asia/Tashkent')!).getTime()).toBeLessThanOrEqual(Date.now());
+    expect(dateOnlyToInstant('', 'UTC')).toBeUndefined();
+    expect(dateOnlyToInstant('14/10/2026', 'UTC')).toBeUndefined();
+  });
+
+  it('dateOnlyKey round-trips a picked day and reads a legacy UTC midnight as a UTC date', () => {
+    expect(dateOnlyKey(dateOnlyToInstant('2026-10-14', 'America/Denver'), 'America/Denver')).toBe('2026-10-14');
+    expect(dateOnlyKey('2026-10-14T00:00:00.000Z', 'America/Denver')).toBe('2026-10-14');
+    expect(dateOnlyKey('2026-10-14T03:00:00.000Z', 'America/Denver')).toBe('2026-10-13');
+    expect(dateOnlyKey(null, 'UTC')).toBe('');
+  });
+
+  it('formatDateOnly shows the picked day in any format', () => {
+    expect(formatDateOnly('2026-10-14T00:00:00.000Z', 'America/Chicago')).toBe('Oct 14, 2026');
+    expect(formatDateOnly('2026-10-14T05:00:00.000Z', 'America/Chicago', 'monthDay')).toBe('Oct 14');
+    expect(formatDateOnly(undefined, 'UTC')).toBe('—');
   });
 });

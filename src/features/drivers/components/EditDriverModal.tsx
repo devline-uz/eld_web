@@ -19,7 +19,8 @@ import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
 import * as f from '@/shared/forms/fields';
-import { internationalPhone, phoneForDisplay, phoneProblem } from '@/shared/forms/phoneNumber';
+import { internationalPhone, phoneDigits, phoneForDisplay, phoneProblem } from '@/shared/forms/phoneNumber';
+import { clearable } from '@/shared/forms/clearable';
 import {
   licenceNumber,
   normalizeLicenceNumber,
@@ -229,6 +230,7 @@ export function EditDriverModal({ driver, onClose }: EditDriverModalProps) {
     control,
     handleSubmit,
     setError,
+    getValues,
     formState: { errors, isDirty },
   } = useForm<EditDriverValues>({
     resolver,
@@ -296,11 +298,14 @@ export function EditDriverModal({ driver, onClose }: EditDriverModalProps) {
         ...(changingEmail
           ? { email: values.email, ...(reauthIdToken ? { reauthIdToken } : { currentPassword }) }
           : {}),
-        // E.164 from the schema; empty or an untouched legacy value → not sent (unchanged).
-        phone: values.phone || undefined,
+        // E.164 from the schema; an untouched legacy value → not sent (unchanged). The schema maps
+        // both "empty" and "untouched legacy" to `undefined`, so the raw input tells them apart:
+        // an emptied field the driver had a phone in is sent as `null` (CODE-010 — cleared).
+        phone: values.phone ?? (phoneDigits(getValues('phone') ?? '') === '' ? clearable('', driver.phone) : undefined),
         cdlNumber: values.cdlNumber,
         cdlState: values.cdlState,
-        homeTerminalName: values.homeTerminalName || undefined,
+        // NOT NULL column: no home terminal is `''`, so a cleared name goes as `''`.
+        homeTerminalName: values.homeTerminalName || (driver.homeTerminalName ? '' : undefined),
         ...(values.homeTerminalTimezone !== driver.homeTerminalTimezone
           ? { homeTerminalTimezone: values.homeTerminalTimezone }
           : {}),
@@ -310,7 +315,8 @@ export function EditDriverModal({ driver, onClose }: EditDriverModalProps) {
         shortHaulException,
         splitSleeperEnabled,
         eldExempt,
-        eldExemptReason: eldExempt ? eldExemptReason : undefined,
+        // Turning the exemption off drops its reason too (CODE-010).
+        eldExemptReason: eldExempt ? eldExemptReason : clearable('', driver.eldExemptReason),
         ...(hosRuleset && hosRuleset !== driver.hosRuleset ? { hosRuleset } : {}),
       },
       {

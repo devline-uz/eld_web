@@ -311,7 +311,10 @@ export function useCreateDriver() {
 /** `PATCH /drivers/:id` — a changed `email` is never applied directly: it becomes `pendingEmail`
  * and the response carries `emailVerification`. Changing it needs the acting user's own
  * `currentPassword` (or `reauthIdToken` for a Google-only account); never store either. */
-export interface UpdateDriverPayload extends Partial<CreateDriverPayload> {
+export interface UpdateDriverPayload extends Omit<Partial<CreateDriverPayload>, 'phone' | 'eldExemptReason'> {
+  /** `null` clears the stored value (CODE-010). */
+  phone?: string | null;
+  eldExemptReason?: string | null;
   status?: string;
   currentPassword?: string;
   reauthIdToken?: string;

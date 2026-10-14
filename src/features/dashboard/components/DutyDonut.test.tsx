@@ -7,10 +7,13 @@ import DutyDonut from './DutyDonut';
 import { donutArcs } from '../lib/donutArcs';
 import { dutyLegendLabel } from '../lib/dutyLegendLabel';
 
-const unit = (dutyStatus: string) => ({ dutyStatus }) as unknown as LiveFleetUnit;
+let seq = 0;
+/** One unit with a driver signed in, in the given HOS duty status. */
+const unit = (driverDutyStatus: string | null, extra: Partial<LiveFleetUnit> = {}) =>
+  ({ driverId: `drv_${++seq}`, dutyStatus: 'OFF_DUTY', driverDutyStatus, ...extra }) as unknown as LiveFleetUnit;
 
 describe('DutyDonut legend', () => {
-  it('names each row `<label>: <count> units, <percent>`', async () => {
+  it('names each row `<label>: <count> drivers, <percent>`', async () => {
     const onSegmentClick = vi.fn();
     render(
       <DutyDonut
@@ -18,17 +21,17 @@ describe('DutyDonut legend', () => {
         onSegmentClick={onSegmentClick}
       />,
     );
-    const driving = screen.getByRole('button', { name: 'Driving: 2 units, 50%' });
-    expect(screen.getByRole('button', { name: 'Sleeper: 1 unit, 25%' })).toBeInTheDocument();
+    const driving = screen.getByRole('button', { name: 'Driving: 2 drivers, 50%' });
+    expect(screen.getByRole('button', { name: 'Sleeper: 1 driver, 25%' })).toBeInTheDocument();
     expect(
-      screen.getByRole('button', { name: 'On-duty (not driving): 0 units, 0%' }),
+      screen.getByRole('button', { name: 'On-duty (not driving): 0 drivers, 0%' }),
     ).toBeInTheDocument();
     await userEvent.click(driving);
     expect(onSegmentClick).toHaveBeenCalledWith('DRIVING');
   });
 
-  it('builds the label with singular/plural units', () => {
-    expect(dutyLegendLabel('OFF_DUTY', 1, 10)).toBe('Off-duty: 1 unit, 10%');
+  it('builds the label with singular/plural drivers', () => {
+    expect(dutyLegendLabel('OFF_DUTY', 1, 10)).toBe('Off-duty: 1 driver, 10%');
   });
 });
 
@@ -49,10 +52,10 @@ describe('DutyDonut SVG ring', () => {
       'var(--color-violet)',
       'var(--color-neutral)',
     ]);
-    expect(arcs[0]!.querySelector('title')?.textContent).toBe('Driving: 2 units, 50%');
+    expect(arcs[0]!.querySelector('title')?.textContent).toBe('Driving: 2 drivers, 50%');
     expect(
       screen.getByRole('img', {
-        name: 'Duty status now: Driving: 2 units, 50%; On-duty (not driving): 0 units, 0%; Sleeper: 1 unit, 25%; Off-duty: 1 unit, 25%',
+        name: 'Duty status now: Driving: 2 drivers, 50%; On-duty (not driving): 0 drivers, 0%; Sleeper: 1 driver, 25%; Off-duty: 1 driver, 25%',
       }),
     ).toBeInTheDocument();
     expect(container.textContent).toContain('on duty');
@@ -81,5 +84,39 @@ describe('DutyDonut SVG ring', () => {
     render(<DutyDonut units={[]} />);
     expect(screen.getByText('No drivers reporting')).toBeInTheDocument();
     expect(screen.queryByTestId('duty-donut-segment')).not.toBeInTheDocument();
+  });
+});
+
+// QA LIVE-002 — the donut counts assigned drivers by their own HOS status, like the Drivers list.
+describe('DutyDonut — LIVE-002 driver duty', () => {
+  it('counts an ELD-offline / out-of-service unit\'s driver by their HOS status, and the legend sums to the assigned drivers', () => {
+    render(
+      <DutyDonut
+        units={[
+          unit('DRIVING', { dutyStatus: 'ELD_OFFLINE', isStale: true }),
+          unit('ON_DUTY', { dutyStatus: 'INACTIVE' }),
+          unit('ON_DUTY', { dutyStatus: 'IDLE' }),
+          unit('OFF_DUTY'),
+          unit(null), // HOS state unavailable
+          { driverId: null, dutyStatus: 'ELD_OFFLINE', driverDutyStatus: null } as unknown as LiveFleetUnit,
+        ]}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Driving: 1 driver, 20%' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'On-duty (not driving): 2 drivers, 40%' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Off-duty: 1 driver, 20%' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Status unknown: 1 driver, 20%' })).toBeInTheDocument();
+    // Centre: Driving + On-duty + Sleeper, the Drivers list's "On duty".
+    expect(screen.getByText('3')).toBeInTheDocument();
+    expect(screen.getByText('1 driver is not reporting live (ELD offline) — last known status shown')).toBeInTheDocument();
+  });
+
+  it('hides the Status unknown row when nobody is in it, and never navigates for it', async () => {
+    const onSegmentClick = vi.fn();
+    const { rerender } = render(<DutyDonut units={[unit('DRIVING')]} onSegmentClick={onSegmentClick} />);
+    expect(screen.queryByRole('button', { name: /Status unknown/ })).not.toBeInTheDocument();
+    rerender(<DutyDonut units={[unit('DRIVING'), unit(null)]} onSegmentClick={onSegmentClick} />);
+    await userEvent.click(screen.getByRole('button', { name: /Status unknown/ }));
+    expect(onSegmentClick).not.toHaveBeenCalled();
   });
 });

@@ -160,6 +160,16 @@ export function isRole(value: unknown): value is Role {
 /** Server refusal text (403 FORBIDDEN) when a non-super-admin touches an administrator. */
 export const SUPER_ADMIN_ONLY_REASON = 'Only a Super Admin can manage administrators.';
 
+/**
+ * Server refusal text (403 FORBIDDEN) for the permission-ceiling rules (backend CODE-002/003):
+ * "You cannot assign a role with permissions above your own: …", "You cannot edit the role you
+ * are assigned to.", and API-key scope refusals, which carry `details.exceeding`. Already
+ * user-facing, so it is shown verbatim instead of the generic "You do not have access to this."
+ */
+export function isPermissionCeilingRefusal(message: string, details: Readonly<Record<string, unknown>>): boolean {
+  return message.startsWith('You cannot ') || Array.isArray(details.exceeding);
+}
+
 /** "Privileged roles" = ADMIN and SUPER_ADMIN. Keys are compared case/whitespace-insensitively. */
 export function isPrivilegedRole(key: unknown): boolean {
   if (typeof key !== 'string') return false;

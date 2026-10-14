@@ -194,7 +194,11 @@ export const roleSchema = z.object({
 export const DEVICE_MODELS = ['PT30', 'PT40'] as const;
 export const deviceSchema = z.object({
   model: z.enum(DEVICE_MODELS),
-  serial: f.requiredString(M.deviceSerial).max(LIMITS.deviceSerialMax, M.deviceSerial),
+  // CODE-009 — trimmed + upper-cased, the canonical form the API stores (`normalizeDeviceSerial`).
+  serial: f
+    .requiredString(M.deviceSerial)
+    .max(LIMITS.deviceSerialMax, M.deviceSerial)
+    .transform((value) => value.toUpperCase()),
   firmware: z.string().trim().max(LIMITS.deviceFirmwareMax).optional(),
   vehicleId: z.string().trim().optional(),
 });

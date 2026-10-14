@@ -8,7 +8,8 @@ import { useToast } from '@/shared/ui/Toast';
 import { useDefectsList, useCreateWorkOrder, type WorkOrderPriority } from '@/shared/api/dvir';
 import { useVehiclesPicker } from '@/shared/api/vehicles';
 import { ApiError, formErrorMessage } from '@/shared/api/errors';
-import { formatLocal } from '@/shared/format/datetime';
+import { formatCarrierDateTime, todayInTz } from '@/shared/format/datetime';
+import { useCarrierTimezone } from '@/shared/auth/useCarrierTimezone';
 import {
   blockCostKeys,
   blockOdometerKeys,
@@ -38,6 +39,7 @@ const PLACED_FIELDS = ['title', 'vendor', 'dueAt', 'costUsd', 'odometerMi', 'est
 type PlacedField = (typeof PLACED_FIELDS)[number];
 
 export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: string; onClose: () => void }) {
+  const carrierTz = useCarrierTimezone();
   const { toast } = useToast();
   const vehiclesQuery = useVehiclesPicker();
   const [selectedVehicleId, setSelectedVehicleId] = useState(vehicleId ?? '');
@@ -77,8 +79,9 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
   const partsCostError = getCostError(partsCost, 'Estimated parts cost');
   const odometerError = getOdometerError(odometer);
   const laborHoursError = getLaborHoursError(estimatedLaborHours);
-  // Not an HOS screen, so "today" is the browser's local date — the same zone the date picker uses.
-  const today = formatLocal(new Date(), 'yyyy-MM-dd');
+  // CODE-038 — company context: "today" is the carrier's calendar day, the zone the due date is
+  // stored and listed in (not the browser's).
+  const today = todayInTz(carrierTz);
   const dueDateError = getDueDateError(dueDate, today);
   const valid =
     selectedVehicleId !== '' && title.trim() !== '' && !partsCostError && !odometerError && !laborHoursError && !dueDateError;
@@ -140,7 +143,7 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
         costUsd: partsCost ? Number(partsCost) : undefined,
         odometerMi: odometer ? Number(odometer) : undefined,
         estimatedLaborHours: estimatedLaborHours ? Number(estimatedLaborHours) : undefined,
-        dueAt: dueDateToIso(dueDate),
+        dueAt: dueDateToIso(dueDate, carrierTz),
         defectIds: selectedDefects.length > 0 ? selectedDefects : undefined,
         keepOutOfService,
         notifyDriver,
@@ -227,7 +230,7 @@ export function CreateWorkOrderModal({ vehicleId, onClose }: { vehicleId?: strin
                     </span>
                     <span className="block text-caption text-text-muted">{d.description}</span>
                   </span>
-                  <span className="tabular-nums text-caption text-text-muted">{formatLocal(d.createdAt, 'dateTime')}</span>
+                  <span className="tabular-nums text-caption text-text-muted">{formatCarrierDateTime(d.createdAt, carrierTz)}</span>
                 </label>
               ))}
             </div>

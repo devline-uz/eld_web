@@ -75,6 +75,25 @@ describe('ApiError', () => {
     expect(toUserMessage(new ApiError(403, { code: 'FORBIDDEN', message: text }))).toBe(text);
   });
 
+  it('surfaces the server text for permission-ceiling 403s (roles, role assignment, API-key scopes)', () => {
+    const own = 'You cannot edit the role you are assigned to.';
+    expect(toUserMessage(new ApiError(403, { code: 'FORBIDDEN', message: own }))).toBe(own);
+    const scopes = 'API key scopes cannot exceed your own permissions: users (FULL, you have NONE).';
+    expect(
+      toUserMessage(
+        new ApiError(403, {
+          code: 'FORBIDDEN',
+          message: scopes,
+          details: { exceeding: [{ key: 'users', requested: 'FULL', allowed: 'NONE' }] },
+        }),
+      ),
+    ).toBe(scopes);
+    // The plain guard refusal keeps the generic copy.
+    expect(toUserMessage(new ApiError(403, { code: 'FORBIDDEN', message: 'Insufficient permission.' }))).toBe(
+      'You do not have access to this.',
+    );
+  });
+
   it('resolves the message for any thrown value', () => {
     expect(toUserMessage(new ApiError(403, { code: 'FORBIDDEN' }))).toBe(
       'You do not have access to this.',

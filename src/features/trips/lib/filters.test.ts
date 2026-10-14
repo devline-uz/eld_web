@@ -37,6 +37,7 @@ function row(overrides: Partial<TripTableRow> = {}): TripTableRow {
     pickup: null,
     delivery: null,
     displayStatus: 'On time',
+    startOverdue: false,
     ...overrides,
   };
 }

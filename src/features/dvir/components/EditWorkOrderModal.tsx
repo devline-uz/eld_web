@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
+import { useCarrierTimezone } from '@/shared/auth/useCarrierTimezone';
 import { TOAST_COPY } from '@/shared/ui/copy';
 import { useUpdateWorkOrder, type WorkOrderPriority, type WorkOrderTableRow } from '@/shared/api/dvir';
 import { ApiError, formErrorMessage } from '@/shared/api/errors';
@@ -36,12 +37,13 @@ const PLACED_FIELDS = ['costUsd', 'odometerMi', 'estimatedLaborHours'] as const;
 type PlacedField = (typeof PLACED_FIELDS)[number];
 
 export function EditWorkOrderModal({ workOrder, onClose }: { workOrder: WorkOrderTableRow; onClose: () => void }) {
+  const carrierTz = useCarrierTimezone();
   const { toast } = useToast();
   const mutation = useUpdateWorkOrder(workOrder.id);
   const [title, setTitle] = useState(workOrder.title);
   const [vendor, setVendor] = useState(workOrder.vendor ?? '');
   const [priority, setPriority] = useState<WorkOrderPriority>(workOrder.priority);
-  const [dueDate, setDueDate] = useState(isoToDueDate(workOrder.dueAt));
+  const [dueDate, setDueDate] = useState(isoToDueDate(workOrder.dueAt, carrierTz));
   const [cost, setCost] = useState(workOrder.costUsd != null ? String(workOrder.costUsd) : '');
   const [odometer, setOdometer] = useState(workOrder.odometerMi != null ? String(workOrder.odometerMi) : '');
   const [estimatedLaborHours, setEstimatedLaborHours] = useState(
@@ -73,7 +75,7 @@ export function EditWorkOrderModal({ workOrder, onClose }: { workOrder: WorkOrde
     title !== workOrder.title ||
     vendor !== (workOrder.vendor ?? '') ||
     priority !== workOrder.priority ||
-    dueDate !== isoToDueDate(workOrder.dueAt) ||
+    dueDate !== isoToDueDate(workOrder.dueAt, carrierTz) ||
     cost !== (workOrder.costUsd != null ? String(workOrder.costUsd) : '') ||
     odometer !== (workOrder.odometerMi != null ? String(workOrder.odometerMi) : '') ||
     estimatedLaborHours !== (workOrder.estimatedLaborHours != null ? String(workOrder.estimatedLaborHours) : '') ||
@@ -98,7 +100,7 @@ export function EditWorkOrderModal({ workOrder, onClose }: { workOrder: WorkOrde
         costUsd: cost.trim() ? Number(cost) : null,
         odometerMi: odometer.trim() ? Number(odometer) : null,
         estimatedLaborHours: estimatedLaborHours.trim() ? Number(estimatedLaborHours) : undefined,
-        dueAt: dueDateToIso(dueDate) ?? null,
+        dueAt: dueDateToIso(dueDate, carrierTz) ?? null,
         keepOutOfService,
         notifyDriver,
         blockDispatchAssignment,
