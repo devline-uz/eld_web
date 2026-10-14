@@ -28,6 +28,12 @@ describe('field rules', () => {
     expect(firstError(f.email(), '')).toBe(M.email);
   });
 
+  it('optionalEmail allows blank (trimmed to empty) but still checks a typed address', () => {
+    expect(f.optionalEmail().parse('   ')).toBe('');
+    expect(f.optionalEmail().parse(' a@b.example ')).toBe('a@b.example');
+    expect(firstError(f.optionalEmail(), 'sarah@')).toBe(M.email);
+  });
+
   it('only accepts fmcsa.dot.gov for an inspector', () => {
     expect(f.inspectorEmail().safeParse('inspector@fmcsa.dot.gov').success).toBe(true);
     expect(f.inspectorEmail().safeParse('agent@eastern.fmcsa.dot.gov').success).toBe(true);
@@ -176,6 +182,22 @@ describe('form schemas', () => {
       notifyByEmail: true,
     });
     expect(result.success).toBe(true);
+  });
+
+  it('Add driver email is optional: blank / whitespace → "", a real one trimmed, a bad one refused', () => {
+    const base = {
+      firstName: 'Marcus',
+      lastName: 'Webb',
+      username: 'marcus.webb',
+      password: 'Onebook2026',
+      cdlNumber: 'OH-4471982',
+      cdlState: 'OH',
+      notifyByEmail: true,
+    };
+    expect(driverSchema.parse({ ...base, email: '' }).email).toBe('');
+    expect(driverSchema.parse({ ...base, email: '   ' }).email).toBe('');
+    expect(driverSchema.parse({ ...base, email: ' m.webb@example.com ' }).email).toBe('m.webb@example.com');
+    expect(firstError(driverSchema, { ...base, email: 'not-an-email' })).toBe(M.email);
   });
 
   it('requires a unique-looking VIN and unit number on Add vehicle (11.2)', () => {

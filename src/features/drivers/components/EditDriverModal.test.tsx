@@ -318,3 +318,103 @@ describe('W-07 Edit driver — refusals are never silent', () => {
     expect(screen.getByLabelText(/^Home terminal(?! time zone)/)).toHaveAttribute('maxLength', '120');
   });
 });
+
+describe('W-07 Edit driver — email change needs the acting user\'s password', () => {
+  const emailInput = () => screen.getByLabelText(/Email address/) as HTMLInputElement;
+  const passwordInput = () => screen.queryByLabelText(/Your password/) as HTMLInputElement | null;
+
+  it('an unchanged email (any case / spaces) is not sent and asks for no password', async () => {
+    const patched = capturePatch();
+    const user = userEvent.setup();
+    renderModal();
+    await user.clear(emailInput());
+    await user.type(emailInput(), '  John.Smith@Example.com ');
+    expect(passwordInput()).toBeNull();
+    await user.click(save());
+    await waitFor(() => expect(patched.body).not.toBeNull());
+    expect(patched.body).not.toHaveProperty('email');
+    expect(patched.body).not.toHaveProperty('currentPassword');
+  });
+
+  it('a changed email shows the password prompt and blocks the save until it is filled', async () => {
+    const patched = capturePatch();
+    const user = userEvent.setup();
+    renderModal();
+    await user.clear(emailInput());
+    await user.type(emailInput(), 'new@example.com');
+    expect(passwordInput()).not.toBeNull();
+
+    await user.click(save());
+    expect(await screen.findByText('Enter your password to change the email.')).toBeInTheDocument();
+    expect(patched.body).toBeNull();
+
+    await user.type(passwordInput() as HTMLInputElement, 'my-password');
+    await user.click(save());
+    await waitFor(() => expect(patched.body).not.toBeNull());
+    expect(patched.body).toMatchObject({ email: 'new@example.com', currentPassword: 'my-password' });
+  });
+
+  it('email is optional: a driver with none saves other fields with it blank, no password, no email sent', async () => {
+    const patched = capturePatch();
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    renderModal({ email: null } as Partial<DriverRow>, onClose);
+    expect(emailInput()).toHaveValue('');
+    expect(screen.getByText('Email address').parentElement?.textContent).not.toContain('*');
+    await user.clear(screen.getByLabelText(/First name/));
+    await user.type(screen.getByLabelText(/First name/), 'Johnny');
+    expect(passwordInput()).toBeNull();
+    await user.click(save());
+    await waitFor(() => expect(patched.body).not.toBeNull());
+    expect(patched.body).toMatchObject({ firstName: 'Johnny' });
+    expect(patched.body).not.toHaveProperty('email');
+    expect(patched.body).not.toHaveProperty('currentPassword');
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  it('a typed address is still validated', async () => {
+    const patched = capturePatch();
+    const user = userEvent.setup();
+    renderModal({ email: null } as Partial<DriverRow>);
+    await user.type(emailInput(), 'not-an-email');
+    await user.click(save());
+    expect(await screen.findByText('Enter a valid email address.')).toBeInTheDocument();
+    expect(patched.body).toBeNull();
+  });
+
+  it('clearing an existing email asks for the password, then sends email "" with it', async () => {
+    const patched = capturePatch();
+    const user = userEvent.setup();
+    renderModal();
+    await user.clear(emailInput());
+    expect(passwordInput()).not.toBeNull();
+    expect(screen.getByText(/Removing the driver.s email needs your own password/)).toBeInTheDocument();
+
+    await user.click(save());
+    expect(await screen.findByText('Enter your password to remove the email.')).toBeInTheDocument();
+    expect(patched.body).toBeNull();
+
+    await user.type(passwordInput() as HTMLInputElement, 'my-password');
+    await user.click(save());
+    await waitFor(() => expect(patched.body).not.toBeNull());
+    expect(patched.body).toMatchObject({ email: '', currentPassword: 'my-password' });
+  });
+
+  it('a wrong password (401 REAUTH_FAILED) is shown on the password field and keeps the modal open', async () => {
+    server.use(
+      http.patch(url(endpoints.drivers.update('drv_1')), () =>
+        fail(401, 'REAUTH_FAILED', 'Password is incorrect.', { currentPassword: 'Password is incorrect.' }),
+      ),
+    );
+    const onClose = vi.fn();
+    const user = userEvent.setup();
+    renderModal({}, onClose);
+    await user.clear(emailInput());
+    await user.type(emailInput(), 'new@example.com');
+    await user.type(passwordInput() as HTMLInputElement, 'nope');
+    await user.click(save());
+    expect(await screen.findByText('Password is incorrect.')).toBeInTheDocument();
+    expect(passwordInput()).toHaveAttribute('aria-invalid', 'true');
+    expect(onClose).not.toHaveBeenCalled();
+  });
+});

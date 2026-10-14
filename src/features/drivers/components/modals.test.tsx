@@ -73,6 +73,48 @@ describe('11.8 Add driver (Q-3)', () => {
     ).toBeInTheDocument();
   });
 
+  it('email is optional: blank is not sent, no "invitation sent" toast, an invalid one is still refused', async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    server.use(
+      http.get(url(endpoints.vehicles.list), () =>
+        ok({ items: [], page: 1, limit: 500, total: 0, totalPages: 1 }),
+      ),
+      http.post(url(endpoints.drivers.create), async ({ request }) => {
+        bodies.push((await request.json()) as Record<string, unknown>);
+        return ok({ id: 'drv_new', username: 'kwatson', status: 'ACTIVE' });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<AddDriverModal onClose={() => {}} />);
+
+    // No required `*` on the label (the column is nullable — same as Edit driver).
+    expect(screen.getByText(/^Email address/).querySelector('.text-danger')).toBeNull();
+    await user.type(screen.getByLabelText(/First name/), 'Kristin');
+    await user.type(screen.getByLabelText(/Last name/), 'Watson');
+    await user.type(screen.getByLabelText(/^Username/), 'kwatson');
+    await user.type(screen.getByLabelText(/^Password/), 'password1');
+    await user.type(screen.getByLabelText(/Driver licence number/), 'W1234567');
+
+    // A malformed address is still a field error and never posts.
+    await user.type(screen.getByLabelText(/Email address/), 'not-an-email');
+    await user.click(screen.getByRole('button', { name: 'Save driver' }));
+    expect(await screen.findByText('Enter a valid email address.')).toBeInTheDocument();
+    expect(bodies).toHaveLength(0);
+
+    // Whitespace-only = blank = no email.
+    await user.clear(screen.getByLabelText(/Email address/));
+    await user.type(screen.getByLabelText(/Email address/), '   ');
+    expect(screen.getByText(/No email address — no invitation is sent/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Save driver' }));
+
+    expect(await screen.findByText('Driver added')).toBeInTheDocument();
+    expect(bodies).toHaveLength(1);
+    expect('email' in bodies[0]!).toBe(false);
+    expect(bodies[0]!.sendInvitation).toBe(true);
+    expect(screen.getByText(/No email on file, so no invitation was sent/)).toBeInTheDocument();
+    expect(screen.queryByText(/An invitation was sent to/)).not.toBeInTheDocument();
+  });
+
   it('WB — a double click on Save driver posts exactly once (mutation.isPending guard)', async () => {
     let posts = 0;
     server.use(
@@ -810,7 +852,7 @@ describe('11.8 Add driver — duplicate values and unit assignment', () => {
 });
 
 describe('11.7 Import drivers', () => {
-  it('flags a missing email as a per-row warning (SMS is never mentioned, Q-2)', async () => {
+  it('a blank email cell is a warning, not a skip: the row is imported with no email (SMS never mentioned, Q-2)', async () => {
     const user = userEvent.setup();
     renderWithProviders(<ImportDriversModal onClose={() => {}} />);
 
@@ -820,7 +862,7 @@ describe('11.7 Import drivers', () => {
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;
     await user.upload(input, file);
 
-    expect(await screen.findByText(/Missing or duplicate email/)).toBeInTheDocument();
+    expect(await screen.findByText(/No email — imported without one; no invitation is sent/)).toBeInTheDocument();
     expect(screen.getByText(/one-time sign-in code/)).toBeInTheDocument();
     expect(screen.queryByText(/SMS/)).not.toBeInTheDocument();
   });

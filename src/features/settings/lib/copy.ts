@@ -15,6 +15,22 @@ const plural = (count: number, singular: string): string => `${singular}${count 
 export const SETTINGS_TOAST = {
   /* ---------------------------------------------------------------- W-18 users */
   userUpdated: (name: string): ToastCopy => ({ title: `${name} updated` }),
+  /** B-84 — same wording as the driver email change (features/drivers/lib/copy.ts). */
+  emailChangeRequested: (name: string, pendingEmail: string, delivered: boolean): ToastCopy => ({
+    title: delivered ? 'Confirmation link sent' : 'Email change pending',
+    description: delivered
+      ? `${name}'s email changes to ${pendingEmail} once the link sent there is confirmed.`
+      : `The confirmation email to ${pendingEmail} could not be sent right now. Use Resend in Edit user.`,
+  }),
+  emailChangeResent: (pendingEmail: string): ToastCopy => ({
+    title: 'Confirmation link resent',
+    description: `Sent to ${pendingEmail}.`,
+  }),
+  emailChangeResendFailed: (pendingEmail: string): ToastCopy => ({
+    title: 'Confirmation email not sent',
+    description: `The link to ${pendingEmail} could not be emailed right now. Try again later.`,
+  }),
+  emailChangeCancelled: { title: 'Email change cancelled' } satisfies ToastCopy,
   roleChanged: (name: string, roleName: string): ToastCopy => ({
     title: 'Role updated',
     description: `${name} is now ${roleName}. The new permissions apply on their next page load.`,

@@ -14,6 +14,8 @@ import {
   useDriver,
   useDriverHos,
   useResetDriverPassword,
+  useResendDriverEmailChange,
+  useCancelDriverEmailChange,
   type DriverHosResponse,
   useSendDriverVerification,
 } from '@/shared/api/drivers';
@@ -233,6 +235,24 @@ export default function DriverProfilePage() {
   const deactivate = useDeactivateDriver();
   const resetPassword = useResetDriverPassword();
   const sendVerification = useSendDriverVerification();
+  const resendEmailChange = useResendDriverEmailChange(id ?? '');
+  const cancelEmailChange = useCancelDriverEmailChange(id ?? '');
+
+  function runResendEmailChange() {
+    if (!id || resendEmailChange.isPending) return;
+    resendEmailChange.mutate(undefined, {
+      onSuccess: (result) => toast({ kind: 'success', ...DRIVER_TOAST.emailChangeResent(result.pendingEmail) }),
+      onError: (error) => toast({ kind: 'error', title: formErrorMessage(error) }),
+    });
+  }
+
+  function runCancelEmailChange() {
+    if (!id || cancelEmailChange.isPending) return;
+    cancelEmailChange.mutate(undefined, {
+      onSuccess: () => toast({ kind: 'success', ...DRIVER_TOAST.emailChangeCancelled() }),
+      onError: (error) => toast({ kind: 'error', title: formErrorMessage(error) }),
+    });
+  }
 
   function runResetPassword() {
     if (!id || resetPassword.isPending) return;
@@ -328,6 +348,38 @@ export default function DriverProfilePage() {
                 {driver.email ? ` · ${driver.email}` : ''}
                 {driver.phone ? ` · ${phoneForDisplay(driver.phone)}` : ''}
               </p>
+              {driver.pendingEmail && (
+                <div
+                  role="status"
+                  className="mt-2 flex flex-wrap items-center gap-2 rounded-md bg-warning-soft px-3 py-2 text-body text-text"
+                >
+                  <span className="break-all">
+                    Pending: {driver.pendingEmail} — awaiting confirmation
+                  </span>
+                  {canFull && (
+                    <span className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        loading={resendEmailChange.isPending}
+                        disabled={resendEmailChange.isPending || cancelEmailChange.isPending}
+                        onClick={runResendEmailChange}
+                      >
+                        Resend
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        loading={cancelEmailChange.isPending}
+                        disabled={resendEmailChange.isPending || cancelEmailChange.isPending}
+                        onClick={runCancelEmailChange}
+                      >
+                        Cancel change
+                      </Button>
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 lg:shrink-0">

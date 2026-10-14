@@ -5,6 +5,7 @@
 // src/features/vehicles/UnitProfilePage.tsx, DriverProfilePage.tsx for the two that do) relies on
 // this one mechanism — tracked as the generic "forbidden" cell in web/tests/STATES-AUDIT.md.
 import { describe, expect, it } from 'vitest';
+import { matchRoutes } from 'react-router-dom';
 import { buildRoutes } from './router';
 import { NO_PERMISSIONS, type PermissionMap } from '@/shared/auth/permissions';
 
@@ -74,4 +75,18 @@ describe('buildRoutes — FE-005 every screen has an errorElement inside the she
     expect(shell.errorElement).toBeTruthy();
     for (const child of shell.children ?? []) expect(child.errorElement).toBeTruthy();
   });
+});
+
+describe('buildRoutes — public email-link landings (no session needed)', () => {
+  it.each(['/account/email/confirm', '/account/email/cancel', '/driver-email/verify', '/driver-email/confirm'])(
+    '%s resolves to the public AuthLayout branch, not the RequireAuth shell',
+    (path) => {
+      const routes = buildRoutes(NO_PERMISSIONS, null);
+      const matches = matchRoutes(routes, path) ?? [];
+      expect(matches.length).toBeGreaterThan(0);
+      // The first match is the top-level branch: the RequireAuth shell is routes[1].
+      expect(matches[0]!.route).not.toBe(routes[1]);
+      expect(matches.at(-1)!.pathname).toBe(path);
+    },
+  );
 });

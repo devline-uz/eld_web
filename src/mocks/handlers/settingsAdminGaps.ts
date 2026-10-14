@@ -125,9 +125,21 @@ export const settingsAdminHandlers = [
     if (!email) {
       return fail(422, 'VALIDATION_ERROR', 'Check the highlighted fields.', { email: 'Email is required.' });
     }
+    // Backend `UsersService.invite`: trimmed + lower-cased, compared case-insensitively against
+    // every user (INVITED rows are the pending invites) and every unexpired `pendingEmail`.
     if (USERS.some((u) => u.email.toLowerCase() === email)) {
-      return fail(409, 'EMAIL_TAKEN', 'A user with this email already exists.', {
-        email: 'A user with this email already exists.',
+      return fail(409, 'EMAIL_TAKEN', 'A user with this email address already exists.', {
+        email: 'A user with this email address already exists.',
+      });
+    }
+    // A pending change older than `USER_EMAIL_CHANGE_TTL` (24 h default) no longer reserves it.
+    const pendingCutoff = Date.now() - 24 * 3_600_000;
+    const pendingHolds = (u: UserRow) =>
+      u.pendingEmail?.toLowerCase() === email &&
+      (!u.pendingEmailRequestedAt || Date.parse(u.pendingEmailRequestedAt) > pendingCutoff);
+    if (USERS.some(pendingHolds)) {
+      return fail(409, 'EMAIL_TAKEN', 'This email address is already waiting for confirmation on another account.', {
+        email: 'This email address is already waiting for confirmation on another account.',
       });
     }
     const role = roleById(String(dto.roleId ?? 'rol_viewer')) ?? ROLES[ROLES.length - 1]!;
@@ -164,12 +176,50 @@ export const settingsAdminHandlers = [
     if (losingAdmin && activeAdmins.length <= 1) {
       return fail(409, 'LAST_ADMIN', 'The last administrator cannot be removed or demoted.');
     }
+    // B-84 — a changed email is never applied: it needs the acting user's password, becomes
+    // `pendingEmail` and answers `emailVerification` (backend `UsersService.update`).
+    const nextEmail = typeof dto.email === 'string' ? dto.email.trim().toLowerCase() : undefined;
+    const proof = { currentPassword: dto.currentPassword, reauthIdToken: dto.reauthIdToken };
+    delete dto.email;
+    delete dto.currentPassword;
+    delete dto.reauthIdToken;
+    const changingEmail = nextEmail !== undefined && nextEmail !== user.email.toLowerCase();
+    if (changingEmail) {
+      if (USERS.some((u) => u.id !== user.id && (u.email.toLowerCase() === nextEmail || u.pendingEmail === nextEmail))) {
+        return fail(409, 'EMAIL_TAKEN', 'A user with this email address already exists.', {
+          email: 'A user with this email address already exists.',
+        });
+      }
+      if (!proof.currentPassword && !proof.reauthIdToken) {
+        return fail(401, 'REAUTH_REQUIRED', 'Enter your password to change this email.', {
+          currentPassword: 'Enter your password to confirm this change.',
+        });
+      }
+      if (proof.currentPassword === 'wrong') {
+        return fail(401, 'REAUTH_FAILED', 'Password is incorrect.', { currentPassword: 'Password is incorrect.' });
+      }
+    }
     if (dto.roleId !== undefined) {
       const role = roleById(String(dto.roleId));
       if (role) user.role = { id: role.id, key: role.key, name: role.name };
       delete dto.roleId;
     }
     Object.assign(user, dto);
+    if (!changingEmail) return ok(user);
+    Object.assign(user, { pendingEmail: nextEmail, pendingEmailRequestedAt: new Date().toISOString() });
+    return ok({ ...user, emailVerification: { pendingEmail: nextEmail, emailDelivered: true } });
+  }),
+  http.post(url(endpoints.users.emailChangeResend(':id')), ({ params }) => {
+    const user = USERS.find((u) => u.id === String(params.id));
+    if (!user) return NOT_FOUND('User');
+    if (!user.pendingEmail) return fail(404, 'EMAIL_CHANGE_NOT_PENDING', 'This user has no pending email change.');
+    return ok({ pendingEmail: user.pendingEmail, emailedTo: user.pendingEmail, emailDelivered: true }, 202);
+  }),
+  http.delete(url(endpoints.users.emailChange(':id')), ({ params }) => {
+    const user = USERS.find((u) => u.id === String(params.id));
+    if (!user) return NOT_FOUND('User');
+    if (!user.pendingEmail) return fail(404, 'EMAIL_CHANGE_NOT_PENDING', 'This user has no pending email change.');
+    Object.assign(user, { pendingEmail: null, pendingEmailRequestedAt: null });
     return ok(user);
   }),
   http.delete(url(endpoints.users.remove(':id')), ({ params }) => {

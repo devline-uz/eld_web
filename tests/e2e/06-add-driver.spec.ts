@@ -1,5 +1,6 @@
-// web/tz.md §18.1 scenario 6 — Add driver: `Email address` required and unique; the new
-// driver appears in the Drivers table.
+// web/tz.md §18.1 scenario 6 — Add driver: `Email address` validated and unique; the new
+// driver appears in the Drivers table. The email is optional (`Driver.email` is nullable and
+// `CreateDriverDto` takes blank as "no email"), so the check here is a malformed address.
 import { test, expect } from '@playwright/test';
 import { authStatePath, keepAuthStateFresh } from './support/auth';
 
@@ -16,14 +17,14 @@ function uniqueDriver() {
   };
 }
 
-test('Add driver requires Email address, and the create call succeeds', async ({ page }) => {
+test('Add driver refuses a malformed Email address, and the create call succeeds', async ({ page }) => {
   const d = uniqueDriver();
   await page.goto('/drivers');
   await page.getByRole('button', { name: 'Add driver' }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
 
-  // Submit with Email address left blank — the required-field error surfaces.
+  // Submit with a malformed Email address — the format error surfaces.
   await dialog.getByLabel('First name').fill(d.firstName);
   await dialog.getByLabel('Last name').fill(d.lastName);
   await dialog.getByLabel('Username').fill(d.username);
@@ -36,10 +37,9 @@ test('Add driver requires Email address, and the create call succeeds', async ({
   // name, so `exact: true` against "Password" resolves to the input alone.
   await dialog.getByRole('textbox', { name: 'Password', exact: true }).fill('Onebook2026x');
   await dialog.getByLabel('Driver licence number').fill(`CDL${Date.now()}`);
+  await dialog.getByLabel('Email address').fill('not-an-email');
   await dialog.getByRole('button', { name: 'Save driver' }).click();
-  // `shared/forms/fields.ts` `email()` shares its message with the format check
-  // ("Enter a valid email address.") rather than a distinct "required" string — an empty field
-  // fails the same `zod` rule a malformed one would.
+  // `shared/forms/fields.ts` `optionalEmail()` — blank is allowed, a malformed address is not.
   await expect(dialog.getByText('Enter a valid email address.')).toBeVisible();
 
   // Fill the email and save for real — `POST /drivers` is a real, working endpoint.

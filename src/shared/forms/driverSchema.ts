@@ -7,13 +7,15 @@ import { licenceNumber, refineLicenceForState } from './driverLicence';
 
 /**
  * 11.8 · Add driver (Q-3 — every driver account is created here).
- * `Email address` is required and unique; the password is the mobile-app password.
+ * `Email address` is optional (`Driver.email` is nullable; `CreateDriverDto` takes blank as no
+ * email) and unique when given; the password is the mobile-app password.
  */
 export const driverSchema = z
   .object({
     firstName: f.personName(),
     lastName: f.personName(),
-    email: f.email(),
+    /** Blank (after trim) → `''` → not sent: the driver has no email and gets no invitation. */
+    email: f.optionalEmail(),
     username: f.username(),
     password: f.driverPassword(),
     /** Trimmed, upper-cased, `[A-Z0-9-]`, 4–20; checked against `cdlState`'s format below. */

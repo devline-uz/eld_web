@@ -59,6 +59,9 @@ export interface UserRow {
   invitedAt?: string | null;
   expiresAt?: string | null;
   homeTerminalName?: string | null;
+  /** B-84 — an email change awaiting the new owner's confirmation (`email` is still the old one). */
+  pendingEmail?: string | null;
+  pendingEmailRequestedAt?: string | null;
   role: { id?: string; key: string; name: string };
 }
 
@@ -85,9 +88,11 @@ export interface InviteUserPayload {
   terminalIds?: string[];
 }
 
-/** `UpdateUserDto` (B-84, shipped). Changing `email` does NOT write it: the response carries
- * `emailVerification.pendingEmail` and the address switches only once the link is confirmed via
- * `POST /auth/email/verify` (backend D-101). */
+/** `UpdateUserDto` (B-84, shipped). Changing `email` does NOT write it: it becomes `pendingEmail`,
+ * the response carries `emailVerification.pendingEmail` and the address switches only once the link
+ * is confirmed via `POST /auth/email/verify` (backend D-101). An email change needs the ACTING
+ * user's `currentPassword` (or `reauthIdToken` for a Google-only account) — 401 REAUTH_REQUIRED /
+ * REAUTH_FAILED otherwise; both are sent only with a changed `email`. */
 export interface UpdateUserPayload {
   firstName?: string;
   lastName?: string;
@@ -97,9 +102,14 @@ export interface UpdateUserPayload {
   status?: UserStatus;
   email?: string;
   homeTerminalName?: string;
+  currentPassword?: string;
+  reauthIdToken?: string;
 }
 
-export type UpdateUserResult = UserRow & { emailVerification?: { pendingEmail: string; verifyToken?: string } };
+export type UpdateUserResult = UserRow & {
+  /** `emailDelivered` — whether the confirm link reached the mail server (false without SMTP). */
+  emailVerification?: { pendingEmail: string; emailDelivered?: boolean; verifyToken?: string };
+};
 
 /** `emailDelivered: false` = the user exists but the invite email did not go out (no SMTP on
  * the server, or the send failed) — the screen must say so rather than claim it was sent. */
@@ -120,6 +130,25 @@ export function useUpdateUser() {
   return useMutation({
     mutationFn: ({ id, dto }: { id: string; dto: UpdateUserPayload }) =>
       client.patch<UpdateUserResult>(endpoints.users.update(id), dto),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qkRoot.users }),
+  });
+}
+
+/** B-84 — `POST /users/:id/email-change/resend`: a fresh confirm link for the SAME pending change. */
+export function useResendUserEmailChange() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      client.post<{ pendingEmail: string; emailedTo: string; emailDelivered: boolean }>(endpoints.users.emailChangeResend(id)),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qkRoot.users }),
+  });
+}
+
+/** B-84 — `DELETE /users/:id/email-change`: drops the pending change; its links stop working. */
+export function useCancelUserEmailChange() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => client.delete<UserRow>(endpoints.users.emailChange(id)),
     onSuccess: () => qc.invalidateQueries({ queryKey: qkRoot.users }),
   });
 }
@@ -396,11 +425,27 @@ export function useDeleteAlertRule() {
   });
 }
 
+/** One channel's outcome of `POST /alert-rules/:id/test` — EMAIL is real SMTP to the caller. */
+export interface AlertRuleTestChannelResult {
+  channel: AlertChannel;
+  /** SENT = delivered now · QUEUED = handed to the webhook queue · FAILED / SUPPRESSED carry `reason`. */
+  status: 'SENT' | 'QUEUED' | 'FAILED' | 'SUPPRESSED';
+  /** NO_EMAIL_ADDRESS · NO_MAIL_TRANSPORT · SMTP_SEND_FAILED · NO_WEBHOOK_CONFIGURED · CHANNEL_DISABLED */
+  reason?: string;
+}
+
+export interface AlertRuleTestResult {
+  /** At least one channel actually sent or queued the test. */
+  triggered: boolean;
+  /** Per-channel outcome; empty for a disabled rule. Optional: older backends answered `{ triggered }` only. */
+  channels?: AlertRuleTestChannelResult[];
+}
+
 /** B-9 (shipped 2026-09-24) — sends a test through the rule's own channels to the caller; a
- * disabled rule answers `{ triggered: false }`. */
+ * disabled rule answers `{ triggered: false, channels: [] }`. */
 export function useTestAlertRule() {
   return useMutation({
-    mutationFn: (id: string) => client.post<{ triggered: boolean }>(endpoints.alertRules.test(id)),
+    mutationFn: (id: string) => client.post<AlertRuleTestResult>(endpoints.alertRules.test(id)),
   });
 }
 
@@ -700,14 +745,36 @@ export function useUpdateTicket() {
   });
 }
 
-/** B-84 — the landing page of the email-change link: `POST /auth/email/verify { token }`. */
+/** B-84 — the landing page of the email-change link (`/account/email/confirm`):
+ * `POST /auth/email/verify { token }`. Anonymous on purpose: the token is self-authenticating,
+ * the page works signed out, and a `401 TOKEN_EXPIRED` about the LINK must never trigger the
+ * session refresh/sign-out path (§6.2 rule 2/3). */
 export function useConfirmEmailChange() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (token: string) => client.post<{ success: boolean }>(endpoints.auth.emailVerify, { token }),
+    mutationFn: (token: string) =>
+      client.post<{ success: boolean; email?: string; alreadyVerified?: boolean }>(
+        endpoints.auth.emailVerify,
+        { token },
+        { anonymous: true },
+      ),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: qkRoot.me });
       void qc.invalidateQueries({ queryKey: qkRoot.users });
     },
+  });
+}
+
+/** B-84 — the "this wasn't me" page of the notice mailed to the OLD address (`/account/email/cancel`):
+ * `POST /auth/email/cancel { token }`. Anonymous for the same reasons as `useConfirmEmailChange`.
+ * `REVERTED` = the change was already confirmed and has been undone (every session was revoked). */
+export function useCancelEmailChangeLink() {
+  return useMutation({
+    mutationFn: (token: string) =>
+      client.post<{ success: boolean; result: 'CANCELLED' | 'REVERTED' }>(
+        endpoints.auth.emailCancel,
+        { token },
+        { anonymous: true },
+      ),
   });
 }

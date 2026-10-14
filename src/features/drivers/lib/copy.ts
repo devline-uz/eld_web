@@ -29,6 +29,12 @@ export const DRIVER_TOAST = {
     title: 'Driver added',
     description: 'No invitation was sent. Share the mobile app password with the driver directly.',
   }),
+  /** 11.8 with `Send invitation now` ticked but no email typed — the backend only invites a
+   * driver with an email on file, so nothing was sent. */
+  driverAddedNoEmail: (): ToastCopy => ({
+    title: 'Driver added',
+    description: 'No email on file, so no invitation was sent. Share the mobile app password with the driver directly.',
+  }),
   /** 11.8 — the driver was created, but the follow-up `POST /vehicles/:id/assign-driver` failed. */
   driverAddedUnitNotAssigned: (unitNumber: string, reason: string): ToastCopy => ({
     title: `Driver added, but Unit #${unitNumber} was not assigned`,
@@ -51,10 +57,28 @@ export const DRIVER_TOAST = {
   }),
   /** B-81 shipped — `POST /drivers/:id/reset-password`. `code` only exists in dev
    * (`DEV_ECHO_SECRETS`); it is shown once here and never logged or persisted. */
-  passwordReset: (result: { emailedTo: string | null; code?: string }): ToastCopy =>
+  passwordReset: (result: { emailedTo: string | null; code?: string; emailHoldUntil?: string }): ToastCopy =>
     result.emailedTo
       ? { title: 'Password reset emailed', description: `Sent to ${result.emailedTo}.` }
-      : { title: 'One-time code', description: result.code ?? 'Ask the driver to sign in again.' },
+      : result.emailHoldUntil
+        ? {
+            // Driver email change hold — the new address is not trusted with a password yet.
+            title: 'One-time code (not emailed — email changed recently)',
+            description: result.code ?? 'Ask the driver to sign in again.',
+          }
+        : { title: 'One-time code', description: result.code ?? 'Ask the driver to sign in again.' },
+  /** Driver email change — `PATCH` stored the new address as pending and mailed the confirm link. */
+  emailChangeRequested: (pendingEmail: string, delivered: boolean): ToastCopy => ({
+    title: delivered ? 'Confirmation link sent' : 'Email change pending',
+    description: delivered
+      ? `The email changes to ${pendingEmail} once the driver confirms the link sent there.`
+      : `The confirmation email to ${pendingEmail} could not be sent right now. Use Resend from the profile.`,
+  }),
+  emailChangeResent: (pendingEmail: string): ToastCopy => ({
+    title: 'Confirmation link resent',
+    description: `Sent to ${pendingEmail}.`,
+  }),
+  emailChangeCancelled: (): ToastCopy => ({ title: 'Email change cancelled' }),
   verificationSent: (email: string): ToastCopy => ({
     title: 'Verification email sent',
     description: `Sent to ${email}.`,

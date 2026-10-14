@@ -25,6 +25,9 @@ import { ROUTE_LOADERS } from './routePrefetch';
 /* ---- lazy features (one chunk per feature; sidebar-reachable ones share `ROUTE_LOADERS` so a
    hover can warm the same chunk — WD-073) ------------------------------------------------ */
 const SignInPage = lazy(() => import('@/features/auth/SignInPage'));
+// Driver email change — public landings of the emailed confirm / "this wasn't me" links.
+const DriverEmailLinkPage = lazy(() => import('@/features/auth/DriverEmailLinkPage'));
+const AccountEmailConfirmPage = lazy(() => import('@/features/auth/AccountEmailConfirmPage'));
 const ForbiddenPage = lazy(() => import('@/features/auth/ForbiddenPage'));
 const NotFoundPage = lazy(() => import('@/features/auth/NotFoundPage'));
 const DashboardPage = lazy(ROUTE_LOADERS['/']);
@@ -286,6 +289,29 @@ export function buildRoutes(permissions: PermissionMap, role: Role | null): Rout
             { path: '*', element: <NotFoundPage />, errorElement: <RouteError />, handle: { title: 'Page not found' } },
           ],
         },
+      ],
+    },
+    {
+      // Public on purpose — kept last: tests index [0] sign-in, [1] the shell (opened from a driver's mailbox, never signed in to the panel).
+      path: '/driver-email',
+      element: <AuthLayout />,
+      errorElement: <RouteError fullPage />,
+      children: [
+        { path: 'confirm', element: <DriverEmailLinkPage mode="confirm" /> },
+        { path: 'cancel', element: <DriverEmailLinkPage mode="cancel" /> },
+        { path: 'verify', element: <DriverEmailLinkPage mode="verify" /> },
+      ],
+    },
+    {
+      // B-84 — public on purpose: the links mailed to a web user's NEW / OLD address must work signed out
+      // (and outranks the shell's `account` / `*` routes, which need a session).
+      path: '/account/email',
+      element: <AuthLayout />,
+      errorElement: <RouteError fullPage />,
+      children: [
+        { path: 'confirm', element: <AccountEmailConfirmPage mode="confirm" /> },
+        // B-84 — "this wasn't me" link mailed to the OLD address (cancel, or revert inside the hold).
+        { path: 'cancel', element: <AccountEmailConfirmPage mode="cancel" /> },
       ],
     },
   ];
