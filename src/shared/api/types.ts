@@ -1,5 +1,5 @@
 // GENERATED FILE — do not edit by hand.
-// Source: backend/docs/openapi.json (187 paths, 240 typed operations).
+// Source: backend/docs/openapi.json (222 paths, 276 typed operations).
 // Regenerate: npm run gen:types   (scripts/generate-api-types.mjs)
 //
 // The backend documents payloads as OpenAPI examples, so these shapes are inferred structurally.
@@ -88,10 +88,14 @@ export type AuthLoginResponse = {
 
 /** POST /api/auth/login/driver */
 export type AuthLoginDriverResponse = {
-  accessToken: string;
-  refreshToken: string;
-  tokenType: string;
-  driverId: string;
+  data: {
+    accessToken: string;
+    refreshToken: string;
+    tokenType: string;
+    driverId: string;
+  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** POST /api/auth/google */
@@ -103,9 +107,13 @@ export type AuthGoogleResponse = {
 
 /** POST /api/auth/refresh */
 export type AuthRefreshResponse = {
-  accessToken: string;
-  refreshToken: string;
-  tokenType: string;
+  data: {
+    accessToken: string;
+    refreshToken: string;
+    tokenType: string;
+  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** POST /api/auth/logout */
@@ -123,22 +131,49 @@ export type AuthResetPasswordResponse = {
   success: boolean;
 };
 
-/** POST /api/auth/email/verify */
-export type AuthVerifyEmailChangeResponse = {
+/** POST /api/auth/password/reset-code */
+export type AuthRequestPasswordResetCodeResponse = {
+  data: {
+    success: boolean;
+    email: string;
+    expiresInSec: number;
+    resendAfterSec: number;
+  };
+  traceId: string;
+  timestamp: string;
+};
+
+/** POST /api/auth/password/reset-code/confirm */
+export type AuthConfirmPasswordResetCodeResponse = {
+  data: {
+    success: boolean;
+  };
+  traceId: string;
+  timestamp: string;
+};
+
+/** POST /api/auth/driver/password/forgot */
+export type AuthForgotDriverPasswordResponse = {
+  success: boolean;
+};
+
+/** POST /api/auth/driver/password/reset */
+export type AuthResetDriverPasswordResponse = {
   success: boolean;
 };
 
 /** GET /api/auth/me */
 export type AuthMeResponse = {
-  id: string;
-  type: string;
-  role: string;
-  permissions: Record<string, unknown>;
-  fullName: string;
-  email: string;
-  avatarUrl: unknown;
-  carrierName: string;
-  homeTerminalTimezone: string;
+  data: {
+    id: string;
+    type: string;
+    username: string;
+    fullName: string;
+    email: string;
+    homeTerminalTimezone: string;
+  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** GET /api/carrier */
@@ -148,6 +183,11 @@ export type CarrierGetResponse = {
   dotNumber: string;
   eldIdentifier: string;
   erodsMode: string;
+  virtualEldEnabled: boolean;
+  virtualEldAvailable: boolean;
+  virtualEldUpdatedAt: unknown;
+  virtualEldUpdatedById: unknown;
+  virtualEldUpdatedBy: unknown;
 };
 
 /** PATCH /api/carrier */
@@ -159,6 +199,14 @@ export type CarrierUpdateResponse = {
   eldIdentifier: string;
   eldRegistrationId: unknown;
   erodsMode: string;
+  virtualEldEnabled: boolean;
+  virtualEldAvailable: boolean;
+  virtualEldUpdatedAt: string;
+  virtualEldUpdatedById: string;
+  virtualEldUpdatedBy: {
+    id: string;
+    name: string;
+  };
 };
 
 /** GET /api/carrier/transfer-config */
@@ -167,6 +215,20 @@ export type CarrierGetTransferConfigResponse = {
   eldIdentifier: string;
   eldRegistrationId: unknown;
   erodsMode: string;
+};
+
+/** GET /api/audit-log */
+export type AuditListResponse = {
+  items: Array<{
+    id: string;
+    actorType: string;
+    actorName: string;
+    actorEmail: string;
+    action: string;
+    objectType: string;
+    objectId: string;
+  }>;
+  nextCursor: unknown;
 };
 
 /** GET /api/attachments/{id}/presign */
@@ -180,6 +242,7 @@ export type RolesListResponse = Array<{
   key: string;
   isSystem: boolean;
   permissions: Record<string, unknown>;
+  userCount: number;
 }>;
 
 /** POST /api/roles */
@@ -267,9 +330,15 @@ export type UsersUpdateResponse = {
   firstName: string;
   lastName: string;
   status: string;
+  email: string;
+  pendingEmail: string;
   role: {
     key: string;
     name: string;
+  };
+  emailVerification: {
+    pendingEmail: string;
+    emailDelivered: boolean;
   };
 };
 
@@ -281,6 +350,20 @@ export type UsersRemoveResponse = {
 /** POST /api/users/{id}/resend-invite */
 export type UsersResendInviteResponse = {
   emailDelivered: boolean;
+};
+
+/** POST /api/users/{id}/email-change/resend */
+export type UsersResendEmailChangeResponse = {
+  pendingEmail: string;
+  emailedTo: string;
+  emailDelivered: boolean;
+};
+
+/** DELETE /api/users/{id}/email-change */
+export type UsersCancelEmailChangeResponse = {
+  id: string;
+  email: string;
+  pendingEmail: unknown;
 };
 
 /** GET /api/me/profile */
@@ -355,18 +438,17 @@ export type MeUpdatePreferencesResponse = {
   distanceUnit: string;
 };
 
-/** GET /api/audit-log */
-export type AuditListResponse = {
-  items: Array<{
-    id: string;
-    actorType: string;
-    actorName: string;
-    actorEmail: string;
-    action: string;
-    objectType: string;
-    objectId: string;
-  }>;
-  nextCursor: unknown;
+/** POST /api/auth/email/verify */
+export type UserEmailVerifyResponse = {
+  success: boolean;
+  email: string;
+  alreadyVerified: boolean;
+};
+
+/** POST /api/auth/email/cancel */
+export type UserEmailCancelResponse = {
+  success: boolean;
+  result: string;
 };
 
 /** GET /api/api-keys */
@@ -447,6 +529,7 @@ export type DriversRosterItem = {
     allowYardMove: boolean;
     shortHaulException: boolean;
     splitSleeperEnabled: boolean;
+    hosRuleset: string;
   };
   dutyStatus: string;
   unit: {
@@ -460,6 +543,8 @@ export type DriversRosterItem = {
   };
   openViolations: number;
   emailVerified: unknown;
+  isStale: boolean;
+  staleSince: unknown;
 };
 
 /** GET /api/drivers/roster */
@@ -479,6 +564,20 @@ export type DriversHosResponse = {
   dutyStatus: string;
   statusSince: string;
   computedAt: string;
+  isStale: boolean;
+  staleSince: unknown;
+  hosRuleset: string;
+};
+
+/** POST /api/drivers/{id}/hos/adverse-driving */
+export type DriversInvokeAdverseDrivingResponse = {
+  id: string;
+  driverId: string;
+  date: string;
+  annotation: string;
+  invokedById: string;
+  invokedByType: string;
+  createdAt: string;
 };
 
 /** GET /api/drivers/{id} */
@@ -501,7 +600,12 @@ export type DriversUpdateResponse = {
   id: string;
   username: string;
   status: string;
-  allowPersonalConveyance: boolean;
+  email: string;
+  pendingEmail: string;
+  emailVerification: {
+    pendingEmail: string;
+    emailDelivered: boolean;
+  };
 };
 
 /** DELETE /api/drivers/{id} */
@@ -516,6 +620,20 @@ export type DriversImportResponse = {
   imported: number;
   updated: number;
   failed: unknown[];
+};
+
+/** POST /api/drivers/{id}/email-change/resend */
+export type DriversResendEmailChangeResponse = {
+  pendingEmail: string;
+  emailedTo: string;
+  emailDelivered: boolean;
+};
+
+/** DELETE /api/drivers/{id}/email-change */
+export type DriversCancelEmailChangeResponse = {
+  id: string;
+  email: string;
+  pendingEmail: unknown;
 };
 
 /** POST /api/drivers/{id}/reset-password */
@@ -561,95 +679,57 @@ export type DriversRemoveDocumentResponse = {
   deleted: boolean;
 };
 
-/** GET /api/transfers — list item */
-export type TransfersListItem = {
+/** POST /api/auth/driver/email/confirm */
+export type DriverEmailConfirmResponse = {
+  success: boolean;
+  email: string;
+};
+
+/** POST /api/auth/driver/email/verify */
+export type DriverEmailVerifyResponse = {
+  success: boolean;
+  email: string;
+  alreadyVerified: boolean;
+};
+
+/** POST /api/auth/driver/email/cancel */
+export type DriverEmailCancelResponse = {
+  success: boolean;
+  result: string;
+};
+
+/** GET /api/violations — list item */
+export type ViolationsListItem = {
   id: string;
-  sentAt: string;
-  method: string;
-  comment: string;
-  periodFrom: string;
-  periodTo: string;
+  driverId: string;
+  dailyLogId: string;
+  logDate: string;
+  type: string;
+  occurredAt: string;
+  exceededBySec: number;
+  detail: string;
   status: string;
-  sentById: string;
-  fileName: string;
+  resolvedAt: unknown;
+  resolvedById: unknown;
+  resolutionNote: unknown;
+  severity: string;
+  driverName: string;
+  vehicleId: string;
+  unitNumber: string;
+  event: string;
+  locationLabel: string;
+  date: string;
 };
 
-/** GET /api/transfers */
-export type TransfersListResponse = OffsetPage<TransfersListItem>;
+/** GET /api/violations */
+export type ViolationsListResponse = OffsetPage<ViolationsListItem>;
 
-/** POST /api/transfers */
-export type TransfersCreateResponse = {
-  transfer: {
-    id: string;
-    fileName: string;
-    status: string;
-    erodsMode: string;
-    fileSizeBytes: number;
-  };
-  warnings: Array<{
-    code: string;
-    level: string;
-    message: string;
-  }>;
-  counts: {
-    header: number;
-    events: number;
-  };
-};
-
-/** GET /api/transfers/{id} */
-export type TransfersGetResponse = {
+/** POST /api/violations/{id}/resolve */
+export type ViolationsResolveResponse = {
   id: string;
-  method: string;
   status: string;
-  erodsMode: string;
-  comment: string;
-  fileName: string;
-  fileSizeBytes: number;
-  counts: {
-    header: number;
-    events: number;
-  };
-  sentAt: string;
-};
-
-/** GET /api/mobile/transfers */
-export type MobileTransfersListResponse = {
-  items: Array<{
-    id: string;
-    method: string;
-    status: string;
-    erodsMode: string;
-    referenceId: string;
-    sentAt: string;
-    createdAt: string;
-    fileName: string;
-    outputFileComment: string;
-    rangeStart: string;
-    rangeEnd: string;
-  }>;
-  total: number;
-  limit: number;
-};
-
-/** POST /api/mobile/transfers */
-export type MobileTransfersCreateResponse = {
-  id: string;
-  method: string;
-  status: string;
-  erodsMode: string;
-  referenceId: unknown;
-  sentAt: unknown;
-  createdAt: string;
-  fileName: string;
-  outputFileComment: string;
-  rangeStart: string;
-  rangeEnd: string;
-  warnings: string[];
-  counts: {
-    header: number;
-    events: number;
-  };
+  resolvedAt: string;
+  resolutionNote: string;
 };
 
 /** GET /api/vehicles — list item */
@@ -802,16 +882,17 @@ export type VehiclesUnassignDriverResponse = {
   assignedDriverId: unknown;
 };
 
-/** GET /api/trailers */
-export type TrailersListResponse = {
-  items: Array<{
-    id: string;
-    number: string;
-    vin: string;
-    licensePlate: string;
-    licenseState: string;
-  }>;
+/** GET /api/trailers — list item */
+export type TrailersListItem = {
+  id: string;
+  number: string;
+  vin: string;
+  status: string;
+  deletedAt: unknown;
 };
+
+/** GET /api/trailers */
+export type TrailersListResponse = OffsetPage<TrailersListItem>;
 
 /** POST /api/trailers */
 export type TrailersCreateResponse = {
@@ -844,7 +925,9 @@ export type TrailersGetResponse = {
 export type TrailersUpdateResponse = {
   id: string;
   number: string;
-  licensePlate: string;
+  vin: string;
+  status: string;
+  deletedAt: unknown;
 };
 
 /** DELETE /api/trailers/{id} */
@@ -970,34 +1053,62 @@ export type AlertRulesRemoveResponse = {
 /** POST /api/alert-rules/{id}/test */
 export type AlertRulesTestResponse = {
   triggered: boolean;
-};
-
-/** GET /api/notifications — list item */
-export type NotificationsListItem = {
-  id: string;
-  type: string;
-  kind: string;
-  title: string;
-  body: string;
-  objectType: string;
-  objectId: string;
-  category: string;
-  severity: string;
-  readAt: unknown;
+  channels: Array<{
+    channel: string;
+    status: string;
+  }>;
 };
 
 /** GET /api/notifications */
-export type NotificationsListResponse = OffsetPage<NotificationsListItem>;
+export type NotificationsListResponse = {
+  data: {
+    items: Array<{
+      id: string;
+      userId: string;
+      driverId: unknown;
+      type: string;
+      kind: string;
+      title: string;
+      body: string;
+      objectType: string;
+      objectId: string;
+      category: string;
+      severity: string;
+      readAt: unknown;
+      createdAt: string;
+    }>;
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+    counts: {
+      all: number;
+      violations: number;
+      maintenance: number;
+    };
+    unreadCount: number;
+  };
+  traceId: string;
+  timestamp: string;
+};
 
 /** POST /api/notifications/read-all */
 export type NotificationsReadAllResponse = {
-  updated: number;
+  data: {
+    updated: number;
+  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** POST /api/notifications/{id}/read */
 export type NotificationsMarkReadResponse = {
-  id: string;
-  readAt: string;
+  data: {
+    id: string;
+    readAt: string;
+  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** GET /api/notification-channels */
@@ -1077,253 +1188,869 @@ export type IntegrationsDisconnectResponse = {
   status: string;
 };
 
-/** GET /api/mobile/bootstrap */
-export type MobileBootstrapGetResponse = {
-  serverTime: string;
-  hosEngineVersion: string;
-  driver: {
-    id: string;
-    firstName: string;
-    lastName: string;
-    cdlNumber: string;
-    cdlState: string;
-  };
-  vehicle: {
-    id: string;
-    unitNumber: string;
-  };
-  device: {
-    id: string;
-    serial: string;
-    bleState: string;
-  };
-  hos: {
-    state: {
-      currentStatus: string;
-      driveRemainingSec: number;
+/** GET /api/mobile/app-config */
+export type MobileAppConfigAppConfigResponse = {
+  data: {
+    minSupportedVersion: string;
+    latestVersion: string;
+    storeUrl: string;
+    userManualUrl: unknown;
+    privacyPolicyUrl: string;
+    termsUrl: unknown;
+    minPt30Firmware: unknown;
+    recommendedPt30Firmware: unknown;
+    updateRequired: boolean;
+    updateAvailable: boolean;
+    virtualEld: {
+      enabled: boolean;
     };
   };
-  inspectionPacket: {
-    days: unknown[];
+  traceId: string;
+  timestamp: string;
+};
+
+/** GET /api/mobile/legal/{kind} */
+export type MobileAppConfigLegalResponse = {
+  data: {
+    version: string;
+    url: string;
+    html: unknown;
   };
-  syncConfig: {
-    batchMaxChanges: number;
-    batchMaxBytes: number;
+  traceId: string;
+  timestamp: string;
+};
+
+/** GET /api/mobile/bootstrap */
+export type MobileBootstrapGetResponse = {
+  data: {
+    serverTime: string;
+    hosEngineVersion: string;
+    driver: {
+      id: string;
+      username: string;
+      firstName: string;
+      lastName: string;
+      cdlNumber: string;
+      cdlState: string;
+      email: string;
+      phone: string;
+      exemptDriverStatus: boolean;
+      status: string;
+      homeTerminalName: string;
+      homeTerminalTimezone: string;
+      hosRuleset: string;
+      exceptions: {
+        allowPersonalConveyance: boolean;
+        allowYardMove: boolean;
+        adverseDrivingEnabled: boolean;
+        shortHaulException: boolean;
+        splitSleeperEnabled: boolean;
+        eldExempt: boolean;
+        eldExemptReason: unknown;
+      };
+      lastSyncAt: string;
+    };
+    vehicle: {
+      id: string;
+      unitNumber: string;
+      vin: string;
+      make: string;
+      model: string;
+      year: number;
+      sleeperBerth: boolean;
+      status: string;
+      odometerMi: number;
+    };
+    device: {
+      id: string;
+      serial: string;
+      model: string;
+      firmware: string;
+      status: string;
+      bleState: string;
+      bleMacAddress: string;
+      pairedAt: string;
+      periodicConnectedSec: number;
+      periodicDisconnectedMin: number;
+    };
+    coDriver: unknown;
+    availableVehicles: Array<{
+      id: string;
+      unitNumber: string;
+      make: string;
+      model: string;
+      deviceSerial: unknown;
+    }>;
+    carrier: {
+      name: string;
+      dotNumber: string;
+      timezone: string;
+      hosRuleset: string;
+      distanceUnit: string;
+      allowPersonalConveyance: boolean;
+      allowYardMove: boolean;
+      eldIdentifier: string;
+      mainOfficeAddress: string;
+      eldProvider: string;
+      eldRegistrationId: string;
+      erodsMode: string;
+    };
+    hos: {
+      computedAt: string;
+      timezone: string;
+      state: {
+        currentStatus: string;
+        driveRemainingSec: number;
+        shiftRemainingSec: number;
+        breakRemainingSec: number;
+        cycleRemainingSec: number;
+        dailyTotals: {
+          off: number;
+          sb: number;
+          drive: number;
+          on: number;
+        };
+        violations: unknown[];
+        statusSince: string;
+        nextBreakDueAt: unknown;
+        shiftEndsAt: string;
+        cycleRecapAt: unknown;
+        restartAvailableAt: unknown;
+      };
+    };
+    inspectionPacket: {
+      driverId: string;
+      timezone: string;
+      generatedAt: string;
+      days: unknown[];
+    };
+    syncConfig: {
+      batchMaxChanges: number;
+      batchMaxBytes: number;
+      onlineIntervalSec: number;
+      onlineBatchThreshold: number;
+      offlineBackoffSec: number[];
+      localEventRetentionDays: number;
+      localInspectionRetentionDays: number;
+      syncBacklogWarnDays: number;
+      syncBacklogWarnBytes: number;
+    };
+    appUpdate: unknown;
+    pendingEditRequestCount: number;
+    pendingUnidentifiedCount: number;
   };
+  traceId: string;
+  timestamp: string;
 };
 
 /** POST /api/mobile/sync */
 export type MobileSyncSyncResponse = {
-  accepted: string[];
-  rejected: Array<{
-    clientId: string;
-    code: string;
-  }>;
-  serverChanges: unknown[];
-  serverTime: string;
-  hosEngineVersion: string;
-  nextSyncAfterSec: number;
+  data: {
+    accepted: string[];
+    rejected: Array<{
+      clientId: string;
+      code: string;
+      message: string;
+    }>;
+    serverChanges: Array<{
+      id: string;
+      eventType: number;
+      eventCode: number;
+      eventDateTime: string;
+      recordStatus: number;
+      recordOrigin: number;
+      annotation: unknown;
+      supersedesId: unknown;
+    }>;
+    serverTime: string;
+    hosEngineVersion: string;
+    nextSyncAfterSec: number;
+  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** POST /api/mobile/duty-status */
 export type MobileDutyStatusChangeResponse = {
-  id: string;
-  status: string;
-  startAt: string;
-  recordOrigin: number;
-  recordStatus: number;
-  applied: boolean;
+  data: {
+    id: string;
+    driverId: string;
+    status: string;
+    specialCondition: string;
+    locationName: string;
+    startAt: string;
+    endAt: unknown;
+    recordOrigin: number;
+    recordStatus: number;
+    applied: boolean;
+    recertificationRequired: boolean;
+  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** POST /api/mobile/signature */
 export type MobileDvirUploadSignatureResponse = {
-  signatureImageId: string;
-  attachmentId: unknown;
-  key: string;
-  sha256: string;
-  sizeBytes: number;
+  data: {
+    signatureImageId: string;
+    attachmentId: string;
+    key: string;
+    sha256: string;
+    sizeBytes: number;
+  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** POST /api/mobile/dvir */
 export type MobileDvirSubmitResponse = {
-  id: string;
-  vehicleId: string;
-  type: string;
-  vehicleCondition: string;
-  defectCount: number;
-  photoCount: number;
-  outOfService: boolean;
-  applied: boolean;
+  data: {
+    id: string;
+    driverId: string;
+    vehicleId: string;
+    trailerId: unknown;
+    trailerNumber: string;
+    type: string;
+    submittedAt: string;
+    vehicleCondition: string;
+    defectCount: number;
+    photoCount: number;
+    outOfService: boolean;
+    signatureImageId: string;
+    mechanicSignatureImageId: unknown;
+    applied: boolean;
+  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** GET /api/mobile/available-vehicles */
-export type MobileVehicleListResponse = Array<{
-  id: string;
-  unitNumber: string;
-  make: string;
-  model: string;
-  deviceSerial: string;
-}>;
+export type MobileVehicleListResponse = {
+  data: Array<{
+    id: string;
+    unitNumber: string;
+    make: string;
+    model: string;
+    deviceSerial: string;
+  }>;
+  traceId: string;
+  timestamp: string;
+};
+
+/** POST /api/mobile/release-vehicle */
+export type MobileVehicleReleaseResponse = {
+  data: {
+    released: boolean;
+    vehicleId: string;
+  };
+  traceId: string;
+  timestamp: string;
+};
 
 /** POST /api/mobile/select-vehicle */
 export type MobileVehicleSelectResponse = {
-  id: string;
-  unitNumber: string;
-  vin: string;
-  make: string;
-  model: string;
-  year: number;
-  sleeperBerth: boolean;
-  status: string;
-  odometerMi: number;
+  data: {
+    id: string;
+    unitNumber: string;
+    vin: string;
+    make: string;
+    model: string;
+    year: number;
+    sleeperBerth: boolean;
+    status: string;
+    odometerMi: number;
+    device: {
+      id: string;
+      serial: string;
+      model: string;
+    };
+  };
+  traceId: string;
+  timestamp: string;
+};
+
+/** GET /api/mobile/co-driver */
+export type MobileCoDriverCurrentResponse = {
+  data: {
+    pairingId: string;
+    startedAt: string;
+    coDriver: {
+      id: string;
+      firstName: string;
+      lastName: string;
+      username: string;
+    };
+    trip: {
+      shippingDocuments: string[];
+      trailerNumbers: string[];
+    };
+  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** POST /api/mobile/co-driver/switch */
 export type MobileCoDriverSwitchResponse = {
-  accessToken: string;
-  refreshToken: string;
-  tokenType: string;
+  data: {
+    accessToken: string;
+    refreshToken: string;
+    tokenType: string;
+  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** POST /api/mobile/co-driver/leave */
 export type MobileCoDriverLeaveResponse = {
-  ended: boolean;
+  data: {
+    ended: boolean;
+  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** GET /api/mobile/trip */
 export type MobileTripGetResponse = {
-  id: string;
-  number: string;
-  status: string;
-  stops: unknown[];
-  documents: unknown[];
+  data: {
+    source: string;
+    id: unknown;
+    trip: unknown;
+    logDate: string;
+    shippingDocument: string;
+    shippingDocuments: string[];
+    trailerId: unknown;
+    trailerNumber: string;
+    trailerNumbers: string[];
+    bobtail: boolean;
+    notes: unknown;
+    updatedAt: string;
+    stops: unknown[];
+    documents: unknown[];
+  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** PATCH /api/mobile/trip */
 export type MobileTripPatchResponse = {
-  id: string;
-  shippingDocument: string;
-  trailerId: string;
-  notes: string;
+  data: {
+    source: string;
+    id: string;
+    number: string;
+    status: string;
+    vehicleId: string;
+    trailerId: string;
+    shippingDocument: string;
+    shippingDocuments: string[];
+    trailerNumber: string;
+    trailerNumbers: string[];
+    bobtail: boolean;
+    commodity: string;
+    weightLbs: number;
+    pieces: number;
+    plannedStartAt: string;
+    plannedEndAt: string;
+    startedAt: string;
+    completedAt: unknown;
+    etaAt: string;
+    onTime: boolean;
+    notes: string;
+    stops: Array<{
+      id: string;
+      sequence: number;
+      type: string;
+      name: string;
+      address: string;
+      latitude: number;
+      longitude: number;
+      scheduledAt: string;
+      arrivedAt: string;
+      departedAt: unknown;
+      status: string;
+      note: unknown;
+    }>;
+    documents: Array<{
+      tripId: string;
+      number: string;
+      shippingDocument: string;
+      commodity: string;
+      pieces: number;
+      weightLbs: number;
+    }>;
+  };
+  traceId: string;
+  timestamp: string;
+};
+
+/** GET /api/mobile/trailers */
+export type MobileTrailersListResponse = {
+  data: Array<{
+    id: string;
+    number: string;
+    plate: unknown;
+  }>;
+  traceId: string;
+  timestamp: string;
 };
 
 /** GET /api/mobile/dvirs */
-export type MobileDvirHistoryListResponse = Array<{
-  id: string;
-  vehicleId: string;
-  type: string;
-  submittedAt: string;
-  vehicleCondition: string;
-  defectCount: number;
-  repairStatus: string;
-}>;
+export type MobileDvirHistoryListResponse = {
+  data: Array<{
+    id: string;
+    vehicleId: string;
+    type: string;
+    submittedAt: string;
+    vehicleCondition: string;
+    defectCount: number;
+    repairStatus: string;
+    trailerNumber: string;
+    odometerMi: number;
+    location: {
+      lat: number;
+      lon: number;
+      name: string;
+    };
+  }>;
+  traceId: string;
+  timestamp: string;
+};
 
 /** GET /api/mobile/dvirs/{id} */
 export type MobileDvirHistoryGetResponse = {
-  id: string;
-  vehicleId: string;
-  defects: unknown[];
-  photos: unknown[];
+  data: {
+    id: string;
+    driverId: string;
+    vehicleId: string;
+    trailerId: unknown;
+    type: string;
+    submittedAt: string;
+    odometerMi: number;
+    location: {
+      lat: number;
+      lon: number;
+      name: string;
+    };
+    trailerNumber: string;
+    vehicleCondition: string;
+    notes: unknown;
+    repairStatus: string;
+    driverSignature: {
+      key: string;
+      url: string;
+      hash: string;
+    };
+    mechanicSignature: unknown;
+    nextDriverReviewedAt: unknown;
+    defects: Array<{
+      id: string;
+      part: string;
+      category: string;
+      severity: string;
+      description: string;
+      status: string;
+      outOfService: boolean;
+      resolvedAt: unknown;
+      resolutionNote: unknown;
+      photos: Array<{
+        id: string;
+        url: string;
+        mimeType: string;
+        sizeBytes: number;
+      }>;
+    }>;
+    photos: unknown[];
+  };
+  traceId: string;
+  timestamp: string;
+};
+
+/** GET /api/mobile/defect-catalog */
+export type MobileCatalogDefectCatalogResponse = {
+  data: Array<{
+    code: string;
+    name: string;
+    part: string;
+    category: string;
+    critical: boolean;
+    isPhoto: boolean;
+  }>;
+  traceId: string;
+  timestamp: string;
+};
+
+/** GET /api/mobile/saved-signature */
+export type MobileCatalogGetResponse = {
+  data: {
+    signatureImageId: string;
+    key: string;
+    url: string;
+    mimeType: string;
+    sizeBytes: number;
+    sha256: string;
+    updatedAt: string;
+  };
+  traceId: string;
+  timestamp: string;
+};
+
+/** PUT /api/mobile/saved-signature */
+export type MobileCatalogPutResponse = {
+  data: {
+    signatureImageId: string;
+    key: string;
+    url: string;
+    mimeType: string;
+    sizeBytes: number;
+    sha256: string;
+    updatedAt: string;
+  };
+  traceId: string;
+  timestamp: string;
+};
+
+/** DELETE /api/mobile/saved-signature */
+export type MobileCatalogRemoveResponse = {
+  data: {
+    deleted: boolean;
+  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** GET /api/mobile/contacts */
-export type MobileContactsListResponse = Array<{
-  id: string;
-  name: string;
-  role: string;
-  phone: string;
-}>;
+export type MobileContactsListResponse = {
+  data: Array<{
+    id: string;
+    name: string;
+    role: string;
+    phone: string;
+  }>;
+  traceId: string;
+  timestamp: string;
+};
 
 /** POST /api/mobile/push-tokens */
 export type PushTokensRegisterResponse = {
-  id: string;
-  driverId: string;
-  platform: string;
-  lastSeenAt: string;
+  data: {
+    id: string;
+    driverId: string;
+    token: string;
+    platform: string;
+    deviceLabel: string;
+    lastSeenAt: string;
+    createdAt: string;
+  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** DELETE /api/mobile/push-tokens/{token} */
 export type PushTokensRemoveResponse = {
-  deleted: boolean;
+  data: {
+    deleted: boolean;
+  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** GET /api/mobile/device-health */
 export type DeviceHealthGetResponse = {
-  vehicleId: string;
-  device: {
-    id: string;
-    serial: string;
-    firmware: string;
-    bleState: string;
-    storedEventsCount: number;
+  data: {
+    vehicleId: string;
+    device: {
+      id: string;
+      serial: string;
+      firmware: string;
+      bleState: string;
+      storedEventsCount: number;
+      lastDeviceStatusAt: string;
+    };
+    activeCodes: Array<{
+      kind: string;
+      code: string;
+    }>;
+    unidentified: {
+      windowDays: number;
+      pendingCount: number;
+      pendingConfirmationRequestIds: string[];
+    };
+    hosDrift: {
+      computedAt: string;
+      lastComparedAt: string;
+      maxDriftSec: number;
+      driftAlerted: boolean;
+    };
   };
-  activeCodes: Array<{
-    kind: string;
-    code: string;
-  }>;
-  unidentified: {
-    windowDays: number;
-    pendingCount: number;
-    pendingConfirmationRequestIds: string[];
-  };
-  hosDrift: {
-    computedAt: string;
-    maxDriftSec: number;
-    driftAlerted: boolean;
-  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** GET /api/mobile/conversations */
 export type MobileMessagingListConversationsResponse = {
-  items: Array<{
-    id: string;
-    type: string;
-    lastMessage: {
+  data: {
+    items: Array<{
+      id: string;
+      type: string;
+      title: string;
+      lastMessageAt: string;
+      lastMessage: {
+        id: string;
+        conversationId: string;
+        senderUserId: string;
+        senderDriverId: unknown;
+        body: string;
+        attachmentId: unknown;
+        clientId: unknown;
+        sentAt: string;
+        deliveredAt: unknown;
+        readAt: unknown;
+        senderId: string;
+        senderType: string;
+        senderName: string;
+      };
+      unreadCount: number;
+      participants: Array<{
+        id: string;
+        type: string;
+        name: string;
+      }>;
+    }>;
+  };
+  traceId: string;
+  timestamp: string;
+};
+
+/** POST /api/mobile/conversations */
+export type MobileMessagingStartConversationResponse = {
+  data: {
+    conversationId: string;
+    message: {
       id: string;
       body: string;
+      sentAt: string;
+      senderId: string;
+      senderType: string;
+      clientId: string;
     };
-    unreadCount: number;
-  }>;
+  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** GET /api/mobile/conversations/{id}/messages */
 export type MobileMessagingListMessagesResponse = {
-  items: Array<{
-    id: string;
-    body: string;
-    sentAt: string;
-  }>;
-  limit: number;
+  data: {
+    items: Array<{
+      id: string;
+      conversationId: string;
+      senderUserId: string;
+      senderDriverId: unknown;
+      body: string;
+      attachmentId: unknown;
+      clientId: unknown;
+      sentAt: string;
+      deliveredAt: unknown;
+      readAt: unknown;
+      senderId: string;
+      senderType: string;
+      senderName: string;
+    }>;
+    limit: number;
+  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** POST /api/mobile/conversations/{id}/messages */
 export type MobileMessagingSendMessageResponse = {
-  id: string;
-  body: string;
-  sentAt: string;
+  data: {
+    id: string;
+    conversationId: string;
+    senderUserId: unknown;
+    senderDriverId: string;
+    body: string;
+    attachmentId: unknown;
+    clientId: string;
+    sentAt: string;
+    deliveredAt: unknown;
+    readAt: unknown;
+    senderId: string;
+    senderType: string;
+    senderName: string;
+  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** POST /api/mobile/conversations/{id}/read */
 export type MobileMessagingMarkReadResponse = {
-  messagesMarked: number;
+  data: {
+    messagesMarked: number;
+  };
+  traceId: string;
+  timestamp: string;
+};
+
+/** GET /api/mobile/attachments/{id}/presign */
+export type MobileAttachmentsPresignResponse = {
+  data: {
+    url: string;
+    expiresAt: string;
+  };
+  traceId: string;
+  timestamp: string;
+};
+
+/** GET /api/mobile/maintenance */
+export type MobileMaintenanceListResponse = {
+  data: Array<{
+    id: string;
+    scheduleType: string;
+    scheduleName: string;
+    frequencyMi: number;
+    remainingMi: number;
+    status: string;
+    at: string;
+  }>;
+  traceId: string;
+  timestamp: string;
+};
+
+/** GET /api/mobile/maintenance/{id} */
+export type MobileMaintenanceGetResponse = {
+  data: {
+    id: string;
+    scheduleType: string;
+    scheduleName: string;
+    frequencyMi: number;
+    remainingMi: number;
+    status: string;
+    at: string;
+    invoiceNumber: string;
+    vendorName: string;
+    cost: number;
+    notes: string;
+    invoiceAttachment: {
+      id: string;
+      fileName: string;
+      mimeType: string;
+    };
+    submittedAt: string;
+    reviewNote: string;
+  };
+  traceId: string;
+  timestamp: string;
+};
+
+/** POST /api/mobile/maintenance/{id}/submit */
+export type MobileMaintenanceSubmitResponse = {
+  data: {
+    id: string;
+    scheduleType: string;
+    scheduleName: string;
+    frequencyMi: number;
+    remainingMi: number;
+    status: string;
+    at: string;
+    invoiceNumber: string;
+    vendorName: string;
+    cost: number;
+    notes: string;
+    invoiceAttachment: {
+      id: string;
+      fileName: string;
+      mimeType: string;
+    };
+    submittedAt: string;
+    reviewNote: unknown;
+  };
+  traceId: string;
+  timestamp: string;
+};
+
+/** POST /api/mobile/device/mac */
+export type MobileDeviceReportMacResponse = {
+  data: {
+    deviceId: string;
+    macAddress: string;
+    outcome: string;
+  };
+  traceId: string;
+  timestamp: string;
+};
+
+/** GET /api/mobile/device-config */
+export type MobileDeviceConfigConfigResponse = {
+  data: {
+    serial: string;
+    model: string;
+    systemVars: {
+      PERIODIC_EVENT_GAP: number;
+      PERIODIC_EVENT_GAP_NOBLE: number;
+      EVENTS_STORED: number;
+      DRIVING_ACCL: number;
+      DRIVING_BRAKING: number;
+      DRIVING_CORNERING: number;
+      HSI_MODE: number;
+    };
+    autoFirmware: boolean;
+    shareDiagnostics: boolean;
+    configVersion: string;
+  };
+  traceId: string;
+  timestamp: string;
+};
+
+/** POST /api/mobile/virtual-devices */
+export type MobileVirtualDeviceRegisterResponse = {
+  data: {
+    id: string;
+    serial: string;
+    model: string;
+    isVirtual: boolean;
+    firmware: string;
+    vehicleId: string;
+    status: string;
+    bleState: string;
+    bleMacAddress: unknown;
+    reportedVin: string;
+    pairedAt: string;
+    createdAt: string;
+    firmwareOutdated: boolean;
+    systemVars: {
+      PERIODIC_EVENT_GAP: number;
+      PERIODIC_EVENT_GAP_NOBLE: number;
+      EVENTS_STORED: number;
+      DRIVING_ACCL: number;
+      DRIVING_BRAKING: number;
+      DRIVING_CORNERING: number;
+      HSI_MODE: number;
+    };
+  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** POST /api/logs/edit-requests/{id}/accept */
 export type LogsAcceptResponse = {
-  id: string;
-  status: string;
-  resolvedAt: string;
-  activeEventId: string;
-  supersededEventId: string;
-  recertificationRequired: boolean;
+  data: {
+    id: string;
+    status: string;
+    applied: boolean;
+  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** POST /api/logs/edit-requests/{id}/reject */
 export type LogsRejectResponse = {
-  id: string;
-  status: string;
-  resolvedAt: string;
-  driverComment: string;
+  data: {
+    id: string;
+    status: string;
+    applied: boolean;
+  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** GET /api/logs/{driverId} */
@@ -1443,94 +2170,240 @@ export type LogsCertifyResponse = {
 
 /** POST /api/mobile/log-entries */
 export type MobileLogsCreateEntryResponse = {
-  id: string;
-  eventSequenceId: number;
-  recordOrigin: number;
-  recordStatus: number;
-  dutyStatus: string;
-  occurredAt: string;
-  annotation: string;
-  recertificationRequired: boolean;
+  data: {
+    id: string;
+    driverId: string;
+    status: string;
+    specialCondition: string;
+    locationName: string;
+    startAt: string;
+    endAt: unknown;
+    recordOrigin: number;
+    recordStatus: number;
+    applied: boolean;
+    recertificationRequired: boolean;
+  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** POST /api/mobile/certify */
 export type MobileLogsCertifyResponse = {
-  driverId: string;
-  certified: Array<{
-    date: string;
-    certifiedAt: string;
-    signatureCount: number;
-  }>;
+  data: {
+    driverId: string;
+    days: Array<{
+      date: string;
+      certified: boolean;
+      certificationCount: number;
+      eventCode: number;
+      certifiedAt: string;
+      certifierType: string;
+    }>;
+  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** GET /api/mobile/log-edit-requests */
 export type MobileLogsListEditRequestsResponse = {
-  items: Array<{
-    id: string;
-    date: string;
-    status: string;
-    reason: string;
-    proposed: {
+  data: {
+    driverId: string;
+    items: Array<{
+      id: string;
+      driverId: string;
       status: string;
-      startAt: string;
-      endAt: string;
-    };
+      kind: string;
+      originalEventId: string;
+      proposedStatus: string;
+      proposedSpecial: string;
+      proposedStart: string;
+      proposedEnd: string;
+      locationName: string;
+      annotation: string;
+      requestedById: string;
+      requestedAt: string;
+      resolvedAt: unknown;
+      date: string;
+      original: {
+        status: string;
+        start: string;
+        end: string;
+        location: string;
+      };
+      proposedGraph: Array<{
+        status: string;
+        effective: string;
+        special: string;
+        startAt: string;
+        endAt: string;
+        durationSec: number;
+      }>;
+      requestedBy: {
+        id: string;
+        name: string;
+      };
+    }>;
+  };
+  traceId: string;
+  timestamp: string;
+};
+
+/** GET /api/mobile/certification-status */
+export type MobileLogsCertificationStatusResponse = {
+  data: Array<{
+    date: string;
+    certified: boolean;
+    certifiedAt: string;
+    certificationCount: number;
+    recertificationRequired: boolean;
   }>;
+  traceId: string;
+  timestamp: string;
 };
 
 /** GET /api/mobile/logs */
 export type MobileLogsGetDayResponse = {
-  driverId: string;
-  date: string;
-  timezone: string;
-  summary: {
-    drivingSec: number;
-    onDutySec: number;
-    offDutySec: number;
-    sleeperSec: number;
-    certified: boolean;
+  data: {
+    driverId: string;
+    date: string;
+    timezone: string;
+    summary: {
+      date: string;
+      timezone: string;
+      offDutySec: number;
+      sleeperSec: number;
+      drivingSec: number;
+      onDutySec: number;
+      totalDistanceMi: number;
+      dayLengthSec: number;
+      certified: boolean;
+      certifiedAt: unknown;
+      certificationCount: number;
+      hasViolation: boolean;
+      violationCount: number;
+      hasUnassigned: boolean;
+      hasEdits: boolean;
+    };
+    graph: Array<{
+      status: string;
+      effective: string;
+      special: string;
+      startAt: string;
+      endAt: string;
+      durationSec: number;
+      eventId: string;
+      locationDescription: string;
+      odometerMi: number;
+      engineHours: number;
+      annotation: unknown;
+      carriedOver: boolean;
+    }>;
+    events: Array<{
+      id: string;
+      eventType: number;
+      eventCode: number;
+      eventSequenceId: number;
+      eventDateTime: string;
+      recordStatus: number;
+      recordOrigin: number;
+      status: string;
+      locationName: unknown;
+      totalVehicleMiles: number;
+      totalEngineHours: number;
+      annotation: unknown;
+      comment: unknown;
+      supersedesId: unknown;
+      editedById: unknown;
+      editorType: unknown;
+      editReason: unknown;
+      vehicleId: string;
+      eventId: string;
+      locationDescription: string;
+      odometerMi: number;
+      engineHours: number;
+      specialCondition: unknown;
+      malfunctionCode: unknown;
+      diagnosticCode: unknown;
+    }>;
+    trip: {
+      shippingDocuments: string[];
+      trailerNumbers: string[];
+      notes: unknown;
+      bobtail: boolean;
+      tripIds: string[];
+      tripNumbers: string[];
+      dayDetails: boolean;
+    };
+    malfunctionIndicator: boolean;
+    diagnosticIndicator: boolean;
+    violations: unknown[];
+    certification: {
+      certified: boolean;
+      certifiedAt: unknown;
+      certifiedById: unknown;
+      certifierType: unknown;
+      certificationCount: number;
+      signatureUrl: unknown;
+      recertificationRequired: boolean;
+    };
   };
-  graph: Array<{
-    status: string;
-    effective: string;
-    startAt: string;
-    durationSec: number;
-  }>;
+  traceId: string;
+  timestamp: string;
 };
 
 /** POST /api/ingest/events */
 export type IngestEventsResponse = {
-  received: number;
-  stored: number;
+  accepted: number;
   duplicates: number;
-  unidentified: number;
+  sequenceIds: {
+    drv_1: number[];
+  };
   warnings: unknown[];
-  firstEventSequenceId: number;
-  lastEventSequenceId: number;
+  malfunctions: unknown[];
+  diagnostics: unknown[];
+  unidentifiedSegmentIds: unknown[];
+  confirmationRequests: unknown[];
 };
 
 /** POST /api/ingest/telemetry */
 export type IngestTelemetryResponse = {
+  accepted: number;
+  duplicates: number;
+  denserThanContract: number;
+};
+
+/** POST /api/ingest/device-events */
+export type IngestDeviceEventsUploadResponse = {
   received: number;
   stored: number;
   duplicates: number;
+  safetyEvents: number;
 };
 
 /** POST /api/ingest/ble-state */
 export type IngestBleStateResponse = {
-  deviceId: string;
   bleState: string;
-  recordedAt: string;
-  diagnosticRaised: boolean;
+  connectionType: string;
+  disconnectedAlert: boolean;
 };
 
 /** POST /api/ingest/device-status */
 export type IngestDeviceStatusResponse = {
-  deviceId: string;
-  storedEventCount: number;
-  firmwareVersion: string;
-  firmwareOutdated: boolean;
-  lastHeartbeatAt: string;
+  storedEventsCount: number;
+  backlogAlert: boolean;
+  codes: unknown[];
+  model: string;
+  vinMismatch: boolean;
+  systemVars: {
+    PERIODIC_EVENT_GAP: number;
+    PERIODIC_EVENT_GAP_NOBLE: number;
+    EVENTS_STORED: number;
+    DRIVING_ACCL: number;
+    DRIVING_BRAKING: number;
+    DRIVING_CORNERING: number;
+    HSI_MODE: number;
+  };
+  configVersion: string;
 };
 
 /** GET /api/vehicles/{id}/dtc */
@@ -1540,6 +2413,11 @@ export type DtcListResponse = {
     vehicleId: string;
     spn: number;
     fmi: number;
+    code: unknown;
+    bus: string;
+    milOn: boolean;
+    conversionMethod: number;
+    active: unknown;
     occurrence: number;
     source: string;
     description: unknown;
@@ -1564,10 +2442,22 @@ export type MessagingCreateConversationResponse = {
   type: string;
 };
 
+/** POST /api/conversations/attachments */
+export type MessagingUploadAttachmentResponse = {
+  id: string;
+  attachmentId: string;
+  kind: string;
+  mimeType: string;
+  sizeBytes: number;
+  durationSec: number;
+};
+
 /** GET /api/conversations/{id}/messages — list item */
 export type MessagingListMessagesItem = {
   id: string;
   body: string;
+  type: string;
+  attachment: unknown;
   sentAt: string;
 };
 
@@ -1579,6 +2469,22 @@ export type MessagingSendMessageResponse = {
   id: string;
   body: string;
   sentAt: string;
+};
+
+/** POST /api/conversations/{id}/messages/audio */
+export type MessagingSendAudioMessageResponse = {
+  id: string;
+  type: string;
+  body: string;
+  attachmentId: string;
+  sentAt: string;
+  attachment: {
+    id: string;
+    kind: string;
+    mimeType: string;
+    sizeBytes: number;
+    durationMs: number;
+  };
 };
 
 /** POST /api/conversations/{id}/read */
@@ -1602,8 +2508,35 @@ export type DevicesListItem = {
   id: string;
   serial: string;
   model: string;
+  isVirtual: boolean;
   bleState: string;
+  firmware: string;
   firmwareOutdated: boolean;
+  productName: string;
+  bleFirmware: string;
+  imei: unknown;
+  reportedVin: string;
+  sdkVersion: string;
+  appPlatform: string;
+  connectionType: string;
+  busType: string;
+  lastInfoAt: string;
+  periodicConnectedSec: number;
+  periodicNoBleSec: number;
+  periodicDisconnectedMin: number;
+  harshAccelMg: number;
+  harshBrakeMg: number;
+  harshCornerMg: number;
+  systemVars: {
+    PERIODIC_EVENT_GAP: number;
+    PERIODIC_EVENT_GAP_NOBLE: number;
+    EVENTS_STORED: number;
+    DRIVING_ACCL: number;
+    DRIVING_BRAKING: number;
+    DRIVING_CORNERING: number;
+    HSI_MODE: number;
+  };
+  connection: string;
 };
 
 /** GET /api/devices */
@@ -1622,10 +2555,19 @@ export type DevicesCreateResponse = {
 export type DevicesExportResponse = {
   devices: Array<{
     serial: string;
+    isVirtual: boolean;
     model: string;
     bleMac: string;
     firmwareVersion: string;
   }>;
+};
+
+/** GET /api/devices/counts */
+export type DevicesCountsResponse = {
+  total: number;
+  connected: number;
+  disconnected: number;
+  offlineOver24h: number;
 };
 
 /** GET /api/devices/{id} */
@@ -1633,12 +2575,37 @@ export type DevicesGetResponse = {
   id: string;
   serial: string;
   model: string;
+  isVirtual: boolean;
   status: string;
   vehicleId: string;
   bleState: string;
-  firmwareVersion: string;
+  firmware: string;
   firmwareOutdated: boolean;
-  lastHeartbeatAt: string;
+  lastSeenAt: string;
+  productName: string;
+  bleFirmware: string;
+  imei: unknown;
+  reportedVin: string;
+  sdkVersion: string;
+  appPlatform: string;
+  connectionType: string;
+  busType: string;
+  lastInfoAt: string;
+  periodicConnectedSec: number;
+  periodicNoBleSec: number;
+  periodicDisconnectedMin: number;
+  harshAccelMg: number;
+  harshBrakeMg: number;
+  harshCornerMg: number;
+  systemVars: {
+    PERIODIC_EVENT_GAP: number;
+    PERIODIC_EVENT_GAP_NOBLE: number;
+    EVENTS_STORED: number;
+    DRIVING_ACCL: number;
+    DRIVING_BRAKING: number;
+    DRIVING_CORNERING: number;
+    HSI_MODE: number;
+  };
 };
 
 /** PATCH /api/devices/{id} */
@@ -1731,27 +2698,53 @@ export type CoDriverPairingsEndResponse = {
 
 /** POST /api/unidentified/{id}/confirm */
 export type UnidentifiedConfirmResponse = {
-  id: string;
-  status: string;
-  driverId: string;
-  recordOrigin: number;
-  eventCount: number;
-};
-
-/** GET /api/unidentified/confirmation-requests */
-export type UnidentifiedListConfirmationRequestsResponse = {
-  items: Array<{
+  data: {
     id: string;
     vehicleId: string;
-    status: string;
-    assignedDriverId: string;
-    assignedById: string;
-    confirmationRequestedAt: string;
     startAt: string;
     endAt: string;
     durationSec: number;
     distanceMi: number;
-  }>;
+    status: string;
+    assignedDriverId: string;
+    assignedById: string;
+    assignedAt: string;
+    annotation: string;
+    confirmationRequestedAt: unknown;
+    fromStoredEvents: boolean;
+    eventIds: string[];
+  };
+  traceId: string;
+  timestamp: string;
+};
+
+/** GET /api/unidentified/confirmation-requests */
+export type UnidentifiedListConfirmationRequestsResponse = {
+  data: {
+    items: Array<{
+      id: string;
+      vehicleId: string;
+      startAt: string;
+      endAt: string;
+      durationSec: number;
+      distanceMi: number;
+      status: string;
+      assignedDriverId: string;
+      assignedById: string;
+      assignedAt: unknown;
+      annotation: unknown;
+      confirmationRequestedAt: string;
+      fromStoredEvents: boolean;
+      eventIds: string[];
+      startLocation: string;
+      endLocation: string;
+      unitNumber: string;
+      startOdometerMi: number;
+      endOdometerMi: number;
+    }>;
+  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** GET /api/unidentified */
@@ -1788,84 +2781,206 @@ export type UnidentifiedGetResponse = {
 
 /** POST /api/unidentified/{id}/assign */
 export type UnidentifiedAssignResponse = {
-  id: string;
-  status: string;
-  driverId: string;
-  assignedById: string;
-  assignedAt: string;
-  recordOrigin: number;
-  eventCount: number;
+  data: {
+    id: string;
+    vehicleId: string;
+    startAt: string;
+    endAt: string;
+    durationSec: number;
+    distanceMi: number;
+    status: string;
+    assignedDriverId: string;
+    assignedById: string;
+    assignedAt: string;
+    annotation: string;
+    confirmationRequestedAt: unknown;
+    fromStoredEvents: boolean;
+    eventIds: string[];
+  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** POST /api/unidentified/{id}/annotate */
 export type UnidentifiedAnnotateResponse = {
-  id: string;
-  status: string;
-  annotation: string;
-  annotatedById: string;
+  data: {
+    id: string;
+    vehicleId: string;
+    startAt: string;
+    endAt: string;
+    durationSec: number;
+    distanceMi: number;
+    status: string;
+    assignedDriverId: unknown;
+    assignedById: unknown;
+    assignedAt: unknown;
+    annotation: string;
+    confirmationRequestedAt: unknown;
+    fromStoredEvents: boolean;
+    eventIds: string[];
+  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** POST /api/unidentified/{id}/reject */
 export type UnidentifiedRejectResponse = {
-  id: string;
-  status: string;
-  driverId: unknown;
-  recordOrigin: number;
-  eventCount: number;
+  data: {
+    id: string;
+    vehicleId: string;
+    startAt: string;
+    endAt: string;
+    durationSec: number;
+    distanceMi: number;
+    status: string;
+    assignedDriverId: unknown;
+    assignedById: string;
+    assignedAt: string;
+    annotation: string;
+    confirmationRequestedAt: unknown;
+    fromStoredEvents: boolean;
+    eventIds: string[];
+  };
+  traceId: string;
+  timestamp: string;
 };
 
-/** GET /api/violations — list item */
-export type ViolationsListItem = {
+/** GET /api/transfers — list item */
+export type TransfersListItem = {
   id: string;
-  driverId: string;
-  dailyLogId: string;
-  logDate: string;
-  type: string;
-  occurredAt: string;
-  exceededBySec: number;
-  detail: string;
+  sentAt: string;
+  method: string;
+  comment: string;
+  periodFrom: string;
+  periodTo: string;
   status: string;
-  resolvedAt: unknown;
-  resolvedById: unknown;
-  resolutionNote: unknown;
-  severity: string;
-  driverName: string;
-  vehicleId: string;
-  unitNumber: string;
-  event: string;
-  locationLabel: string;
-  date: string;
+  sentById: string;
+  fileName: string;
 };
 
-/** GET /api/violations */
-export type ViolationsListResponse = OffsetPage<ViolationsListItem>;
+/** GET /api/transfers */
+export type TransfersListResponse = OffsetPage<TransfersListItem>;
 
-/** POST /api/violations/{id}/resolve */
-export type ViolationsResolveResponse = {
+/** POST /api/transfers */
+export type TransfersCreateResponse = {
+  transfer: {
+    id: string;
+    fileName: string;
+    status: string;
+    erodsMode: string;
+    fileSizeBytes: number;
+  };
+  warnings: Array<{
+    code: string;
+    level: string;
+    message: string;
+  }>;
+  counts: {
+    header: number;
+    events: number;
+  };
+};
+
+/** GET /api/transfers/{id} */
+export type TransfersGetResponse = {
   id: string;
+  method: string;
   status: string;
-  resolvedAt: string;
-  resolutionNote: string;
+  erodsMode: string;
+  comment: string;
+  fileName: string;
+  fileSizeBytes: number;
+  counts: {
+    header: number;
+    events: number;
+  };
+  sentAt: string;
+};
+
+/** GET /api/mobile/transfers */
+export type MobileTransfersListResponse = {
+  data: {
+    items: Array<{
+      id: string;
+      method: string;
+      status: string;
+      erodsMode: string;
+      referenceId: string;
+      sentAt: string;
+      createdAt: string;
+      fileName: string;
+      outputFileComment: string;
+      rangeStart: string;
+      rangeEnd: string;
+    }>;
+    total: number;
+    limit: number;
+  };
+  traceId: string;
+  timestamp: string;
+};
+
+/** POST /api/mobile/transfers */
+export type MobileTransfersCreateResponse = {
+  data: {
+    id: string;
+    method: string;
+    status: string;
+    erodsMode: string;
+    referenceId: unknown;
+    sentAt: unknown;
+    createdAt: string;
+    fileName: string;
+    outputFileComment: string;
+    rangeStart: string;
+    rangeEnd: string;
+    warnings: string[];
+    counts: {
+      header: number;
+      events: number;
+    };
+    clientId: string;
+    requestedAt: string;
+  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** POST /api/mobile/hos-state */
 export type HosStateHosStateSubmitResponse = {
-  accepted: boolean;
-  engineVersion: string;
-  versionMismatch: boolean;
-  drift: boolean;
-  server: {
-    driveRemainingSec: number;
-    shiftRemainingSec: number;
-    cycleRemainingSec: number;
-    breakRemainingSec: number;
+  data: {
+    hosEngineVersion: string;
+    accepted: boolean;
+    versionMismatch: boolean;
+    updateRequired: boolean;
+    compared: boolean;
+    drift: boolean;
+    maxDriftSec: number;
+    fields: unknown[];
+    statusMismatch: boolean;
+    serverState: {
+      currentStatus: string;
+      driveRemainingSec: number;
+      shiftRemainingSec: number;
+      breakRemainingSec: number;
+      cycleRemainingSec: number;
+      dailyTotals: {
+        off: number;
+        sb: number;
+        drive: number;
+        on: number;
+      };
+      violations: unknown[];
+      statusSince: string;
+      nextBreakDueAt: string;
+      shiftEndsAt: string;
+      cycleRecapAt: unknown;
+      restartAvailableAt: unknown;
+    };
+    driftThresholdSec: number;
   };
-  deltasSec: {
-    driveRemainingSec: number;
-    shiftRemainingSec: number;
-    cycleRemainingSec: number;
-    breakRemainingSec: number;
-  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** GET /api/dvir — list item */
@@ -2052,6 +3167,8 @@ export type MaintenanceSchedulesGetResponse = {
 export type MaintenanceSchedulesUpdateResponse = {
   id: string;
   enabled: boolean;
+  status: string;
+  reviewNote: string;
 };
 
 /** DELETE /api/maintenance-schedules/{id} */
@@ -2125,31 +3242,84 @@ export type SupportCreateFeedbackResponse = {
 
 /** POST /api/mobile/feedback */
 export type MobileSupportCreateFeedbackResponse = {
-  id: string;
-  comment: string;
-  createdAt: string;
+  data: {
+    id: string;
+    driverId: string;
+    userId: unknown;
+    answers: {
+      tenure: string;
+      ease: string;
+      hosSatisfaction: string;
+      recommend: number;
+      overallExperience: number;
+    };
+    comment: string;
+    appVersion: string;
+    platform: string;
+    createdAt: string;
+  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** GET /api/mobile/support/tickets */
 export type MobileSupportListOwnTicketsResponse = {
-  items: Array<{
-    id: string;
-    subject: string;
-    category: string;
-    priority: string;
-    status: string;
-    createdAt: string;
-    updatedAt: string;
-  }>;
+  data: {
+    items: Array<{
+      id: string;
+      number: string;
+      subject: string;
+      body: string;
+      category: string;
+      priority: string;
+      status: string;
+      contactMethod: unknown;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** POST /api/mobile/support/tickets */
 export type MobileSupportCreateTicketResponse = {
-  id: string;
-  number: string;
-  subject: string;
-  status: string;
-  priority: string;
+  data: {
+    id: string;
+    number: string;
+    subject: string;
+    body: string;
+    category: string;
+    priority: string;
+    status: string;
+    createdByUserId: unknown;
+    createdByDriverId: string;
+    assignedToId: unknown;
+    contactMethod: string;
+    createdAt: string;
+    updatedAt: string;
+    resolvedAt: unknown;
+  };
+  traceId: string;
+  timestamp: string;
+};
+
+/** GET /api/mobile/support/tickets/{id} */
+export type MobileSupportGetOwnTicketResponse = {
+  data: {
+    id: string;
+    number: string;
+    subject: string;
+    body: string;
+    category: string;
+    priority: string;
+    status: string;
+    contactMethod: unknown;
+    createdAt: string;
+    updatedAt: string;
+  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** GET /api/trips — list item */
@@ -2227,16 +3397,36 @@ export type SafetyUpdateEventResponse = {
 
 /** GET /api/safety/scorecard */
 export type SafetyScorecardResponse = {
-  items: Array<{
-    driverId: string;
+  periodStart: string;
+  periodEnd: string;
+  computedAt: string;
+  minMiles: number;
+  fleet: {
     score: number;
+    previousScore: number;
+    trend: number;
+    scoredDrivers: number;
+    unscoredDrivers: number;
+    belowThresholdCount: number;
+    milesDriven: number;
+  };
+  items: Array<{
+    id: string;
+    driverId: string;
+    periodStart: string;
+    periodEnd: string;
+    score: number;
+    scored: boolean;
     harshCount: number;
+    speedingCount: number;
+    seatbeltCount: number;
+    milesDriven: number;
+    violationCount: number;
     rank: number;
     previousScore: number;
     trend: number;
+    computedAt: string;
   }>;
-  periodStart: string;
-  periodEnd: string;
 };
 
 /** POST /api/safety/coaching */
@@ -2254,6 +3444,10 @@ export type GeofencesListResponse = {
     type: string;
     radiusMi: number;
     alertOnEnter: boolean;
+    colour: string;
+    countAsYardMove: boolean;
+    vehicleGroupId: unknown;
+    vehicleGroupName: unknown;
   }>;
 };
 
@@ -2263,6 +3457,9 @@ export type GeofencesCreateResponse = {
   name: string;
   type: string;
   radiusMi: number;
+  colour: string;
+  countAsYardMove: boolean;
+  vehicleGroupId: string;
 };
 
 /** GET /api/geofences/{id} */
@@ -2270,12 +3467,17 @@ export type GeofencesGetResponse = {
   id: string;
   name: string;
   type: string;
+  colour: string;
+  countAsYardMove: boolean;
+  vehicleGroupId: string;
+  vehicleGroupName: string;
 };
 
 /** PATCH /api/geofences/{id} */
 export type GeofencesUpdateResponse = {
   id: string;
   enabled: boolean;
+  vehicleGroupId: unknown;
 };
 
 /** DELETE /api/geofences/{id} */
@@ -2314,6 +3516,10 @@ export type LiveFleetFleetResponse = {
     shiftEndsAt: string;
     eldSerial: string;
     bleState: string;
+    recordStatus: string;
+    connectivity: string;
+    isStale: boolean;
+    staleSince: unknown;
   }>;
   generatedAt: string;
 };
@@ -2325,6 +3531,10 @@ export type DashboardSummaryResponse = {
       vehicleId: string;
       unitNumber: string;
       dutyStatus: string;
+      recordStatus: string;
+      connectivity: string;
+      isStale: boolean;
+      staleSince: unknown;
     }>;
     generatedAt: string;
     counts: {
@@ -2359,6 +3569,8 @@ export type DashboardSummaryResponse = {
   vehicles: {
     active: number;
     total: number;
+    inactive: number;
+    outOfService: number;
   };
   generatedAt: string;
 };
@@ -2513,11 +3725,15 @@ export interface ApiOperations {
   'POST /api/auth/logout': AuthLogoutResponse;
   'POST /api/auth/password/forgot': AuthForgotPasswordResponse;
   'POST /api/auth/password/reset': AuthResetPasswordResponse;
-  'POST /api/auth/email/verify': AuthVerifyEmailChangeResponse;
+  'POST /api/auth/password/reset-code': AuthRequestPasswordResetCodeResponse;
+  'POST /api/auth/password/reset-code/confirm': AuthConfirmPasswordResetCodeResponse;
+  'POST /api/auth/driver/password/forgot': AuthForgotDriverPasswordResponse;
+  'POST /api/auth/driver/password/reset': AuthResetDriverPasswordResponse;
   'GET /api/auth/me': AuthMeResponse;
   'GET /api/carrier': CarrierGetResponse;
   'PATCH /api/carrier': CarrierUpdateResponse;
   'GET /api/carrier/transfer-config': CarrierGetTransferConfigResponse;
+  'GET /api/audit-log': AuditListResponse;
   'GET /api/attachments/{id}/presign': AttachmentsPresignResponse;
   'GET /api/roles': RolesListResponse;
   'POST /api/roles': RolesCreateResponse;
@@ -2530,6 +3746,8 @@ export interface ApiOperations {
   'PATCH /api/users/{id}': UsersUpdateResponse;
   'DELETE /api/users/{id}': UsersRemoveResponse;
   'POST /api/users/{id}/resend-invite': UsersResendInviteResponse;
+  'POST /api/users/{id}/email-change/resend': UsersResendEmailChangeResponse;
+  'DELETE /api/users/{id}/email-change': UsersCancelEmailChangeResponse;
   'GET /api/me/profile': MeProfileResponse;
   'PATCH /api/me/profile': MeUpdateProfileResponse;
   'GET /api/me/sessions': MeSessionsResponse;
@@ -2539,7 +3757,8 @@ export interface ApiOperations {
   'DELETE /api/me/avatar': MeDeleteAvatarResponse;
   'GET /api/me/preferences': MeGetPreferencesResponse;
   'PUT /api/me/preferences': MeUpdatePreferencesResponse;
-  'GET /api/audit-log': AuditListResponse;
+  'POST /api/auth/email/verify': UserEmailVerifyResponse;
+  'POST /api/auth/email/cancel': UserEmailCancelResponse;
   'GET /api/api-keys': ApiKeysListResponse;
   'POST /api/api-keys': ApiKeysCreateResponse;
   'PATCH /api/api-keys/{id}/scopes': ApiKeysUpdateScopesResponse;
@@ -2549,21 +3768,24 @@ export interface ApiOperations {
   'GET /api/drivers/export': DriversExportResponse;
   'GET /api/drivers/roster': DriversRosterResponse;
   'GET /api/drivers/{id}/hos': DriversHosResponse;
+  'POST /api/drivers/{id}/hos/adverse-driving': DriversInvokeAdverseDrivingResponse;
   'GET /api/drivers/{id}': DriversGetResponse;
   'PATCH /api/drivers/{id}': DriversUpdateResponse;
   'DELETE /api/drivers/{id}': DriversRemoveResponse;
   'POST /api/drivers/import': DriversImportResponse;
+  'POST /api/drivers/{id}/email-change/resend': DriversResendEmailChangeResponse;
+  'DELETE /api/drivers/{id}/email-change': DriversCancelEmailChangeResponse;
   'POST /api/drivers/{id}/reset-password': DriversResetPasswordResponse;
   'POST /api/drivers/{id}/send-verification': DriversSendVerificationResponse;
   'POST /api/drivers/{id}/verify-email': DriversVerifyEmailResponse;
   'GET /api/drivers/{id}/documents': DriversListDocumentsResponse;
   'POST /api/drivers/{id}/documents': DriversCreateDocumentResponse;
   'DELETE /api/drivers/{id}/documents/{docId}': DriversRemoveDocumentResponse;
-  'GET /api/transfers': TransfersListResponse;
-  'POST /api/transfers': TransfersCreateResponse;
-  'GET /api/transfers/{id}': TransfersGetResponse;
-  'GET /api/mobile/transfers': MobileTransfersListResponse;
-  'POST /api/mobile/transfers': MobileTransfersCreateResponse;
+  'POST /api/auth/driver/email/confirm': DriverEmailConfirmResponse;
+  'POST /api/auth/driver/email/verify': DriverEmailVerifyResponse;
+  'POST /api/auth/driver/email/cancel': DriverEmailCancelResponse;
+  'GET /api/violations': ViolationsListResponse;
+  'POST /api/violations/{id}/resolve': ViolationsResolveResponse;
   'GET /api/vehicles': VehiclesListResponse;
   'POST /api/vehicles': VehiclesCreateResponse;
   'GET /api/vehicles/export': VehiclesExportResponse;
@@ -2608,27 +3830,44 @@ export interface ApiOperations {
   'GET /api/integrations/{provider}': IntegrationsGetResponse;
   'PUT /api/integrations/{provider}': IntegrationsUpsertResponse;
   'DELETE /api/integrations/{provider}': IntegrationsDisconnectResponse;
+  'GET /api/mobile/app-config': MobileAppConfigAppConfigResponse;
+  'GET /api/mobile/legal/{kind}': MobileAppConfigLegalResponse;
   'GET /api/mobile/bootstrap': MobileBootstrapGetResponse;
   'POST /api/mobile/sync': MobileSyncSyncResponse;
   'POST /api/mobile/duty-status': MobileDutyStatusChangeResponse;
   'POST /api/mobile/signature': MobileDvirUploadSignatureResponse;
   'POST /api/mobile/dvir': MobileDvirSubmitResponse;
   'GET /api/mobile/available-vehicles': MobileVehicleListResponse;
+  'POST /api/mobile/release-vehicle': MobileVehicleReleaseResponse;
   'POST /api/mobile/select-vehicle': MobileVehicleSelectResponse;
+  'GET /api/mobile/co-driver': MobileCoDriverCurrentResponse;
   'POST /api/mobile/co-driver/switch': MobileCoDriverSwitchResponse;
   'POST /api/mobile/co-driver/leave': MobileCoDriverLeaveResponse;
   'GET /api/mobile/trip': MobileTripGetResponse;
   'PATCH /api/mobile/trip': MobileTripPatchResponse;
+  'GET /api/mobile/trailers': MobileTrailersListResponse;
   'GET /api/mobile/dvirs': MobileDvirHistoryListResponse;
   'GET /api/mobile/dvirs/{id}': MobileDvirHistoryGetResponse;
+  'GET /api/mobile/defect-catalog': MobileCatalogDefectCatalogResponse;
+  'GET /api/mobile/saved-signature': MobileCatalogGetResponse;
+  'PUT /api/mobile/saved-signature': MobileCatalogPutResponse;
+  'DELETE /api/mobile/saved-signature': MobileCatalogRemoveResponse;
   'GET /api/mobile/contacts': MobileContactsListResponse;
   'POST /api/mobile/push-tokens': PushTokensRegisterResponse;
   'DELETE /api/mobile/push-tokens/{token}': PushTokensRemoveResponse;
   'GET /api/mobile/device-health': DeviceHealthGetResponse;
   'GET /api/mobile/conversations': MobileMessagingListConversationsResponse;
+  'POST /api/mobile/conversations': MobileMessagingStartConversationResponse;
   'GET /api/mobile/conversations/{id}/messages': MobileMessagingListMessagesResponse;
   'POST /api/mobile/conversations/{id}/messages': MobileMessagingSendMessageResponse;
   'POST /api/mobile/conversations/{id}/read': MobileMessagingMarkReadResponse;
+  'GET /api/mobile/attachments/{id}/presign': MobileAttachmentsPresignResponse;
+  'GET /api/mobile/maintenance': MobileMaintenanceListResponse;
+  'GET /api/mobile/maintenance/{id}': MobileMaintenanceGetResponse;
+  'POST /api/mobile/maintenance/{id}/submit': MobileMaintenanceSubmitResponse;
+  'POST /api/mobile/device/mac': MobileDeviceReportMacResponse;
+  'GET /api/mobile/device-config': MobileDeviceConfigConfigResponse;
+  'POST /api/mobile/virtual-devices': MobileVirtualDeviceRegisterResponse;
   'POST /api/logs/edit-requests/{id}/accept': LogsAcceptResponse;
   'POST /api/logs/edit-requests/{id}/reject': LogsRejectResponse;
   'GET /api/logs/{driverId}': LogsGetDayResponse;
@@ -2641,21 +3880,26 @@ export interface ApiOperations {
   'POST /api/mobile/log-entries': MobileLogsCreateEntryResponse;
   'POST /api/mobile/certify': MobileLogsCertifyResponse;
   'GET /api/mobile/log-edit-requests': MobileLogsListEditRequestsResponse;
+  'GET /api/mobile/certification-status': MobileLogsCertificationStatusResponse;
   'GET /api/mobile/logs': MobileLogsGetDayResponse;
   'POST /api/ingest/events': IngestEventsResponse;
   'POST /api/ingest/telemetry': IngestTelemetryResponse;
+  'POST /api/ingest/device-events': IngestDeviceEventsUploadResponse;
   'POST /api/ingest/ble-state': IngestBleStateResponse;
   'POST /api/ingest/device-status': IngestDeviceStatusResponse;
   'GET /api/vehicles/{id}/dtc': DtcListResponse;
   'GET /api/conversations': MessagingListConversationsResponse;
   'POST /api/conversations': MessagingCreateConversationResponse;
+  'POST /api/conversations/attachments': MessagingUploadAttachmentResponse;
   'GET /api/conversations/{id}/messages': MessagingListMessagesResponse;
   'POST /api/conversations/{id}/messages': MessagingSendMessageResponse;
+  'POST /api/conversations/{id}/messages/audio': MessagingSendAudioMessageResponse;
   'POST /api/conversations/{id}/read': MessagingMarkReadResponse;
   'POST /api/messages/broadcast': MessagingBroadcastResponse;
   'GET /api/devices': DevicesListResponse;
   'POST /api/devices': DevicesCreateResponse;
   'GET /api/devices/export': DevicesExportResponse;
+  'GET /api/devices/counts': DevicesCountsResponse;
   'GET /api/devices/{id}': DevicesGetResponse;
   'PATCH /api/devices/{id}': DevicesUpdateResponse;
   'DELETE /api/devices/{id}': DevicesRemoveResponse;
@@ -2675,8 +3919,11 @@ export interface ApiOperations {
   'POST /api/unidentified/{id}/assign': UnidentifiedAssignResponse;
   'POST /api/unidentified/{id}/annotate': UnidentifiedAnnotateResponse;
   'POST /api/unidentified/{id}/reject': UnidentifiedRejectResponse;
-  'GET /api/violations': ViolationsListResponse;
-  'POST /api/violations/{id}/resolve': ViolationsResolveResponse;
+  'GET /api/transfers': TransfersListResponse;
+  'POST /api/transfers': TransfersCreateResponse;
+  'GET /api/transfers/{id}': TransfersGetResponse;
+  'GET /api/mobile/transfers': MobileTransfersListResponse;
+  'POST /api/mobile/transfers': MobileTransfersCreateResponse;
   'POST /api/mobile/hos-state': HosStateHosStateSubmitResponse;
   'GET /api/dvir': DvirAdminListResponse;
   'GET /api/dvir/compliance': DvirAdminComplianceResponse;
@@ -2710,6 +3957,7 @@ export interface ApiOperations {
   'POST /api/mobile/feedback': MobileSupportCreateFeedbackResponse;
   'GET /api/mobile/support/tickets': MobileSupportListOwnTicketsResponse;
   'POST /api/mobile/support/tickets': MobileSupportCreateTicketResponse;
+  'GET /api/mobile/support/tickets/{id}': MobileSupportGetOwnTicketResponse;
   'GET /api/trips': TripsListResponse;
   'POST /api/trips': TripsCreateResponse;
   'GET /api/trips/unassigned-loads': TripsUnassignedResponse;

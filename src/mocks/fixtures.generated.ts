@@ -81,9 +81,6 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
   'POST /api/auth/driver/password/reset': {
     "success": true
   },
-  'POST /api/auth/email/verify': {
-    "success": true
-  },
   'GET /api/auth/me': {
     "id": "drv_1",
     "type": "driver",
@@ -97,7 +94,12 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "name": "Acme Trucking",
     "dotNumber": "1234567",
     "eldIdentifier": "OBK001",
-    "erodsMode": "TEST"
+    "erodsMode": "TEST",
+    "virtualEldEnabled": false,
+    "virtualEldAvailable": true,
+    "virtualEldUpdatedAt": null,
+    "virtualEldUpdatedById": null,
+    "virtualEldUpdatedBy": null
   },
   'PATCH /api/carrier': {
     "id": "carrier",
@@ -106,13 +108,35 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "timezone": "America/New_York",
     "eldIdentifier": "OBK001",
     "eldRegistrationId": null,
-    "erodsMode": "TEST"
+    "erodsMode": "TEST",
+    "virtualEldEnabled": true,
+    "virtualEldAvailable": true,
+    "virtualEldUpdatedAt": "2026-10-12T09:00:00.000Z",
+    "virtualEldUpdatedById": "usr_1",
+    "virtualEldUpdatedBy": {
+      "id": "usr_1",
+      "name": "Jane Admin"
+    }
   },
   'GET /api/carrier/transfer-config': {
     "timezone": "America/New_York",
     "eldIdentifier": "OBK001",
     "eldRegistrationId": null,
     "erodsMode": "TEST"
+  },
+  'GET /api/audit-log': {
+    "items": [
+      {
+        "id": "42",
+        "actorType": "USER",
+        "actorName": "Sarah Chen",
+        "actorEmail": "sarah.chen@universal-logistics.com",
+        "action": "UPDATE",
+        "objectType": "Role",
+        "objectId": "role_1"
+      }
+    ],
+    "nextCursor": null
   },
   'GET /api/attachments/{id}/presign': {
     "url": "https://minio.internal/onebook/dvir/photo.jpg?X-Amz-Signature=...",
@@ -198,9 +222,15 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "firstName": "Dana",
     "lastName": "Ford",
     "status": "ACTIVE",
+    "email": "dana.ford@example.com",
+    "pendingEmail": "dana@new.example.com",
     "role": {
       "key": "DISPATCHER",
       "name": "Dispatcher"
+    },
+    "emailVerification": {
+      "pendingEmail": "dana@new.example.com",
+      "emailDelivered": true
     }
   },
   'DELETE /api/users/{id}': {
@@ -208,6 +238,16 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
   },
   'POST /api/users/{id}/resend-invite': {
     "emailDelivered": true
+  },
+  'POST /api/users/{id}/email-change/resend': {
+    "pendingEmail": "new@example.com",
+    "emailedTo": "new@example.com",
+    "emailDelivered": true
+  },
+  'DELETE /api/users/{id}/email-change': {
+    "id": "usr_3",
+    "email": "dana.ford@example.com",
+    "pendingEmail": null
   },
   'GET /api/me/profile': {
     "id": "usr_1",
@@ -265,19 +305,14 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "dateFormat": "MMM D, YYYY",
     "distanceUnit": "MILES"
   },
-  'GET /api/audit-log': {
-    "items": [
-      {
-        "id": "42",
-        "actorType": "USER",
-        "actorName": "Sarah Chen",
-        "actorEmail": "sarah.chen@universal-logistics.com",
-        "action": "UPDATE",
-        "objectType": "Role",
-        "objectId": "role_1"
-      }
-    ],
-    "nextCursor": null
+  'POST /api/auth/email/verify': {
+    "success": true,
+    "email": "new@example.com",
+    "alreadyVerified": false
+  },
+  'POST /api/auth/email/cancel': {
+    "success": true,
+    "result": "CANCELLED"
   },
   'GET /api/api-keys': [
     {
@@ -371,7 +406,9 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
           "cycleRemainingSec": 252000
         },
         "openViolations": 0,
-        "emailVerified": null
+        "emailVerified": null,
+        "isStale": false,
+        "staleSince": null
       }
     ],
     "page": 1,
@@ -396,7 +433,18 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "dutyStatus": "DRIVING",
     "statusSince": "2026-09-12T18:00:00.000Z",
     "computedAt": "2026-09-12T20:00:00.000Z",
+    "isStale": false,
+    "staleSince": null,
     "hosRuleset": "US_70_8_PROPERTY"
+  },
+  'POST /api/drivers/{id}/hos/adverse-driving': {
+    "id": "adv_1",
+    "driverId": "drv_1",
+    "date": "2026-09-12",
+    "annotation": "Unforeseen snow closure on I-80, dispatcher confirmed",
+    "invokedById": "usr_1",
+    "invokedByType": "user",
+    "createdAt": "2026-09-12T18:00:00.000Z"
   },
   'GET /api/drivers/{id}': {
     "id": "drv_1",
@@ -415,7 +463,12 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "id": "drv_1",
     "username": "jsmith",
     "status": "ACTIVE",
-    "allowPersonalConveyance": false
+    "email": "old@example.com",
+    "pendingEmail": "new@example.com",
+    "emailVerification": {
+      "pendingEmail": "new@example.com",
+      "emailDelivered": true
+    }
   },
   'DELETE /api/drivers/{id}': {
     "id": "drv_1",
@@ -426,6 +479,16 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "imported": 3,
     "updated": 1,
     "failed": []
+  },
+  'POST /api/drivers/{id}/email-change/resend': {
+    "pendingEmail": "new@example.com",
+    "emailedTo": "new@example.com",
+    "emailDelivered": true
+  },
+  'DELETE /api/drivers/{id}/email-change': {
+    "id": "drv_1",
+    "email": "old@example.com",
+    "pendingEmail": null
   },
   'POST /api/drivers/{id}/reset-password': {
     "emailedTo": "jsmith@example.com"
@@ -460,97 +523,53 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
   'DELETE /api/drivers/{id}/documents/{docId}': {
     "deleted": true
   },
-  'GET /api/transfers': {
+  'POST /api/auth/driver/email/confirm': {
+    "success": true,
+    "email": "new@example.com"
+  },
+  'POST /api/auth/driver/email/verify': {
+    "success": true,
+    "email": "jsmith@example.com",
+    "alreadyVerified": false
+  },
+  'POST /api/auth/driver/email/cancel': {
+    "success": true,
+    "result": "CANCELLED"
+  },
+  'GET /api/violations': {
     "items": [
       {
-        "id": "trf_1",
-        "sentAt": "2026-09-02T13:14:00.000Z",
-        "method": "WEB_SERVICES",
-        "comment": "TERMINAL AUDIT 2025-09-02",
-        "periodFrom": "2026-07-01",
-        "periodTo": "2026-08-31",
-        "status": "ACCEPTED",
-        "sentById": "usr_1",
-        "fileName": "SMITH38018.csv"
+        "id": "vio_1",
+        "driverId": "drv_1",
+        "dailyLogId": "dl_1",
+        "logDate": "2026-09-14",
+        "type": "DRIVING_11",
+        "occurredAt": "2026-09-14T14:26:00.000Z",
+        "exceededBySec": 1560,
+        "detail": "Driving 11h26m",
+        "status": "OPEN",
+        "resolvedAt": null,
+        "resolvedById": null,
+        "resolutionNote": null,
+        "severity": "VIOLATION",
+        "driverName": "John Smith",
+        "vehicleId": "veh_1",
+        "unitNumber": "101",
+        "event": "11-hour driving limit exceeded",
+        "locationLabel": "1.04 mi W of Harrisburg, OH",
+        "date": "2026-09-14"
       }
     ],
+    "total": 1,
     "page": 1,
     "limit": 25,
-    "total": 1,
     "totalPages": 1
   },
-  'POST /api/transfers': {
-    "transfer": {
-      "id": "trf_1",
-      "fileName": "SMITH38018.csv",
-      "status": "QUEUED",
-      "erodsMode": "TEST",
-      "fileSizeBytes": 2048
-    },
-    "warnings": [
-      {
-        "code": "ERODS_TEST_MODE",
-        "level": "warning",
-        "message": "eRODS is in TEST mode …"
-      }
-    ],
-    "counts": {
-      "header": 9,
-      "events": 42
-    }
-  },
-  'GET /api/transfers/{id}': {
-    "id": "trf_1",
-    "method": "WEB_SERVICES",
-    "status": "ACCEPTED",
-    "erodsMode": "TEST",
-    "comment": "ROADSIDE INSPECTION 2026-09-10",
-    "fileName": "SMITH38018.csv",
-    "fileSizeBytes": 2048,
-    "counts": {
-      "header": 9,
-      "events": 42
-    },
-    "sentAt": "2026-09-11T15:41:00.000Z"
-  },
-  'GET /api/mobile/transfers': {
-    "items": [
-      {
-        "id": "trf_1",
-        "method": "WEB_SERVICES",
-        "status": "TEST_ONLY",
-        "erodsMode": "TEST",
-        "referenceId": "ERODS-TEST-26-0910-4821",
-        "sentAt": "2026-09-10T15:44:02.000Z",
-        "createdAt": "2026-09-10T15:44:00.000Z",
-        "fileName": "SMITH38018.csv",
-        "outputFileComment": "ROADSIDE INSPECTION 2026-09-10",
-        "rangeStart": "2026-09-03T00:00:00.000Z",
-        "rangeEnd": "2026-09-10T00:00:00.000Z"
-      }
-    ],
-    "total": 1,
-    "limit": 5
-  },
-  'POST /api/mobile/transfers': {
-    "id": "trf_1",
-    "method": "WEB_SERVICES",
-    "status": "QUEUED",
-    "erodsMode": "TEST",
-    "referenceId": null,
-    "sentAt": null,
-    "createdAt": "2026-09-10T15:44:02.000Z",
-    "fileName": "SMITH38018.csv",
-    "outputFileComment": "ROADSIDE INSPECTION 2026-09-10",
-    "rangeStart": "2026-09-03T00:00:00.000Z",
-    "rangeEnd": "2026-09-10T00:00:00.000Z",
-    "warnings": [
-      "ERODS_TEST_MODE"
-    ],
-    "counts": {
-      "header": 9,
-      "events": 42
-    }
+  'POST /api/violations/{id}/resolve': {
+    "id": "vio_1",
+    "status": "RESOLVED",
+    "resolvedAt": "2026-09-14T15:41:00.000Z",
+    "resolutionNote": "Adverse weather, dispatcher confirmed"
   },
   'GET /api/vehicles': {
     "items": [
@@ -848,7 +867,18 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "deleted": true
   },
   'POST /api/alert-rules/{id}/test': {
-    "triggered": true
+    "triggered": true,
+    "channels": [
+      {
+        "channel": "IN_APP",
+        "status": "SENT"
+      },
+      {
+        "channel": "EMAIL",
+        "status": "FAILED",
+        "reason": "NO_MAIL_TRANSPORT"
+      }
+    ]
   },
   'GET /api/notifications': {
     "items": [
@@ -968,7 +998,10 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "minPt30Firmware": null,
     "recommendedPt30Firmware": null,
     "updateRequired": false,
-    "updateAvailable": true
+    "updateAvailable": true,
+    "virtualEld": {
+      "enabled": false
+    }
   },
   'GET /api/mobile/legal/{kind}': {
     "version": "2026-10",
@@ -1096,7 +1129,9 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
       "syncBacklogWarnDays": 30,
       "syncBacklogWarnBytes": 209715200
     },
-    "appUpdate": null
+    "appUpdate": null,
+    "pendingEditRequestCount": 1,
+    "pendingUnidentifiedCount": 0
   },
   'POST /api/mobile/sync': {
     "accepted": [
@@ -1312,7 +1347,12 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
       "defectCount": 1,
       "repairStatus": "PENDING",
       "trailerNumber": "X53-1188",
-      "odometerMi": 84213
+      "odometerMi": 84213,
+      "location": {
+        "lat": 41.75,
+        "lon": -87.98,
+        "name": "2mi ESE IL Darien"
+      }
     }
   ],
   'GET /api/mobile/dvirs/{id}': {
@@ -1544,6 +1584,10 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
   'POST /api/mobile/conversations/{id}/read': {
     "messagesMarked": 3
   },
+  'GET /api/mobile/attachments/{id}/presign': {
+    "url": "https://eldapi.stackyard.uz/onebook-eld/chat/carrier/drv_1/att.m4a?X-Amz-Signature=...",
+    "expiresAt": "2026-10-11T15:15:00.000Z"
+  },
   'GET /api/mobile/maintenance': [
     {
       "id": "3f2c0a7e-0000-4000-8000-000000000001",
@@ -1616,19 +1660,39 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "shareDiagnostics": true,
     "configVersion": "3f9a1c0b7d2e"
   },
+  'POST /api/mobile/virtual-devices': {
+    "id": "0b6f1c2e-0000-4000-8000-000000000199",
+    "serial": "VPT30_A1B2",
+    "model": "PT30",
+    "isVirtual": true,
+    "firmware": "V1.0.0",
+    "vehicleId": "0b6f1c2e-0000-4000-8000-000000000201",
+    "status": "ASSIGNED",
+    "bleState": "DISCONNECTED",
+    "bleMacAddress": null,
+    "reportedVin": "1FUJGLDR7CLBP8834",
+    "pairedAt": "2026-10-12T09:00:00.000Z",
+    "createdAt": "2026-10-12T09:00:00.000Z",
+    "firmwareOutdated": false,
+    "systemVars": {
+      "PERIODIC_EVENT_GAP": 30,
+      "PERIODIC_EVENT_GAP_NOBLE": 30,
+      "EVENTS_STORED": 1,
+      "DRIVING_ACCL": 0,
+      "DRIVING_BRAKING": 0,
+      "DRIVING_CORNERING": 0,
+      "HSI_MODE": 1
+    }
+  },
   'POST /api/logs/edit-requests/{id}/accept': {
-    "id": "edt_1",
+    "id": "9120",
     "status": "ACCEPTED",
-    "resolvedAt": "2026-09-11T15:41:00.000Z",
-    "activeEventId": "evt_9001",
-    "supersededEventId": "evt_8801",
-    "recertificationRequired": true
+    "applied": true
   },
   'POST /api/logs/edit-requests/{id}/reject': {
-    "id": "edt_1",
+    "id": "9120",
     "status": "REJECTED",
-    "resolvedAt": "2026-09-11T15:41:00.000Z",
-    "driverComment": "I was off duty, not on duty."
+    "applied": false
   },
   'GET /api/logs/{driverId}': {
     "driverId": "drv_1",
@@ -1784,7 +1848,44 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
         "annotation": "Forgot to switch to On duty while loading",
         "requestedById": "usr_1",
         "requestedAt": "2026-09-11T14:00:00.000Z",
-        "resolvedAt": null
+        "resolvedAt": null,
+        "date": "2026-09-10",
+        "original": {
+          "status": "OFF",
+          "start": "2026-09-10T18:26:58.000Z",
+          "end": "2026-09-10T19:30:00.000Z",
+          "location": "3mi W OH Columbus"
+        },
+        "proposedGraph": [
+          {
+            "status": "OFF",
+            "effective": "OFF",
+            "special": "NONE",
+            "startAt": "2026-09-10T04:00:00.000Z",
+            "endAt": "2026-09-10T18:26:58.000Z",
+            "durationSec": 52018
+          },
+          {
+            "status": "ON",
+            "effective": "ON",
+            "special": "NONE",
+            "startAt": "2026-09-10T18:26:58.000Z",
+            "endAt": "2026-09-10T19:30:00.000Z",
+            "durationSec": 3782
+          },
+          {
+            "status": "OFF",
+            "effective": "OFF",
+            "special": "NONE",
+            "startAt": "2026-09-10T19:30:00.000Z",
+            "endAt": "2026-09-11T04:00:00.000Z",
+            "durationSec": 30600
+          }
+        ],
+        "requestedBy": {
+          "id": "usr_1",
+          "name": "Jane Dispatcher"
+        }
       }
     ]
   },
@@ -2016,11 +2117,21 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "id": "cnv_2",
     "type": "DIRECT"
   },
+  'POST /api/conversations/attachments': {
+    "id": "att_1",
+    "attachmentId": "att_1",
+    "kind": "CHAT_AUDIO",
+    "mimeType": "audio/mp4",
+    "sizeBytes": 48211,
+    "durationSec": 12
+  },
   'GET /api/conversations/{id}/messages': {
     "items": [
       {
         "id": "msg_1",
         "body": "On schedule.",
+        "type": "TEXT",
+        "attachment": null,
         "sentAt": "2026-09-11T15:00:00.000Z"
       }
     ],
@@ -2033,6 +2144,20 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "id": "msg_2",
     "body": "Confirmed.",
     "sentAt": "2026-09-11T15:05:00.000Z"
+  },
+  'POST /api/conversations/{id}/messages/audio': {
+    "id": "msg_3",
+    "type": "AUDIO",
+    "body": "Voice message",
+    "attachmentId": "att_9",
+    "sentAt": "2026-10-13T10:00:00.000Z",
+    "attachment": {
+      "id": "att_9",
+      "kind": "AUDIO",
+      "mimeType": "audio/webm",
+      "sizeBytes": 48211,
+      "durationMs": 5300
+    }
   },
   'POST /api/conversations/{id}/read': {
     "conversationId": "cnv_1",
@@ -2054,6 +2179,7 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
         "id": "dev_1",
         "serial": "PT30_A86E",
         "model": "PT30",
+        "isVirtual": false,
         "bleState": "CONNECTED",
         "firmware": "L108",
         "firmwareOutdated": false,
@@ -2106,6 +2232,7 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "devices": [
       {
         "serial": "PT30_A86E",
+        "isVirtual": false,
         "model": "PT30",
         "bleMac": "A4:C1:38:12:9F:6E",
         "firmwareVersion": "L108"
@@ -2122,6 +2249,7 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "id": "dev_1",
     "serial": "PT30_A86E",
     "model": "PT30",
+    "isVirtual": false,
     "status": "ASSIGNED",
     "vehicleId": "veh_1",
     "bleState": "CONNECTED",
@@ -2225,25 +2353,49 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     "endedAt": "2026-09-24T12:00:00.000Z"
   },
   'POST /api/unidentified/{id}/confirm': {
-    "id": "seg_1",
+    "id": "6f1c2a0e-3d1b-4c55-9a51-2f0f6b1d9e10",
+    "vehicleId": "b3e0c1d2-8a4f-4f0e-9d7c-1a2b3c4d5e6f",
+    "startAt": "2026-09-10T12:30:00.000Z",
+    "endAt": "2026-09-10T13:00:00.000Z",
+    "durationSec": 1800,
+    "distanceMi": 21,
     "status": "ASSIGNED",
-    "driverId": "drv_1",
-    "recordOrigin": 1,
-    "eventCount": 4
+    "assignedDriverId": "drv_1",
+    "assignedById": "usr_1",
+    "assignedAt": "2026-09-11T15:41:00.000Z",
+    "annotation": "Unidentified driving assigned to johnsmith",
+    "confirmationRequestedAt": null,
+    "fromStoredEvents": true,
+    "eventIds": [
+      "7701",
+      "7702"
+    ]
   },
   'GET /api/unidentified/confirmation-requests': {
     "items": [
       {
-        "id": "seg_1",
-        "vehicleId": "veh_1",
-        "status": "PENDING_CONFIRMATION",
-        "assignedDriverId": "drv_1",
-        "assignedById": "usr_1",
-        "confirmationRequestedAt": "2026-09-11T15:41:00.000Z",
+        "id": "6f1c2a0e-3d1b-4c55-9a51-2f0f6b1d9e10",
+        "vehicleId": "b3e0c1d2-8a4f-4f0e-9d7c-1a2b3c4d5e6f",
         "startAt": "2026-09-10T12:30:00.000Z",
         "endAt": "2026-09-10T13:00:00.000Z",
         "durationSec": 1800,
-        "distanceMi": 21
+        "distanceMi": 21,
+        "status": "PENDING_CONFIRMATION",
+        "assignedDriverId": "drv_1",
+        "assignedById": "usr_1",
+        "assignedAt": null,
+        "annotation": null,
+        "confirmationRequestedAt": "2026-09-11T15:41:00.000Z",
+        "fromStoredEvents": true,
+        "eventIds": [
+          "7701",
+          "7702"
+        ],
+        "startLocation": "3mi W OH Columbus",
+        "endLocation": "1mi N OH Hilliard",
+        "unitNumber": "4821",
+        "startOdometerMi": 120345,
+        "endOdometerMi": 120366
       }
     ]
   },
@@ -2280,61 +2432,155 @@ export const OPENAPI_EXAMPLES: Record<string, unknown> = {
     ]
   },
   'POST /api/unidentified/{id}/assign': {
-    "id": "seg_1",
+    "id": "6f1c2a0e-3d1b-4c55-9a51-2f0f6b1d9e10",
+    "vehicleId": "b3e0c1d2-8a4f-4f0e-9d7c-1a2b3c4d5e6f",
+    "startAt": "2026-09-10T12:30:00.000Z",
+    "endAt": "2026-09-10T13:00:00.000Z",
+    "durationSec": 1800,
+    "distanceMi": 21,
     "status": "ASSIGNED",
-    "driverId": "drv_1",
+    "assignedDriverId": "drv_1",
     "assignedById": "usr_1",
     "assignedAt": "2026-09-11T15:41:00.000Z",
-    "recordOrigin": 1,
-    "eventCount": 4
+    "annotation": "Unidentified driving assigned to johnsmith",
+    "confirmationRequestedAt": null,
+    "fromStoredEvents": true,
+    "eventIds": [
+      "7701",
+      "7702"
+    ]
   },
   'POST /api/unidentified/{id}/annotate': {
-    "id": "seg_1",
+    "id": "6f1c2a0e-3d1b-4c55-9a51-2f0f6b1d9e10",
+    "vehicleId": "b3e0c1d2-8a4f-4f0e-9d7c-1a2b3c4d5e6f",
+    "startAt": "2026-09-10T12:30:00.000Z",
+    "endAt": "2026-09-10T13:00:00.000Z",
+    "durationSec": 1800,
+    "distanceMi": 21,
     "status": "ANNOTATED",
+    "assignedDriverId": null,
+    "assignedById": null,
+    "assignedAt": null,
     "annotation": "Yard move by shop tech",
-    "annotatedById": "usr_1"
+    "confirmationRequestedAt": null,
+    "fromStoredEvents": true,
+    "eventIds": [
+      "7701",
+      "7702"
+    ]
   },
   'POST /api/unidentified/{id}/reject': {
-    "id": "seg_1",
+    "id": "6f1c2a0e-3d1b-4c55-9a51-2f0f6b1d9e10",
+    "vehicleId": "b3e0c1d2-8a4f-4f0e-9d7c-1a2b3c4d5e6f",
+    "startAt": "2026-09-10T12:30:00.000Z",
+    "endAt": "2026-09-10T13:00:00.000Z",
+    "durationSec": 1800,
+    "distanceMi": 21,
     "status": "REJECTED",
-    "driverId": null,
-    "recordOrigin": 4,
-    "eventCount": 4
+    "assignedDriverId": null,
+    "assignedById": "usr_1",
+    "assignedAt": "2026-09-11T15:41:00.000Z",
+    "annotation": "Not this driver",
+    "confirmationRequestedAt": null,
+    "fromStoredEvents": true,
+    "eventIds": [
+      "7701",
+      "7702"
+    ]
   },
-  'GET /api/violations': {
+  'GET /api/transfers': {
     "items": [
       {
-        "id": "vio_1",
-        "driverId": "drv_1",
-        "dailyLogId": "dl_1",
-        "logDate": "2026-09-14",
-        "type": "DRIVING_11",
-        "occurredAt": "2026-09-14T14:26:00.000Z",
-        "exceededBySec": 1560,
-        "detail": "Driving 11h26m",
-        "status": "OPEN",
-        "resolvedAt": null,
-        "resolvedById": null,
-        "resolutionNote": null,
-        "severity": "VIOLATION",
-        "driverName": "John Smith",
-        "vehicleId": "veh_1",
-        "unitNumber": "101",
-        "event": "11-hour driving limit exceeded",
-        "locationLabel": "1.04 mi W of Harrisburg, OH",
-        "date": "2026-09-14"
+        "id": "trf_1",
+        "sentAt": "2026-09-02T13:14:00.000Z",
+        "method": "WEB_SERVICES",
+        "comment": "TERMINAL AUDIT 2025-09-02",
+        "periodFrom": "2026-07-01",
+        "periodTo": "2026-08-31",
+        "status": "ACCEPTED",
+        "sentById": "usr_1",
+        "fileName": "SMITH38018.csv"
+      }
+    ],
+    "page": 1,
+    "limit": 25,
+    "total": 1,
+    "totalPages": 1
+  },
+  'POST /api/transfers': {
+    "transfer": {
+      "id": "trf_1",
+      "fileName": "SMITH38018.csv",
+      "status": "QUEUED",
+      "erodsMode": "TEST",
+      "fileSizeBytes": 2048
+    },
+    "warnings": [
+      {
+        "code": "ERODS_TEST_MODE",
+        "level": "warning",
+        "message": "eRODS is in TEST mode …"
+      }
+    ],
+    "counts": {
+      "header": 9,
+      "events": 42
+    }
+  },
+  'GET /api/transfers/{id}': {
+    "id": "trf_1",
+    "method": "WEB_SERVICES",
+    "status": "ACCEPTED",
+    "erodsMode": "TEST",
+    "comment": "ROADSIDE INSPECTION 2026-09-10",
+    "fileName": "SMITH38018.csv",
+    "fileSizeBytes": 2048,
+    "counts": {
+      "header": 9,
+      "events": 42
+    },
+    "sentAt": "2026-09-11T15:41:00.000Z"
+  },
+  'GET /api/mobile/transfers': {
+    "items": [
+      {
+        "id": "trf_1",
+        "method": "WEB_SERVICES",
+        "status": "TEST_ONLY",
+        "erodsMode": "TEST",
+        "referenceId": "ERODS-TEST-26-0910-4821",
+        "sentAt": "2026-09-10T15:44:02.000Z",
+        "createdAt": "2026-09-10T15:44:00.000Z",
+        "fileName": "SMITH38018.csv",
+        "outputFileComment": "ROADSIDE INSPECTION 2026-09-10",
+        "rangeStart": "2026-09-03T00:00:00.000Z",
+        "rangeEnd": "2026-09-10T00:00:00.000Z"
       }
     ],
     "total": 1,
-    "page": 1,
-    "limit": 25,
-    "totalPages": 1
+    "limit": 5
   },
-  'POST /api/violations/{id}/resolve': {
-    "id": "vio_1",
-    "status": "RESOLVED",
-    "resolvedAt": "2026-09-14T15:41:00.000Z",
-    "resolutionNote": "Adverse weather, dispatcher confirmed"
+  'POST /api/mobile/transfers': {
+    "id": "trf_1",
+    "method": "WEB_SERVICES",
+    "status": "QUEUED",
+    "erodsMode": "TEST",
+    "referenceId": null,
+    "sentAt": null,
+    "createdAt": "2026-09-10T15:44:02.000Z",
+    "fileName": "SMITH38018.csv",
+    "outputFileComment": "ROADSIDE INSPECTION 2026-09-10",
+    "rangeStart": "2026-09-03T00:00:00.000Z",
+    "rangeEnd": "2026-09-10T00:00:00.000Z",
+    "warnings": [
+      "ERODS_TEST_MODE"
+    ],
+    "counts": {
+      "header": 9,
+      "events": 42
+    },
+    "clientId": "0b9d6f5e-0000-4000-8000-000000000002",
+    "requestedAt": "2026-09-10T15:40:00.000Z"
   },
   'POST /api/mobile/hos-state': {
     "hosEngineVersion": "1.0.3",
