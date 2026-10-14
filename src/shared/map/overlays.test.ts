@@ -2,7 +2,7 @@
 // stop dots + straight planned lines. Pure functions: no MapLibre, no DOM.
 import { describe, expect, it } from 'vitest';
 import type { Polygon, Position } from 'geojson';
-import { CIRCLE_STEPS, circleToPolygon, geofencesToGeoJSON, tripsToGeoJSON, type TripGeometrySource } from './overlays';
+import { CIRCLE_STEPS, circleToPolygon, geofencesToGeoJSON, tripsToGeoJSON, wrapLongitude, type TripGeometrySource } from './overlays';
 
 /** Great-circle distance in metres, to check the circle's radius independently. */
 function haversine([lon1, lat1]: Position, [lon2, lat2]: Position): number {
@@ -97,5 +97,18 @@ describe('tripsToGeoJSON', () => {
       trip({ stops: [{ sequence: 1, type: 'PICKUP', name: 'Yard', status: 'PENDING', latitude: null, longitude: null }] }),
     ]);
     expect(fc.features).toHaveLength(0);
+  });
+});
+
+describe('wrapLongitude (CODE-061)', () => {
+  it.each([
+    [-83, -83],
+    [277, -83],
+    [-443, -83],
+    [180, 180],
+    [-180, -180],
+    [540, 180],
+  ])('wrapLongitude(%d) -> %d', (input, expected) => {
+    expect(wrapLongitude(input)).toBe(expected);
   });
 });

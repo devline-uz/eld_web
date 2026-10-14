@@ -6,7 +6,6 @@ import { SeverityBadge } from '@/shared/ui/Badge';
 import { useToast } from '@/shared/ui/Toast';
 import {
   useResolveDefect,
-  useLinkDefectWorkOrder,
   useWorkOrdersList,
   type DefectResolutionType,
   type DefectTableRow,
@@ -14,17 +13,17 @@ import {
 import { ApiError, formErrorMessage } from '@/shared/api/errors';
 import { useCarrierTransferConfig } from '@/shared/api/reports';
 import { usePermission } from '@/shared/auth/usePermission';
-import { formatCarrier, timezoneAbbreviation } from '@/shared/format/datetime';
+import { dateOnlyToInstant, formatCarrier, timezoneAbbreviation, todayInTz } from '@/shared/format/datetime';
+import { useCarrierTimezone } from '@/shared/auth/useCarrierTimezone';
 import { blockCostKeys, getCostError, sanitizeCost } from '../lib/workOrderFieldGuards';
 import { formatEnumLabel } from '@/shared/format/enumLabel';
 
 /**
  * WB-137 — the `reported …` stamp is company context (§8.3), so it renders in `carrier.timezone`
  * through the shared en-US / 24-hour formatter, never the browser zone. `GET /carrier` sits behind
- * `carrierSettings`; without it the same Eastern fallback the reports use applies, and the zone
- * abbreviation is always printed so the reader knows which clock the time is on.
+ * `carrierSettings`; without it the carrier zone from `/auth/me` applies (`useCarrierTimezone`), and
+ * the zone abbreviation is always printed so the reader knows which clock the time is on.
  */
-const CARRIER_TZ_FALLBACK = 'America/New_York';
 
 type Resolution = DefectResolutionType;
 
@@ -61,9 +60,9 @@ export function ResolveDefectModal({ defect, onClose }: { defect: DefectTableRow
   const { toast } = useToast();
   const { can } = usePermission();
   const carrier = useCarrierTransferConfig(can('carrierSettings'));
-  const carrierTz = carrier.data?.timezone ?? CARRIER_TZ_FALLBACK;
+  const authCarrierTz = useCarrierTimezone();
+  const carrierTz = carrier.data?.timezone ?? authCarrierTz;
   const mutation = useResolveDefect(defect.id);
-  const linkWorkOrder = useLinkDefectWorkOrder(defect.id);
   const workOrders = useWorkOrdersList({ vehicleId: defect.vehicleId, status: 'OPEN', limit: 50 });
 
   const initialWorkOrderId = defect.workOrderId ?? '';
@@ -100,7 +99,7 @@ export function ResolveDefectModal({ defect, onClose }: { defect: DefectTableRow
     completedAt !== '' ||
     laborHours !== '' ||
     partsCostUsd !== '';
-  const isPending = mutation.isPending || linkWorkOrder.isPending;
+  const isPending = mutation.isPending;
 
   function submit() {
     // B-68 (shipped 2026-09-24, WD-121) — `resolutionType` carries the choice itself, so "No repair
@@ -112,25 +111,21 @@ export function ResolveDefectModal({ defect, onClose }: { defect: DefectTableRow
     setServerError(null);
     if (!valid) return;
 
-    const link =
-      workOrderId !== initialWorkOrderId
-        ? // `PATCH /defects/:id/work-order` is the real endpoint that carries the link — the
-          // resolve DTO has no `workOrderId`, so the select is applied through it first: if it
-          // fails nothing is resolved, and the banner says why.
-          linkWorkOrder.mutateAsync(workOrderId === '' ? null : workOrderId)
-        : Promise.resolve(null);
-
-    void link
-      .then(() =>
-        mutation.mutateAsync({
-          resolutionType,
-          resolutionNote,
-          correctedBy: correctedBy.trim() || undefined,
-          completedAt: completedAt ? new Date(completedAt).toISOString() : undefined,
-          laborHours: laborHours.trim() ? Number(laborHours) : undefined,
-          partsCostUsd: partsCostUsd.trim() ? Number(partsCostUsd) : undefined,
-        }),
-      )
+    // CODE-077 — the work-order choice travels IN the resolve request: the backend validates the
+    // link and applies it in the same write, so a refused resolve never leaves a link behind
+    // (it used to be `PATCH /defects/:id/work-order` first, then the resolve).
+    void mutation
+      .mutateAsync({
+        resolutionType,
+        resolutionNote,
+        correctedBy: correctedBy.trim() || undefined,
+        // CODE-038 — midnight of the picked day in the carrier zone: never ahead of the clock, so
+        // "today" is not refused as a future date east of UTC.
+        completedAt: dateOnlyToInstant(completedAt, carrierTz),
+        laborHours: laborHours.trim() ? Number(laborHours) : undefined,
+        partsCostUsd: partsCostUsd.trim() ? Number(partsCostUsd) : undefined,
+        ...(workOrderId !== initialWorkOrderId && { workOrderId: workOrderId === '' ? null : workOrderId }),
+      })
       .then(() => {
         toast({
           kind: 'success',
@@ -195,7 +190,12 @@ export function ResolveDefectModal({ defect, onClose }: { defect: DefectTableRow
         {defect.outOfService && (
           <p className="rounded-md bg-warning-soft p-3 text-body text-text">
             Unit {defect.vehicle?.unitNumber ?? ''} is out of service because of this defect. Marking it{' '}
-            {isDeferred ? 'deferred keeps the unit out of service' : 'resolved returns the unit to service unless another critical defect is still open'}
+            {/* QA CODE-008 — matches the backend: only a repair / "no repair needed" can release the
+                unit, and any other open, in-progress or deferred critical defect (or a work order
+                set to keep it out of service) still holds it. */}
+            {isDeferred
+              ? 'deferred keeps the unit out of service until the defect is repaired'
+              : 'resolved returns the unit to service unless another critical defect is still open or deferred, or a work order keeps it out of service'}
             .
           </p>
         )}
@@ -278,6 +278,7 @@ export function ResolveDefectModal({ defect, onClose }: { defect: DefectTableRow
             <input
               type="date"
               value={completedAt}
+              max={todayInTz(carrierTz)}
               onChange={(e) => {
                 setCompletedAt(e.target.value);
                 clearServerError('completedAt');

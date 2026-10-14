@@ -23,7 +23,8 @@ import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
 import { EMPTY_STATE_COPY, searchEmptyState, TOAST_COPY } from '@/shared/ui/copy';
 import { useToast } from '@/shared/ui/Toast';
 import { ApiError, formErrorMessage } from '@/shared/api/errors';
-import { formatLocal } from '@/shared/format/datetime';
+import { dateOnlyToInstant, formatCarrierDateTime, formatDateOnly, timezoneAbbreviation, todayInTz } from '@/shared/format/datetime';
+import { useCarrierTimezone } from '@/shared/auth/useCarrierTimezone';
 import { useNowTick } from '@/shared/format/useRelativeTime';
 import { formatMoney, formatOdometer } from '@/shared/format/numbers';
 import { orDash, orNone, orUnassigned } from '@/shared/format/empty';
@@ -114,6 +115,7 @@ function DvirStatusBadge({ row }: { row: DvirTableRow }) {
 }
 
 export default function DvirPage() {
+  const carrierTz = useCarrierTimezone();
   const { can } = usePermission();
   const [params, setParams] = useSearchParams();
   const canMaintenanceRead = can('maintenance', 'READ');
@@ -183,8 +185,12 @@ export default function DvirPage() {
   const matchesSearch = (unit: string | undefined, ...text: (string | null | undefined)[]) =>
     !needle || (unit ?? '').toLowerCase().includes(needle) || text.some((t) => (t ?? '').toLowerCase().includes(needle));
 
+  // CODE-075 — "oldest" is about OVERDUE services only, measured by how far past the due date
+  // they are; `Math.abs` over every row turned a DUE_SOON "in 5 d" into "oldest 5 d".
   const oldestOverdueDays = useMemo(() => {
-    const days = overdue.rows.map((s) => Math.abs(s.due.daysRemaining ?? 0)).filter((d) => d > 0);
+    const days = overdue.rows
+      .filter((s) => s.due.state === 'OVERDUE' && s.due.daysRemaining != null && s.due.daysRemaining < 0)
+      .map((s) => -(s.due.daysRemaining as number));
     return days.length ? Math.max(...days) : 0;
   }, [overdue.rows]);
   const nowTick = useNowTick();
@@ -320,7 +326,16 @@ export default function DvirPage() {
         </span>
         <span className="tabular-nums text-caption text-text-muted">
           <span className={isOverdue ? 'font-semibold text-danger' : undefined}>{dueLabel}</span> ·{' '}
-          {orDash(s.nextDueAt ?? s.nextDueMi, () => (s.nextDueAt ? formatLocal(s.nextDueAt, 'monthDay') : `${s.nextDueMi} mi`))}
+          {/* LIVE-028 — the second half names the interval the first half is about: "Overdue by
+              51,024 mi · Oct 23" read as overdue by a future date. A mileage overdue shows the
+              due odometer; otherwise the due date (or the due odometer when there is no date). */}
+          {orDash(s.nextDueAt ?? s.nextDueMi, () =>
+            s.nextDueMi != null && (!s.nextDueAt || (s.due.milesRemaining != null && s.due.milesRemaining <= 0))
+              ? `due at ${formatOdometer(s.nextDueMi)} mi`
+              : s.nextDueAt
+                ? `due ${formatDateOnly(s.nextDueAt, carrierTz, 'monthDay')}`
+                : '—',
+          )}
         </span>
         <ProgressBar ratio={ratio} tone={tone} thick label={`Unit ${s.vehicle?.unitNumber ?? '—'} ${s.name} — ${dueLabel}`} />
       </div>
@@ -429,32 +444,33 @@ export default function DvirPage() {
         <KpiRowSkeleton />
       ) : (
         <div className="grid grid-cols-1 gap-card-gap sm:grid-cols-2 xl:grid-cols-4">
+          {/* CODE-075 — a failed or forbidden source shows "—", never a reassuring 0. */}
           <KpiCard
             label="Open defects"
-            value={defects.total}
-            chip={defects.criticalCount > 0 ? { text: `${defects.criticalCount} critical`, tone: 'danger' } : undefined}
+            value={defects.isError ? '—' : defects.total}
+            chip={!defects.isError && defects.criticalCount > 0 ? { text: `${defects.criticalCount} critical`, tone: 'danger' } : undefined}
             icon={AlertTriangle}
             iconTone="danger"
           />
           <KpiCard
             label="Overdue services"
-            value={overdue.rows.filter((s) => s.due.state === 'OVERDUE').length}
-            chip={oldestOverdueDays > 0 ? { text: `oldest ${oldestOverdueDays} d`, tone: 'warning' } : undefined}
+            value={overdue.isError ? '—' : overdue.rows.filter((s) => s.due.state === 'OVERDUE').length}
+            chip={!overdue.isError && oldestOverdueDays > 0 ? { text: `oldest ${oldestOverdueDays} d`, tone: 'warning' } : undefined}
             icon={Wrench}
             iconTone="warning"
           />
           <KpiCard
             label="DVIRs today"
-            value={dvirsTodayLabel}
-            chip={dvirsToday.length > 0 ? { text: `${noDefectToday} no-defect`, tone: 'success' } : undefined}
+            value={dvirs.isError ? '—' : dvirsTodayLabel}
+            chip={!dvirs.isError && dvirsToday.length > 0 ? { text: `${noDefectToday} no-defect`, tone: 'success' } : undefined}
             icon={ClipboardList}
             iconTone="success"
           />
           <KpiCard
             label="Vehicles out of service"
-            value={outOfServiceVehicles.length}
+            value={vehicles.isError ? '—' : outOfServiceVehicles.length}
             chip={
-              outOfServiceVehicles.length > 0
+              !vehicles.isError && outOfServiceVehicles.length > 0
                 ? { text: `Unit ${outOfServiceVehicles[0]?.unitNumber ?? ''}`, tone: 'danger' }
                 : undefined
             }
@@ -541,9 +557,9 @@ export default function DvirPage() {
                     [
                       {
                         id: 'dateTime',
-                        header: 'DATE & TIME',
+                        header: `DATE & TIME (${timezoneAbbreviation(carrierTz)})`,
                         cell: ({ row }) => (
-                          <span className="tabular-nums text-text">{formatLocal(row.original.submittedAt, 'dateTime')}</span>
+                          <span className="tabular-nums text-text">{formatCarrierDateTime(row.original.submittedAt, carrierTz)}</span>
                         ),
                       },
                       {
@@ -605,7 +621,7 @@ export default function DvirPage() {
 
           <Card padded={false}>
             <div className="p-card pb-0">
-              <SectionHeader title="Upcoming maintenance" subtitle="Next 30 days" />
+              <SectionHeader title="Upcoming maintenance" subtitle="Due within 7 days or 500 mi" />
             </div>
             <div className="flex flex-col gap-3 p-card">
               {overdue.isLoading ? (
@@ -788,6 +804,7 @@ function OpenDefectsTable({
   onRetry: () => void;
   onRowClick?: (defect: DefectTableRow) => void;
 }) {
+  const carrierTz = useCarrierTimezone();
   if (isLoading) return <LoadingState />;
   if (isError) return <ErrorState onRetry={onRetry} />;
   if (total === 0) return <EmptyState {...EMPTY_STATE_COPY.openDefects} />;
@@ -804,7 +821,7 @@ function OpenDefectsTable({
           {
             id: 'reported',
             header: 'REPORTED',
-            cell: ({ row }) => <span className="tabular-nums text-text-muted">{formatLocal(row.original.createdAt, 'dateTime')}</span>,
+            cell: ({ row }) => <span className="tabular-nums text-text-muted">{formatCarrierDateTime(row.original.createdAt, carrierTz)}</span>,
           },
           { id: 'component', header: 'COMPONENT', cell: ({ row }) => <span className="text-text">{formatEnumLabel(row.original.category)}</span> },
           {
@@ -843,6 +860,7 @@ function OpenDefectsTable({
 
 /** Mounted only while its tab is active — `GET /work-orders` (`q` is a real param) per page. */
 function WorkOrdersTab({ search, onRows }: { search: string; onRows: (rows: WorkOrderTableRow[]) => void }) {
+  const carrierTz = useCarrierTimezone();
   const { can } = usePermission();
   const canFull = can('maintenance', 'FULL');
   const [page, setPage] = useState(1);
@@ -938,7 +956,7 @@ function WorkOrdersTab({ search, onRows }: { search: string; onRows: (rows: Work
                 {
                   id: 'due',
                   header: 'DUE',
-                  cell: ({ row }) => <span className="tabular-nums text-text-muted">{row.original.dueAt ? formatLocal(row.original.dueAt, 'shortDate') : '—'}</span>,
+                  cell: ({ row }) => <span className="tabular-nums text-text-muted">{formatDateOnly(row.original.dueAt, carrierTz)}</span>,
                 },
               ] as ColumnDef<WorkOrderTableRow, unknown>[]
             }
@@ -1055,6 +1073,7 @@ function WorkOrderCancelModal({ workOrder, onClose }: { workOrder: WorkOrderTabl
 
 /** Mounted only while its tab is active — one `GET /maintenance-schedules` page per render. */
 function SchedulesTab({ search, onRows }: { search: string; onRows: (rows: ScheduleTableRow[]) => void }) {
+  const carrierTz = useCarrierTimezone();
   const { can } = usePermission();
   const canFull = can('maintenance', 'FULL');
   const [page, setPage] = useState(1);
@@ -1142,7 +1161,7 @@ function SchedulesTab({ search, onRows }: { search: string; onRows: (rows: Sched
                 {
                   id: 'lastService',
                   header: 'LAST SERVICE',
-                  cell: ({ row }) => <span className="tabular-nums text-text-muted">{row.original.lastServiceAt ? formatLocal(row.original.lastServiceAt, 'shortDate') : '—'}</span>,
+                  cell: ({ row }) => <span className="tabular-nums text-text-muted">{formatDateOnly(row.original.lastServiceAt, carrierTz)}</span>,
                 },
                 {
                   id: 'nextDue',
@@ -1181,7 +1200,9 @@ function ScheduleCompleteModal({ schedule, onClose }: { schedule: ScheduleTableR
   const { toast } = useToast();
   const mutation = useCompleteSchedule(schedule.id);
   const [odometer, setOdometer] = useState('');
-  const [initialServiceDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const carrierTz = useCarrierTimezone();
+  // CODE-038 — the carrier's "today" (a UTC `slice(0, 10)` was tomorrow on a US evening).
+  const [initialServiceDate] = useState(() => todayInTz(carrierTz));
   const [serviceDate, setServiceDate] = useState(initialServiceDate);
   const [serverError, setServerError] = useState<string | null>(null);
   // Stage 3 — typed odometer/date used to be lost silently on Cancel/×/Esc: the Modal had no
@@ -1212,7 +1233,7 @@ function ScheduleCompleteModal({ schedule, onClose }: { schedule: ScheduleTableR
               mutation.mutate(
                 {
                   serviceOdometerMi: odometer ? Number(odometer) : undefined,
-                  serviceAt: serviceDate ? new Date(serviceDate).toISOString() : undefined,
+                  serviceAt: dateOnlyToInstant(serviceDate, carrierTz),
                 },
                 {
                   onSuccess: () => {
@@ -1241,7 +1262,7 @@ function ScheduleCompleteModal({ schedule, onClose }: { schedule: ScheduleTableR
       <div className="flex flex-col gap-4">
         <label className="flex flex-col gap-1">
           <span className="text-label text-text">Service date</span>
-          <input type="date" value={serviceDate} onChange={(e) => setServiceDate(e.target.value)} className={inputClass} />
+          <input type="date" value={serviceDate} max={todayInTz(carrierTz)} onChange={(e) => setServiceDate(e.target.value)} className={inputClass} />
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-label text-text">Odometer at service</span>

@@ -102,6 +102,21 @@ function workOrdersListHandler() {
 /* ------------------------------------------------------------------ 11.17 Resolve defect */
 
 describe('ResolveDefectModal — 11.17', () => {
+  it('QA CODE-008 — on an out-of-service defect, Deferred says the unit stays out of service until repaired', async () => {
+    const user = userEvent.setup();
+    server.use(workOrdersListHandler());
+    renderModal(
+      <ResolveDefectModal
+        defect={{ ...DEFECT, outOfService: true, vehicle: { unitNumber: '101' } as DefectTableRow['vehicle'] }}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/resolved returns the unit to service unless another critical defect is still open or deferred/)).toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: /Deferred/ }));
+    expect(screen.getByText(/deferred keeps the unit out of service until the defect is repaired/)).toBeInTheDocument();
+  });
+
   it('sends exactly what `ResolveDefectDto` accepts and nothing else (B-68 resolutionType)', async () => {
     const user = userEvent.setup();
     let body: unknown;
@@ -210,14 +225,14 @@ describe('ResolveDefectModal — 11.17', () => {
     expect(await screen.findByText('Unit — · Brake pads · reported Sep 10, 08:00 ET')).toBeInTheDocument();
   });
 
-  it('applies the chosen work order through PATCH /defects/:id/work-order', async () => {
+  it('CODE-077: sends the chosen work order IN the resolve request (one write, no separate link call)', async () => {
     const user = userEvent.setup();
-    let linkBody: unknown;
+    let linkCalls = 0;
     let resolveBody: unknown;
     server.use(
       workOrdersListHandler(),
-      http.patch(url(endpoints.defects.workOrder('def_1')), async ({ request }) => {
-        linkBody = await request.json();
+      http.patch(url(endpoints.defects.workOrder('def_1')), () => {
+        linkCalls += 1;
         return ok({ id: 'def_1', workOrderId: 'wo_1' });
       }),
       http.patch(url(endpoints.defects.resolve('def_1')), async ({ request }) => {
@@ -233,7 +248,25 @@ describe('ResolveDefectModal — 11.17', () => {
     await user.click(screen.getByRole('button', { name: 'Mark as resolved' }));
 
     await waitFor(() => expect(resolveBody).toBeTruthy());
-    expect(linkBody).toEqual({ workOrderId: 'wo_1' });
+    expect(resolveBody).toMatchObject({ resolutionType: 'REPAIRED', workOrderId: 'wo_1' });
+    expect(linkCalls).toBe(0);
+  });
+
+  it('CODE-077: an untouched work-order select is not sent with the resolve', async () => {
+    const user = userEvent.setup();
+    let resolveBody: Record<string, unknown> | undefined;
+    server.use(
+      workOrdersListHandler(),
+      http.patch(url(endpoints.defects.resolve('def_1')), async ({ request }) => {
+        resolveBody = (await request.json()) as Record<string, unknown>;
+        return ok({ id: 'def_1', status: 'REPAIRED' });
+      }),
+    );
+    renderModal(<ResolveDefectModal defect={DEFECT} onClose={vi.fn()} />);
+    await user.type(screen.getByLabelText(/Repair notes/i), 'Replaced pads');
+    await user.click(screen.getByRole('button', { name: 'Mark as resolved' }));
+    await waitFor(() => expect(resolveBody).toBeTruthy());
+    expect(resolveBody).not.toHaveProperty('workOrderId');
   });
 
   it('closes straight away when untouched, and confirms after an edit (Esc and Cancel alike)', async () => {
@@ -454,10 +487,12 @@ describe('EditWorkOrderModal — clearing a field clears it', () => {
     await user.clear(screen.getByLabelText(/Assign to/));
     await user.clear(screen.getByLabelText(/Parts cost/));
     await user.clear(screen.getByLabelText(/Work to perform/));
+    await user.clear(screen.getByLabelText(/Estimated labor/));
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() => expect(body).toBeTruthy());
-    expect(body).toMatchObject({ vendor: null, costUsd: null, description: null, title: 'Brake repair' });
+    // CODE-077 — the labor estimate clears too.
+    expect(body).toMatchObject({ vendor: null, costUsd: null, description: null, estimatedLaborHours: null, title: 'Brake repair' });
   });
 
   it('is not dirty until something changes', async () => {
@@ -508,8 +543,8 @@ describe('EditScheduleModal — clearing a field clears it', () => {
 
     await waitFor(() => expect(body).toBeTruthy());
     expect(body).toMatchObject({ name: 'Oil & filter', intervalMi: null, intervalDays: 180 });
-    // QA-B — `UpdateMaintenanceScheduleDto.lastServiceMi` is not nullable; `null` was answered 422.
-    expect(body).not.toHaveProperty('lastServiceMi');
+    // CODE-077 — the DTO accepts `null` now, so an emptied last-service odometer clears it.
+    expect(body).toMatchObject({ lastServiceMi: null });
   });
 
   it('is not dirty until something changes', async () => {

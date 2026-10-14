@@ -4,8 +4,8 @@
 // (4) records as well. §395.8 forbids hiding the audit trail — but it must not be the default
 // view either, or the inspector reads the same duty change three times. Default: recordStatus = 1.
 // The checkbox reveals the rest: superseded struck through and muted, proposed on `--info-soft`.
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronRight } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { AlertTriangle, ChevronRight } from 'lucide-react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { formatInTimeZone } from 'date-fns-tz';
 import { Card, SectionHeader } from '@/shared/ui/Card';
@@ -23,6 +23,7 @@ import { formatNumber } from '@/shared/format/numbers';
 import { EVENT_WINDOW, eventWindowSize } from '../eventWindow';
 import { RECORD_ORIGIN, RECORD_STATUS, type LogEventView } from '@/shared/api/hosLogs';
 import { LogRecordModal } from './LogRecordModal';
+import { telemetryFlags } from '../telemetryChecks';
 
 const DUTY_BADGE: Record<string, DutyStatus> = {
   OFF: 'OFF_DUTY',
@@ -64,6 +65,8 @@ export interface LogEventsCardProps {
   highlightedEventId: string | null;
   onRequestEdit: (event: LogEventView) => void;
   onViewAll: () => void;
+  /** LIVE-017 — "today" or "on Oct 8" (`dayPhrase`); defaults to "today". */
+  dayLabel?: string;
 }
 
 export function LogEventsCard({
@@ -79,6 +82,7 @@ export function LogEventsCard({
   highlightedEventId,
   onRequestEdit,
   onViewAll,
+  dayLabel = 'today',
 }: LogEventsCardProps) {
   const { toast } = useToast();
   const { can } = usePermission();
@@ -93,6 +97,8 @@ export function LogEventsCard({
     return carriedIn ? [carriedIn, ...inDay] : inDay;
   }, [events, carriedIn, showAllRecords]);
   const carriedId = carriedIn?.id ?? null;
+  // LIVE-015 — impossible odometer / engine-hour readings are flagged, never silently shown.
+  const flags = useMemo(() => telemetryFlags(carriedIn ? [carriedIn, ...events] : events), [events, carriedIn]);
   const [requestedRows, setRequestedRows] = useState(EVENT_WINDOW);
   const highlightIndex = useMemo(
     () => (highlightedEventId ? visible.findIndex((event) => event.id === highlightedEventId) : -1),
@@ -163,9 +169,13 @@ export function LogEventsCard({
         meta: { numeric: true },
         enableSorting: false,
         cell: ({ row }) =>
-          row.original.totalVehicleMiles === null || row.original.totalVehicleMiles === undefined
-            ? EMPTY.dash
-            : `${formatOdometer(row.original.totalVehicleMiles)} mi`,
+          row.original.totalVehicleMiles === null || row.original.totalVehicleMiles === undefined ? (
+            EMPTY.dash
+          ) : (
+            <TelemetryValue warning={flags.get(row.original.id)?.odometer}>
+              {`${formatOdometer(row.original.totalVehicleMiles)} mi`}
+            </TelemetryValue>
+          ),
       },
       {
         id: 'engineHours',
@@ -173,7 +183,11 @@ export function LogEventsCard({
         meta: { numeric: true },
         enableSorting: false,
         // B-38 (shipped) — Appendix A total engine hours; `—` only when the record has none.
-        cell: ({ row }) => formatEngineHours(row.original.totalEngineHours ?? null),
+        cell: ({ row }) => (
+          <TelemetryValue warning={flags.get(row.original.id)?.engineHours}>
+            {formatEngineHours(row.original.totalEngineHours ?? null)}
+          </TelemetryValue>
+        ),
       },
       {
         id: 'origin',
@@ -198,7 +212,7 @@ export function LogEventsCard({
         },
       },
     ],
-    [timezone, windowed, carriedId],
+    [timezone, windowed, carriedId, flags],
   );
 
   return (
@@ -206,7 +220,7 @@ export function LogEventsCard({
       <div className="p-card">
         <SectionHeader
           title="Log events"
-          subtitle={`${events.filter((event) => event.recordStatus === RECORD_STATUS.active).length} events today · ${pendingEditCount} driver edit${pendingEditCount === 1 ? '' : 's'} pending review`}
+          subtitle={`${events.filter((event) => event.recordStatus === RECORD_STATUS.active).length} events ${dayLabel} · ${pendingEditCount} driver edit${pendingEditCount === 1 ? '' : 's'} pending review`}
           action={
             <Button variant="secondary" onClick={viewAll} data-print-hide="">
               <ChevronRight size={16} strokeWidth={1.75} />
@@ -254,7 +268,11 @@ export function LogEventsCard({
                 can('hosEdit', 'FULL')
                   ? (row) => (
                       <RowMenu
-                        onRequestEdit={() => onRequestEdit(row)}
+                        // QA CODE-027 — only a live duty-status record can be edited; a retired
+                        // original, a proposal or a non-duty event would fork the record chain.
+                        onRequestEdit={
+                          row.recordStatus === RECORD_STATUS.active && row.status !== null ? () => onRequestEdit(row) : undefined
+                        }
                         onCopyId={() => {
                           void navigator.clipboard?.writeText(row.id);
                           toast({ kind: 'success', title: 'Event ID copied' });
@@ -303,20 +321,35 @@ export function LogEventsCard({
 const menuItemClass =
   'flex w-full cursor-pointer items-center rounded-md px-2 py-1.5 text-body text-text outline-none data-[highlighted]:bg-bg-subtle';
 
+/** LIVE-015 — a recorded reading with a data-inconsistency warning next to it. */
+function TelemetryValue({ warning, children }: { warning?: string; children: ReactNode }) {
+  if (!warning) return <>{children}</>;
+  return (
+    <span className="inline-flex items-center gap-1 text-danger" title={warning}>
+      {children}
+      <AlertTriangle aria-hidden className="h-3.5 w-3.5" />
+      <span className="sr-only">{`Data inconsistency: ${warning}`}</span>
+    </span>
+  );
+}
+
 function RowMenu({
   onRequestEdit,
   onCopyId,
   onViewRecord,
 }: {
-  onRequestEdit: () => void;
+  /** Absent when the row cannot be edited (QA CODE-027). */
+  onRequestEdit?: () => void;
   onCopyId: () => void;
   onViewRecord: () => void;
 }) {
   return (
     <Can perm="hosEdit" level="FULL">
-      <button type="button" className={menuItemClass} onClick={onRequestEdit}>
-        Request an edit
-      </button>
+      {onRequestEdit && (
+        <button type="button" className={menuItemClass} onClick={onRequestEdit}>
+          Request an edit
+        </button>
+      )}
       <button type="button" className={menuItemClass} onClick={onViewRecord}>
         View full record
       </button>

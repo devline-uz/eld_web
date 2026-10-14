@@ -26,8 +26,8 @@ import {
   rowTotals,
   segmentTooltip,
   unassignedInDay,
-  zoneLabel,
-} from './grid';
+  withImplicitOffDuty,
+  zoneLabel, driverDayVehicleIds, unassignedForVehicles } from './grid';
 import type { HosViolation, RodsGraphSegment, UnidentifiedSegment } from '@/shared/api/hosLogs';
 
 const TZ = 'America/New_York';
@@ -132,6 +132,12 @@ describe('DST — 23/25-hour days keep 24 columns', () => {
     expect(new Date(rodsDayStart('2026-09-10', TZ)).toISOString()).toBe('2026-09-10T04:00:00.000Z');
   });
 
+  it('CODE-065: a midnight lost to DST resolves forward, like the backend (Havana, Santiago)', () => {
+    // Values from the backend `dayStart` (hos/engine/timezone.ts) for the same zone and date.
+    expect(new Date(rodsDayStart('2026-03-08', 'America/Havana')).toISOString()).toBe('2026-03-08T05:00:00.000Z');
+    expect(new Date(rodsDayStart('2026-09-06', 'America/Santiago')).toISOString()).toBe('2026-09-06T04:00:00.000Z');
+  });
+
   it('finds the day start on the spring-forward day (23 hours)', () => {
     expect(new Date(rodsDayStart('2026-03-08', TZ)).toISOString()).toBe('2026-03-08T05:00:00.000Z');
   });
@@ -231,12 +237,35 @@ describe('violations and unassigned segments', () => {
     resolutionNote: null,
   };
 
-  it('marks the instant and bands the interval that ran over', () => {
+  it('marks the instant and bands the interval that ran over, starting at the crossing', () => {
     const [plotted] = plotViolationsOf([violation], dayStart, 86_400);
     expect(plotted.title).toBe('11-hour driving limit');
-    expect(plotted.at).toBeCloseTo(plotted.to, 10);
+    // LIVE-004 / CODE-026 — `occurredAt` is the crossing: the band starts there, never before it.
+    expect(plotted.from).toBeCloseTo(plotted.at, 10);
     expect(plotted.to - plotted.from).toBeCloseTo(1560 / 86_400, 8);
     expect(plotted.open).toBe(true);
+  });
+
+  it('LIVE-004 — clips an overrun that runs past midnight to the end of the day', () => {
+    // Crossed at 14:38 local, over by 130:12 — the band ends at the right edge, not on a later day.
+    const [plotted] = plotViolationsOf(
+      [{ ...violation, occurredAt: '2026-09-10T18:38:00.000Z', exceededBySec: 130 * 3600 + 12 * 60 }],
+      dayStart,
+      86_400,
+    );
+    expect(plotted.from).toBeCloseTo((14 * 3600 + 38 * 60) / 86_400, 8);
+    expect(plotted.to).toBe(1);
+  });
+
+  it('LIVE-004 — a crossing on the previous day only bands the part that falls in this day', () => {
+    // Crossed at 22:00 the day before, over by 4 h → 00:00–02:00 of this day.
+    const [plotted] = plotViolationsOf(
+      [{ ...violation, occurredAt: '2026-09-10T02:00:00.000Z', exceededBySec: 4 * 3600 }],
+      dayStart,
+      86_400,
+    );
+    expect(plotted.from).toBe(0);
+    expect(plotted.to).toBeCloseTo(2 / 24, 8);
   });
 
   it('WB-061 — keeps a resolved violation on the grid, flagged not-open and titled Resolved', () => {
@@ -280,9 +309,17 @@ describe('TOTAL column', () => {
     expect(totals.map((t) => t.label)).toEqual(['07:30', '02:00', '11:26', '03:04']);
   });
 
-  it('renders driving in danger only when it passes the §395.3(a)(3)(i) 11-hour limit', () => {
-    const over = rowTotals({ offDutySec: 0, sleeperSec: 0, drivingSec: DRIVING_LIMIT_SEC + 60, onDutySec: 0 });
+  it('renders driving in danger only when the engine filed an 11-hour violation (CODE-066)', () => {
+    const over = rowTotals({ offDutySec: 0, sleeperSec: 0, drivingSec: DRIVING_LIMIT_SEC + 60, onDutySec: 0 }, [
+      { type: 'DRIVING_11' },
+    ]);
     expect(over.find((t) => t.row === 'D')?.overLimit).toBe(true);
+    // Two legal shifts (6 h, 10-hour break, 6 h) put 12 h on one calendar day — no violation.
+    const twoShifts = rowTotals({ offDutySec: 43_200, sleeperSec: 0, drivingSec: 12 * 3600, onDutySec: 0 }, []);
+    expect(twoShifts.find((t) => t.row === 'D')?.overLimit).toBe(false);
+    // A 14-hour violation alone does not paint the driving total.
+    const shift = rowTotals({ offDutySec: 0, sleeperSec: 0, drivingSec: 3600, onDutySec: 0 }, [{ type: 'SHIFT_14' }]);
+    expect(shift.find((t) => t.row === 'D')?.overLimit).toBe(false);
     const under = rowTotals({ offDutySec: 86_400, sleeperSec: 0, drivingSec: DRIVING_LIMIT_SEC, onDutySec: 0 });
     expect(under.find((t) => t.row === 'D')?.overLimit).toBe(false);
     // OFF / SB / ON have no daily ceiling in §395 — they are never drawn in danger.
@@ -302,6 +339,15 @@ describe('tooltip and spoken summary', () => {
     expect(segmentTooltip(plotted, TZ, '1.04 mi W of Harrisburg, OH')).toBe(
       '08:00 – 08:30 · Off duty · 30 min · 1.04 mi W of Harrisburg, OH',
     );
+  });
+
+  it('LIVE-018 — a sub-minute segment shows its seconds, not "0 min"', () => {
+    const [plotted] = plotSegmentsOf(
+      [segment('OFF', '2026-09-10T09:47:06.000Z', '2026-09-10T09:47:13.000Z')],
+      dayStart,
+      86_400,
+    );
+    expect(segmentTooltip(plotted, TZ, null)).toBe('05:47 – 05:47 · Off duty · 7 s');
   });
 
   it('names the special category in the tooltip', () => {
@@ -425,5 +471,55 @@ describe('segment hover lookup (findSegmentAt)', () => {
       const t = start + m * 60_000;
       expect(findSegmentAt(lookup, t)).toBe(linear(t));
     }
+  });
+});
+
+describe('withImplicitOffDuty (LIVE-006)', () => {
+  const dayStart = rodsDayStart('2026-09-10', TZ);
+  const zero = { offDutySec: 0, sleeperSec: 0, drivingSec: 0, onDutySec: 0 };
+
+  it('draws a full off-duty line on a finished day with no records, matching TOTAL OFF 24:00', () => {
+    const graph = withImplicitOffDuty([], { ...zero, offDutySec: 86_400 }, dayStart);
+    expect(graph).toHaveLength(1);
+    expect(graph[0]).toMatchObject({ status: 'OFF', effective: 'OFF', special: 'NONE', durationSec: 86_400 });
+    expect(Date.parse(graph[0]!.startAt)).toBe(dayStart);
+    expect(Date.parse(graph[0]!.endAt)).toBe(dayStart + 86_400_000);
+  });
+
+  it('draws only "today so far" on the current day', () => {
+    const graph = withImplicitOffDuty([], { ...zero, offDutySec: 49 * 60 }, dayStart);
+    expect(graph[0]?.durationSec).toBe(49 * 60);
+  });
+
+  it('fills the gap before the first record of the day as off duty', () => {
+    const driving = segment('D', '2026-09-10T10:00:00.000Z', '2026-09-10T12:00:00.000Z');
+    // 04:00Z is local midnight: 6 h gap before the first record, then 2 h driving.
+    const graph = withImplicitOffDuty([driving], { ...zero, offDutySec: 6 * 3600, drivingSec: 2 * 3600 }, dayStart);
+    expect(graph.map((s) => s.status)).toEqual(['OFF', 'D']);
+    expect(graph[0]?.endAt).toBe(driving.startAt);
+  });
+
+  it('adds nothing when the segments already cover the totals', () => {
+    const off = segment('OFF', '2026-09-10T04:00:00.000Z', '2026-09-11T04:00:00.000Z');
+    const graph = [off];
+    expect(withImplicitOffDuty(graph, { ...zero, offDutySec: 86_400 }, dayStart)).toBe(graph);
+  });
+});
+
+describe('QA CODE-031 — unidentified segments limited to the driver\'s units', () => {
+  const segments = [
+    { id: 's1', vehicleId: 'veh-own' },
+    { id: 's2', vehicleId: 'veh-other' },
+    { id: 's3', vehicleId: 'veh-assigned' },
+    { id: 's4', vehicleId: 'veh-eld' },
+  ];
+
+  it('keeps segments on units named by the day\'s records, the recording ELDs or the current assignment', () => {
+    const ids = driverDayVehicleIds([{ vehicleId: 'veh-own' }, { vehicleId: null }], ['veh-assigned', 'veh-eld', null, undefined]);
+    expect(unassignedForVehicles(segments, ids).map((s) => s.id)).toEqual(['s1', 's3', 's4']);
+  });
+
+  it('shows nothing for a driver with no unit that day', () => {
+    expect(unassignedForVehicles(segments, driverDayVehicleIds([], [null]))).toEqual([]);
   });
 });

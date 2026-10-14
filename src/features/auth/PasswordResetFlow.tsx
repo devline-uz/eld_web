@@ -1,8 +1,9 @@
 // owner: web-auth-rbac — W-00 "Forgot password?" (customer request 2026-10-12), dev auth only.
 //
-// Two steps inside the sign-in card: (1) the email must belong to an active back-office account
-// (`POST /auth/password/reset-code`, 404 → "No account found with this email"), which emails a
-// 6-digit code; (2) the code proves the requester owns that mailbox, then the new password is set
+// Two steps inside the sign-in card: (1) `POST /auth/password/reset-code` emails a 6-digit code when
+// the address belongs to an active back-office account — the answer is the same 200 either way
+// (CODE-081, no account enumeration), so step 2 is worded "if an account uses this email";
+// (2) the code proves the requester owns that mailbox, then the new password is set
 // (`POST /auth/password/reset-code/confirm`). Success returns to the sign-in view with a toast.
 //
 // ⚠️ Like DeveloperSignIn, this module is only referenced behind `VITE_AUTH_MODE === 'dev'`, so a
@@ -22,7 +23,6 @@ import { Button } from '@/shared/ui/Button';
 import { TOAST_COPY } from '@/shared/ui/copy';
 import { useToast } from '@/shared/ui/Toast';
 
-const NOT_FOUND_MESSAGE = 'No account found with this email.';
 const PASSWORD_MAX = 128;
 
 const emailSchema = z.object({ email: fields.email() });
@@ -230,10 +230,6 @@ function EmailStep({
       onSent(await requestPasswordResetCode(email.trim()));
     } catch (cause) {
       const failure = asFailure(cause);
-      if (failure?.status === 404) {
-        setError('email', { message: NOT_FOUND_MESSAGE }, { shouldFocus: true });
-        return;
-      }
       if (failure?.status === 422 && failure.fieldErrors.email) {
         setError('email', { message: failure.fieldErrors.email }, { shouldFocus: true });
         return;
@@ -380,7 +376,7 @@ function CodeStep({
       const result = await requestPasswordResetCode(email);
       onResent(Date.now() + result.resendAfterSec * 1000);
       resetField('code');
-      setBanner({ tone: 'info', text: `A new code was sent to ${email}.` });
+      setBanner({ tone: 'info', text: `If an account uses ${email}, a new code is on its way.` });
     } catch (cause) {
       const failure = asFailure(cause);
       const wait = failure?.status === 429 ? retryAfterOf(failure) : null;
@@ -400,8 +396,9 @@ function CodeStep({
     <>
       <h1 className="mt-4 text-page-title text-text">Check your email</h1>
       <p className="mt-1 text-page-sub text-text-muted">
-        We sent a 6-digit code to <span className="font-medium text-text">{email}</span>. It expires in{' '}
-        {Math.round(expiresInSec / 60)} minutes.
+        If an active OneBook ELD account uses <span className="font-medium text-text">{email}</span>, we sent it a
+        6-digit code. It expires in {Math.round(expiresInSec / 60)} minutes. No email after a few minutes? Check
+        spam, or contact your administrator.
       </p>
       {banner ? <Banner tone={banner.tone}>{banner.text}</Banner> : null}
       <form

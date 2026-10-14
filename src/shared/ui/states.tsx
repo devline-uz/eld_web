@@ -1,4 +1,4 @@
-import { AlertTriangle, Lock } from 'lucide-react';
+import { AlertTriangle, Lock, SearchX } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Button } from './Button';
 import { cn } from './cn';
@@ -71,8 +71,9 @@ export interface ErrorStateProps {
 
 /** Lives inside the failing card, never replaces the whole page (§13.1). */
 export function ErrorState({
-  title = 'Could not load the fleet',
-  description = 'The telematics service did not respond. Your data is safe — try again in a moment.',
+  // LIVE-019 — generic by default; fleet screens pass their own "Could not load the fleet" title.
+  title = 'Could not load this page',
+  description = 'The service did not respond. Your data is safe — try again in a moment.',
   onRetry,
   onContactSupport,
 }: ErrorStateProps) {
@@ -118,6 +119,38 @@ export function ForbiddenState({ screenName, onBack }: ForbiddenStateProps) {
       {onBack && (
         <Button variant="link" onClick={onBack}>
           ‹ Back to dashboard
+        </Button>
+      )}
+    </div>
+  );
+}
+
+export interface NotFoundStateProps {
+  /** e.g. "Unit not found". */
+  title: string;
+  description?: string;
+  backLabel?: string;
+  onBack?: () => void;
+}
+
+/** LIVE-019 — a missing record (404, or a malformed id that was never sent) is not an outage:
+ * no Retry, a plain explanation and a way back to the list. */
+export function NotFoundState({
+  title,
+  description = 'It may have been deleted, or the link is wrong.',
+  backLabel = 'Back',
+  onBack,
+}: NotFoundStateProps) {
+  return (
+    <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 text-center">
+      <span className="flex size-14 items-center justify-center rounded-full bg-bg-subtle text-text-muted">
+        <SearchX size={24} strokeWidth={1.75} aria-hidden="true" />
+      </span>
+      <h3 className="text-card-title font-semibold text-text">{title}</h3>
+      <p className="max-w-80 text-body text-text-muted">{description}</p>
+      {onBack && (
+        <Button variant="secondary" onClick={onBack}>
+          {backLabel}
         </Button>
       )}
     </div>

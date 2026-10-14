@@ -1,5 +1,5 @@
 // owner: web-dispatch-messaging — reasons shown on controls W-11 deliberately disables.
-import { formatLocal } from '@/shared/format/datetime';
+import { formatInTz } from '@/shared/format/datetime';
 import { ERROR_MESSAGES } from '@/shared/api/errors';
 import type { TripScheduleConflict } from '@/shared/api/trips';
 
@@ -7,9 +7,9 @@ import type { TripScheduleConflict } from '@/shared/api/trips';
  * `GET /trailers` itself failing to return any rows — shown only if that call errors. */
 export const TRAILER_LOOKUP_ERROR = 'Trailers unavailable — try again.';
 
-/** 409 `TRIP_SCHEDULE_CONFLICT`, in the browser zone — the same zone the modal's
- * `datetime-local` windows and the board's dates use. */
-export function scheduleConflictMessage(c: TripScheduleConflict): string {
+/** 409 `TRIP_SCHEDULE_CONFLICT`, in the carrier zone — the same zone the modal's
+ * `datetime-local` windows and the board's dates use (LIVE-007). */
+export function scheduleConflictMessage(c: TripScheduleConflict, timeZone: string): string {
   const unit =
     c.resource === 'driver'
       ? c.driverName ? `Driver ${c.driverName}` : 'This driver'
@@ -17,8 +17,8 @@ export function scheduleConflictMessage(c: TripScheduleConflict): string {
         ? c.trailerNumber ? `Trailer ${c.trailerNumber}` : 'This trailer'
         : c.unitNumber ? `Unit ${c.unitNumber}` : 'This unit';
   const range = c.end
-    ? `from ${formatLocal(c.start, 'dateTime')} to ${formatLocal(c.end, 'dateTime')}`
-    : `from ${formatLocal(c.start, 'dateTime')} onward (no planned end)`;
+    ? `from ${formatInTz(c.start, timeZone, 'dateTime')} to ${formatInTz(c.end, timeZone, 'dateTime')}`
+    : `from ${formatInTz(c.start, timeZone, 'dateTime')} onward (no planned end)`;
   // e.g. `Unit 1 is already assigned to another trip (TRP-500) from Oct 10, 12:00 to Oct 20, 12:00.`
   return `${unit} is already assigned to another trip (${c.number}) ${range}.`;
 }
@@ -51,3 +51,16 @@ export const deleteTripTitle = (number: string): string => `Delete trip ${number
 /** §5.9 destructive confirm — says the delete is permanent and nothing survives it. */
 export const DELETE_TRIP_DESCRIPTION =
   'This permanently deletes the trip and its stops. It cannot be undone, and the trip will not be kept for history or reports.';
+
+/* --------------------------------------------- Start / Mark delivered / Cancel (QA LIVE-003) */
+
+export const tripStartedToast = (number: string): string => `Trip ${number} started`;
+export const tripDeliveredToast = (number: string): string => `Trip ${number} marked delivered`;
+export const tripCancelledToast = (number: string): string => `Trip ${number} cancelled`;
+export const cancelTripTitle = (number: string): string => `Cancel trip ${number}?`;
+/** §5.9 destructive confirm — unlike Delete, the trip is kept (Completed segment, `Cancelled` filter). */
+export const CANCEL_TRIP_DESCRIPTION =
+  'The trip is kept for history (filter Completed by “Cancelled”) and its driver, unit and trailer are freed for other trips. A cancelled trip cannot be reopened or edited.';
+export const DELIVERED_AT_INVALID = 'Enter a valid date and time.';
+export const DELIVERED_AT_FUTURE = 'Delivery time cannot be in the future.';
+export const DELIVERED_AT_BEFORE_START = 'Delivery time cannot be before the trip started.';

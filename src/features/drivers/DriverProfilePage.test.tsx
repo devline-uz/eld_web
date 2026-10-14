@@ -22,7 +22,7 @@ vi.mock('@/shared/auth/usePermission', () => ({
 }));
 
 const DRIVER = {
-  id: 'drv_1',
+  id: '0e7c5a4e-1d2b-4c3a-9f10-0000000000d1',
   username: 'jsmith',
   firstName: 'John',
   lastName: 'Smith',
@@ -54,12 +54,12 @@ function LocationProbe() {
   return <output data-testid="location">{`${location.pathname}${location.search}`}</output>;
 }
 
-function renderPage() {
+function renderPage(path = '/drivers/0e7c5a4e-1d2b-4c3a-9f10-0000000000d1') {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
-        <MemoryRouter initialEntries={['/drivers/drv_1']}>
+        <MemoryRouter initialEntries={[path]}>
           <Routes>
             <Route path="/drivers/:id" element={<DriverProfilePage />} />
           </Routes>
@@ -83,7 +83,7 @@ beforeEach(() => {
   setAuthBridge({ getAccessToken: () => 'test-token' });
   setAccessToken('test-token');
   server.use(
-    http.get(url(endpoints.drivers.hos('drv_1')), () =>
+    http.get(url(endpoints.drivers.hos('0e7c5a4e-1d2b-4c3a-9f10-0000000000d1')), () =>
       ok({
         driveRemainingSec: 0,
         shiftRemainingSec: 0,
@@ -101,17 +101,17 @@ beforeEach(() => {
 
 describe('W-07 Driver profile — four states', () => {
   it("header Message deep-links to the driver's conversation (WB-139)", async () => {
-    server.use(http.get(url(endpoints.drivers.detail('drv_1')), () => ok(DRIVER)));
+    server.use(http.get(url(endpoints.drivers.detail('0e7c5a4e-1d2b-4c3a-9f10-0000000000d1')), () => ok(DRIVER)));
     const user = userEvent.setup();
     renderPage();
     await screen.findByRole('heading', { name: 'John Smith' });
     await user.click(screen.getByRole('button', { name: 'Message' }));
-    expect(screen.getByTestId('location')).toHaveTextContent(/^\/messages\?driverId=drv_1$/);
+    expect(screen.getByTestId('location')).toHaveTextContent(/^\/messages\?driverId=0e7c5a4e-1d2b-4c3a-9f10-0000000000d1$/);
   });
 
   it('forbidden: renders <ForbiddenState> and never fetches the driver without `drivers`', async () => {
     permission = false;
-    server.use(http.get(url(endpoints.drivers.detail('drv_1')), () => ok(DRIVER)));
+    server.use(http.get(url(endpoints.drivers.detail('0e7c5a4e-1d2b-4c3a-9f10-0000000000d1')), () => ok(DRIVER)));
     renderPage();
     expect(
       await screen.findByText(/forbidden|do not have permission|do not have access/i),
@@ -120,7 +120,7 @@ describe('W-07 Driver profile — four states', () => {
 
   it('loading: shows a skeleton before the driver resolves', async () => {
     server.use(
-      http.get(url(endpoints.drivers.detail('drv_1')), async () => {
+      http.get(url(endpoints.drivers.detail('0e7c5a4e-1d2b-4c3a-9f10-0000000000d1')), async () => {
         await new Promise((r) => setTimeout(r, 50));
         return ok(DRIVER);
       }),
@@ -134,10 +134,10 @@ describe('W-07 Driver profile — four states', () => {
 
   it('error: renders <ErrorState> with Retry when the driver fetch fails', async () => {
     server.use(
-      http.get(url(endpoints.drivers.detail('drv_1')), () =>
+      http.get(url(endpoints.drivers.detail('0e7c5a4e-1d2b-4c3a-9f10-0000000000d1')), () =>
         HttpResponse.json(
-          { statusCode: 404, code: 'NOT_FOUND', message: 'Not found' },
-          { status: 404 },
+          { statusCode: 500, code: 'INTERNAL_ERROR', message: 'Boom' },
+          { status: 500 },
         ),
       ),
     );
@@ -145,13 +145,63 @@ describe('W-07 Driver profile — four states', () => {
     expect(await screen.findByRole('button', { name: /retry/i })).toBeInTheDocument();
   });
 
-  it('empty: the Activity tab shows "No activity recorded." when there is none', async () => {
-    server.use(http.get(url(endpoints.drivers.detail('drv_1')), () => ok(DRIVER)));
+  it('LIVE-019 — a 404 is "Driver not found" with a way back, not a Retry', async () => {
+    server.use(
+      http.get(url(endpoints.drivers.detail('0e7c5a4e-1d2b-4c3a-9f10-0000000000d1')), () =>
+        HttpResponse.json({ statusCode: 404, code: 'NOT_FOUND', message: 'Not found' }, { status: 404 }),
+      ),
+    );
+    renderPage();
+    expect(await screen.findByRole('heading', { name: 'Driver not found' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /retry/i })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Back to drivers' }));
+    expect(screen.getByTestId('location')).toHaveTextContent(/^\/drivers$/);
+  });
+
+  it('LIVE-019 — a malformed id is "not found" and never reaches the API', async () => {
+    const requests: string[] = [];
+    server.events.on('request:start', ({ request }) => requests.push(request.url));
+    renderPage('/drivers/not-a-uuid');
+    expect(await screen.findByRole('heading', { name: 'Driver not found' })).toBeInTheDocument();
+    expect(requests.filter((u) => u.includes('not-a-uuid'))).toEqual([]);
+    server.events.removeAllListeners('request:start');
+  });
+
+  it('LIVE-024 — the Activity tab says plainly when nothing is on file', async () => {
+    server.use(
+      http.get(url(endpoints.drivers.detail('0e7c5a4e-1d2b-4c3a-9f10-0000000000d1')), () => ok(DRIVER)),
+      http.get(url(endpoints.auditLog.list), () => ok({ items: [], nextCursor: null })),
+    );
     renderPage();
     await screen.findByRole('heading', { name: 'John Smith' });
     const activityTab = await screen.findByRole('button', { name: 'Activity' });
     await userEvent.click(activityTab);
-    expect(await screen.findByText('No activity recorded.')).toBeInTheDocument();
+    expect(await screen.findByText('No changes or sign-ins recorded for this driver yet.')).toBeInTheDocument();
+  });
+
+  it('LIVE-024 — the Activity tab lists this driver record\'s audit trail', async () => {
+    let query = '';
+    server.use(
+      http.get(url(endpoints.drivers.detail('0e7c5a4e-1d2b-4c3a-9f10-0000000000d1')), () => ok(DRIVER)),
+      http.get(url(endpoints.auditLog.list), ({ request }) => {
+        query = new URL(request.url).search;
+        return ok({
+          items: [
+            { id: 'a2', createdAt: '2026-10-13T15:00:00.000Z', actorType: 'USER', actorName: 'Sarah Chen', action: 'UPDATE', objectType: 'Driver', objectId: '0e7c5a4e-1d2b-4c3a-9f10-0000000000d1' },
+            { id: 'a1', createdAt: '2026-10-12T15:00:00.000Z', actorType: 'DRIVER', action: 'LOGIN', objectType: 'Driver', objectId: '0e7c5a4e-1d2b-4c3a-9f10-0000000000d1' },
+          ],
+          nextCursor: null,
+        });
+      }),
+    );
+    renderPage();
+    await screen.findByRole('heading', { name: 'John Smith' });
+    await userEvent.click(await screen.findByRole('button', { name: 'Activity' }));
+    expect(await screen.findByText('Profile updated')).toBeInTheDocument();
+    expect(screen.getByText('Sarah Chen')).toBeInTheDocument();
+    expect(screen.getByText('Signed in to the app')).toBeInTheDocument();
+    expect(query).toContain('objectType=Driver');
+    expect(query).toContain('objectId=0e7c5a4e-1d2b-4c3a-9f10-0000000000d1');
   });
 });
 
@@ -160,8 +210,8 @@ describe('W-07 Driver profile — Documents tab', () => {
   it('lists documents and uploads a new one', async () => {
     let uploaded = false;
     server.use(
-      http.get(url(endpoints.drivers.detail('drv_1')), () => ok(DRIVER)),
-      http.get(url(endpoints.drivers.documents('drv_1')), () =>
+      http.get(url(endpoints.drivers.detail('0e7c5a4e-1d2b-4c3a-9f10-0000000000d1')), () => ok(DRIVER)),
+      http.get(url(endpoints.drivers.documents('0e7c5a4e-1d2b-4c3a-9f10-0000000000d1')), () =>
         ok(
           uploaded
             ? [
@@ -177,7 +227,7 @@ describe('W-07 Driver profile — Documents tab', () => {
             : [],
         ),
       ),
-      http.post(url(endpoints.drivers.documents('drv_1')), () =>
+      http.post(url(endpoints.drivers.documents('0e7c5a4e-1d2b-4c3a-9f10-0000000000d1')), () =>
         ok({
           id: 'doc_1',
           type: 'CDL',
@@ -220,6 +270,10 @@ describe('W-07 Driver profile — Documents tab', () => {
   });
 
   it('a file name past the CreateDriverDocumentDto limit is refused before any upload', async () => {
+    server.use(
+      http.get(url(endpoints.drivers.detail('0e7c5a4e-1d2b-4c3a-9f10-0000000000d1')), () => ok(DRIVER)),
+      http.get(url(endpoints.drivers.documents('0e7c5a4e-1d2b-4c3a-9f10-0000000000d1')), () => ok([])),
+    );
     const user = userEvent.setup();
     renderPage();
     await screen.findByRole('heading', { name: 'John Smith' });
@@ -249,7 +303,7 @@ describe('W-07 Driver profile — long values stay inside the profile card', () 
 
   it('wraps a long email inside its row instead of overflowing the card', async () => {
     server.use(
-      http.get(url(endpoints.drivers.detail('drv_1')), () => ok({ ...DRIVER, email: LONG_EMAIL })),
+      http.get(url(endpoints.drivers.detail('0e7c5a4e-1d2b-4c3a-9f10-0000000000d1')), () => ok({ ...DRIVER, email: LONG_EMAIL })),
     );
     renderPage();
     await screen.findByRole('heading', { name: 'John Smith' });
@@ -267,7 +321,7 @@ describe('W-07 Driver profile — long values stay inside the profile card', () 
   });
 
   it('leaves short values untouched in the same row layout', async () => {
-    server.use(http.get(url(endpoints.drivers.detail('drv_1')), () => ok(DRIVER)));
+    server.use(http.get(url(endpoints.drivers.detail('0e7c5a4e-1d2b-4c3a-9f10-0000000000d1')), () => ok(DRIVER)));
     renderPage();
     await screen.findByRole('heading', { name: 'John Smith' });
 
@@ -279,17 +333,17 @@ describe('W-07 Driver profile — long values stay inside the profile card', () 
   // ---------------------------------------------------------------- stage-2 dead controls
 
   it('WB-186 · `View all ›` on the Violations card opens this driver log', async () => {
-    server.use(http.get(url(endpoints.drivers.detail('drv_1')), () => ok(DRIVER)));
+    server.use(http.get(url(endpoints.drivers.detail('0e7c5a4e-1d2b-4c3a-9f10-0000000000d1')), () => ok(DRIVER)));
     const user = userEvent.setup();
     renderPage();
     await screen.findByRole('heading', { name: 'John Smith' });
 
     await user.click(screen.getByRole('button', { name: 'View all ›' }));
-    expect(screen.getByTestId('location')).toHaveTextContent(/^\/hos-logs\?driverId=drv_1$/);
+    expect(screen.getByTestId('location')).toHaveTextContent(/^\/hos-logs\?driverId=0e7c5a4e-1d2b-4c3a-9f10-0000000000d1$/);
   });
 
   it('WB-180 · `Assign trip` and the Trips tab carry the driver into the Trips filter', async () => {
-    server.use(http.get(url(endpoints.drivers.detail('drv_1')), () => ok(DRIVER)));
+    server.use(http.get(url(endpoints.drivers.detail('0e7c5a4e-1d2b-4c3a-9f10-0000000000d1')), () => ok(DRIVER)));
     const user = userEvent.setup();
     renderPage();
     await screen.findByRole('heading', { name: 'John Smith' });
@@ -297,16 +351,16 @@ describe('W-07 Driver profile — long values stay inside the profile card', () 
     await user.click(screen.getByRole('button', { name: 'Trips' }));
     expect(await screen.findByRole('link', { name: 'Dispatch & Trips' })).toHaveAttribute(
       'href',
-      '/trips?fDriver=drv_1',
+      '/trips?fDriver=0e7c5a4e-1d2b-4c3a-9f10-0000000000d1',
     );
 
     // Navigating away unmounts the profile (no /trips route here), so this click comes last.
     await user.click(screen.getByRole('button', { name: 'Assign trip' }));
-    expect(screen.getByTestId('location')).toHaveTextContent(/^\/trips\?fDriver=drv_1$/);
+    expect(screen.getByTestId('location')).toHaveTextContent(/^\/trips\?fDriver=0e7c5a4e-1d2b-4c3a-9f10-0000000000d1$/);
   });
 
   it('WB-180 · the DVIRs tab no longer links with a param W-09 never reads', async () => {
-    server.use(http.get(url(endpoints.drivers.detail('drv_1')), () => ok(DRIVER)));
+    server.use(http.get(url(endpoints.drivers.detail('0e7c5a4e-1d2b-4c3a-9f10-0000000000d1')), () => ok(DRIVER)));
     const user = userEvent.setup();
     renderPage();
     await screen.findByRole('heading', { name: 'John Smith' });
@@ -320,8 +374,8 @@ describe('W-07 Driver profile — long values stay inside the profile card', () 
 
   it('WB-185 · a failing HOS card shows a human error with Retry, never the gap id', async () => {
     server.use(
-      http.get(url(endpoints.drivers.detail('drv_1')), () => ok(DRIVER)),
-      http.get(url(endpoints.drivers.hos('drv_1')), () =>
+      http.get(url(endpoints.drivers.detail('0e7c5a4e-1d2b-4c3a-9f10-0000000000d1')), () => ok(DRIVER)),
+      http.get(url(endpoints.drivers.hos('0e7c5a4e-1d2b-4c3a-9f10-0000000000d1')), () =>
         HttpResponse.json(
           { statusCode: 500, code: 'INTERNAL_ERROR', message: 'nope' },
           { status: 500 },
@@ -338,8 +392,8 @@ describe('W-07 Driver profile — long values stay inside the profile card', () 
   it('WB-183 · `Deactivate driver` confirms and then writes status INACTIVE', async () => {
     const patched: Array<Record<string, unknown>> = [];
     server.use(
-      http.get(url(endpoints.drivers.detail('drv_1')), () => ok(DRIVER)),
-      http.patch(url(endpoints.drivers.update('drv_1')), async ({ request }) => {
+      http.get(url(endpoints.drivers.detail('0e7c5a4e-1d2b-4c3a-9f10-0000000000d1')), () => ok(DRIVER)),
+      http.patch(url(endpoints.drivers.update('0e7c5a4e-1d2b-4c3a-9f10-0000000000d1')), async ({ request }) => {
         patched.push((await request.json()) as Record<string, unknown>);
         return ok({ ...DRIVER, status: 'INACTIVE' });
       }),
@@ -359,8 +413,8 @@ describe('W-07 Driver profile — long values stay inside the profile card', () 
 
   it('B-81 shipped · `Reset app password` calls POST /drivers/:id/reset-password', async () => {
     server.use(
-      http.get(url(endpoints.drivers.detail('drv_1')), () => ok(DRIVER)),
-      http.post(url(endpoints.drivers.resetPassword('drv_1')), () =>
+      http.get(url(endpoints.drivers.detail('0e7c5a4e-1d2b-4c3a-9f10-0000000000d1')), () => ok(DRIVER)),
+      http.post(url(endpoints.drivers.resetPassword('0e7c5a4e-1d2b-4c3a-9f10-0000000000d1')), () =>
         ok({ emailedTo: 'john.smith@example.com' }),
       ),
     );
@@ -378,8 +432,8 @@ describe('W-07 Driver profile — long values stay inside the profile card', () 
   it('WB-188 · `Edit` opens the profile form and PATCHes the changed fields', async () => {
     let patched: Record<string, unknown> | null = null;
     server.use(
-      http.get(url(endpoints.drivers.detail('drv_1')), () => ok(DRIVER)),
-      http.patch(url(endpoints.drivers.update('drv_1')), async ({ request }) => {
+      http.get(url(endpoints.drivers.detail('0e7c5a4e-1d2b-4c3a-9f10-0000000000d1')), () => ok(DRIVER)),
+      http.patch(url(endpoints.drivers.update('0e7c5a4e-1d2b-4c3a-9f10-0000000000d1')), async ({ request }) => {
         patched = (await request.json()) as Record<string, unknown>;
         return ok({ ...DRIVER, firstName: 'Jonathan' });
       }),
@@ -407,7 +461,7 @@ describe('W-07 Driver profile — pending email change', () => {
   const PENDING = { ...DRIVER, pendingEmail: 'new@example.com', pendingEmailRequestedAt: '2026-10-13T10:00:00.000Z' };
 
   it('shows "Pending: … — awaiting confirmation" with Resend and Cancel; the current email stays', async () => {
-    server.use(http.get(url(endpoints.drivers.detail('drv_1')), () => ok(PENDING)));
+    server.use(http.get(url(endpoints.drivers.detail('0e7c5a4e-1d2b-4c3a-9f10-0000000000d1')), () => ok(PENDING)));
     renderPage();
     expect(await screen.findByText('Pending: new@example.com — awaiting confirmation')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Resend' })).toBeInTheDocument();
@@ -419,12 +473,12 @@ describe('W-07 Driver profile — pending email change', () => {
   it('Resend posts to the resend endpoint; Cancel deletes the pending change', async () => {
     const calls: string[] = [];
     server.use(
-      http.get(url(endpoints.drivers.detail('drv_1')), () => ok(PENDING)),
-      http.post(url(endpoints.drivers.emailChangeResend('drv_1')), () => {
+      http.get(url(endpoints.drivers.detail('0e7c5a4e-1d2b-4c3a-9f10-0000000000d1')), () => ok(PENDING)),
+      http.post(url(endpoints.drivers.emailChangeResend('0e7c5a4e-1d2b-4c3a-9f10-0000000000d1')), () => {
         calls.push('resend');
         return ok({ pendingEmail: 'new@example.com', emailedTo: 'new@example.com', emailDelivered: true }, 202);
       }),
-      http.delete(url(endpoints.drivers.emailChange('drv_1')), () => {
+      http.delete(url(endpoints.drivers.emailChange('0e7c5a4e-1d2b-4c3a-9f10-0000000000d1')), () => {
         calls.push('cancel');
         return ok({ ...DRIVER, pendingEmail: null });
       }),
@@ -439,7 +493,7 @@ describe('W-07 Driver profile — pending email change', () => {
   });
 
   it('no banner without a pending change; an unverified current email keeps its badge', async () => {
-    server.use(http.get(url(endpoints.drivers.detail('drv_1')), () => ok({ ...DRIVER, emailVerifiedAt: null })));
+    server.use(http.get(url(endpoints.drivers.detail('0e7c5a4e-1d2b-4c3a-9f10-0000000000d1')), () => ok({ ...DRIVER, emailVerifiedAt: null })));
     renderPage();
     expect(await screen.findByText('Email not verified')).toBeInTheDocument();
     expect(screen.queryByText(/awaiting confirmation/)).toBeNull();

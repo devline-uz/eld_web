@@ -210,6 +210,7 @@ export const endpoints = {
     events: '/safety/events',
     event: (id: string) => `/safety/events/${id}`,
     scorecard: '/safety/scorecard',
+    summary: '/safety/summary',
     coaching: '/safety/coaching',
   },
   geofences: {
@@ -360,7 +361,23 @@ export type Endpoints = typeof endpoints;
  * tiles, keyed by `VITE_MAP_API_KEY`. Called with plain `fetch`, never through `client.ts`. */
 export const GEOCODING_BASE_URL = 'https://api.maptiler.com/geocoding';
 
+/** The public OSRM demo server — no SLA, rate limited, and its usage policy forbids production use. */
+export const OSRM_DEMO_URL = 'https://router.project-osrm.org';
+
+/** CODE-057 / LIVE-010 — the routing base for a build: `VITE_ROUTING_URL` when set; otherwise the
+ * public demo server in development only. A production build without it gets `null` — the route
+ * preview then draws straight segments and says road routing is not configured. */
+export function resolveRoutingBaseUrl(configured: string | undefined, dev: boolean): string | null {
+  const url = (configured ?? '').trim().replace(/\/+$/, '');
+  if (url) return url;
+  return dev ? OSRM_DEMO_URL : null;
+}
+
 /** Third-party road routing (OSRM `route` service): `{base}/route/v1/driving/{lon,lat;lon,lat}`.
- * Default is the public OSRM demo server (development / low volume only); set `VITE_ROUTING_URL` to a
- * self-hosted OSRM or compatible instance for production. No key. Plain `fetch`, never `client.ts`. */
-export const ROUTING_BASE_URL: string = (import.meta.env.VITE_ROUTING_URL ?? '') || 'https://router.project-osrm.org';
+ * Set `VITE_ROUTING_URL` to a self-hosted OSRM or compatible instance (required for production,
+ * see `resolveRoutingBaseUrl`). No key. Plain `fetch`, never `client.ts`. */
+export const ROUTING_BASE_URL: string | null = resolveRoutingBaseUrl(import.meta.env.VITE_ROUTING_URL, import.meta.env.DEV);
+
+if (ROUTING_BASE_URL === null) {
+  console.warn('[routing] VITE_ROUTING_URL is not set — trip route previews draw straight lines. Configure a self-hosted OSRM for production.');
+}

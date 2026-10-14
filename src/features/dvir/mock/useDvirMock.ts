@@ -29,7 +29,7 @@ import {
 } from '@/shared/api/dvir';
 import { useVehiclesLookup as useVehiclesLookupApi } from '@/shared/api/lookups';
 import type { DriverRow, VehicleRow } from '@/shared/api/vehicles';
-import { DEMO_FALLBACK_ENABLED, DEMO_FALLBACK_MODE } from '@/shared/lib/mockMode';
+import { DEMO_FALLBACK_ENABLED, shouldUseDemoRows } from '@/shared/lib/mockMode';
 import { buildDvirMockData, MOCK_ID_PREFIX, type DvirMockData } from './dvirMockData';
 
 let cached: DvirMockData | null = null;
@@ -39,13 +39,8 @@ function mockData(): DvirMockData {
   return cached;
 }
 
-/** Use demo rows for one section? Never while the real request is still in flight. */
-function shouldMock(real: { isLoading: boolean; isError: boolean }, realCount: number): boolean {
-  if (DEMO_FALLBACK_MODE === 'off') return false;
-  if (DEMO_FALLBACK_MODE === 'always') return true;
-  if (real.isLoading) return false;
-  return real.isError || realCount === 0;
-}
+/** CODE-086 — demo rows only on an empty successful answer (or `always`); errors stay visible. */
+const shouldMock = shouldUseDemoRows;
 
 function pageOf<T>(rows: T[], page: number, limit: number) {
   const totalPages = Math.max(1, Math.ceil(rows.length / limit));
@@ -125,13 +120,18 @@ function useDueSchedulesDemo() {
 }
 
 /** The `Vehicles out of service` KPI — demo units only when the real lookup has none at all. */
-function useVehiclesLookupDemo(): { data: { items: VehicleRow[] } | undefined; isLoading: boolean } {
+function useVehiclesLookupDemo(): { data: { items: VehicleRow[] } | undefined; isLoading: boolean; isError: boolean } {
   const real = useVehiclesLookupApi();
   const realItems = real.data?.items;
   const mock = shouldMock({ isLoading: real.isLoading, isError: real.isError }, realItems?.length ?? 0);
+  // CODE-075 — `isError` is passed through so a failed lookup reads "—", not "0 out of service".
+  const isError = real.isError && !real.data;
   return useMemo(
-    () => (mock ? { data: { items: mockData().vehicles }, isLoading: false } : { data: real.data, isLoading: real.isLoading }),
-    [mock, real.data, real.isLoading],
+    () =>
+      mock
+        ? { data: { items: mockData().vehicles }, isLoading: false, isError: false }
+        : { data: real.data, isLoading: real.isLoading, isError },
+    [mock, real.data, real.isLoading, isError],
   );
 }
 

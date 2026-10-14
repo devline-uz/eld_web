@@ -53,7 +53,7 @@ async function submitAssignment(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole('checkbox', { name: 'Select Unit 101 segment' }));
   await user.selectOptions(screen.getByRole('combobox', { name: 'Resolution for Unit 101' }), 'drv_1');
   await user.type(screen.getByRole('textbox'), 'Forgot to log in.');
-  await user.click(screen.getByRole('button', { name: 'Assign 1 segment' }));
+  await user.click(screen.getByRole('button', { name: 'Send 1 segment for confirmation' }));
 }
 
 function fail(error: Error) {
@@ -95,5 +95,17 @@ describe('11.13 Unassigned driving — refusals', () => {
     fail(new ApiError(409, { code: 'UNIDENTIFIED_ALREADY_ASSIGNED' }));
 
     expect(screen.getByRole('alert')).toHaveTextContent('That segment has already been assigned.');
+  });
+
+  it("CODE-007: a segment that overlaps the driver's own log is refused with actionable copy", async () => {
+    mutate.mockClear();
+    const user = userEvent.setup();
+    renderModal();
+    await submitAssignment(user);
+    fail(new ApiError(409, { code: 'UNIDENTIFIED_OVERLAPS_DRIVER_LOG' }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      "This driver's own log overlaps this unidentified driving. Correct the driver's log first or assign it to another driver.",
+    );
   });
 });

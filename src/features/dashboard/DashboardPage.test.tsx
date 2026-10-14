@@ -66,14 +66,14 @@ afterAll(() => server.close());
 interface SummaryOverrides {
   liveFleet?: { items: unknown[]; generatedAt?: string };
   violations?: { items: unknown[]; total: number };
-  unidentified?: { total: number; totalDurationSec: number };
+  unidentified?: { total: number; totalDurationSec: number; awaitingDriver?: number; awaitingDriverDurationSec?: number };
   vehicles?: { active: number; total: number; inactive?: number; outOfService?: number };
 }
 
 const DUTY_ON = new Set(['DRIVING', 'ON_DUTY', 'SLEEPER']);
 
 function buildSummary(overrides: SummaryOverrides = {}) {
-  const liveItems = (overrides.liveFleet?.items ?? []) as Array<{ dutyStatus: string }>;
+  const liveItems = (overrides.liveFleet?.items ?? []) as Array<{ dutyStatus: string; connectivity?: string }>;
   return {
     liveFleet: {
       items: liveItems,
@@ -83,7 +83,7 @@ function buildSummary(overrides: SummaryOverrides = {}) {
         onDuty: liveItems.filter((u) => DUTY_ON.has(u.dutyStatus)).length,
         moving: liveItems.filter((u) => u.dutyStatus === 'DRIVING').length,
         idle: liveItems.filter((u) => u.dutyStatus === 'IDLE').length,
-        offline: liveItems.filter((u) => u.dutyStatus === 'ELD_OFFLINE').length,
+        offline: liveItems.filter((u) => u.connectivity === 'ELD_OFFLINE').length,
       },
     },
     violations: overrides.violations ?? { items: [], total: 0 },
@@ -183,6 +183,35 @@ describe('W-01 Fleet Dashboard', () => {
     expect(screen.getByText('Live fleet')).toBeInTheDocument();
   });
 
+  it('CODE-054: Open HOS violations falls back to the summary count (never 0) while the table fails', async () => {
+    server.use(
+      http.get(url(endpoints.dashboard.summary), () => ok(buildSummary({ violations: { items: [], total: 7 } }))),
+      http.get(url(endpoints.violations.list), () => new Response(null, { status: 500 })),
+    );
+    renderPage();
+    const label = await screen.findByText('Open HOS violations', {}, { timeout: 8000 });
+    const card = label.parentElement!.parentElement!;
+    await waitFor(() => expect(within(card).getByText('7')).toBeInTheDocument());
+  });
+
+  it('CODE-029: the Unassigned driving tile names segments awaiting driver confirmation apart', async () => {
+    server.use(
+      http.get(url(endpoints.dashboard.summary), () =>
+        ok(buildSummary({ unidentified: { total: 3, totalDurationSec: 1800, awaitingDriver: 2, awaitingDriverDurationSec: 900 } })),
+      ),
+      violationsPage([]),
+    );
+    renderPage();
+    expect(await screen.findByText('3 segments · 2 awaiting driver', {}, { timeout: 8000 })).toBeInTheDocument();
+  });
+
+  it('CODE-029: no awaiting-driver hint when nothing waits for a driver', async () => {
+    server.use(http.get(url(endpoints.dashboard.summary), () => ok(buildSummary())), violationsPage([]));
+    renderPage();
+    expect(await screen.findByText('3 segments', {}, { timeout: 8000 })).toBeInTheDocument();
+    expect(screen.queryByText(/awaiting driver/)).not.toBeInTheDocument();
+  });
+
   it('UI-015/UI-004: the duty card counts ASSIGNED drivers and the vehicles KPI names out-of-service units', async () => {
     server.use(
       http.get(url(endpoints.dashboard.summary), () =>
@@ -205,6 +234,34 @@ describe('W-01 Fleet Dashboard', () => {
 
     expect(await screen.findByText('2 assigned drivers · 2 on duty', {}, { timeout: 8000 })).toBeInTheDocument();
     expect(screen.getByText('of 45 · 2 out of service')).toBeInTheDocument();
+  });
+
+  it('QA LIVE-002 / LIVE-011: drivers on ELD-offline or out-of-service units still count as on duty; ELD offline counts units', async () => {
+    server.use(
+      http.get(url(endpoints.dashboard.summary), () =>
+        ok({
+          ...buildSummary({
+            liveFleet: {
+              items: [
+                { vehicleId: 'v1', unitNumber: '#101', driverId: 'd1', dutyStatus: 'ELD_OFFLINE', isStale: true, driverDutyStatus: 'DRIVING', connectivity: 'ELD_OFFLINE', lat: null, lon: null },
+                { vehicleId: 'v2', unitNumber: '#102', driverId: 'd2', dutyStatus: 'INACTIVE', driverDutyStatus: 'ON_DUTY', connectivity: 'ELD_OFFLINE', lat: null, lon: null },
+                { vehicleId: 'v3', unitNumber: '#103', driverId: 'd3', dutyStatus: 'OFF_DUTY', driverDutyStatus: 'OFF_DUTY', connectivity: 'ELD_OFFLINE', lat: null, lon: null },
+                { vehicleId: 'v4', unitNumber: '#104', driverId: null, dutyStatus: 'INACTIVE', driverDutyStatus: null, connectivity: 'NO_DEVICE', lat: null, lon: null },
+              ],
+            },
+          }),
+        }),
+      ),
+      violationsPage([]),
+    );
+    renderPage();
+
+    expect(await screen.findByText('3 assigned drivers · 2 on duty', {}, { timeout: 8000 })).toBeInTheDocument();
+    const kpi = screen.getByText('Drivers on duty').closest('div')!.parentElement!;
+    expect(within(kpi).getByText('2')).toBeInTheDocument();
+    expect(screen.getByText('0 moving · 0 idle · 3 units with ELD offline')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Driving: 1 driver, 33%' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Off-duty: 1 driver, 33%' })).toBeInTheDocument();
   });
 
   it("shows an in-card error state when GET /dashboard/summary fails without leaving the page blank", async () => {
@@ -241,7 +298,7 @@ describe('W-01 Fleet Dashboard', () => {
         ok(
           buildSummary({
             liveFleet: {
-              items: [{ vehicleId: 'v1', unitNumber: '#101', dutyStatus: 'DRIVING', lat: 40, lon: -83 }],
+              items: [{ vehicleId: 'v1', unitNumber: '#101', driverId: 'd1', dutyStatus: 'DRIVING', lat: 40, lon: -83 }],
             },
           }),
         ),
@@ -321,7 +378,7 @@ describe('W-01 Fleet Dashboard', () => {
     });
     server.use(
       http.get(url(endpoints.dashboard.summary), () =>
-        ok(buildSummary({ liveFleet: { items: [{ vehicleId: 'v1', unitNumber: '#101', dutyStatus: 'DRIVING', lat: 40, lon: -83 }] } })),
+        ok(buildSummary({ liveFleet: { items: [{ vehicleId: 'v1', unitNumber: '#101', driverId: 'd1', dutyStatus: 'DRIVING', lat: 40, lon: -83 }] } })),
       ),
       violationsPage([]),
     );

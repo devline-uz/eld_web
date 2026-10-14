@@ -1,8 +1,9 @@
 // owner: web-hos-logs — ⭐ 11.13 Unassigned driving (web/tz.md §11.13). `hosEdit` FULL.
 //
-// ⭐ The rule that is easy to get wrong: after an assignment `recordOrigin` STAYS 1. The panel
-// never calls an assigned segment "driver entered" — `ORIGIN` keeps reading `ELD · automatic` and
-// only an `Assigned by …` annotation is added (§7.4 / §23). Nothing here deletes a record.
+// ⭐ CODE-029 — the carrier only PROPOSES a driver: every assignment is sent with
+// `requireDriverConfirmation`, the segment waits in PENDING_CONFIRMATION and nothing reaches the
+// driver's log until they accept in the app (§395.32). Annotations are not assignments and apply
+// at once. Nothing here deletes a record.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { formatInTimeZone } from 'date-fns-tz';
@@ -61,9 +62,6 @@ export function UnassignedDrivingModal({
   );
   const [choice, setChoice] = useState<Record<string, string>>({});
   const [annotation, setAnnotation] = useState('');
-  // B-83 — drawn checked (§11.13). On: nothing is attributed until the driver confirms in the app
-  // (status PENDING_CONFIRMATION); off: the segment moves to the driver's log immediately.
-  const [askDriver, setAskDriver] = useState(true);
   const [banner, setBanner] = useState<string | null>(null);
   // The banner sits above the segment list while the annotation and the button are below it —
   // bring it into view when it appears, so a refusal is never scrolled out of sight.
@@ -104,7 +102,7 @@ export function UnassignedDrivingModal({
           id,
           driverId: value,
           annotation: annotation.trim(),
-          requireDriverConfirmation: askDriver,
+          requireDriverConfirmation: true,
         });
       }
     }
@@ -115,7 +113,7 @@ export function UnassignedDrivingModal({
     inFlight.current = true;
     mutation.mutate(actions, {
       onSuccess: () => {
-        const awaiting = actions.filter((action) => action.kind === 'assign' && askDriver).length;
+        const awaiting = actions.filter((action) => action.kind === 'assign').length;
         // A confirmation request recalculates nothing yet, so it must not claim it did (WD-089).
         toast({
           kind: 'success',
@@ -156,20 +154,13 @@ export function UnassignedDrivingModal({
       size="lg"
       title="Unassigned driving"
       subtitle={`${segments.length} segment${segments.length === 1 ? '' : 's'} recorded with no driver logged in · ${formatHosHours(totalSec)} total`}
-      isDirty={annotation.length > 0 || !askDriver}
+      isDirty={annotation.length > 0}
       footer={
         <div className="flex w-full items-center justify-between">
-          {/* B-83 — sent as `requireDriverConfirmation` on every `assign` action (annotations are
-              not driver assignments and are unaffected). */}
-          <label className="flex items-center gap-2 text-body text-text">
-            <input
-              type="checkbox"
-              checked={askDriver}
-              disabled={mutation.isPending}
-              onChange={(e) => setAskDriver(e.target.checked)}
-            />
-            Ask each driver to confirm in the app
-          </label>
+          {/* CODE-029 — every assignment waits for the driver's confirmation in the app. */}
+          <p className="text-caption text-text-muted">
+            Each driver confirms in the app before the hours move to their log.
+          </p>
           <div className="flex gap-2">
             <ModalCancelButton disabled={mutation.isPending} />
             <Button
@@ -179,7 +170,7 @@ export function UnassignedDrivingModal({
               loading={mutation.isPending}
               onClick={submit}
             >
-              {`Assign ${selected.length} segment${selected.length === 1 ? '' : 's'}`}
+              {`Send ${selected.length} segment${selected.length === 1 ? '' : 's'} for confirmation`}
             </Button>
           </div>
         </div>

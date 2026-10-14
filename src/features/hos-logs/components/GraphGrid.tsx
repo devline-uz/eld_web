@@ -26,6 +26,7 @@ import {
   hourRulesPath,
   pct,
   plotSegments,
+  withImplicitOffDuty,
   plotUnassigned,
   plotViolations,
   quarterHourTicksPath,
@@ -61,7 +62,11 @@ export interface GraphGridProps {
   locationAt?: (startAt: string) => string | null;
   /** Click a segment → scroll to and highlight the matching `Log events` row. */
   onSelectSegment?: (startAt: string) => void;
+  /** CODE-066 — limits still in force at 00:00 from an earlier day (`GET /logs/:id` `ongoingViolations`). */
+  ongoingViolations?: ReadonlyArray<{ type: string }>;
 }
+
+const NO_ONGOING: ReadonlyArray<{ type: string }> = [];
 
 export function GraphGrid({
   summary,
@@ -73,21 +78,22 @@ export function GraphGrid({
   zone,
   locationAt,
   onSelectSegment,
+  ongoingViolations = NO_ONGOING,
 }: GraphGridProps) {
   const model = useMemo(() => {
     const dayStartMs = rodsDayStart(summary.date, timezone);
-    const segments = plotSegments(graph, dayStartMs, summary.dayLengthSec);
+    const segments = plotSegments(withImplicitOffDuty(graph, summary, dayStartMs), dayStartMs, summary.dayLengthSec);
     return {
       dayStartMs,
       segments,
       connectors: connectorsOf(segments),
       violations: plotViolations(violations, dayStartMs, summary.dayLengthSec),
       unassigned: plotUnassigned(unassigned, dayStartMs, summary.dayLengthSec),
-      totals: rowTotals(summary),
+      totals: rowTotals(summary, [...violations, ...ongoingViolations]),
       // WB-255 — parsed once per data change, not once per segment per mousemove.
       lookup: segmentLookupOf(segments),
     };
-  }, [summary, graph, violations, unassigned, timezone]);
+  }, [summary, graph, violations, ongoingViolations, unassigned, timezone]);
 
   const spoken = gridSpokenSummary(model.totals, dateLabel, zone);
 
@@ -99,7 +105,7 @@ export function GraphGrid({
           sr-only audit table must be a SIBLING, or it is dropped from the accessibility tree. */}
       <div role="img" aria-label={spoken} className="flex min-w-[40rem] items-stretch gap-3">
       {/* left column: OFF / SB / D / ON with their sub-labels */}
-      <div aria-hidden className="w-hos-labels shrink-0" style={{ paddingTop: GRID.axisHeight }}>
+      <div aria-hidden className="sticky left-0 z-10 w-hos-labels shrink-0 bg-bg-surface" style={{ paddingTop: GRID.axisHeight }}>
         {ROW_ORDER.map((row) => (
           // 12 + 12 fits the 26px row; `text-badge` (16px line) + `leading-4` overflowed into the
           // next row, so "Off duty" overlapped "SB".
@@ -142,8 +148,9 @@ export function GraphGrid({
         </HoverPlot>
       </div>
 
-      {/* TOTAL column */}
-      <div className="w-hos-total shrink-0 text-right">
+      {/* TOTAL column — LIVE-030: pinned to the right edge while the grid scrolls sideways on a
+          narrow screen (768 px clipped it to "TOT" / "02:2"; at 375 px it started off-screen). */}
+      <div data-testid="hos-total-column" className="sticky right-0 z-10 w-hos-total shrink-0 bg-bg-surface pl-2 text-right">
         <div
           className="text-table-head font-semibold uppercase tracking-wide text-text-muted"
           style={{ height: GRID.axisHeight }}

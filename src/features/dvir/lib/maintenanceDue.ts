@@ -11,6 +11,10 @@ export interface DueCheckInput {
   lastServiceAt: Date | null;
   currentOdometerMi: number;
   now: Date;
+  /** QA CODE-037 — where the interval counts from when no service was ever recorded (same as the
+   * backend): `null`/absent = unknown, and that interval is not evaluated. */
+  baselineMi?: number | null;
+  baselineAt?: Date | null;
 }
 
 export type DueState = 'OK' | 'DUE_SOON' | 'OVERDUE';
@@ -28,9 +32,10 @@ export const DUE_SOON_MILES = 500;
 export const DUE_SOON_DAYS = 7;
 
 export function computeDue(input: DueCheckInput): DueResult {
-  const nextDueMi = input.intervalMi != null ? (input.lastServiceMi ?? 0) + input.intervalMi : null;
-  const nextDueAt =
-    input.intervalDays != null ? addDays(input.lastServiceAt ?? new Date(0), input.intervalDays) : null;
+  const fromMi = input.lastServiceMi ?? input.baselineMi ?? null;
+  const fromAt = input.lastServiceAt ?? input.baselineAt ?? null;
+  const nextDueMi = input.intervalMi != null && fromMi != null ? fromMi + input.intervalMi : null;
+  const nextDueAt = input.intervalDays != null && fromAt != null ? addDays(fromAt, input.intervalDays) : null;
 
   const milesRemaining = nextDueMi != null ? nextDueMi - input.currentOdometerMi : null;
   const daysRemaining = nextDueAt != null ? diffDays(nextDueAt, input.now) : null;
@@ -47,6 +52,29 @@ export function computeDue(input: DueCheckInput): DueResult {
     nextDueAt,
     milesRemaining,
     daysRemaining,
+  };
+}
+
+/** Before this, a stored `nextDue*` was computed from 0 mi / 1970 — not a real baseline. */
+const LEGACY_EPOCH_CUTOFF_MS = Date.UTC(2000, 0, 1);
+
+/** QA CODE-037 — mirror of the backend `scheduleBaseline`: a stored schedule with no recorded
+ * service counts from its creation point, recovered as `nextDue* - interval`; rows saved by the old
+ * 0 mi / 1970 fallback give an unknown baseline (that interval is not evaluated). */
+export function scheduleBaseline(schedule: {
+  intervalMi: number | null;
+  intervalDays: number | null;
+  nextDueMi: number | null;
+  nextDueAt: string | Date | null;
+}): { baselineMi: number | null; baselineAt: Date | null } {
+  const mi = schedule.intervalMi != null && schedule.nextDueMi != null ? schedule.nextDueMi - schedule.intervalMi : null;
+  const at =
+    schedule.intervalDays != null && schedule.nextDueAt != null
+      ? addDays(new Date(schedule.nextDueAt), -schedule.intervalDays)
+      : null;
+  return {
+    baselineMi: mi != null && mi > 0 ? mi : null,
+    baselineAt: at != null && at.getTime() >= LEGACY_EPOCH_CUTOFF_MS ? at : null,
   };
 }
 

@@ -138,6 +138,22 @@ describe('W-08 · 24-hour graph grid', () => {
     expect(screen.getByTestId('hos-total-D').className).toContain('tabular');
   });
 
+  it('CODE-066: 12 h of driving with no 11-hour violation (two legal shifts) is not in danger', () => {
+    renderGrid({ summary: { ...summary, drivingSec: 12 * 3600 }, violations: [] });
+    expect(screen.getByTestId('hos-total-D').className).not.toContain('text-danger');
+  });
+
+  it('CODE-066: an 11-hour violation still in force from an earlier day paints the driving total', () => {
+    renderGrid({ summary: { ...summary, drivingSec: 3600 }, violations: [], ongoingViolations: [{ type: 'DRIVING_11' }] });
+    expect(screen.getByTestId('hos-total-D').className).toContain('text-danger');
+  });
+
+  it('LIVE-030: the TOTAL column stays pinned while the grid scrolls sideways', () => {
+    renderGrid();
+    expect(screen.getByTestId('hos-total-column').className).toMatch(/\bsticky\b/);
+    expect(screen.getByTestId('hos-total-column').className).toContain('right-0');
+  });
+
   it('draws the violation as a red dashed vertical line', () => {
     renderGrid();
     const mark = screen.getByTestId('hos-violation-mark');
@@ -222,7 +238,8 @@ describe('W-08 · 24-hour graph grid', () => {
       unassigned: [],
     });
     expect(screen.getByTestId('hos-hour-rules').getAttribute('d')!.match(/M/g)).toHaveLength(25);
-    const segment = screen.getByTestId('hos-segment');
+    // LIVE-006 — the time before the first record is drawn as off duty, so the driving line is last.
+    const segment = screen.getAllByTestId('hos-segment').at(-1)!;
     // 11/23 of the day in plot units (96 across) — measured against dayLengthSec, not 86 400.
     expect(Number(segment.getAttribute('x1'))).toBeCloseTo((11 / 23) * 96, 2);
   });

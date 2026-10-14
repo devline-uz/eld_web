@@ -55,6 +55,11 @@ describe('vehicle uniqueness rules', () => {
       deviceId: 'PT30_X',
     });
   });
+  it('CODE-044 plates compare without spaces or dashes', () => {
+    expect(run({ licensePlate: 'abc-123', licenseState: 'OH' })).toEqual(['licensePlate']);
+    expect(run({ licensePlate: 'ABC 123', licenseState: 'OH' })).toEqual(['licensePlate']);
+    expect(normalizeVehicleUniques({ licensePlate: 'pqr-4821', licenseState: 'OH' }).licensePlate).toBe('PQR4821');
+  });
   it('a soft-deleted unit does not hold its plate', () => {
     expect(
       findVehicleConflicts({ vehicles: [{ ...A, deletedAt: '2026-01-01' }] }, { ...draft, licensePlate: 'ABC123', licenseState: 'OH' }),

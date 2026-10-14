@@ -156,6 +156,28 @@ describe('W-07 Edit driver — phone', () => {
     expect(patched.body!.phone).toBeUndefined();
   });
 
+  // CODE-010 — clearing the stored phone used to send nothing, so the old number stayed.
+  it('a cleared phone is sent as null', async () => {
+    const patched = capturePatch();
+    const user = userEvent.setup();
+    renderModal();
+    await user.clear(phoneInput());
+    await user.click(save());
+    await waitFor(() => expect(patched.body).not.toBeNull());
+    expect(patched.body!.phone).toBeNull();
+  });
+
+  it('turning the ELD exemption off clears its reason', async () => {
+    const patched = capturePatch();
+    const user = userEvent.setup();
+    renderModal({ eldExempt: false, eldExemptReason: 'Pre-2000 engine' });
+    await user.clear(screen.getByLabelText(/First name/));
+    await user.type(screen.getByLabelText(/First name/), 'Johnny');
+    await user.click(save());
+    await waitFor(() => expect(patched.body).not.toBeNull());
+    expect(patched.body!.eldExemptReason).toBeNull();
+  });
+
   it('an incomplete phone is flagged on blur and blocks the save', async () => {
     const patched = capturePatch();
     const user = userEvent.setup();

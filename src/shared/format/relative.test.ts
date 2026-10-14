@@ -140,3 +140,20 @@ describe('useRelativeTime — recomputed every 30 s', () => {
     expect(later.result.current).toBe(NOW + RELATIVE_TICK_MS * 3);
   });
 });
+
+// LIVE-007 — an older value falls back to its date in the given (carrier) zone.
+describe('relative time — date fallback zone', () => {
+  const now = Date.parse('2026-10-14T12:00:00Z');
+  it('uses the given zone for the date of an older value', () => {
+    // 2026-09-26T19:40Z is Sep 26 in Denver, Sep 27 in Tashkent.
+    expect(formatRelative('2026-09-26T19:40:00Z', now, 'America/Denver')).toBe('Sep 26, 2026');
+    expect(formatRelativeShort('2026-09-26T19:40:00Z', now, 'Asia/Tashkent')).toBe('Sep 27, 2026');
+  });
+
+  it('useRelativeTime passes the zone through', () => {
+    const { result } = renderHook(() => useRelativeTime('2020-01-01T03:00:00Z', 'short', 'America/Denver'));
+    expect(result.current).toBe('Dec 31, 2019');
+    const long = renderHook(() => useRelativeTime('2020-01-01T03:00:00Z', 'long', 'America/Denver'));
+    expect(long.result.current).toBe('Dec 31, 2019');
+  });
+});

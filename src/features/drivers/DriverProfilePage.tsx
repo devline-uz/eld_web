@@ -30,8 +30,10 @@ import { Card, SectionHeader } from '@/shared/ui/Card';
 import { ConfirmDelete } from '@/shared/ui/Modal';
 import { HosMeter } from '@/shared/ui/HosMeter';
 import { useToast } from '@/shared/ui/Toast';
-import { ErrorState, LoadingState, ForbiddenState } from '@/shared/ui/states';
-import { formatLocal } from '@/shared/format/datetime';
+import { ErrorState, LoadingState, ForbiddenState, NotFoundState } from '@/shared/ui/states';
+import { isNotFoundError, validRouteId } from '@/shared/lib/routeIds';
+import { formatCarrier } from '@/shared/format/datetime';
+import { useCarrierTimezone } from '@/shared/auth/useCarrierTimezone';
 import { formatHosHours, formatRodsDateTime, hosClockNotes } from '@/shared/format/hos';
 import { useDriverOpenViolations } from '@/shared/api/hosLogs';
 import { orNone } from '@/shared/format/empty';
@@ -40,6 +42,7 @@ import { qk, qkRoot } from '@/shared/api/queryKeys';
 import { messagesHref } from '@/shared/lib/messagesHref';
 import { EditDriverModal } from './components/EditDriverModal';
 import { DriverDocumentsTab } from './components/DriverDocumentsTab';
+import { DriverActivityTab } from './components/DriverActivityTab';
 import { DRIVER_TOAST } from './lib/copy';
 import { DVIR_HREF, tripsHrefForDriver } from './lib/links';
 import { hosRulesetLabel } from '@/shared/lib/hosRuleset';
@@ -177,8 +180,24 @@ function exemptionsList(driver: {
   return flags.length > 0 ? flags.join(', ') : '';
 }
 
+/** While a lookup is still loading, a placeholder — never a real-looking "Unassigned" / "—". */
+function Pending() {
+  return (
+    <span className="inline-block h-3 w-16 animate-pulse rounded bg-bg-subtle align-middle" aria-label="Loading" role="status" />
+  );
+}
+
+const STATUS_BADGE: Record<string, { tone: 'success' | 'neutral' | 'danger'; label: string }> = {
+  ACTIVE: { tone: 'success', label: 'Active' },
+  INACTIVE: { tone: 'neutral', label: 'Inactive' },
+  TERMINATED: { tone: 'danger', label: 'Terminated' },
+};
+
 export default function DriverProfilePage() {
-  const { id } = useParams<{ id: string }>();
+  const { id: routeId } = useParams<{ id: string }>();
+  // LIVE-019 — a malformed id is never sent (it came back 422/404 and read as an outage).
+  const id = validRouteId(routeId);
+  const carrierTz = useCarrierTimezone();
   const navigate = useNavigate();
   const { can } = usePermission();
   const [params, setParams] = useSearchParams();
@@ -302,12 +321,16 @@ export default function DriverProfilePage() {
   }
 
   if (!can('drivers')) return <ForbiddenState screenName="Driver profile" />;
+  if (!id || isNotFoundError(driverQuery.error)) {
+    return <NotFoundState title="Driver not found" backLabel="Back to drivers" onBack={() => navigate('/drivers')} />;
+  }
   if (driverQuery.isLoading) return <LoadingState rows={8} />;
   if (driverQuery.isError || !driverQuery.data)
     return <ErrorState onRetry={() => driverQuery.refetch()} />;
 
   const driver = driverQuery.data;
   const name = `${driver.firstName} ${driver.lastName}`;
+  const statusBadge = STATUS_BADGE[driver.status] as (typeof STATUS_BADGE)[string] | undefined;
   const canFull = can('drivers', 'FULL');
   const canMessage = can('messaging');
   const canAssignTrip = can('trips');
@@ -331,9 +354,9 @@ export default function DriverProfilePage() {
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-page-title text-text">{name}</h2>
-                {driver.status === 'ACTIVE' && (
-                  <Badge tone="success" dot>
-                    Active
+                {statusBadge && (
+                  <Badge tone={statusBadge.tone} dot>
+                    {statusBadge.label}
                   </Badge>
                 )}
                 {driver.email && !driver.emailVerifiedAt && (
@@ -556,15 +579,22 @@ export default function DriverProfilePage() {
               <DetailRow label="CDL number" value={driver.cdlNumber} />
               <DetailRow label="CDL state" value={driver.cdlState} />
               <DetailRow label="Home terminal" value={driver.homeTerminalName} />
-              <DetailRow label="Fleet manager" value={fleetManagerQuery.data?.name ?? '—'} />
+              <DetailRow
+                label="Fleet manager"
+                value={driver.fleetManagerId && fleetManagerQuery.isLoading ? <Pending /> : (fleetManagerQuery.data?.name ?? '—')}
+              />
               <DetailRow
                 label="Co-driver"
                 value={
                   <span className="inline-flex flex-wrap items-center justify-end gap-2">
                     <span>
-                      {coDriverQuery.data
-                        ? `${coDriverQuery.data.firstName} ${coDriverQuery.data.lastName}`
-                        : '—'}
+                      {coDriverPairingQuery.isLoading || (coDriverPartnerId && coDriverQuery.isLoading) ? (
+                        <Pending />
+                      ) : coDriverQuery.data ? (
+                        `${coDriverQuery.data.firstName} ${coDriverQuery.data.lastName}`
+                      ) : (
+                        '—'
+                      )}
                     </span>
                     {/* B-7 — assigning a co-driver lives on the unit profile (it pairs with the
                         unit's primary driver); ending the active pairing works from either side. */}
@@ -580,7 +610,13 @@ export default function DriverProfilePage() {
               />
               <DetailRow
                 label="Assigned unit"
-                value={vehicleQuery.data?.unitNumber ?? 'Unassigned'}
+                value={
+                  driver.assignedVehicleId && vehicleQuery.isLoading ? (
+                    <Pending />
+                  ) : (
+                    vehicleQuery.data?.unitNumber ?? (driver.assignedVehicleId ? '—' : 'Unassigned')
+                  )
+                }
               />
               <DetailRow
                 label="App version"
@@ -590,7 +626,7 @@ export default function DriverProfilePage() {
               />
               <DetailRow
                 label="Registered on"
-                value={formatLocal(driver.registeredAt, 'shortDate')}
+                value={formatCarrier(driver.registeredAt, carrierTz, 'shortDate')}
               />
               <DetailRow label="Exemptions" value={orNone(exemptionsList(driver) || null)} />
             </div>
@@ -636,11 +672,7 @@ export default function DriverProfilePage() {
         </Card>
       )}
       {tab === 'documents' && <DriverDocumentsTab driverId={driver.id} />}
-      {tab === 'activity' && (
-        <Card>
-          <p className="text-body text-text-muted">No activity recorded.</p>
-        </Card>
-      )}
+      {tab === 'activity' && <DriverActivityTab driverId={driver.id} />}
 
       {editOpen && <EditDriverModal driver={driver} onClose={() => setEditOpen(false)} />}
       <ConfirmDelete
@@ -648,7 +680,7 @@ export default function DriverProfilePage() {
         onClose={() => setConfirmDeactivate(false)}
         onConfirm={runDeactivate}
         title="Deactivate this driver?"
-        description="They can no longer sign in to the mobile app. Their logs, DVIRs and certifications stay available for audits."
+        description="They are signed out of the mobile app at once and can no longer sign in, message or be dispatched. Their unit and any co-driver pairing are released. Logs, DVIRs and certifications stay available for audits."
         confirmLabel="Deactivate"
         loading={deactivate.isPending}
       />

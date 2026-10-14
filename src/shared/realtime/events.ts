@@ -86,6 +86,19 @@ export interface RealtimeEventPayloads {
     status: string;
     eta: string | null;
   };
+  /** room: `fleet` — CODE-056: a trip was created (any status, drafts included). */
+  'trip.created': {
+    tripId: string;
+  };
+  /** room: `fleet` — CODE-056: a trip was edited without a status move (times, stops, refs). */
+  'trip.updated': {
+    tripId: string;
+  };
+  /** room: `fleet` — a trip was deleted (hard delete; `id` and `tripId` are the same). */
+  'trip.deleted': {
+    id: string;
+    tripId: string;
+  };
   /** room: `fleet` */
   'safety.event_created': {
     vehicleId: string;
@@ -138,6 +151,9 @@ export const REALTIME_EVENTS = [
   'message.read',
   'typing',
   'trip.status_changed',
+  'trip.created',
+  'trip.updated',
+  'trip.deleted',
   'safety.event_created',
   'geofence.transition',
   'report.ready',

@@ -14,19 +14,26 @@ import {
   useTripsBoard,
   useUnassignedLoads,
   useAutoAssignTrips,
+  autoAssignSummary,
   usePublishTrip,
   useDeleteTrip,
+  useTripStatusAction,
+  canCancelTrip,
+  canDeliverTrip,
+  canStartTrip,
   isTripDeletable,
   isTripEditable,
   isTripInProgress,
   isTripNotFound,
   tripScheduleConflict,
+  ACTIVE_SLICE_LIMIT,
   tripsActiveSliceQuery,
   tripsKpiQuery,
   type TripTableRow,
   type TripRow,
+  type TripStatus,
 } from '@/shared/api/trips';
-import { qkRoot } from '@/shared/api/queryKeys';
+import { qk, qkRoot } from '@/shared/api/queryKeys';
 import { useDebouncedValue } from '@/shared/hooks/useDebouncedValue';
 import type { OffsetPage } from '@/shared/api/types';
 import { Button } from '@/shared/ui/Button';
@@ -38,18 +45,24 @@ import { Pagination } from '@/shared/ui/Pagination';
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
 import { EMPTY_STATE_COPY, searchEmptyState } from '@/shared/ui/copy';
 import { useToast } from '@/shared/ui/Toast';
-import { ConfirmDelete } from '@/shared/ui/Modal';
+import { ConfirmDelete, Modal } from '@/shared/ui/Modal';
 import { formErrorMessage } from '@/shared/api/errors';
-import { formatLocal, formatLocalDateTime } from '@/shared/format/datetime';
+import { formatCarrierDateTime, formatInTz } from '@/shared/format/datetime';
+import { useCarrierTimezone } from '@/shared/auth/useCarrierTimezone';
 import { formatWeight } from '@/shared/format/numbers';
 import { orDash } from '@/shared/format/empty';
 import { CreateTripModal } from './components/CreateTripModal';
 import { AssignLoadModal } from './components/AssignLoadModal';
+import { MarkDeliveredModal } from './components/MarkDeliveredModal';
 import { TripFiltersDrawer, TripFilterChips } from './components/TripFiltersDrawer';
 import { RoutePreview } from './components/RoutePreview';
 import { intermediateTripStops, orderTripStops } from './lib/useTripRoute';
 import { PeriodDropdown } from './components/PeriodDropdown';
 import {
+  CANCEL_TRIP_DESCRIPTION,
+  cancelTripTitle,
+  tripCancelledToast,
+  tripStartedToast,
   DELETE_TRIP_DESCRIPTION,
   TRIP_IN_PROGRESS,
   TRIP_NOT_EDITABLE,
@@ -64,6 +77,8 @@ type Segment = 'ACTIVE' | 'SCHEDULED' | 'COMPLETED' | 'UNASSIGNED';
 
 export default function TripsPage() {
   const { can } = usePermission();
+  // LIVE-007 — board times in the carrier zone, the same zone the trip windows are typed in.
+  const carrierTz = useCarrierTimezone();
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const canFull = can('trips', 'FULL');
@@ -78,6 +93,8 @@ export default function TripsPage() {
   const [assignLoad, setAssignLoad] = useState<TripRow | null>(null);
   const [editTrip, setEditTrip] = useState<TripRow | null>(null);
   const [deleteTrip, setDeleteTrip] = useState<TripRow | null>(null);
+  const [deliverTrip, setDeliverTrip] = useState<TripRow | null>(null);
+  const [cancelTrip, setCancelTrip] = useState<TripRow | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filtersRevision, setFiltersRevision] = useState(0);
   const [params, setParams] = useSearchParams();
@@ -91,12 +108,20 @@ export default function TripsPage() {
   function setSegment(next: Segment) {
     setPage(1);
     setSegmentState(next);
+    // LIVE-029 — the route panel follows the tab: a trip picked on Active is not kept on Scheduled.
+    setSelectedTripId(null);
   }
 
   // WD-073 — Active is two bounded server slices (exact in-memory search/filter); Scheduled and
   // Completed are one server page each (`q`/`status` real params); the 11.23 groups the API has
   // no params for (B-59) switch a history segment to the bounded newest-first window.
-  const filterRows = useCallback((rows: TripTableRow[]) => rows.filter((t) => matchesTripFilters(t, filters)), [filters]);
+  const filterRows = useCallback((rows: TripTableRow[]) => rows.filter((t) => matchesTripFilters(t, filters, carrierTz)), [filters, carrierTz]);
+  // CODE-047 — cancelled trips live under Completed; they are fetched only when the status filter
+  // asks for them (alone, or next to Delivered).
+  const completedStatuses = useMemo<TripStatus[]>(() => {
+    if (!filters.status.includes('Cancelled')) return ['DELIVERED'];
+    return filters.status.includes('Delivered') ? ['DELIVERED', 'CANCELLED'] : ['CANCELLED'];
+  }, [filters.status]);
   const trips = useTripsBoard({
     segment,
     page,
@@ -104,6 +129,7 @@ export default function TripsPage() {
     search: debouncedSearch,
     useWindow: activeFilterCount > 0,
     filter: filterRows,
+    completedStatuses,
   });
   const unassigned = useUnassignedLoads();
   const autoAssign = useAutoAssignTrips();
@@ -114,6 +140,41 @@ export default function TripsPage() {
   const deleteMutation = useDeleteTrip({
     onDeleted: (tripId) => setSelectedTripId((current) => (current === tripId ? null : current)),
   });
+
+  // LIVE-003 — the dispatcher moves a trip through its lifecycle from the board (backend
+  // `ALLOWED_TRANSITIONS`); a 409 means the driver app or another dispatcher moved it first — the
+  // mutation refetches the board either way.
+  const statusAction = useTripStatusAction();
+  const [startingId, setStartingId] = useState<string | null>(null);
+  function startTrip(trip: TripRow) {
+    if (statusAction.isPending) return;
+    setStartingId(trip.id);
+    statusAction.mutate(
+      { tripId: trip.id, status: 'IN_PROGRESS' },
+      {
+        onSuccess: () => toast({ kind: 'success', title: tripStartedToast(trip.number) }),
+        onError: (error) => toast({ kind: 'error', title: isTripNotFound(error) ? TRIP_NOT_FOUND : formErrorMessage(error) }),
+        onSettled: () => setStartingId(null),
+      },
+    );
+  }
+  function confirmCancel() {
+    const target = cancelTrip;
+    if (!target || statusAction.isPending) return;
+    statusAction.mutate(
+      { tripId: target.id, status: 'CANCELLED' },
+      {
+        onSuccess: () => {
+          toast({ kind: 'success', title: tripCancelledToast(target.number) });
+          setCancelTrip(null);
+        },
+        onError: (error) => {
+          toast({ kind: 'error', title: isTripNotFound(error) ? TRIP_NOT_FOUND : formErrorMessage(error) });
+          setCancelTrip(null);
+        },
+      },
+    );
+  }
 
   function confirmDelete() {
     const target = deleteTrip;
@@ -148,6 +209,16 @@ export default function TripsPage() {
         const deletable = isTripDeletable(row);
         return (
           <Can perm="trips" level="FULL">
+            {canStartTrip(row) && (
+              <DropdownMenu.Item onSelect={() => startTrip(row)} className={itemClass}>
+                Start trip
+              </DropdownMenu.Item>
+            )}
+            {canDeliverTrip(row) && (
+              <DropdownMenu.Item onSelect={() => setDeliverTrip(row)} className={itemClass}>
+                Mark delivered
+              </DropdownMenu.Item>
+            )}
             <DropdownMenu.Item
               disabled={!editable}
               title={editable ? undefined : TRIP_NOT_EDITABLE}
@@ -156,6 +227,11 @@ export default function TripsPage() {
             >
               Edit trip
             </DropdownMenu.Item>
+            {canCancelTrip(row) && (
+              <DropdownMenu.Item onSelect={() => setCancelTrip(row)} className={`${itemClass} text-danger hover:bg-danger-soft`}>
+                Cancel trip
+              </DropdownMenu.Item>
+            )}
             <DropdownMenu.Item
               disabled={!deletable}
               title={deletable ? undefined : TRIP_IN_PROGRESS}
@@ -205,13 +281,37 @@ export default function TripsPage() {
       // on-time DELIVERED window) or fix their `total`. Invalidate exactly those keys so the
       // KPI cards and segment counts stay correct; the board's own list pages are left alone
       // (§16.3 — never invalidate the whole list).
-      void queryClient.invalidateQueries({ queryKey: tripsActiveSliceQuery('ASSIGNED').queryKey });
-      void queryClient.invalidateQueries({ queryKey: tripsActiveSliceQuery('IN_PROGRESS').queryKey });
-      void queryClient.invalidateQueries({ queryKey: tripsActiveSliceQuery('DRAFT').queryKey });
-      void queryClient.invalidateQueries({ queryKey: tripsActiveSliceQuery('PLANNED').queryKey });
-      void queryClient.invalidateQueries({ queryKey: tripsKpiQuery().queryKey });
+      refreshTripSlices();
+    },
+    // CODE-056 — another dispatcher created, edited or deleted a trip: there is no row to patch for
+    // a new trip, and an edit/delete can move it between slices, so the board's slices are refetched
+    // (a deleted row is dropped from every cached page first, so it never flashes back).
+    'trip.created': () => {
+      refreshTripSlices();
+      // A new PLANNED trip without a driver lands on the unassigned-loads board too.
+      void queryClient.invalidateQueries({ queryKey: qk.unassignedLoads().slice(0, 2) });
+    },
+    'trip.updated': (payload) => {
+      void queryClient.invalidateQueries({ queryKey: qk.trip(payload.tripId) });
+      refreshTripSlices();
+    },
+    'trip.deleted': (payload) => {
+      queryClient.setQueriesData<OffsetPage<TripRow> | { items: TripRow[] } | TripRow | undefined>({ queryKey: qkRoot.trips }, (prev) => {
+        if (!prev || !('items' in prev) || !Array.isArray(prev.items)) return prev;
+        return { ...prev, items: prev.items.filter((t) => t.id !== payload.tripId) };
+      });
+      if (selectedTripId === payload.tripId) setSelectedTripId(null);
+      refreshTripSlices();
     },
   });
+
+  function refreshTripSlices() {
+    void queryClient.invalidateQueries({ queryKey: tripsActiveSliceQuery('ASSIGNED').queryKey });
+    void queryClient.invalidateQueries({ queryKey: tripsActiveSliceQuery('IN_PROGRESS').queryKey });
+    void queryClient.invalidateQueries({ queryKey: tripsActiveSliceQuery('DRAFT').queryKey });
+    void queryClient.invalidateQueries({ queryKey: tripsActiveSliceQuery('PLANNED').queryKey });
+    void queryClient.invalidateQueries({ queryKey: tripsKpiQuery().queryKey });
+  }
 
   const counts = {
     active: trips.counts.active,
@@ -226,10 +326,10 @@ export default function TripsPage() {
 
   // The `Active trips` chip and the `Running late` hint were the mock's literals ("6 arriving
   // today", "avg 48 min") whatever the fleet did. Both now come from the active trips on screen.
-  const todayKey = formatLocal(new Date(), 'yyyy-MM-dd');
+  const todayKey = formatInTz(new Date(), carrierTz, 'yyyy-MM-dd');
   const arrivingToday = trips.activeRows.filter((t) => {
     const at = t.etaAt ?? t.plannedEndAt;
-    return at ? formatLocal(at, 'yyyy-MM-dd') === todayKey : false;
+    return at ? formatInTz(at, carrierTz, 'yyyy-MM-dd') === todayKey : false;
   }).length;
   const lateMinutes = trips.activeRows
     .filter((t) => t.displayStatus === 'Late' && t.etaAt && t.plannedEndAt)
@@ -240,19 +340,17 @@ export default function TripsPage() {
       ? `avg ${Math.round(lateMinutes.reduce((sum, m) => sum + m, 0) / lateMinutes.length)} min`
       : undefined;
 
-  const selectedTrip = useMemo(
-    () => trips.activeRows.find((t) => t.id === selectedTripId) ?? filteredRows.find((t) => t.id === selectedTripId) ?? filteredRows[0] ?? null,
-    [trips.activeRows, selectedTripId, filteredRows],
-  );
+  // LIVE-029 — only a trip of the CURRENT tab can be the selected one (the panel used to keep an
+  // Active trip's route while the Scheduled list was shown).
+  const selectedTrip = useMemo(() => {
+    const segmentRows = segment === 'ACTIVE' ? trips.activeRows : segment === 'SCHEDULED' ? trips.scheduledRows : filteredRows;
+    return segmentRows.find((t) => t.id === selectedTripId) ?? filteredRows.find((t) => t.id === selectedTripId) ?? filteredRows[0] ?? null;
+  }, [segment, trips.activeRows, trips.scheduledRows, selectedTripId, filteredRows]);
 
   async function handleAutoAssign() {
     autoAssign.mutate(undefined, {
-      onSuccess: (result) => {
-        toast({
-          kind: 'success',
-          title: `${result.assigned.length} loads assigned · ${result.skipped} skipped (no driver with enough hours)`,
-        });
-      },
+      // CODE-055 — the toast says what the run did; the backend has no HOS-hours check.
+      onSuccess: (result) => toast(autoAssignSummary(result)),
       onError: (error) => toast({ kind: 'error', title: formErrorMessage(error) }),
     });
   }
@@ -294,7 +392,7 @@ export default function TripsPage() {
       header: 'DEPART',
       cell: ({ row }) => (
         <span className="tabular-nums text-text">
-          {row.original.startedAt || row.original.plannedStartAt ? formatLocal(row.original.startedAt ?? row.original.plannedStartAt, 'time') : '—'}
+          {row.original.startedAt || row.original.plannedStartAt ? formatInTz(row.original.startedAt ?? row.original.plannedStartAt, carrierTz, 'time') : '—'}
         </span>
       ),
     },
@@ -305,7 +403,7 @@ export default function TripsPage() {
         const late = row.original.displayStatus === 'Late';
         return (
           <span className={late ? 'tabular-nums font-semibold text-danger' : 'tabular-nums font-semibold text-text'}>
-            {row.original.etaAt ? formatLocal(row.original.etaAt, 'time') : '—'}
+            {row.original.etaAt ? formatInTz(row.original.etaAt, carrierTz, 'time') : '—'}
           </span>
         );
       },
@@ -315,7 +413,7 @@ export default function TripsPage() {
       header: 'START DATE',
       cell: ({ row }) => {
         const at = row.original.startedAt ?? row.original.plannedStartAt;
-        return <span className="whitespace-nowrap tabular-nums text-text">{at ? formatLocalDateTime(at) : '—'}</span>;
+        return <span className="whitespace-nowrap tabular-nums text-text">{at ? formatCarrierDateTime(at, carrierTz) : '—'}</span>;
       },
     },
     {
@@ -323,7 +421,7 @@ export default function TripsPage() {
       header: 'END DATE',
       cell: ({ row }) => {
         const at = row.original.completedAt ?? row.original.plannedEndAt;
-        return <span className="whitespace-nowrap tabular-nums text-text">{at ? formatLocalDateTime(at) : '—'}</span>;
+        return <span className="whitespace-nowrap tabular-nums text-text">{at ? formatCarrierDateTime(at, carrierTz) : '—'}</span>;
       },
     },
     {
@@ -341,10 +439,25 @@ export default function TripsPage() {
                 : status === 'Upcoming'
                   ? 'info'
                   : 'success';
-        return (
+        const badge = (
           <Badge tone={tone} className="whitespace-nowrap">
             {status}
           </Badge>
+        );
+        // QA LIVE-003 — a scheduled (draft / planned) trip whose planned start has passed keeps its
+        // status (nothing changes it for the dispatcher) but is flagged so it is not missed.
+        if (!row.original.startOverdue || !row.original.plannedStartAt) return badge;
+        const overdueTitle = `Planned start ${formatCarrierDateTime(row.original.plannedStartAt, carrierTz)} has passed and the trip has not started.`;
+        return (
+          <span className="inline-flex items-center gap-1.5">
+            {badge}
+            <span title={overdueTitle}>
+              <Badge tone="danger" className="whitespace-nowrap">
+                Overdue
+              </Badge>
+              <span className="sr-only"> — {overdueTitle}</span>
+            </span>
+          </span>
         );
       },
     },
@@ -371,7 +484,7 @@ export default function TripsPage() {
                   // Publishing puts the draft on its unit's timeline — a 409 names the trip in the way.
                   onError: (error) => {
                     const conflict = tripScheduleConflict(error);
-                    toast({ kind: 'error', title: conflict ? scheduleConflictMessage(conflict) : formErrorMessage(error) });
+                    toast({ kind: 'error', title: conflict ? scheduleConflictMessage(conflict, carrierTz) : formErrorMessage(error) });
                   },
                   onSettled: () => setPublishingId(null),
                 });
@@ -401,7 +514,7 @@ export default function TripsPage() {
       header: 'PICKUP WINDOW',
       cell: ({ row }) =>
         row.original.plannedStartAt ? (
-          <span className="tabular-nums text-text-secondary">{formatLocalDateTime(row.original.plannedStartAt)}</span>
+          <span className="tabular-nums text-text-secondary">{formatCarrierDateTime(row.original.plannedStartAt, carrierTz)}</span>
         ) : (
           <span className="text-text-muted">—</span>
         ),
@@ -621,6 +734,12 @@ export default function TripsPage() {
                     setPage(1);
                   }}
                 />
+                {trips.truncated && segment !== 'COMPLETED' ? (
+                  // CODE-048 — never drop rows silently: say the board holds only the newest slice.
+                  <p role="note" className="px-4 pb-3 text-caption text-text-muted">
+                    Showing the newest {ACTIVE_SLICE_LIMIT.toLocaleString('en-US')} trips per status. Use search or filters to find older ones.
+                  </p>
+                ) : null}
               </>
             )}
           </Card>
@@ -629,6 +748,27 @@ export default function TripsPage() {
             {selectedTrip ? (
               <>
                 <SectionHeader title={`Route · ${selectedTrip.number}`} subtitle={`${selectedTrip.pickup?.name ?? '—'} → ${selectedTrip.delivery?.name ?? '—'}`} />
+                {(canStartTrip(selectedTrip) || canDeliverTrip(selectedTrip)) && (
+                  <Can perm="trips" level="FULL">
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {canStartTrip(selectedTrip) && (
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          loading={statusAction.isPending && startingId === selectedTrip.id}
+                          onClick={() => startTrip(selectedTrip)}
+                        >
+                          Start trip
+                        </Button>
+                      )}
+                      {canDeliverTrip(selectedTrip) && (
+                        <Button variant="primary" size="sm" onClick={() => setDeliverTrip(selectedTrip)}>
+                          Mark delivered
+                        </Button>
+                      )}
+                    </div>
+                  </Can>
+                )}
                 <RoutePreview pickup={selectedTrip.pickup} delivery={selectedTrip.delivery} waypoints={intermediateTripStops(selectedTrip.stops)} />
                 <ol className="mt-4 flex flex-col gap-3">
                   {orderTripStops(selectedTrip.stops).map((stop) => {
@@ -636,10 +776,10 @@ export default function TripsPage() {
                     const label =
                       stop.status === 'COMPLETED'
                         ? stop.departedAt
-                          ? `${formatLocal(stop.departedAt, 'time')} · departed`
+                          ? `${formatInTz(stop.departedAt, carrierTz, 'time')} · departed`
                           : 'completed'
                         : stop.scheduledAt
-                          ? `${formatLocal(stop.scheduledAt, 'time')} · ETA`
+                          ? `${formatInTz(stop.scheduledAt, carrierTz, 'time')} · ETA`
                           : 'pending';
                     return (
                       <li key={stop.id} className="flex gap-2">
@@ -676,6 +816,28 @@ export default function TripsPage() {
         confirmLabel="Delete permanently"
         loading={deleteMutation.isPending}
       />
+      {deliverTrip && <MarkDeliveredModal key={deliverTrip.id} trip={deliverTrip} onClose={() => setDeliverTrip(null)} />}
+      {/* Not `ConfirmDelete`: its fixed "Cancel" button next to "Cancel trip" would read as two cancels. */}
+      <Modal
+        open={cancelTrip !== null}
+        onClose={() => {
+          if (!statusAction.isPending) setCancelTrip(null);
+        }}
+        title={cancelTrip ? cancelTripTitle(cancelTrip.number) : 'Cancel trip?'}
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" size="lg" onClick={() => setCancelTrip(null)} disabled={statusAction.isPending}>
+              Keep trip
+            </Button>
+            <Button variant="danger" size="lg" onClick={confirmCancel} loading={statusAction.isPending}>
+              Cancel trip
+            </Button>
+          </>
+        }
+      >
+        <p className="text-body text-text-secondary">{CANCEL_TRIP_DESCRIPTION}</p>
+      </Modal>
       {assignLoad && <AssignLoadModal load={assignLoad} onClose={() => setAssignLoad(null)} />}
       <TripFiltersDrawer
         key={filtersRevision}

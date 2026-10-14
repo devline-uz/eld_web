@@ -1,7 +1,7 @@
 // web/tz.md §8.2 — relative time, the one place the browser locale is correct.
 // < 60 s → `just now` · < 60 min → `N minutes ago` (`12 min` in tables) · < 24 h → `N h` ·
 // yesterday → `Yesterday` · < 7 d → `N d` · older → the date. Recomputed every 30 s.
-import { formatLocal, type DateInput } from './datetime';
+import { formatInTz, formatLocal, type DateInput } from './datetime';
 import { EMPTY } from './empty';
 
 export const RELATIVE_TICK_MS = 30_000;
@@ -26,8 +26,14 @@ function isYesterday(then: number, now: number): boolean {
   return startOfToday - startOfDay === DAY;
 }
 
+/** An older instant falls back to its date — in `timeZone` when given (LIVE-007: a company-context
+ * list shows the carrier's date, not the browser's), else the browser zone. */
+function olderDate(then: number, timeZone: string | undefined): string {
+  return timeZone ? formatInTz(then, timeZone, 'shortDate') : formatLocal(then, 'shortDate');
+}
+
 /** `2 minutes ago` · `1 h` · `Yesterday` · `2 d` · `just now` · older → `Sep 11, 2025`. */
-export function formatRelative(value: DateInput, now: number = Date.now()): string {
+export function formatRelative(value: DateInput, now: number = Date.now(), timeZone?: string): string {
   const then = toTime(value);
   if (then === null) return EMPTY.dash;
   const diff = now - then;
@@ -40,11 +46,11 @@ export function formatRelative(value: DateInput, now: number = Date.now()): stri
   if (diff < DAY) return `${Math.floor(diff / HOUR)} h`;
   if (isYesterday(then, now)) return 'Yesterday';
   if (diff < 7 * DAY) return `${Math.floor(diff / DAY)} d`;
-  return formatLocal(then, 'shortDate');
+  return olderDate(then, timeZone);
 }
 
 /** The table form — `12 min`, `3 h`, `2 d`, `just now` (§8.2 `LAST SYNC`). */
-export function formatRelativeShort(value: DateInput, now: number = Date.now()): string {
+export function formatRelativeShort(value: DateInput, now: number = Date.now(), timeZone?: string): string {
   const then = toTime(value);
   if (then === null) return EMPTY.dash;
   const diff = now - then;
@@ -53,7 +59,7 @@ export function formatRelativeShort(value: DateInput, now: number = Date.now()):
   if (diff < DAY) return `${Math.floor(diff / HOUR)} h`;
   if (isYesterday(then, now)) return 'Yesterday';
   if (diff < 7 * DAY) return `${Math.floor(diff / DAY)} d`;
-  return formatLocal(then, 'shortDate');
+  return olderDate(then, timeZone);
 }
 
 /** `14:26 · 1h ago` — the mixed form. The clock half is rendered in the given zone. */

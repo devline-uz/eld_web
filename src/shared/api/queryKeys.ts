@@ -77,6 +77,7 @@ export const qk = {
   unassignedLoads: (params?: QueryParams) => ['trips', 'unassigned-loads', p(params)] as const,
   safetyEvents: (params?: QueryParams) => ['safety', 'events', p(params)] as const,
   scorecard: (params?: QueryParams) => ['safety', 'scorecard', p(params)] as const,
+  safetySummary: () => ['safety', 'summary'] as const,
   geofences: (params?: QueryParams) => ['geofences', p(params)] as const,
   liveFleet: (params?: QueryParams) => ['live', 'fleet', p(params)] as const,
 

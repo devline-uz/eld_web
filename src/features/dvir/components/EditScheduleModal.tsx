@@ -12,8 +12,9 @@ import { useCreateSchedule, useUpdateSchedule, type ScheduleTableRow } from '@/s
 import { useVehiclesPicker } from '@/shared/api/vehicles';
 import { ApiError, formErrorMessage } from '@/shared/api/errors';
 import { formatDistance, formatNumber } from '@/shared/format/numbers';
-import { formatLocal } from '@/shared/format/datetime';
-import { computeDue, overdueReasons } from '../lib/maintenanceDue';
+import { dateOnlyKey, dateOnlyToInstant, formatDateOnly, todayInTz } from '@/shared/format/datetime';
+import { useCarrierTimezone } from '@/shared/auth/useCarrierTimezone';
+import { computeDue, scheduleBaseline, overdueReasons } from '../lib/maintenanceDue';
 
 const inputClass = 'h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text';
 
@@ -84,15 +85,17 @@ function overdueWarning(
   due: ReturnType<typeof computeDue>,
   reasons: ReturnType<typeof overdueReasons>,
   currentOdometerMi: number | null,
+  timeZone: string,
 ): string {
   const parts: string[] = [];
   if (reasons.miles && due.nextDueMi != null && currentOdometerMi != null)
     parts.push(`due at ${formatDistance(due.nextDueMi)}, the unit is at ${formatDistance(currentOdometerMi)}`);
-  if (reasons.days && due.nextDueAt) parts.push(`due on ${formatLocal(due.nextDueAt, 'shortDate')}`);
+  if (reasons.days && due.nextDueAt) parts.push(`due on ${formatDateOnly(due.nextDueAt, timeZone)}`);
   return `This schedule will be Overdue as soon as it is saved — ${parts.join('; ')}.`;
 }
 
 export function EditScheduleModal({ schedule, onClose }: { schedule?: ScheduleTableRow; onClose: () => void }) {
+  const carrierTz = useCarrierTimezone();
   const { toast } = useToast();
   const isCreate = !schedule;
   const initial = schedule ?? EMPTY_SCHEDULE;
@@ -105,7 +108,9 @@ export function EditScheduleModal({ schedule, onClose }: { schedule?: ScheduleTa
   const [intervalMi, setIntervalMi] = useState(initial.intervalMi != null ? String(initial.intervalMi) : '');
   const [intervalDays, setIntervalDays] = useState(initial.intervalDays != null ? String(initial.intervalDays) : '');
   const [lastServiceMi, setLastServiceMi] = useState(initial.lastServiceMi != null ? String(initial.lastServiceMi) : '');
-  const [lastServiceAt, setLastServiceAt] = useState(initial.lastServiceAt ? initial.lastServiceAt.slice(0, 10) : '');
+  // CODE-038 — the carrier-zone calendar day (a `slice(0, 10)` of the UTC instant was a day off).
+  const initialLastServiceDay = dateOnlyKey(initial.lastServiceAt, carrierTz);
+  const [lastServiceAt, setLastServiceAt] = useState(initialLastServiceDay);
   const [enabled, setEnabled] = useState<boolean>(initial.enabled);
   const [serverError, setServerError] = useState<string | null>(null);
   // A 422 from the server, mapped onto the field it is about; cleared as soon as that field changes.
@@ -159,23 +164,27 @@ export function EditScheduleModal({ schedule, onClose }: { schedule?: ScheduleTa
     !lastServiceMiAhead;
 
   // WD-112 — non-blocking preview of the state the server will compute on save, with the same
-  // inputs it uses: an emptied last-service field is not sent, so on edit the stored value stays
-  // (`dto.lastServiceMi ?? schedule.lastServiceMi`), on create it is null.
+  // inputs it uses: an emptied last-service field clears it (CODE-077), so it counts as none.
   const preview = (() => {
     if (!numbersValid || lastServiceMiAhead) return null;
     const mi = intervalMi.trim() ? Number(intervalMi) : null;
     const days = intervalDays.trim() ? Number(intervalDays) : null;
     if (mi == null && days == null) return null;
     if (mi != null && currentOdometerMi == null) return null;
-    const lastMi = lastServiceMi.trim() ? Number(lastServiceMi) : (schedule?.lastServiceMi ?? null);
-    const lastAt = lastServiceAt ? new Date(lastServiceAt) : schedule?.lastServiceAt ? new Date(schedule.lastServiceAt) : null;
+    const lastMi = lastServiceMi.trim() ? Number(lastServiceMi) : null;
+    const pickedLastAt = dateOnlyToInstant(lastServiceAt, carrierTz);
+    const lastAt = pickedLastAt ? new Date(pickedLastAt) : null;
+    const now = new Date();
     const due = computeDue({
       intervalMi: mi,
       intervalDays: days,
       lastServiceMi: lastMi,
       lastServiceAt: lastAt,
       currentOdometerMi: currentOdometerMi ?? 0,
-      now: new Date(),
+      now,
+      // QA CODE-037 — same baseline the server uses: today's odometer/date on create, the stored
+      // creation point on edit.
+      ...(schedule ? scheduleBaseline(schedule) : { baselineMi: currentOdometerMi, baselineAt: now }),
     });
     return due.state === 'OVERDUE' ? { due, reasons: overdueReasons(due) } : null;
   })();
@@ -186,7 +195,7 @@ export function EditScheduleModal({ schedule, onClose }: { schedule?: ScheduleTa
     intervalMi !== (initial.intervalMi != null ? String(initial.intervalMi) : '') ||
     intervalDays !== (initial.intervalDays != null ? String(initial.intervalDays) : '') ||
     lastServiceMi !== (initial.lastServiceMi != null ? String(initial.lastServiceMi) : '') ||
-    lastServiceAt !== (initial.lastServiceAt ? initial.lastServiceAt.slice(0, 10) : '') ||
+    lastServiceAt !== initialLastServiceDay ||
     enabled !== initial.enabled;
 
   function submit() {
@@ -208,11 +217,25 @@ export function EditScheduleModal({ schedule, onClose }: { schedule?: ScheduleTa
       setServerFieldErrors(placed);
       setServerError(formErrorMessage(error, PLACED_FIELDS, FIELD_LABELS));
     };
-    // `lastServiceMi`/`lastServiceAt` are not nullable in `UpdateMaintenanceScheduleDto` — sending
-    // `null` for an emptied field was answered 422, so an empty one is left out instead.
+    // CODE-077 — on edit an emptied last-service field sends `null` and clears (the backend DTO
+    // accepts it now); an untouched one is not sent. On create an empty field is simply omitted.
+    const initialLastMi = initial.lastServiceMi != null ? String(initial.lastServiceMi) : '';
     const lastService = {
-      lastServiceMi: lastServiceMi.trim() ? Number(lastServiceMi) : undefined,
-      lastServiceAt: lastServiceAt ? new Date(lastServiceAt).toISOString() : undefined,
+      lastServiceMi: lastServiceMi.trim()
+        ? Number(lastServiceMi)
+        : !isCreate && initialLastMi !== ''
+          ? null
+          : undefined,
+      // CODE-038 — midnight of the picked day in the carrier zone (never ahead of the clock, so
+      // "today" is not refused as future); an unchanged day is not re-sent, keeping the stored time.
+      lastServiceAt:
+        lastServiceAt === initialLastServiceDay
+          ? undefined
+          : lastServiceAt
+            ? dateOnlyToInstant(lastServiceAt, carrierTz)
+            : isCreate
+              ? undefined
+              : null,
     };
     if (isCreate) {
       createMutation.mutate(
@@ -221,7 +244,8 @@ export function EditScheduleModal({ schedule, onClose }: { schedule?: ScheduleTa
           name: name.trim(),
           intervalMi: intervalMi.trim() ? Number(intervalMi) : undefined,
           intervalDays: intervalDays.trim() ? Number(intervalDays) : undefined,
-          ...lastService,
+          lastServiceMi: lastService.lastServiceMi ?? undefined,
+          lastServiceAt: lastService.lastServiceAt ?? undefined,
           enabled,
         },
         {
@@ -388,6 +412,7 @@ export function EditScheduleModal({ schedule, onClose }: { schedule?: ScheduleTa
             <input
               type="date"
               value={lastServiceAt}
+              max={todayInTz(carrierTz)}
               onChange={(e) => {
                 setLastServiceAt(e.target.value);
                 clearServerError('lastServiceAt');
@@ -411,7 +436,7 @@ export function EditScheduleModal({ schedule, onClose }: { schedule?: ScheduleTa
         {preview && (
           <div role="status" className="flex items-start gap-2 rounded-md bg-warning-soft p-3 text-body text-text-secondary">
             <AlertTriangle size={16} strokeWidth={1.75} className="mt-0.5 shrink-0 text-warning" aria-hidden />
-            <span>{overdueWarning(preview.due, preview.reasons, currentOdometerMi)}</span>
+            <span>{overdueWarning(preview.due, preview.reasons, currentOdometerMi, carrierTz)}</span>
           </div>
         )}
         {serverError && (

@@ -81,14 +81,15 @@ describe('the role matrix — 4 roles × 23 keys', () => {
     });
   }
 
-  it('ADMIN is FULL on all 23 keys', () => {
-    for (const key of PERMISSION_KEYS) expect(ROLE_PERMISSIONS.ADMIN[key]).toBe('FULL');
+  it('ADMIN is FULL on every live key (the retired hosCertifyOnBehalf excepted)', () => {
+    for (const key of PERMISSION_KEYS) {
+      if (key !== 'hosCertifyOnBehalf') expect(ROLE_PERMISSIONS.ADMIN[key]).toBe('FULL');
+    }
   });
 
-  it('hosCertifyOnBehalf is ADMIN-only (Certify all, 11.12)', () => {
-    expect(hasPermission(ROLE_PERMISSIONS.ADMIN, 'hosCertifyOnBehalf', 'FULL')).toBe(true);
-    for (const role of ['FLEET_MANAGER', 'DISPATCHER', 'VIEWER'] as const) {
-      expect(ROLE_PERMISSIONS[role].hosCertifyOnBehalf).toBe('NONE');
+  it('CODE-029 — hosCertifyOnBehalf is retired: NONE for every role, certification is driver-only', () => {
+    for (const role of ['ADMIN', 'FLEET_MANAGER', 'DISPATCHER', 'VIEWER'] as const) {
+      expect(hasPermission(ROLE_PERMISSIONS[role], 'hosCertifyOnBehalf', 'READ')).toBe(false);
     }
   });
 

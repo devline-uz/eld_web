@@ -29,11 +29,24 @@ export interface DashboardSummaryResponse {
   liveFleet: {
     items: LiveFleetUnit[];
     generatedAt: string;
-    /** UI-003 — `moving` excludes stale units. */
-    counts: { total: number; onDuty: number; moving: number; idle: number; offline: number };
+    /**
+     * UI-003 — `moving` excludes stale units. QA LIVE-002 — `onDuty` / `driverDuty`: assigned
+     * drivers by their HOS status (Drivers list definition). QA LIVE-011 — `offline`: units whose
+     * paired ELD has been silent > 30 min (`connectivity: 'ELD_OFFLINE'`).
+     */
+    counts: {
+      total: number;
+      onDuty: number;
+      moving: number;
+      idle: number;
+      offline: number;
+      driverDuty?: { assigned: number; DRIVING: number; ON_DUTY: number; SLEEPER: number; OFF_DUTY: number; UNKNOWN: number };
+    };
   };
   violations: { items: DashboardViolation[]; total: number };
-  unidentified: { total: number; totalDurationSec: number };
+  /** `total` / `totalDurationSec` = PENDING (unassigned). CODE-029 — `awaitingDriver*` = assigned by
+   * the carrier, waiting for the driver's confirmation (PENDING_CONFIRMATION); optional for older APIs. */
+  unidentified: { total: number; totalDurationSec: number; awaitingDriver?: number; awaitingDriverDurationSec?: number };
   notifications: { unreadCount: number };
   carrier: { id: string; name: string; timezone: string | null };
   /** UI-004 — `inactive` / `outOfService` are fleet-wide record-status counts (additive). */

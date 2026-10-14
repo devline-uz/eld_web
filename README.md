@@ -20,6 +20,10 @@ Vite reads `.env.local`, not `.env.example`, so the copy step is required.
 (email + password) on the sign-in page. With any other value only Google sign-in is shown,
 as in production.
 
+`VITE_ROUTING_URL` (trip route preview, OSRM `route` API) is required for production builds:
+point it at a self-hosted OSRM. Left empty, `npm run dev` uses the public OSRM demo server and a
+production build draws straight lines with a "road routing is not configured" note (QA CODE-057).
+
 ## Run
 
 | Command | What it does |

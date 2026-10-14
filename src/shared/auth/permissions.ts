@@ -64,7 +64,8 @@ export function hasPermission(
  * nothing in `AuthProvider` reads this table and the JWT is never decoded.
  */
 export const ROLE_PERMISSIONS: Record<Role, PermissionMap> = {
-  ADMIN: Object.fromEntries(PERMISSION_KEYS.map((key) => [key, 'FULL'])) as PermissionMap,
+  // CODE-029 — `hosCertifyOnBehalf` is retired (certification is driver-only): NONE for every role.
+  ADMIN: { ...(Object.fromEntries(PERMISSION_KEYS.map((key) => [key, 'FULL'])) as PermissionMap), hosCertifyOnBehalf: 'NONE' },
   FLEET_MANAGER: {
     dashboard: 'FULL',
     liveFleet: 'FULL',
@@ -159,6 +160,16 @@ export function isRole(value: unknown): value is Role {
 
 /** Server refusal text (403 FORBIDDEN) when a non-super-admin touches an administrator. */
 export const SUPER_ADMIN_ONLY_REASON = 'Only a Super Admin can manage administrators.';
+
+/**
+ * Server refusal text (403 FORBIDDEN) for the permission-ceiling rules (backend CODE-002/003):
+ * "You cannot assign a role with permissions above your own: …", "You cannot edit the role you
+ * are assigned to.", and API-key scope refusals, which carry `details.exceeding`. Already
+ * user-facing, so it is shown verbatim instead of the generic "You do not have access to this."
+ */
+export function isPermissionCeilingRefusal(message: string, details: Readonly<Record<string, unknown>>): boolean {
+  return message.startsWith('You cannot ') || Array.isArray(details.exceeding);
+}
 
 /** "Privileged roles" = ADMIN and SUPER_ADMIN. Keys are compared case/whitespace-insensitively. */
 export function isPrivilegedRole(key: unknown): boolean {

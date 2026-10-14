@@ -8,7 +8,7 @@
 //   1. `Driving` is disabled while the chosen interval covers an automatic `D` record, and
 //   2. when the server still answers `422 DRIVING_TIME_IMMUTABLE` the refusal is shown verbatim
 //      and the request is NEVER retried or trimmed to make it pass.
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
@@ -123,6 +123,17 @@ export function RequestLogEditModal({
   useEffect(() => {
     if (banner) bannerRef.current?.scrollIntoView?.({ block: 'nearest' });
   }, [banner]);
+
+  // LIVE-020 — a field's error clears as soon as that field changes; clearing a wrong end time
+  // used to leave "End time must be after the start time." on screen until the next submit.
+  const clearErrors = useCallback((...fields: string[]) => {
+    setFieldErrors((current) => {
+      if (!fields.some((field) => field in current)) return current;
+      const next = { ...current };
+      for (const field of fields) delete next[field];
+      return next;
+    });
+  }, []);
 
   const startIso = useMemo(
     () => (TIME_RE.test(startTime) ? fromZonedTime(`${date}T${startTime}`, timezone).toISOString() : null),
@@ -325,7 +336,10 @@ export function RequestLogEditModal({
         <Field label="Start time" error={fieldErrors.startAt}>
           <input
             value={startTime}
-            onChange={(e) => setStartTime(inputFilters.time24(e.target.value))}
+            onChange={(e) => {
+              setStartTime(inputFilters.time24(e.target.value));
+              clearErrors('startAt', 'endAt');
+            }}
             inputMode="numeric"
             placeholder="14:26:58"
             className={cn(inputClass, 'tabular')}
@@ -334,7 +348,10 @@ export function RequestLogEditModal({
         <Field label="End time" error={fieldErrors.endAt}>
           <input
             value={endTime}
-            onChange={(e) => setEndTime(inputFilters.time24(e.target.value))}
+            onChange={(e) => {
+              setEndTime(inputFilters.time24(e.target.value));
+              clearErrors('startAt', 'endAt');
+            }}
             inputMode="numeric"
             placeholder="15:30:00"
             className={cn(inputClass, 'tabular')}
@@ -442,7 +459,10 @@ export function RequestLogEditModal({
         <Field label="Odometer" suffix="mi" error={fieldErrors.odometerMi}>
           <input
             value={odometer}
-            onChange={(e) => setOdometer(inputFilters.digits(e.target.value, LIMITS.odometerDigits))}
+            onChange={(e) => {
+              setOdometer(inputFilters.digits(e.target.value, LIMITS.odometerDigits));
+              clearErrors('odometerMi');
+            }}
             inputMode="numeric"
             className={cn(inputClass, 'tabular')}
           />
@@ -450,11 +470,12 @@ export function RequestLogEditModal({
         <Field label="Engine hours" suffix="h" error={fieldErrors.engineHours}>
           <input
             value={engineHours}
-            onChange={(e) =>
+            onChange={(e) => {
               setEngineHours(
                 inputFilters.decimal(e.target.value, LIMITS.engineHoursIntDigits, LIMITS.engineHoursFracDigits),
-              )
-            }
+              );
+              clearErrors('engineHours');
+            }}
             inputMode="decimal"
             className={cn(inputClass, 'tabular')}
           />
@@ -466,7 +487,10 @@ export function RequestLogEditModal({
           <textarea
             value={reason}
             maxLength={LIMITS.annotationMax}
-            onChange={(e) => setReason(e.target.value)}
+            onChange={(e) => {
+              setReason(e.target.value);
+              clearErrors('reason');
+            }}
             aria-invalid={Boolean(fieldErrors.reason)}
             className="min-h-20 rounded-md border border-border bg-bg-surface p-3 text-body text-text"
           />

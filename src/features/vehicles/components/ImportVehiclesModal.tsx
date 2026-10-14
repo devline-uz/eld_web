@@ -141,14 +141,17 @@ export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
                 {
                   onSuccess: (summary) => {
                     const total = summary.imported + summary.updated;
+                    const copy = TOAST_COPY.importFinished(summary.imported, summary.updated, summary.failed.length, total);
+                    // CODE-042 — a written row whose ELD serial could not be paired is a warning,
+                    // never also counted as failed.
+                    const warnings = summary.warnings ?? [];
                     toast({
-                      kind: 'success',
-                      ...TOAST_COPY.importFinished(
-                        summary.imported,
-                        summary.updated,
-                        summary.failed.length,
-                        total,
-                      ),
+                      kind: warnings.length > 0 ? 'warning' : 'success',
+                      ...copy,
+                      description:
+                        warnings.length > 0
+                          ? `${copy.description} ${warnings.length} ELD serial${warnings.length === 1 ? '' : 's'} not paired (row ${warnings[0]!.index + 1}: ${warnings[0]!.error})`
+                          : copy.description,
                     });
                     onClose();
                   },

@@ -37,6 +37,7 @@ function row(overrides: Partial<TripTableRow> = {}): TripTableRow {
     pickup: null,
     delivery: null,
     displayStatus: 'On time',
+    startOverdue: false,
     ...overrides,
   };
 }
@@ -130,6 +131,14 @@ describe('matchesTripFilters', () => {
     expect(matchesTripFilters(row({ startedAt: '2025-09-09T05:30:00.000Z' }), filters)).toBe(false);
     expect(matchesTripFilters(row({ startedAt: null, plannedStartAt: '2025-09-13T00:00:00.000Z' }), filters)).toBe(false);
     expect(matchesTripFilters(row({ startedAt: null, plannedStartAt: null }), filters)).toBe(false);
+  });
+
+  it('CODE-046: the depart day is the day in the board zone, not the UTC day', () => {
+    const filters = { ...EMPTY_TRIP_FILTERS, departFrom: '2025-09-10', departTo: '2025-09-10' };
+    // 02:00Z on Sep 11 is the evening of Sep 10 in New York.
+    const late = row({ startedAt: '2025-09-11T02:00:00.000Z' });
+    expect(matchesTripFilters(late, filters, 'America/New_York')).toBe(true);
+    expect(matchesTripFilters(late, filters, 'UTC')).toBe(false);
   });
 
   it('"no trailer only" excludes trips with a trailer assigned', () => {

@@ -15,8 +15,8 @@ function renderAs(role: keyof typeof ROLE_PERMISSIONS) {
   permissions.current = ROLE_PERMISSIONS[role];
   return render(
     <>
-      <Can perm="hosCertifyOnBehalf" level="FULL">
-        <button type="button">Certify all</button>
+      <Can perm="users" level="FULL">
+        <button type="button">Invite user</button>
       </Can>
       <Can perm="vehicles" level="FULL">
         <button type="button">+ Add vehicle</button>
@@ -29,14 +29,14 @@ function renderAs(role: keyof typeof ROLE_PERMISSIONS) {
 }
 
 describe('<Can>', () => {
-  it('ADMIN sees Certify all', () => {
+  it('ADMIN sees Invite user', () => {
     renderAs('ADMIN');
-    expect(screen.getByText('Certify all')).toBeInTheDocument();
+    expect(screen.getByText('Invite user')).toBeInTheDocument();
   });
 
-  it('FLEET_MANAGER never gets Certify all, but keeps the write CTA', () => {
+  it('FLEET_MANAGER never gets Invite user, but keeps the write CTA', () => {
     renderAs('FLEET_MANAGER');
-    expect(screen.queryByText('Certify all')).not.toBeInTheDocument();
+    expect(screen.queryByText('Invite user')).not.toBeInTheDocument();
     expect(screen.getByText('+ Add vehicle')).toBeInTheDocument();
   });
 

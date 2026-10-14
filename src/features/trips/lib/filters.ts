@@ -10,6 +10,7 @@
 // depart-date range have no server param at all — recorded as web/backend-gaps.md B-59.
 import type { TripDisplayStatus, TripTableRow } from '@/shared/api/trips';
 import { isRealCalendarDate } from './periodRange';
+import { formatInTz } from '@/shared/format/datetime';
 
 export const TRIP_STATUS_OPTIONS: TripDisplayStatus[] = ['On time', 'Late', 'Loading', 'Upcoming', 'Delivered', 'Cancelled', 'Planned'];
 
@@ -95,7 +96,9 @@ function departDate(row: Pick<TripTableRow, 'startedAt' | 'plannedStartAt'>): st
   return row.startedAt ?? row.plannedStartAt;
 }
 
-export function matchesTripFilters(row: TripTableRow, filters: TripFilters): boolean {
+/** `timeZone` — the zone the board renders DEPART in (carrier zone), so the day filter matches the
+ * day the dispatcher sees (CODE-046: it compared the UTC day). */
+export function matchesTripFilters(row: TripTableRow, filters: TripFilters, timeZone = 'UTC'): boolean {
   if (filters.status.length && !filters.status.includes(row.displayStatus)) return false;
   if (filters.driverId.length && (!row.driverId || !filters.driverId.includes(row.driverId))) return false;
   if (filters.vehicleId.length && (!row.vehicleId || !filters.vehicleId.includes(row.vehicleId))) return false;
@@ -103,7 +106,7 @@ export function matchesTripFilters(row: TripTableRow, filters: TripFilters): boo
   if (filters.departFrom || filters.departTo) {
     const depart = departDate(row);
     if (!depart) return false;
-    const day = depart.slice(0, 10);
+    const day = formatInTz(depart, timeZone, 'yyyy-MM-dd');
     if (filters.departFrom && day < filters.departFrom) return false;
     if (filters.departTo && day > filters.departTo) return false;
   }

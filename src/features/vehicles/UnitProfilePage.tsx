@@ -27,9 +27,11 @@ import { qk, qkRoot } from '@/shared/api/queryKeys';
 import { Badge } from '@/shared/ui/Badge';
 import { Button } from '@/shared/ui/Button';
 import { Card, SectionHeader } from '@/shared/ui/Card';
-import { ErrorState, LoadingState, ForbiddenState } from '@/shared/ui/states';
+import { ErrorState, LoadingState, ForbiddenState, NotFoundState } from '@/shared/ui/states';
+import { isNotFoundError, validRouteId } from '@/shared/lib/routeIds';
 import { formatOdometer, formatEngineHoursLong } from '@/shared/format/numbers';
-import { formatLocal } from '@/shared/format/datetime';
+import { formatCarrier, formatCarrierDateTime, timezoneAbbreviation } from '@/shared/format/datetime';
+import { useCarrierTimezone } from '@/shared/auth/useCarrierTimezone';
 import { useNowTick, useRelativeTime } from '@/shared/format/useRelativeTime';
 import { NO_DRIVER_LOGS_REASON } from './lib/copy';
 import { AddVehicleModal } from './components/AddVehicleModal';
@@ -79,7 +81,11 @@ function latestOf(a: string | null | undefined, b: string | null | undefined): s
 }
 
 export default function UnitProfilePage() {
-  const { id } = useParams<{ id: string }>();
+  // LIVE-007 — company context: carrier zone, the same instant as on the DVIR, reports and audit pages.
+  const carrierTz = useCarrierTimezone();
+  const { id: routeId } = useParams<{ id: string }>();
+  // LIVE-019 — a malformed id never reaches the API (every query below stays disabled).
+  const id = validRouteId(routeId);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { can } = usePermission();
@@ -139,8 +145,13 @@ export default function UnitProfilePage() {
   const now = useNowTick();
 
   if (!can('vehicles')) return <ForbiddenState screenName="Unit profile" />;
+  if (!id || isNotFoundError(vehicleQuery.error)) {
+    return <NotFoundState title="Unit not found" backLabel="Back to vehicles" onBack={() => navigate('/vehicles')} />;
+  }
   if (vehicleQuery.isLoading) return <LoadingState rows={8} />;
-  if (vehicleQuery.isError || !vehicleQuery.data) return <ErrorState onRetry={() => vehicleQuery.refetch()} />;
+  if (vehicleQuery.isError || !vehicleQuery.data) {
+    return <ErrorState title="Could not load this unit" onRetry={() => vehicleQuery.refetch()} />;
+  }
 
   const vehicle = vehicleQuery.data;
   const driver = driverQuery.data;
@@ -154,6 +165,10 @@ export default function UnitProfilePage() {
     : null;
   const coDriverName = coDriver ? `${coDriver.firstName} ${coDriver.lastName}` : null;
   const num = (v: number | string | null | undefined) => (v == null ? null : typeof v === 'string' ? Number(v) : v);
+  // LIVE-008 — the ECU's engine hours from the newest telemetry point; `Vehicle.engineHours` is a
+  // manual field ingest never fills, so it is only a fallback when it was actually set.
+  const storedEngineHours = num(vehicle.engineHours);
+  const engineHours = num(telemetry?.engineHours) ?? (storedEngineHours ? storedEngineHours : null);
 
   function setTab(next: Tab) {
     const nextParams = new URLSearchParams(params);
@@ -277,7 +292,7 @@ export default function UnitProfilePage() {
               {/* `GET /vehicles/:id/telemetry?limit=1` (Phase 13) — newest point for the live cells. */}
               <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
                 <TelemetryCell label="Odometer" value={`${formatOdometer(total)} mi`} />
-                <TelemetryCell label="Engine hours" value={formatEngineHoursLong(Number(vehicle.engineHours))} />
+                <TelemetryCell label="Engine hours" value={engineHours != null ? formatEngineHoursLong(engineHours) : '—'} />
                 <TelemetryCell label="Fuel level" value={telemetry?.fuelPct != null ? `${telemetry.fuelPct}%` : '—'} />
                 <TelemetryCell
                   label="Coolant temp"
@@ -334,7 +349,7 @@ export default function UnitProfilePage() {
                 <table className="w-full text-body min-w-lg lg:min-w-0">
                   <thead>
                     <tr className="border-t border-border text-table-head text-text-muted">
-                      <th className="p-3 text-left font-semibold">TIME STAMP</th>
+                      <th className="p-3 text-left font-semibold">TIME STAMP ({timezoneAbbreviation(carrierTz)})</th>
                       <th className="p-3 text-left font-semibold">ACTIVITY</th>
                       <th className="p-3 text-left font-semibold">DRIVER</th>
                       <th className="p-3 text-left font-semibold">SOURCE</th>
@@ -344,7 +359,7 @@ export default function UnitProfilePage() {
                   <tbody>
                     {activitiesQuery.data?.items.map((a) => (
                       <tr key={a.id} className="border-t border-border">
-                        <td className="p-3 tabular-nums">{formatLocal(a.occurredAt, 'dateTime')}</td>
+                        <td className="p-3 tabular-nums">{formatCarrierDateTime(a.occurredAt, carrierTz)}</td>
                         <td className="p-3">{activityLabel(a.activity)}</td>
                         <td className="p-3">{a.driverName ?? '—'}</td>
                         <td className={`p-3 ${a.source.startsWith('ELD') ? 'text-text-muted' : 'text-text'}`}>{activitySource(a.source)}</td>
@@ -372,7 +387,7 @@ export default function UnitProfilePage() {
             <div className="mt-2">
               <DetailRow label="Unit number" value={vehicle.unitNumber} />
               <DetailRow label="ELD device" value={device?.serial ?? 'Not assigned'} />
-              <DetailRow label="Activated on" value={vehicle.activatedAt ? formatLocal(vehicle.activatedAt, 'shortDate') : '—'} />
+              <DetailRow label="Activated on" value={vehicle.activatedAt ? formatCarrier(vehicle.activatedAt, carrierTz, 'shortDate') : '—'} />
               <DetailRow label="VIN" value={vehicle.vin} />
               <DetailRow label="Make / model" value={[vehicle.make, vehicle.model].filter(Boolean).join(' ') || '—'} />
               <DetailRow label="Year" value={vehicle.year ?? '—'} />
@@ -449,8 +464,8 @@ export default function UnitProfilePage() {
                     <td className="p-3">{d.description ?? '—'}</td>
                     <td className="p-3">{d.source}</td>
                     <td className="p-3 tabular-nums">{d.occurrence}</td>
-                    <td className="p-3 tabular-nums">{formatLocal(d.firstSeenAt, 'dateTime')}</td>
-                    <td className="p-3 tabular-nums">{formatLocal(d.lastSeenAt, 'dateTime')}</td>
+                    <td className="p-3 tabular-nums">{formatCarrierDateTime(d.firstSeenAt, carrierTz)}</td>
+                    <td className="p-3 tabular-nums">{formatCarrierDateTime(d.lastSeenAt, carrierTz)}</td>
                     <td className="p-3">
                       {d.clearedAt ? <Badge tone="success">Cleared</Badge> : <Badge tone="warning">Active</Badge>}
                     </td>
@@ -500,7 +515,7 @@ export default function UnitProfilePage() {
             <ul className="divide-y divide-border">
               {activitiesQuery.data?.items.map((a) => (
                 <li key={a.id} className="flex flex-col gap-0.5 p-3">
-                  <span className="tabular-nums text-caption text-text-muted">{formatLocal(a.occurredAt, 'dateTime')}</span>
+                  <span className="tabular-nums text-caption text-text-muted">{formatCarrierDateTime(a.occurredAt, carrierTz)}</span>
                   <span className="text-body text-text">{activityLabel(a.activity)}</span>
                   <span className="text-caption text-text-muted">
                     {a.driverName ?? '—'} · {activitySource(a.source)} · {activityDetails(a.details)}

@@ -8,15 +8,18 @@ import { RealtimeProvider, useIsOffline } from './RealtimeProvider';
 import { useRoom } from './useRoom';
 
 const signOut = vi.fn();
+const refreshUser = vi.fn(async () => undefined);
+const refreshAccessToken = vi.fn<() => Promise<string>>();
 let isAuthenticated = true;
 let accessToken: string | null = 'test-access-token';
 
 vi.mock('@/shared/auth/AuthProvider', () => ({
-  useAuth: () => ({ isAuthenticated, signOut }),
+  useAuth: () => ({ isAuthenticated, signOut, refreshUser }),
 }));
 
 vi.mock('@/shared/api/client', () => ({
   getAccessToken: () => accessToken,
+  refreshAccessToken: () => refreshAccessToken(),
 }));
 
 class FakeSocket {
@@ -77,6 +80,8 @@ describe('RealtimeProvider', () => {
     isAuthenticated = true;
     accessToken = 'test-access-token';
     signOut.mockClear();
+    refreshUser.mockClear();
+    refreshAccessToken.mockReset();
     lastSocket = null;
   });
   afterEach(() => {
@@ -134,6 +139,35 @@ describe('RealtimeProvider', () => {
     act(() => lastSocket!.trigger('disconnect', 'io server disconnect'));
 
     expect(signOut).toHaveBeenCalledTimes(1);
+  });
+
+  describe('CODE-012 — auth.revoked (access changed on the server)', () => {
+    it('a live session re-checks via refresh, reconnects with the new token and re-reads /auth/me', async () => {
+      refreshAccessToken.mockResolvedValueOnce('fresh-token');
+      renderProvider(new QueryClient());
+      await waitFor(() => expect(lastSocket).not.toBeNull());
+      act(() => lastSocket!.trigger('connect'));
+
+      act(() => lastSocket!.trigger('auth.revoked', {}));
+      act(() => lastSocket!.trigger('disconnect', 'io server disconnect'));
+
+      expect(signOut).not.toHaveBeenCalled();
+      await waitFor(() => expect(lastSocket!.connect).toHaveBeenCalled());
+      expect(lastSocket!.auth).toEqual({ token: 'fresh-token' });
+      expect(refreshUser).toHaveBeenCalled();
+    });
+
+    it('a revoked session: the rejected refresh (which signs out by itself) never reconnects', async () => {
+      refreshAccessToken.mockRejectedValueOnce(new Error('401'));
+      renderProvider(new QueryClient());
+      await waitFor(() => expect(lastSocket).not.toBeNull());
+
+      act(() => lastSocket!.trigger('auth.revoked', {}));
+      act(() => lastSocket!.trigger('disconnect', 'io server disconnect'));
+
+      await waitFor(() => expect(refreshAccessToken).toHaveBeenCalled());
+      expect(lastSocket!.connect).not.toHaveBeenCalled();
+    });
   });
 
   describe('access-token rotation (WB-119)', () => {

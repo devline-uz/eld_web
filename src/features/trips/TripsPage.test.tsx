@@ -14,6 +14,8 @@ import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/cli
 import { ToastProvider } from '@/shared/ui/Toast';
 import * as RealtimeProviderModule from '@/shared/realtime/RealtimeProvider';
 import TripsPage from './TripsPage';
+import { fromZonedTime } from 'date-fns-tz';
+import { DEFAULT_CARRIER_TIMEZONE } from '@/shared/auth/useCarrierTimezone';
 
 vi.mock('@/shared/auth/usePermission', () => ({ usePermission: () => ({ can: () => true }) }));
 
@@ -39,7 +41,7 @@ function fakeSocket() {
   };
 }
 
-function renderPage(socket: ReturnType<typeof fakeSocket> | null = null) {
+function renderPage(socket: ReturnType<typeof fakeSocket> | null = null, initialEntry = '/trips') {
   vi.spyOn(RealtimeProviderModule, 'useRealtime').mockReturnValue({
     getSocket: () => socket as never,
     connected: Boolean(socket),
@@ -49,7 +51,7 @@ function renderPage(socket: ReturnType<typeof fakeSocket> | null = null) {
   return { queryClient, ...render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
-        <MemoryRouter>
+        <MemoryRouter initialEntries={[initialEntry]}>
           <TripsPage />
         </MemoryRouter>
       </ToastProvider>
@@ -214,6 +216,57 @@ describe('W-11 Dispatch & Trips', () => {
     expect(screen.getByText('TR-9000').className).not.toContain('text-primary');
   });
 
+  it('LIVE-003: an active trip past its planned end is Late; a planned trip past its start is flagged Overdue (status kept)', async () => {
+    const past = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
+    const overdueActive = { ...TRIP, id: 'trp_7', number: 'TR-7000', status: 'ASSIGNED', plannedStartAt: past(8), plannedEndAt: past(6), startedAt: null, etaAt: null, onTime: null, stops: [] };
+    const overduePlanned = { ...TRIP, id: 'trp_8', number: 'TR-8000', driverId: null, status: 'PLANNED', plannedStartAt: past(7), plannedEndAt: past(6), startedAt: null, etaAt: null, onTime: null, stops: [] };
+    server.use(
+      http.get(url(endpoints.trips.list), ({ request }) => {
+        const status = new URL(request.url).searchParams.get('status');
+        const items = status === 'ASSIGNED' ? [overdueActive] : status === 'PLANNED' ? [overduePlanned] : [];
+        return ok({ items, page: 1, limit: 25, total: items.length, totalPages: 1 });
+      }),
+      http.get(url(endpoints.drivers.list), () => ok({ items: [DRIVER], page: 1, limit: 500, total: 1, totalPages: 1 })),
+      http.get(url(endpoints.vehicles.list), () => ok({ items: [VEHICLE], page: 1, limit: 500, total: 1, totalPages: 1 })),
+      http.get(url(endpoints.trips.unassignedLoads), () => ok({ items: [] })),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    expect(await screen.findByText('TR-7000')).toBeInTheDocument();
+    expect(screen.getByText('Late')).toBeInTheDocument();
+    expect(screen.queryByText('On time')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Scheduled 1' }));
+    expect(await screen.findByText('TR-8000')).toBeInTheDocument();
+    expect(screen.getByText('Planned')).toBeInTheDocument();
+    expect(screen.getByText('Overdue')).toBeInTheDocument();
+  });
+
+  it('LIVE-029: the route panel follows the tab — an Active trip is not kept on Scheduled', async () => {
+    const past = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
+    const activeTrip = { ...TRIP, id: 'trp_7', number: 'TR-7000', status: 'ASSIGNED', plannedStartAt: past(1), plannedEndAt: past(-1), startedAt: null, etaAt: null, onTime: null, stops: [] };
+    const plannedTrip = { ...TRIP, id: 'trp_8', number: 'TR-8000', driverId: null, status: 'PLANNED', plannedStartAt: past(-2), plannedEndAt: past(-3), startedAt: null, etaAt: null, onTime: null, stops: [] };
+    server.use(
+      http.get(url(endpoints.trips.list), ({ request }) => {
+        const status = new URL(request.url).searchParams.get('status');
+        const items = status === 'ASSIGNED' ? [activeTrip] : status === 'PLANNED' ? [plannedTrip] : [];
+        return ok({ items, page: 1, limit: 25, total: items.length, totalPages: 1 });
+      }),
+      http.get(url(endpoints.drivers.list), () => ok({ items: [DRIVER], page: 1, limit: 500, total: 1, totalPages: 1 })),
+      http.get(url(endpoints.vehicles.list), () => ok({ items: [VEHICLE], page: 1, limit: 500, total: 1, totalPages: 1 })),
+      http.get(url(endpoints.trips.unassignedLoads), () => ok({ items: [] })),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByText('TR-7000'));
+    expect(await screen.findByText('Route · TR-7000')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Scheduled 1' }));
+    expect(await screen.findByText('Route · TR-8000')).toBeInTheDocument();
+    expect(screen.queryByText('Route · TR-7000')).not.toBeInTheDocument();
+  });
+
   it('selecting a trip updates the route timeline card', async () => {
     usePopulatedTrips();
     const user = userEvent.setup();
@@ -238,10 +291,19 @@ describe('W-11 Dispatch & Trips', () => {
     expect(screen.getByText('Every load has a driver assigned.')).toBeInTheDocument();
   });
 
-  it('Auto-assign shows the exact §10 toast wording', async () => {
+  // CODE-055 — tz.md §10 worded the toast "(no driver with enough hours)", but the backend runs no
+  // HOS-hours check; the toast now says what the run actually did.
+  it('Auto-assign reports what it did, without an invented HOS reason (CODE-055)', async () => {
     usePopulatedTrips();
     server.use(
-      http.post(url(endpoints.trips.autoAssign), () => ok({ assigned: [{ tripId: 'trp_2', driverId: 'drv_1' }], skipped: 1 })),
+      http.post(url(endpoints.trips.autoAssign), () =>
+        ok({
+          assigned: [{ tripId: 'trp_2', driverId: 'drv_1' }],
+          skipped: 1,
+          noSchedule: 0,
+          failed: [{ tripId: 'trp_9', number: 'TR-9', reason: 'Only a planned or assigned trip can be (re)assigned.' }],
+        }),
+      ),
     );
     const user = userEvent.setup();
     renderPage();
@@ -250,7 +312,11 @@ describe('W-11 Dispatch & Trips', () => {
     await user.click(screen.getByRole('button', { name: /Unassigned 0/ }));
     await user.click(await screen.findByRole('button', { name: 'Auto-assign' }));
 
-    expect(await screen.findByText('1 loads assigned · 1 skipped (no driver with enough hours)')).toBeInTheDocument();
+    expect(
+      await screen.findByText('1 load assigned · 1 left unassigned (1 with no driver free at that time) · 1 failed'),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/TR-9: Only a planned or assigned trip/)).toBeInTheDocument();
+    expect(screen.queryByText(/enough hours/)).not.toBeInTheDocument();
   });
 
   it('Auto-assign names the refusal instead of a bare "Something went wrong."', async () => {
@@ -448,3 +514,97 @@ describe('W-11 Edit / Delete trip (row menu)', () => {
     expect(await screen.findByText('This trip no longer exists. The list has been refreshed.')).toBeInTheDocument();
   });
 });
+
+describe('W-11 Start trip / Mark delivered / Cancel trip (QA LIVE-003, CODE-047)', () => {
+  /** Stateful `GET /trips` + `PATCH /trips/:id` over `rows`, recording each PATCH body. */
+  function useLifecycleRows(rows: Array<Record<string, unknown>>) {
+    const patches: Array<{ id: string; body: Record<string, unknown> }> = [];
+    server.use(
+      http.get(url(endpoints.trips.list), ({ request }) => {
+        const status = new URL(request.url).searchParams.get('status');
+        const items = rows.filter((t) => !status || t.status === status);
+        return ok({ items, page: 1, limit: 25, total: items.length, totalPages: 1 });
+      }),
+      http.get(url(endpoints.drivers.list), () => ok({ items: [DRIVER], page: 1, limit: 500, total: 1, totalPages: 1 })),
+      http.get(url(endpoints.vehicles.list), () => ok({ items: [VEHICLE], page: 1, limit: 500, total: 1, totalPages: 1 })),
+      http.get(url(endpoints.trips.unassignedLoads), () => ok({ items: [] })),
+      http.patch(url(endpoints.trips.update(':id')), async ({ params, request }) => {
+        const body = (await request.json()) as Record<string, unknown>;
+        patches.push({ id: String(params.id), body });
+        const row = rows.find((t) => t.id === params.id)!;
+        Object.assign(row, body);
+        return ok(row);
+      }),
+    );
+    return patches;
+  }
+
+  it('Start trip on the route panel moves an ASSIGNED trip to IN_PROGRESS', async () => {
+    const patches = useLifecycleRows([{ ...TRIP, status: 'ASSIGNED', startedAt: null, etaAt: null, onTime: null }]);
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText('Route · TR-4821');
+    expect(screen.queryByRole('button', { name: 'Mark delivered' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Start trip' }));
+
+    await waitFor(() => expect(patches).toEqual([{ id: 'trp_1', body: { status: 'IN_PROGRESS' } }]));
+    expect(await screen.findByText('Trip TR-4821 started')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Mark delivered' })).toBeInTheDocument();
+  });
+
+  it('Mark delivered confirms with a delivery time, refuses a future one, and the trip moves to Completed', async () => {
+    const patches = useLifecycleRows([{ ...TRIP, etaAt: null, onTime: null, plannedEndAt: '2026-09-11T00:00:00.000Z' }]);
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText('Route · TR-4821');
+    await user.click(screen.getByRole('button', { name: 'Mark delivered' }));
+    expect(await screen.findByText('Mark trip TR-4821 delivered?')).toBeInTheDocument();
+    const input = screen.getByLabelText(/^Delivered at/);
+
+    await user.clear(input);
+    await user.type(input, '2099-01-01T10:00');
+    expect(await screen.findByText('Delivery time cannot be in the future.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Mark delivered' })).toBeDisabled();
+
+    await user.clear(input);
+    await user.type(input, '2026-09-10T18:00');
+    await user.click(screen.getByRole('button', { name: 'Mark delivered' }));
+
+    await waitFor(() => expect(patches).toHaveLength(1));
+    // LIVE-007 — typed in the carrier zone (no session → the default zone), not the runner's.
+    expect(patches[0]!.body).toEqual({ status: 'DELIVERED', completedAt: fromZonedTime('2026-09-10T18:00', DEFAULT_CARRIER_TIMEZONE).toISOString() });
+    expect(await screen.findByText('Trip TR-4821 marked delivered')).toBeInTheDocument();
+    expect(await screen.findByText('No active trips')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Completed 1' })).toBeInTheDocument();
+  });
+
+  it('Cancel trip (row menu) confirms, and the cancelled trip shows under Completed with the Cancelled filter', async () => {
+    const patches = useLifecycleRows([{ ...TRIP, status: 'ASSIGNED', startedAt: null, etaAt: null, onTime: null }]);
+    const user = userEvent.setup();
+    renderPage(null, '/trips?fStatus=Cancelled');
+
+    // The Cancelled filter hides the (active) trip; drop to the row via the Active segment first.
+    await user.click(await screen.findByRole('button', { name: /Clear filters/ }));
+    await screen.findByText('TR-4821');
+    await user.click(screen.getByRole('button', { name: 'Row actions' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Cancel trip' }));
+    expect(await screen.findByText('Cancel trip TR-4821?')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Cancel trip' }));
+
+    await waitFor(() => expect(patches).toEqual([{ id: 'trp_1', body: { status: 'CANCELLED' } }]));
+    expect(await screen.findByText('Trip TR-4821 cancelled')).toBeInTheDocument();
+  });
+
+  it('CODE-047: Completed lists cancelled trips when the status filter asks for them', async () => {
+    useLifecycleRows([{ ...TRIP, status: 'CANCELLED', etaAt: null, onTime: null }]);
+    const user = userEvent.setup();
+    renderPage(null, '/trips?fStatus=Cancelled');
+
+    await user.click(await screen.findByRole('button', { name: /^Completed/ }));
+    expect(await screen.findByText('TR-4821')).toBeInTheDocument();
+    expect(screen.getByText('Cancelled')).toBeInTheDocument();
+  });
+});
+

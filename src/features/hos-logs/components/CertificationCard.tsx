@@ -1,14 +1,10 @@
 // owner: web-hos-logs — W-08 card 3 of 3, `Certification · last 8 days`.
 //
-// ⚠️ `Certify all` is gated on `hosCertifyOnBehalf` FULL, which only ADMIN holds. The design image
-// draws the button in a Fleet-manager frame, but §10 W-08's role table and §11.12 are explicit
-// that certification is the driver's signature and only an administrator may sign on their behalf
-// (web/decisions.md WD-029). A fleet manager does not see the button at all — it is absent from
-// the DOM, not disabled.
-import { Check, AlertTriangle } from 'lucide-react';
+// CODE-029 — certification is the driver's own signature (§395.8(e)) and only the driver can give
+// it, in the app. The web shows the state of the last eight days and says who signs; there is no
+// `Certify all` / on-behalf action any more (the API answers 403 CERTIFY_DRIVER_ONLY).
+import { Check, AlertTriangle, Smartphone } from 'lucide-react';
 import { Card, SectionHeader } from '@/shared/ui/Card';
-import { Button } from '@/shared/ui/Button';
-import { Can } from '@/shared/auth/Can';
 import { cn } from '@/shared/ui/cn';
 import { ErrorState, LoadingState } from '@/shared/ui/states';
 import type { RodsDaySummary } from '@/shared/api/hosLogs';
@@ -20,7 +16,6 @@ export interface CertificationCardProps {
   onRetry: () => void;
   /** `03`…`10` — clicking a cell navigates to `?date=`. */
   onSelectDate: (date: string) => void;
-  onCertifyAll: () => void;
   /** `A reminder was sent to the mobile app at 16:05.` — null when nothing is pending. */
   reminderNote: string | null;
 }
@@ -31,7 +26,6 @@ export function CertificationCard({
   isError,
   onRetry,
   onSelectDate,
-  onCertifyAll,
   reminderNote,
 }: CertificationCardProps) {
   const certified = days.filter((day) => day.certified).length;
@@ -43,11 +37,13 @@ export function CertificationCard({
         title="Certification · last 8 days"
         subtitle={`${certified} certified · ${pending} pending`}
         action={
-          <Can perm="hosCertifyOnBehalf" level="FULL">
-            <Button variant="primary" onClick={onCertifyAll} data-print-hide="">
-              Certify all
-            </Button>
-          </Can>
+          <span
+            className="flex items-center gap-1.5 text-caption text-text-muted"
+            title="Certification is the driver's signature (§395.8(e)). Only the driver can certify, in the driver app."
+          >
+            <Smartphone size={14} strokeWidth={1.75} aria-hidden />
+            Drivers certify in the app
+          </span>
         }
       />
       <div className="mt-4">

@@ -17,7 +17,10 @@ import * as RealtimeProviderModule from '@/shared/realtime/RealtimeProvider';
 import MessagesPage from './MessagesPage';
 
 vi.mock('@/shared/auth/usePermission', () => ({ usePermission: () => ({ can: () => true }) }));
-vi.mock('@/shared/auth/AuthProvider', () => ({ useAuth: () => ({ user: { id: 'usr_1', fullName: 'Sarah Chen' } }) }));
+vi.mock('@/shared/auth/AuthProvider', () => {
+  const auth = { user: { id: 'usr_1', fullName: 'Sarah Chen', homeTerminalTimezone: 'America/Denver' } };
+  return { useAuth: () => auth, useOptionalAuth: () => auth };
+});
 
 function fakeSocket() {
   const listeners = new Map<string, Set<(payload: unknown) => void>>();

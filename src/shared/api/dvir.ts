@@ -396,6 +396,9 @@ export interface ResolveDefectPayload {
   completedAt?: string;
   laborHours?: number;
   partsCostUsd?: number;
+  /** CODE-077 — the work order the repair is recorded on, applied in the SAME write as the
+   * resolution (`null` detaches; omit to keep the current link). */
+  workOrderId?: string | null;
 }
 
 export function useResolveDefect(id: string) {
@@ -408,6 +411,7 @@ export function useResolveDefect(id: string) {
       void queryClient.invalidateQueries({ queryKey: qk.defect(id) });
       void queryClient.invalidateQueries({ queryKey: qkRoot.vehicles });
       void queryClient.invalidateQueries({ queryKey: qkRoot.dvir });
+      void queryClient.invalidateQueries({ queryKey: qkRoot.workOrders });
     },
   });
 }
@@ -542,7 +546,8 @@ export type UpdateWorkOrderPayload = {
   odometerMi?: number | null;
   dueAt?: string | null;
   status?: 'OPEN' | 'IN_PROGRESS';
-  estimatedLaborHours?: number;
+  /** CODE-077 — `null` clears the estimate. */
+  estimatedLaborHours?: number | null;
   keepOutOfService?: boolean;
   notifyDriver?: boolean;
   blockDispatchAssignment?: boolean;

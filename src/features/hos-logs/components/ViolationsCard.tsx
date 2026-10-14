@@ -14,6 +14,7 @@ import { formatHosHours } from '@/shared/format';
 import type { HosViolation, OngoingViolation } from '@/shared/api/hosLogs';
 import { ResolveViolationModal } from '@/shared/violations/ResolveViolationModal';
 import { VIOLATION_TITLE } from '../grid';
+import { dayPhrase } from '../dayPhrase';
 
 /** `Warning` severity for a limit that is only approaching, `Violation` once it is exceeded. */
 function isWarning(violation: HosViolation): boolean {
@@ -27,6 +28,8 @@ export function ViolationsCard({
   violations,
   ongoing = [],
   openTotal,
+  isLoading = false,
+  isError = false,
 }: {
   driverId: string;
   date: string;
@@ -43,14 +46,22 @@ export function ViolationsCard({
    * dashboard and the Drivers roster show. The ones not filed on this day are named in the subtitle.
    */
   openTotal?: number;
+  /**
+   * LIVE-019 — the log day is still loading or failed. The card then never claims a green
+   * "No violations" it could not check: it says the list is unknown instead.
+   */
+  isLoading?: boolean;
+  isError?: boolean;
 }) {
   const [resolving, setResolving] = useState<HosViolation | null>(null);
+  // LIVE-017 — "today" only on the current RODS day; a past day reads "on Oct 8".
+  const when = dayPhrase(date, formatInTimeZone(new Date(), timezone, 'yyyy-MM-dd'));
   const open = violations.filter((violation) => violation.status === 'OPEN');
   // A type already filed on this day is not repeated as "continuing".
   const filedTypes = new Set(violations.map((violation) => violation.type));
   const continuing = ongoing.filter((violation) => !filedTypes.has(violation.type));
   const otherDays = openTotal !== undefined ? Math.max(0, openTotal - open.length) : 0;
-  const subtitle = [
+  const subtitle = isError && violations.length === 0 ? 'Unavailable' : [
     `${open.length} open`,
     continuing.length ? `${continuing.length} continuing from an earlier day` : null,
     otherDays ? `${otherDays} open on other days` : null,
@@ -62,7 +73,7 @@ export function ViolationsCard({
     <Card>
       {/* WB-060 — `Resolve` lives on each OPEN row, so the violation resolved (and the note written
           against it) is always the one the user clicked, never `open[0]`. */}
-      <SectionHeader title="Violations · today" subtitle={subtitle} />
+      <SectionHeader title={`Violations · ${when}`} subtitle={subtitle} />
       <div className="mt-4 flex flex-col gap-2">
         {continuing.map((violation) => (
           <div
@@ -85,8 +96,12 @@ export function ViolationsCard({
             </div>
           </div>
         ))}
-        {violations.length === 0 && continuing.length === 0 ? (
-          <p className="py-8 text-center text-body text-success">● No violations today</p>
+        {(isLoading || isError) && violations.length === 0 && continuing.length === 0 ? (
+          <p className="py-8 text-center text-body text-text-muted" aria-busy={isLoading || undefined}>
+            {isLoading ? 'Checking violations…' : 'Violations unavailable — the log day could not be loaded.'}
+          </p>
+        ) : violations.length === 0 && continuing.length === 0 ? (
+          <p className="py-8 text-center text-body text-success">● {`No violations ${when}`}</p>
         ) : (
           violations.map((violation) => {
             // WB-061 — a RESOLVED / AUTO_CLEARED violation stays listed (audit trail) but muted, with
@@ -121,11 +136,12 @@ export function ViolationsCard({
                 <p className="tabular text-caption text-text-muted">
                   {isWarning(violation)
                     ? violation.detail
-                    : `Exceeded by ${formatHosHours(violation.exceededBySec)} at ${formatInTimeZone(
+                    : // LIVE-004 — `occurredAt` is the crossing, `exceededBySec` the overrun after it.
+                      `Limit exceeded at ${formatInTimeZone(
                         new Date(violation.occurredAt),
                         timezone,
                         'HH:mm',
-                      )}`}
+                      )} · over by ${formatHosHours(violation.exceededBySec)}`}
                 </p>
               </div>
               {isOpen && (

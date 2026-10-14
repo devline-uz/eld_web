@@ -190,6 +190,51 @@ describe('11.2 Edit unit — duplicate values', () => {
   });
 });
 
+// CODE-010 — a field emptied on edit is sent as `null` (the API clears it); LIVE-016 — the unit's
+// paired ELD serial is prefilled.
+describe('11.2 Edit unit — clearing optional fields', () => {
+  it('sends null for a cleared plate, issuing state, notes and ELD serial', async () => {
+    let body: Record<string, unknown> | undefined;
+    server.use(
+      http.patch(url(endpoints.vehicles.update(':id')), async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>;
+        return ok({ ...VEHICLE });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(
+      <AddVehicleModal vehicle={{ ...VEHICLE, notes: 'Reefer', eldSerial: 'PT30_1C4F' } as VehicleRow} onClose={() => {}} />,
+    );
+    expect(screen.getByLabelText(/ELD serial/)).toHaveValue('PT30_1C4F');
+    await user.clear(screen.getByLabelText(/License plate/));
+    await user.clear(screen.getByLabelText(/Issuing state/));
+    await user.clear(screen.getByLabelText(/Notes/));
+    await user.clear(screen.getByLabelText(/ELD serial/));
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await screen.findByText('Unit 101 updated');
+    expect(body).toMatchObject({ licensePlate: null, plateState: null, notes: null, deviceId: null });
+  });
+
+  it('leaves untouched empty fields out and re-sends the paired serial unchanged', async () => {
+    let body: Record<string, unknown> | undefined;
+    server.use(
+      http.patch(url(endpoints.vehicles.update(':id')), async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>;
+        return ok({ ...VEHICLE });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<AddVehicleModal vehicle={{ ...VEHICLE, eldSerial: 'PT30_1C4F' } as VehicleRow} onClose={() => {}} />);
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await screen.findByText('Unit 101 updated');
+    // CODE-044 — the plate goes out in the API's canonical form (no spaces/dashes).
+    expect(body).toMatchObject({ licensePlate: '4821JG', plateState: 'OH', deviceId: 'PT30_1C4F' });
+    expect(body).not.toHaveProperty('notes');
+  });
+});
+
 describe('11.3 Delete unit', () => {
   it('keeps Delete disabled until the confirmation text matches, then deletes', async () => {
     server.use(http.delete(url(endpoints.vehicles.remove(':id')), () => ok({ id: 'veh_1', status: 'INACTIVE' })));

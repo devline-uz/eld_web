@@ -11,7 +11,7 @@ import { GoogleMark } from './GoogleMark';
 
 function SignInMethod({ profile }: { profile: MyProfile }) {
   const devPassword =
-    import.meta.env.VITE_AUTH_MODE === 'dev' && profile.authProvider !== 'GOOGLE' && !profile.googleUid;
+    import.meta.env.VITE_AUTH_MODE === 'dev' && profile.authProvider !== 'GOOGLE' && !profile.googleLinked;
   return (
     <div className="flex flex-col gap-2">
       <p className="text-label text-text-secondary">Sign-in method</p>

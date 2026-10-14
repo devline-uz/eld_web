@@ -31,7 +31,7 @@ export const VALIDATION_MESSAGES = {
   odometer: 'Enter the odometer in miles.',
   odometerNegative: 'Odometer cannot be negative.',
   yearMin: 'Year must be 1970 or later.',
-  yearFuture: 'Year cannot be in the future.',
+  yearFuture: 'Year cannot be later than next model year.',
   outputFileComment: 'Maximum 60 characters.',
   annotation: 'An annotation must be at least 4 characters (FMCSA requirement).',
   editReason: 'Explain why the record is being changed.',
@@ -75,6 +75,9 @@ export const VALIDATION_MESSAGES = {
   vehicleMakeMax: 'Make must be 60 characters or fewer.',
   vehicleModelMax: 'Model must be 60 characters or fewer.',
   vehicleEldSerialMax: 'ELD serial must be 60 characters or fewer.',
+  /** LIVE-021 */
+  licensePlateFormat: 'Use letters, digits, spaces or dashes only.',
+  vehicleEldSerialFormat: 'Use letters, digits, "_", "-", ":" or "." only (e.g. PT30_1C4F).',
   vehicleNotesMax: 'Notes must be 500 characters or fewer.',
   geofenceNameMax: 'Geofence name must be 120 characters or fewer.',
   geofenceAddressMax: 'Address must be 300 characters or fewer.',

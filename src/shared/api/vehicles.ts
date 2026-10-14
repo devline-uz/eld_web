@@ -439,6 +439,8 @@ export interface RouteSegment {
 
 export interface VehicleHistoriesResponse {
   date: string;
+  /** IANA zone the day was cut in (driver home terminal, else carrier); older servers omit it. */
+  timezone?: string;
   distanceMi: number;
   driveSegments: number;
   driveTimeSec: number;
@@ -473,16 +475,19 @@ export function useVehicleHistories(vehicleId: string | undefined, date: string)
 export interface CreateVehiclePayload {
   unitNumber: string;
   vin: string;
-  make: string;
-  model: string;
-  year: number;
-  licensePlate?: string;
-  plateState?: string;
+  /** CODE-045 — optional; `null` (edit only) clears it. */
+  make?: string | null;
+  model?: string | null;
+  year?: number | null;
+  /** `null` (edit only) clears the field — CODE-010. */
+  licensePlate?: string | null;
+  plateState?: string | null;
   fuelType?: string;
   sleeperBerth?: boolean;
   odometerMi?: number;
-  notes?: string;
-  deviceId?: string;
+  notes?: string | null;
+  /** ELD serial; `null` on edit unpairs the unit's device. */
+  deviceId?: string | null;
 }
 
 export function useCreateVehicle() {
@@ -571,6 +576,8 @@ export interface ImportSummary {
   /** B-69 — present when `options.duplicateStrategy` is `SKIP`. */
   skipped?: number;
   failed: Array<{ index: number; error: string }>;
+  /** CODE-042 — rows that were written but whose ELD serial could not be paired (not in `failed`). */
+  warnings?: Array<{ index: number; error: string }>;
 }
 
 /** B-69 (shipped) — `ImportVehiclesOptionsDto`. */

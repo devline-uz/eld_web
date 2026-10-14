@@ -11,7 +11,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url';
 import { Minus, Plus } from 'lucide-react';
 import type { Feature, FeatureCollection, Position } from 'geojson';
-import { circleToPolygon, EMPTY_COLLECTION, rectangleCorners, type LatLon } from './overlays';
+import { circleToPolygon, EMPTY_COLLECTION, rectangleCorners, wrapLongitude, type LatLon } from './overlays';
 
 const STYLE_URL: string = import.meta.env.VITE_MAP_STYLE_URL ?? '';
 
@@ -189,7 +189,9 @@ export default function GeofencePickerMap({
     map.on('click', (e) => {
       const { mode: m, points: pts, onPointsChange: change, disabled: off } = latest.current;
       if (off) return;
-      change(nextPoints(m, pts, { lat: e.lngLat.lat, lon: e.lngLat.lng }));
+      // CODE-061 — a click on a repeated world copy reports a longitude past ±180; wrap it so every
+      // stored vertex is a real coordinate (the API now refuses out-of-range points).
+      change(nextPoints(m, pts, { lat: e.lngLat.lat, lon: wrapLongitude(e.lngLat.lng) }));
     });
 
     map.on('load', () => {

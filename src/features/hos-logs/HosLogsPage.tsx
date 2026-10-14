@@ -4,7 +4,7 @@
 // This is the compliance core: an FMCSA inspector reads this screen at the roadside. Three rules
 // that are not negotiable anywhere below:
 //   • every timestamp is in `driver.homeTerminalTimezone` — `formatLocal` is an ESLint error here;
-//   • `Certify all` needs `hosCertifyOnBehalf` FULL (ADMIN); a fleet manager never sees it;
+//   • CODE-029 — no web certification: the driver certifies in the app (§395.8(e));
 //   • the §395 audit trail is never hidden, and it is never the default view either.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -19,12 +19,14 @@ import { EmptyState, ErrorState, ForbiddenState, LoadingState } from '@/shared/u
 import { EMPTY_STATE_COPY } from '@/shared/ui/copy';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
-import { useAuth } from '@/shared/auth/AuthProvider';
 import { useRoom } from '@/shared/realtime/useRoom';
 import { HOS_LOGS_POLL_MS, useVisiblePolling } from '@/shared/realtime/polling';
 import { EMPTY } from '@/shared/format';
+import { recordedBySubtitle } from './recordedBy';
+import { dayPhrase } from './dayPhrase';
 import { qk, qkRoot } from '@/shared/api/queryKeys';
-import { useDriversList } from '@/shared/api/drivers';
+import { useDriver, useDriversList, type DriverRow } from '@/shared/api/drivers';
+import { ApiError } from '@/shared/api/errors';
 import { useVehiclesPicker } from '@/shared/api/vehicles';
 import {
   RECORD_STATUS,
@@ -42,9 +44,16 @@ import { ViolationsCard } from './components/ViolationsCard';
 import { CertificationCard } from './components/CertificationCard';
 import { LogEventsCard } from './components/LogEventsCard';
 import { RequestLogEditModal } from './components/RequestLogEditModal';
-import { CertifyLogsModal } from './components/CertifyLogsModal';
 import { UnassignedDrivingModal } from './components/UnassignedDrivingModal';
-import { certificationNote, rodsDayStart, unassignedInDay, validDayKey, zoneLabel } from './grid';
+import {
+  certificationNote,
+  driverDayVehicleIds,
+  rodsDayStart,
+  unassignedForVehicles,
+  unassignedInDay,
+  validDayKey,
+  zoneLabel,
+} from './grid';
 import { usePageHeader } from '@/app/layouts/Topbar';
 
 const DAY_MS = 86_400_000;
@@ -57,6 +66,20 @@ function dayKeyIn(timezone: string, at: Date = new Date()): string {
   return formatInTimeZone(at, timezone, 'yyyy-MM-dd');
 }
 
+/** LIVE-019 — a driver id that is not a UUID is never sent to the API (it would only 422/404). */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isNotFound(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404;
+}
+
+/** Drivers who are no longer ACTIVE keep their logs (§395.8(k) retention) and stay pickable. */
+function driverStatusLabel(status: DriverRow['status']): string | undefined {
+  if (status === 'TERMINATED') return 'Terminated';
+  if (status === 'INACTIVE') return 'Inactive';
+  return undefined;
+}
+
 function shiftDay(date: string, days: number): string {
   return new Date(Date.parse(`${date}T00:00:00Z`) + days * DAY_MS).toISOString().slice(0, 10);
 }
@@ -66,27 +89,47 @@ export default function HosLogsPage() {
   const [params, setParams] = useSearchParams();
   const navigate = useNavigate();
   const { can } = usePermission();
-  const auth = useAuth();
   const queryClient = useQueryClient();
 
   const driversQuery = useDriversList({ limit: 200, status: 'ACTIVE' });
-  const drivers = driversQuery.data?.items ?? [];
+  // Inactive and terminated drivers stay in the picker (listed after the active ones): their
+  // RODS stay reviewable for the retention period even though they no longer drive.
+  const allDriversQuery = useDriversList({ limit: 200 });
+  const drivers = useMemo(() => {
+    const active = driversQuery.data?.items ?? [];
+    const seen = new Set(active.map((candidate) => candidate.id));
+    const inactive = (allDriversQuery.data?.items ?? []).filter(
+      (candidate) => candidate.status !== 'ACTIVE' && !seen.has(candidate.id),
+    );
+    return [...active, ...inactive];
+  }, [driversQuery.data, allDriversQuery.data]);
 
   const driverIdParam = params.get('driverId') ?? '';
-  const driverId = driverIdParam || drivers[0]?.id || '';
-  const driver = drivers.find((candidate) => candidate.id === driverId);
+  // LIVE-019 — a malformed id shows "Driver not found" without calling the API.
+  const invalidDriverId = Boolean(driverIdParam) && !UUID_RE.test(driverIdParam);
+  const driverId = invalidDriverId ? '' : driverIdParam || drivers[0]?.id || '';
+  const listedDriver = drivers.find((candidate) => candidate.id === driverId);
+  // CODE-064 — a deep-linked driver outside the first 200 is loaded on its own, so the page uses
+  // HIS home terminal zone instead of silently falling back to UTC.
+  const driverDetailQuery = useDriver(driverId && !listedDriver && driversQuery.isFetched ? driverId : undefined);
+  const driver: DriverRow | undefined = listedDriver ?? driverDetailQuery.data;
+  const driverNotFound = invalidDriverId || isNotFound(driverDetailQuery.error);
   const timezone = driver?.homeTerminalTimezone ?? 'UTC';
   const zone = zoneLabel(timezone);
+  // Until the driver (and so the zone) is known, nothing is fetched in the UTC fallback zone.
+  const driverResolved = Boolean(driver) || driverDetailQuery.isFetched;
+  const queryDriverId = driverId && driverResolved && !driverNotFound ? driverId : '';
 
   const todayKey = dayKeyIn(timezone);
-  const date = validDayKey(params.get('date'), todayKey);
+  const rawDate = params.get('date');
+  const date = validDayKey(rawDate, todayKey);
 
-  const dayQuery = useLogDay(driverId || undefined, date);
+  const dayQuery = useLogDay(queryDriverId || undefined, date);
   // BUG-003 — the driver's active violations on ANY day (`GET /violations`, the same backend
   // definition the dashboard and the Drivers roster count), so the card can reconcile with them.
-  const openViolationsQuery = useDriverOpenViolations(driverId || undefined);
-  const eventsQuery = useLogEvents(driverId || undefined, date);
-  const rangeQuery = useLogRange(driverId || undefined, shiftDay(date, -7), date);
+  const openViolationsQuery = useDriverOpenViolations(queryDriverId || undefined);
+  const eventsQuery = useLogEvents(queryDriverId || undefined, date);
+  const rangeQuery = useLogRange(queryDriverId || undefined, shiftDay(date, -7), date);
   // WB-057 — the window is the driver's RODS day ± one day, built from `rodsDayStart` (the helper
   // the grid plots against), never from UTC midnights: for an Eastern terminal the old window
   // ended at 20:00 ET and a 21:30 ET unidentified segment on the viewed day was never fetched.
@@ -99,8 +142,8 @@ export default function HosLogsPage() {
       to: new Date(dayStartMs + 2 * DAY_MS).toISOString(),
       limit: 200,
     },
-    // Wait for the driver list, so the window is never first built in the `UTC` fallback zone.
-    Boolean(driverId) && (Boolean(driver) || driversQuery.isFetched),
+    // Wait for the driver, so the window is never first built in the `UTC` fallback zone.
+    Boolean(queryDriverId),
   );
 
   const vehiclesQuery = useVehiclesPicker();
@@ -118,7 +161,6 @@ export default function HosLogsPage() {
   const [highlightedEventId, setHighlightedEventId] = useState<string | null>(null);
   const [editTarget, setEditTarget] = useState<LogEventView | null>(null);
   const [editOpen, setEditOpen] = useState(false);
-  const [certifyOpen, setCertifyOpen] = useState(false);
   const [unassignedChipOpen, setUnassignedChipOpen] = useState(false);
   // WD-037 — W-15 `Resolve now ›` deep-links to `/hos-logs?unassigned=1`. The param opens 11.13
   // only for `hosEdit` FULL; everyone else gets the normal page, no modal, no error.
@@ -156,6 +198,15 @@ export default function HosLogsPage() {
     return () => clearTimeout(timer);
   }, [highlightedEventId]);
 
+  // LIVE-031 — a future or impossible `?date=` is shown as today; the URL is corrected to match,
+  // so a shared or bookmarked link never claims a day the page is not showing. Waits for the zone.
+  useEffect(() => {
+    if (!rawDate || rawDate === date || !driverResolved) return;
+    const next = new URLSearchParams(params);
+    next.set('date', date);
+    setParams(next, { replace: true });
+  }, [rawDate, date, driverResolved, params, setParams]);
+
   function setParam(next: Record<string, string>) {
     const merged = new URLSearchParams(params);
     for (const [key, value] of Object.entries(next)) merged.set(key, value);
@@ -163,6 +214,7 @@ export default function HosLogsPage() {
   }
 
   const day = dayQuery.data;
+  const notFound = driverNotFound || isNotFound(dayQuery.error);
   // WB-049 — a partial payload (a stub fixture, an older server) must degrade to the card's own
   // error state, never to React Router's boundary: nothing below dereferences `day` unguarded.
   const dayIsUsable = Boolean(day?.summary?.dayLengthSec && day?.graph);
@@ -196,7 +248,18 @@ export default function HosLogsPage() {
     id: candidate.id,
     name: `${candidate.firstName} ${candidate.lastName}`,
     context: candidate.homeTerminalName ?? EMPTY.dash,
+    hosSummary: driverStatusLabel(candidate.status),
+    hosTone: candidate.status === 'TERMINATED' ? ('danger' as const) : candidate.status === 'INACTIVE' ? ('warning' as const) : undefined,
   }));
+  // A deep-linked driver outside the list still shows as the picker's value.
+  if (driver && !driverOptions.some((option) => option.id === driver.id)) {
+    driverOptions.push({
+      id: driver.id,
+      name: `${driver.firstName} ${driver.lastName}`,
+      context: driver.homeTerminalName ?? EMPTY.dash,
+      hosSummary: driverStatusLabel(driver.status),
+    });
+  }
   const driverName = driver ? `${driver.firstName} ${driver.lastName}` : '';
   const unitNumber = driver?.assignedVehicleId ? unitLabel(driver.assignedVehicleId) : EMPTY.unassigned;
 
@@ -204,12 +267,24 @@ export default function HosLogsPage() {
   // renders a segment keeps only what overlaps `[dayStart, dayStart + dayLengthSec)`. Without this
   // the chip and the 11.13 subtitle report yesterday's and tomorrow's segments on this day.
   const dayLengthSec = day?.summary?.dayLengthSec ?? 86_400;
-  const unassignedSegments = unassignedInDay(unassignedQuery.data?.items ?? [], dayStartMs, dayLengthSec);
+  // QA CODE-031 — the request is fleet-wide (a segment can sit on any unit the driver used that
+  // day); only segments on this driver's units are shown, counted and offered for assignment.
+  const driverVehicleIds = driverDayVehicleIds(
+    [...(rawEvents ?? []), ...(eventsQuery.data?.carriedIn ? [eventsQuery.data.carriedIn] : [])],
+    [driver?.assignedVehicleId, ...(day?.recordedBy ?? []).map((eld) => eld.vehicleId)],
+  );
+  const unassignedSegments = unassignedForVehicles(
+    unassignedInDay(unassignedQuery.data?.items ?? [], dayStartMs, dayLengthSec),
+    driverVehicleIds,
+  );
 
   // WB-073 — the same full-page forbidden state as every other screen, not an error.
-  const headerSubtitle = driver
-    ? `${driverName} · ${unitNumber} · Home terminal: ${driver.homeTerminalName} (${zone})`
-    : 'Select a driver to view their log';
+  const statusSuffix = driver ? driverStatusLabel(driver.status) : undefined;
+  const headerSubtitle = notFound
+    ? 'Driver not found'
+    : driver
+      ? `${driverName}${statusSuffix ? ` (${statusSuffix})` : ''} · ${unitNumber} · Home terminal: ${driver.homeTerminalName} (${zone})`
+      : 'Select a driver to view their log';
   usePageHeader({ title: 'Hours of Service · Driver log', subtitle: headerSubtitle });
   if (!can('hos')) {
     return <ForbiddenState screenName="HOS Logs" />;
@@ -315,7 +390,7 @@ export default function HosLogsPage() {
           <Can perm="hosEdit" level="FULL">
             <Button
               variant="secondary"
-              disabled={!driverId}
+              disabled={!queryDriverId || notFound}
               onClick={() => {
                 setEditTarget(editableEvent);
                 setEditOpen(true);
@@ -327,6 +402,7 @@ export default function HosLogsPage() {
           </Can>
           <Button
             variant="secondary"
+            disabled={!queryDriverId || notFound}
             title={PRINT_LOG_HINT}
             onClick={() => printRegion(printRef.current)}
           >
@@ -334,7 +410,7 @@ export default function HosLogsPage() {
             Export PDF
           </Button>
           <Can perm="reportsTransfer" level="FULL">
-            <Button variant="primary" onClick={() =>
+            <Button variant="primary" disabled={!queryDriverId || notFound} onClick={() =>
                 // WD-037 — 11.14 lives in features/reports; the URL is the seam (no cross-feature import).
                 navigate(`/reports/fmcsa?${new URLSearchParams({ transfer: '1', driverId, date }).toString()}`)
               }>
@@ -345,7 +421,14 @@ export default function HosLogsPage() {
         </div>
       </div>
 
-      {!driverId ? (
+      {notFound ? (
+        <Card>
+          <EmptyState
+            title="Driver not found"
+            description="This driver does not exist or was deleted. Pick another driver above."
+          />
+        </Card>
+      ) : !driverId ? (
         <Card>
           <EmptyState title={EMPTY_STATE_COPY.hosLogsNoDriver.title} />
         </Card>
@@ -355,7 +438,7 @@ export default function HosLogsPage() {
           <Card className="print:break-inside-avoid print:shadow-none">
             <SectionHeader
               title="24-hour graph grid"
-              subtitle={`Recorded by ELD ${EMPTY.notAssigned} · all times ${zone}`}
+              subtitle={recordedBySubtitle(day?.recordedBy, zone)}
               action={
                 // Never claim "No unassigned segments" before the answer is in: while the query is
                 // pending the chip is a skeleton, and a failed query says the count is unknown.
@@ -406,6 +489,7 @@ export default function HosLogsPage() {
                     summary={day.summary}
                     graph={day.graph}
                     violations={day.violations ?? []}
+                    ongoingViolations={day.ongoingViolations}
                     unassigned={unassignedSegments}
                     timezone={day.timezone ?? timezone}
                     dateLabel={dateLabel}
@@ -437,6 +521,8 @@ export default function HosLogsPage() {
               violations={day?.violations ?? []}
               ongoing={day?.ongoingViolations ?? []}
               openTotal={openViolationsQuery.data?.total}
+              isLoading={!day && (dayQuery.isLoading || !queryDriverId)}
+              isError={dayQuery.isError || Boolean(day && !dayIsUsable)}
             />
             <CertificationCard
               days={rangeQuery.data?.days ?? []}
@@ -444,13 +530,13 @@ export default function HosLogsPage() {
               isError={rangeQuery.isError}
               onRetry={() => void rangeQuery.refetch()}
               onSelectDate={(next) => setParam({ date: next })}
-              onCertifyAll={() => setCertifyOpen(true)}
               reminderNote={certificationNote(rangeQuery.data?.days ?? [], timezone)}
             />
           </div>
 
           <LogEventsCard
             events={events}
+            dayLabel={dayPhrase(date, todayKey)}
             // Only the dedicated records endpoint resolves the record in force at 00:00.
             carriedIn={rawEvents ? (eventsQuery.data?.carriedIn ?? null) : null}
             timezone={timezone}
@@ -482,18 +568,6 @@ export default function HosLogsPage() {
           event={editTarget}
           graph={day?.graph ?? []}
           onClose={() => setEditOpen(false)}
-        />
-      )}
-
-      {certifyOpen && (
-        <CertifyLogsModal
-          driverId={driverId}
-          driverName={driverName}
-          signerName={auth.user?.fullName ?? 'Administrator'}
-          timezone={timezone}
-          days={rangeQuery.data?.days ?? []}
-          recertificationDates={certification?.recertificationRequired ? [date] : []}
-          onClose={() => setCertifyOpen(false)}
         />
       )}
 

@@ -522,6 +522,60 @@ describe('W-03 Vehicles', () => {
     expect(within(row).queryByText('Inactive')).not.toBeInTheDocument();
   });
 
+  it('LIVE-022: the driver duty is a secondary line under the unit status, and Out of service has its own chip', async () => {
+    server.use(
+      http.get(url(endpoints.vehicles.list), () =>
+        ok({ items: [VEHICLE_ROW], page: 1, limit: 10, total: 1, totalPages: 1, statusCounts: { ACTIVE: 1, INACTIVE: 0, OUT_OF_SERVICE: 2 } }),
+      ),
+      http.get(url(endpoints.drivers.list), () => ok({ items: [], page: 1, limit: 500, total: 0, totalPages: 1 })),
+      http.get(url(endpoints.devices.list), () => ok({ items: [], page: 1, limit: 500, total: 0, totalPages: 1 })),
+      http.get(url(endpoints.live.fleet), () =>
+        ok({
+          generatedAt: '2026-09-27T00:00:00.000Z',
+          items: [
+            {
+              vehicleId: 'veh_1', unitNumber: '#101', driverId: 'drv_1', driverName: 'Ann Lee', driverPhone: null,
+              dutyStatus: 'OFF_DUTY', speedMph: 0, headingDeg: null, odometerMi: null, lat: null, lon: null,
+              locationLabel: null, lastSeenAt: '2026-09-27T00:00:00.000Z', driveRemainingSec: null, shiftEndsAt: null,
+              eldSerial: null, bleState: null, recordStatus: 'ACTIVE', connectivity: 'ONLINE', isStale: false, staleSince: null,
+            },
+          ],
+        }),
+      ),
+    );
+    renderPage(['/vehicles?fStatus=OUT_OF_SERVICE']);
+
+    expect(await screen.findByRole('button', { name: 'Out of service 2' })).toBeInTheDocument();
+    // A drawer filter narrows the list, so "All" is not shown as the active chip.
+    expect(screen.getByRole('button', { name: /^All / })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('LIVE-022: an ACTIVE unit reads "Active" with the driver duty under it', async () => {
+    server.use(
+      http.get(url(endpoints.vehicles.list), () => ok({ items: [VEHICLE_ROW], page: 1, limit: 10, total: 1, totalPages: 1 })),
+      http.get(url(endpoints.drivers.list), () => ok({ items: [], page: 1, limit: 500, total: 0, totalPages: 1 })),
+      http.get(url(endpoints.devices.list), () => ok({ items: [], page: 1, limit: 500, total: 0, totalPages: 1 })),
+      http.get(url(endpoints.live.fleet), () =>
+        ok({
+          generatedAt: '2026-09-27T00:00:00.000Z',
+          items: [
+            {
+              vehicleId: 'veh_1', unitNumber: '#101', driverId: 'drv_1', driverName: 'Ann Lee', driverPhone: null,
+              dutyStatus: 'OFF_DUTY', speedMph: 0, headingDeg: null, odometerMi: null, lat: null, lon: null,
+              locationLabel: null, lastSeenAt: '2026-09-27T00:00:00.000Z', driveRemainingSec: null, shiftEndsAt: null,
+              eldSerial: null, bleState: null, recordStatus: 'ACTIVE', connectivity: 'ONLINE', isStale: false, staleSince: null,
+            },
+          ],
+        }),
+      ),
+    );
+    renderPage();
+
+    const row = (await screen.findByText('#101')).closest('tr')!;
+    expect(await within(row).findByText(/Driver: Off/)).toBeInTheDocument();
+    expect(within(row).getByText('Active')).toBeInTheDocument();
+  });
+
   // WB-161 — the bulk-bar button had no onClick at all.
   it('bulk "Assign driver" opens 11.4 for the one selected unit', async () => {
     usePopulatedFleet();

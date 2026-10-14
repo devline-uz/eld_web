@@ -465,6 +465,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 }
 
+/** The auth context, or `null` outside `<AuthProvider>` — for display-only readers that have a
+ * sensible fallback (e.g. `useCarrierTimezone`). */
+export function useOptionalAuth(): AuthContextValue | null {
+  return useContext(AuthContext);
+}
+
 export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error('useAuth must be used inside <AuthProvider>');

@@ -2,7 +2,7 @@
 // One-to-one with backend/src/common/errors/codes.ts (append-only registry).
 // An unknown code falls back to `Something went wrong. Reference: <traceId>`.
 import type { ApiErrorBody } from './types';
-import { SUPER_ADMIN_ONLY_REASON } from '@/shared/auth/permissions';
+import { isPermissionCeilingRefusal, SUPER_ADMIN_ONLY_REASON } from '@/shared/auth/permissions';
 
 /** The error a screen ever sees: the envelope, plus the HTTP status and a resolved message. */
 export class ApiError extends Error {
@@ -26,6 +26,8 @@ export class ApiError extends Error {
   get userMessage(): string {
     // Server-authored copy that is already user-facing (super-admin guard).
     if (this.status === 403 && this.message === SUPER_ADMIN_ONLY_REASON) return this.message;
+    // ...and the permission-ceiling refusals (role / role-assignment / API-key scopes above your own).
+    if (this.status === 403 && isPermissionCeilingRefusal(this.message, this.details)) return this.message;
     return errorMessage(this.code, this.traceId);
   }
 
@@ -136,6 +138,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   EDIT_REQUIRES_DRIVER_APPROVAL: 'The driver must accept this edit before it takes effect.',
   EDIT_ALREADY_RESOLVED: 'This edit request has already been answered.',
   UNIDENTIFIED_ALREADY_ASSIGNED: 'That segment has already been assigned.',
+  UNIDENTIFIED_OVERLAPS_DRIVER_LOG: "This driver's own log overlaps this unidentified driving. Correct the driver's log first or assign it to another driver.",
+  CERTIFY_DRIVER_ONLY: 'Only the driver can certify their log, in the driver app.',
   HOS_ENGINE_VERSION_MISMATCH: 'The log was recalculated. Reload the page.',
 
   // --- transfers / eRODS ----------------------------------------------------------------------

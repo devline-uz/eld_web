@@ -59,7 +59,7 @@ describe('SafetyPage demo fallback — flag on', () => {
     expect(screen.queryByText('No scorecards yet')).toBeNull();
   });
 
-  it('shows the demo scorecard instead of the error state when the request fails', async () => {
+  it('CODE-086: keeps the real error state (no demo rows) when the request fails', async () => {
     const user = userEvent.setup();
     server.use(
       http.get(url(endpoints.safety.scorecard), () =>
@@ -68,7 +68,7 @@ describe('SafetyPage demo fallback — flag on', () => {
     );
     renderPage();
     await user.click(await screen.findByRole('tab', { name: /^Scorecards/ }));
-    expect((await screen.findAllByText(/Marcus Johnson/)).length).toBeGreaterThan(0);
-    expect(screen.queryByRole('button', { name: /retry/i })).toBeNull();
+    expect(await screen.findByRole('button', { name: /retry/i })).toBeInTheDocument();
+    expect(screen.queryByText(/Marcus Johnson/)).toBeNull();
   });
 });

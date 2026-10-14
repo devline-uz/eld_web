@@ -1,5 +1,5 @@
 // `VITE_DEMO_FALLBACK=fallback` (dev only — production builds force it off): the IFTA hooks swap in
-// demo rows when the API answers empty or fails. The flag-off side (real error / empty states) is
+// demo rows when the API answers empty (never on a failure — CODE-086). The flag-off side (real error / empty states) is
 // covered by `IftaReportPage.test.tsx` and `@/shared/lib/mockMode.test.ts`.
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http } from 'msw';
@@ -52,11 +52,11 @@ describe('IFTA demo fallback — flag on', () => {
     expect(result.current.isError).toBe(false);
   });
 
-  it('shows demo rows instead of the error when the summary fails', async () => {
+  it('CODE-086: keeps the real error (no demo rows) when the summary fails', async () => {
     server.use(http.get(url(endpoints.reports.iftaSummary), () => fail(409, 'IFTA_SUMMARY_UNAVAILABLE', 'IFTA summary failed.')));
     const { result } = renderHook(() => useIftaSummary(FILTERS), { wrapper: wrapper() });
-    await waitFor(() => expect(result.current.data?.rows.length ?? 0).toBeGreaterThan(0));
-    expect(result.current.isError).toBe(false);
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.data?.rows.length ?? 0).toBe(0);
   });
 
   it('keeps real rows when the API has them', async () => {

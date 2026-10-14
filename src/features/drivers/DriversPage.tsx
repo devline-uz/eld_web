@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useDebouncedValue } from '@/shared/hooks/useDebouncedValue';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import type { ColumnDef } from '@tanstack/react-table';
+import type { ColumnDef, SortingState } from '@tanstack/react-table';
 import { Search, Plus, Download, Filter, Upload, X } from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Can } from '@/shared/auth/Can';
@@ -54,6 +54,17 @@ import { messagesHref } from '@/shared/lib/messagesHref';
 import { tripsHrefForDriver } from './lib/links';
 
 type Segment = 'ALL' | 'ON_DUTY' | 'OFF_DUTY' | 'VIOLATIONS';
+
+/** LIVE-023 — table column → `GET /drivers/roster?sort=` field. Only fields the server can order
+ * the whole roster by; HOS clocks and duty status are computed per page, so they stay unsorted. */
+const DRIVER_SORT_FIELDS: Record<string, string> = { driver: 'lastName', terminal: 'homeTerminalName' };
+
+function parseDriverSort(raw: string | null): SortingState {
+  if (!raw) return [];
+  const [field, dir] = raw.split(':');
+  const column = Object.keys(DRIVER_SORT_FIELDS).find((id) => DRIVER_SORT_FIELDS[id] === field);
+  return column ? [{ id: column, desc: dir === 'desc' }] : [];
+}
 const LIMIT_SEC = { drive: 39600, shift: 50400, cycle: 252000 };
 
 /** BUG-001 — each row's own ruleset limits (adverse +2 h only on an invoked day); 70/8 property if absent. */
@@ -75,6 +86,12 @@ function StaleClock() {
       —
     </span>
   );
+}
+
+/** LIVE-034 — a count that is still loading is a placeholder, never a real-looking 0. */
+function CountSlot({ value, loading }: { value: number; loading: boolean }) {
+  if (!loading) return <>{value}</>;
+  return <span role="status" aria-label="Loading count" className="inline-block h-3 w-5 animate-pulse rounded bg-bg-subtle align-middle" />;
 }
 
 /** `?page=abc` is `NaN` and `?page=0` / `?page=-3` are pages no server can answer — both reached
@@ -107,6 +124,9 @@ export default function DriversPage() {
   }
 
   const filters = useMemo(() => parseDriverFilters(params), [params]);
+  const sortParam = params.get('sort');
+  const sorting = useMemo(() => parseDriverSort(sortParam), [sortParam]);
+  const serverSort = sorting[0] ? `${DRIVER_SORT_FIELDS[sorting[0].id]}:${sorting[0].desc ? 'desc' : 'asc'}` : undefined;
 
   // QA FE-003 — the box owns its text; the URL (and the roster request) follow 250 ms after the
   // last keystroke. Driving the input straight from `?q=` dropped characters on fast typing and
@@ -145,6 +165,7 @@ export default function DriversPage() {
     filters.exemptions.some((e) => e !== 'eldExempt');
   const serverFilters = useMemo(
     () => ({
+      sort: serverSort,
       q: q || undefined,
       terminal: filters.terminal ?? undefined,
       hasOpenViolation: (filters.violationsOnly || segment === 'VIOLATIONS'
@@ -152,7 +173,7 @@ export default function DriversPage() {
         : undefined) as 'true' | undefined,
       exempt: (filters.exemptions.includes('eldExempt') ? 'true' : undefined) as 'true' | undefined,
     }),
-    [q, filters, segment],
+    [q, filters, segment, serverSort],
   );
   const rosterQuery = useDriverRoster({ page, limit, ...serverFilters }, { enabled: !useWindow });
   const windowQuery = useDriverRosterWindow(serverFilters, useWindow);
@@ -185,6 +206,8 @@ export default function DriversPage() {
   const chipFilters = useMemo(
     () => ({
       ...serverFilters,
+      // Order never changes a count — keep the counter request (and its cache entry) sort-free.
+      sort: undefined,
       hasOpenViolation: (filters.violationsOnly ? 'true' : undefined) as 'true' | undefined,
     }),
     [serverFilters, filters.violationsOnly],
@@ -369,6 +392,7 @@ export default function DriversPage() {
     {
       id: 'driver',
       header: 'DRIVER',
+      accessorFn: (row) => row.driver.lastName,
       cell: ({ row }) => {
         const d = row.original.driver;
         const name = `${d.firstName} ${d.lastName}`;
@@ -466,6 +490,7 @@ export default function DriversPage() {
     {
       id: 'terminal',
       header: 'HOME TERMINAL',
+      accessorFn: (row) => row.driver.homeTerminalName,
       cell: ({ row }) => (
         <span className="text-text-secondary">{row.original.driver.homeTerminalName}</span>
       ),
@@ -492,10 +517,19 @@ export default function DriversPage() {
   const isError = useWindow ? windowQuery.isError : rosterQuery.isError;
   const refetch = () => (useWindow ? windowQuery.refetch() : rosterQuery.refetch());
 
-  usePageHeader({
-    title: 'Drivers',
-    subtitle: `${fleetCounts.all} ${fleetCounts.all === 1 ? 'driver' : 'drivers'} · ${fleetCounts.onDuty} on duty · ${fleetCounts.violations} with active violations`,
-  });
+  const headerSubtitle = useMemo(
+    () =>
+      fleetCounts.isLoading ? (
+        <span>
+          <CountSlot value={0} loading /> drivers · <CountSlot value={0} loading /> on duty ·{' '}
+          <CountSlot value={0} loading /> with active violations
+        </span>
+      ) : (
+        `${fleetCounts.all} ${fleetCounts.all === 1 ? 'driver' : 'drivers'} · ${fleetCounts.onDuty} on duty · ${fleetCounts.violations} with active violations`
+      ),
+    [fleetCounts.isLoading, fleetCounts.all, fleetCounts.onDuty, fleetCounts.violations],
+  );
+  usePageHeader({ title: 'Drivers', subtitle: headerSubtitle });
 
   return (
     <div className="flex flex-col gap-4 xl:max-h-content-h">
@@ -569,12 +603,12 @@ export default function DriversPage() {
       <div className="flex h-9 w-fit max-w-full overflow-x-auto rounded-md border border-border xl:shrink-0">
         {(
           [
-            ['ALL', `All ${counts.all}`],
-            ['ON_DUTY', `On duty ${counts.onDuty}`],
-            ['OFF_DUTY', `Off duty ${counts.offDuty}`],
-            ['VIOLATIONS', `Violations ${counts.violations}`],
-          ] as [Segment, string][]
-        ).map(([value, label]) => (
+            ['ALL', 'All', counts.all],
+            ['ON_DUTY', 'On duty', counts.onDuty],
+            ['OFF_DUTY', 'Off duty', counts.offDuty],
+            ['VIOLATIONS', 'Violations', counts.violations],
+          ] as [Segment, string, number][]
+        ).map(([value, label, count]) => (
           <button
             key={value}
             type="button"
@@ -586,7 +620,7 @@ export default function DriversPage() {
                 : 'shrink-0 whitespace-nowrap bg-bg-surface px-3 text-body text-text-secondary hover:bg-bg-subtle'
             }
           >
-            {label}
+            {label} <CountSlot value={count} loading={counts.isLoading} />
           </button>
         ))}
       </div>
@@ -646,6 +680,12 @@ export default function DriversPage() {
                 selection={selection}
                 onSelectionChange={setSelection}
                 onRowClick={(row) => navigate(`/drivers/${row.driver.id}`)}
+                sorting={sorting}
+                onSortingChange={(next) => {
+                  const first = next[0];
+                  const field = first ? DRIVER_SORT_FIELDS[first.id] : undefined;
+                  setParam('sort', field ? `${field}:${first?.desc ? 'desc' : 'asc'}` : null);
+                }}
                 rowActions={
                   canFull
                     ? (row) => (
@@ -688,14 +728,6 @@ export default function DriversPage() {
                               className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle"
                             >
                               Request log edit
-                            </DropdownMenu.Item>
-                          </Can>
-                          <Can perm="hosCertifyOnBehalf" level="FULL">
-                            <DropdownMenu.Item
-                              onSelect={() => navigate(`/hos-logs?driverId=${row.driver.id}`)}
-                              className="cursor-pointer rounded-md px-2 py-1.5 text-body outline-none hover:bg-bg-subtle"
-                            >
-                              Certify on behalf
                             </DropdownMenu.Item>
                           </Can>
                           <Can perm="reportsTransfer">
@@ -835,7 +867,7 @@ export default function DriversPage() {
             ? `Deactivate ${deactivateTargets.length} drivers?`
             : 'Deactivate this driver?'
         }
-        description="They can no longer sign in to the mobile app. Their logs, DVIRs and certifications stay available for audits."
+        description="They are signed out of the mobile app at once and can no longer sign in, message or be dispatched. Their unit and any co-driver pairing are released. Logs, DVIRs and certifications stay available for audits."
         confirmLabel="Deactivate"
         loading={deactivateMutation.isPending}
       />

@@ -16,12 +16,14 @@ import {
   type RepairStatus,
 } from '@/shared/api/dvir';
 import { LoadingState, ErrorState } from '@/shared/ui/states';
-import { formatLocal } from '@/shared/format/datetime';
+import { formatCarrierDateTime, timezoneAbbreviation } from '@/shared/format/datetime';
+import { useCarrierTimezone } from '@/shared/auth/useCarrierTimezone';
 import { formatOdometer } from '@/shared/format/numbers';
 import { orDash } from '@/shared/format/empty';
 import { useToast } from '@/shared/ui/Toast';
 import { formErrorMessage } from '@/shared/api/errors';
 import { printDvir } from '../lib/printDvir';
+import { signOffBlockReason } from '../lib/signOff';
 // DEMO DATA — answers `mock-*` DVIR ids locally (`VITE_DEMO_FALLBACK`, never in production). Remove: import `useDvir` from `@/shared/api/dvir` again.
 import { useDvir } from '../mock/useDvirMock';
 import { formatEnumLabel } from '@/shared/format/enumLabel';
@@ -127,6 +129,9 @@ export function DvirDrawer({
   onClose: () => void;
   onCreateWorkOrder: (vehicleId: string) => void;
 }) {
+  // LIVE-007 — carrier zone with its label, so the drawer matches the reports and audit log.
+  const carrierTz = useCarrierTimezone();
+  const at = (value: string | null | undefined) => `${formatCarrierDateTime(value, carrierTz)} ${timezoneAbbreviation(carrierTz, value)}`;
   const { can } = usePermission();
   const { toast } = useToast();
   const { data, driver, vehicle, isLoading, isError, refetch } = useDvir(dvirId);
@@ -142,6 +147,7 @@ export function DvirDrawer({
   const openDefects = (dvir?.defects ?? []).filter((d) => d.status === 'OPEN');
   const unresolvedCritical = openDefects.some((d) => d.severity === 'CRITICAL');
   const defaultRepairStatus = deriveRepairStatus(dvir?.defects ?? []);
+  const signOffBlocked = signOffBlockReason(dvir?.defects ?? [], repairStatus ?? defaultRepairStatus);
   // Stage 3 — a typed mechanic name / changed repair status used to vanish silently on close.
   const signoffDirty =
     mechanicName.trim() !== '' || (repairStatus !== null && repairStatus !== defaultRepairStatus);
@@ -154,7 +160,7 @@ export function DvirDrawer({
       title={`DVIR #${dvirId.slice(0, 8)}`}
       subtitle={
         dvir
-          ? `Unit ${vehicle?.unitNumber ?? '—'} · ${DVIR_TYPE_LABEL[dvir.type] ?? dvir.type} · ${formatLocal(dvir.submittedAt, 'dateTime')}`
+          ? `Unit ${vehicle?.unitNumber ?? '—'} · ${DVIR_TYPE_LABEL[dvir.type] ?? dvir.type} · ${at(dvir.submittedAt)}`
           : undefined
       }
       footer={
@@ -168,11 +174,11 @@ export function DvirDrawer({
                 if (!dvir) return;
                 printDvir({
                   title: `DVIR #${dvirId.slice(0, 8)}`,
-                  subtitle: `Unit ${vehicle?.unitNumber ?? '—'} · ${DVIR_TYPE_LABEL[dvir.type] ?? dvir.type} · ${formatLocal(dvir.submittedAt, 'dateTime')}`,
+                  subtitle: `Unit ${vehicle?.unitNumber ?? '—'} · ${DVIR_TYPE_LABEL[dvir.type] ?? dvir.type} · ${at(dvir.submittedAt)}`,
                   rows: [
                     ['Driver', driver ? `${driver.firstName} ${driver.lastName}` : '—'],
                     ['Type', DVIR_TYPE_LABEL[dvir.type] ?? dvir.type],
-                    ['Submitted', formatLocal(dvir.submittedAt, 'dateTime')],
+                    ['Submitted', at(dvir.submittedAt)],
                     ['Location', dvir.locationName ?? '—'],
                     ['Odometer', `${formatOdometer(dvir.odometerMi)} mi`],
                     ['Trailer', dvir.trailerId ? dvir.trailerId : 'bobtail: yes'],
@@ -184,11 +190,11 @@ export function DvirDrawer({
                   })),
                   driverSignature: {
                     name: driver ? `${driver.firstName} ${driver.lastName}` : '—',
-                    signedAt: formatLocal(dvir.submittedAt, 'dateTime'),
+                    signedAt: at(dvir.submittedAt),
                   },
                   mechanic: {
                     name: dvir.mechanicName ?? 'Not signed',
-                    signedAt: dvir.mechanicSignedAt ? formatLocal(dvir.mechanicSignedAt, 'dateTime') : 'Pending',
+                    signedAt: dvir.mechanicSignedAt ? at(dvir.mechanicSignedAt) : 'Pending',
                   },
                 });
               }}
@@ -248,7 +254,7 @@ export function DvirDrawer({
             <h3 className="mb-1 text-label font-semibold uppercase tracking-wide text-text-muted">Inspection</h3>
             <Row label="Driver" value={driver ? `${driver.firstName} ${driver.lastName}` : '—'} />
             <Row label="Type" value={DVIR_TYPE_LABEL[dvir.type] ?? dvir.type} />
-            <Row label="Submitted" value={<span className="tabular-nums">{formatLocal(dvir.submittedAt, 'dateTime')}</span>} />
+            <Row label="Submitted" value={<span className="tabular-nums">{at(dvir.submittedAt)}</span>} />
             <Row label="Location" value={orDash(dvir.locationName, (v) => v)} />
             <Row label="Odometer" value={<span className="tabular-nums">{formatOdometer(dvir.odometerMi)} mi</span>} />
             <Row label="Trailer" value={dvir.trailerId ? dvir.trailerId : 'bobtail: yes'} />
@@ -296,13 +302,13 @@ export function DvirDrawer({
               <p className="mt-1 font-serif text-card-title italic text-text">
                 {driver ? `${driver.firstName} ${driver.lastName}` : '—'}
               </p>
-              <p className="tabular-nums text-caption text-text-muted">{formatLocal(dvir.submittedAt, 'dateTime')}</p>
+              <p className="tabular-nums text-caption text-text-muted">{at(dvir.submittedAt)}</p>
             </div>
             <div className="rounded-md border border-border p-3">
               <p className="text-caption text-text-muted">Mechanic signature</p>
               <p className="mt-1 text-card-title text-text-muted">{dvir.mechanicName ?? 'Not signed'}</p>
               <p className="text-caption text-text-muted">
-                {dvir.mechanicSignedAt ? formatLocal(dvir.mechanicSignedAt, 'dateTime') : 'Pending'}
+                {dvir.mechanicSignedAt ? at(dvir.mechanicSignedAt) : 'Pending'}
               </p>
               {canFull && !dvir.mechanicSignedAt && (
                 <div className="mt-2 flex flex-col gap-2">
@@ -333,10 +339,11 @@ export function DvirDrawer({
                       ))}
                     </select>
                   </label>
+                  {signOffBlocked && <p className="text-caption text-text-muted">{signOffBlocked}</p>}
                   <Button
                     variant="secondary"
                     size="sm"
-                    disabled={!mechanicName.trim()}
+                    disabled={!mechanicName.trim() || signOffBlocked !== null}
                     loading={signoff.isPending}
                     onClick={() => {
                       setSignoffError(null);

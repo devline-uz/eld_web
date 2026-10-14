@@ -1,4 +1,5 @@
 // QA: a day of 24:00 driving past limits crossed the day before read "No violations today".
+import { formatInTimeZone } from 'date-fns-tz';
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import type { HosViolation, OngoingViolation } from '@/shared/api/hosLogs';
@@ -53,10 +54,17 @@ describe('ViolationsCard — violations continuing from an earlier day', () => {
     expect(screen.getByText('70-hour cycle limit')).toBeInTheDocument();
   });
 
-  it('still says "No violations today" on a clean day', () => {
+  it('still says "No violations" on a clean day — "on Oct 10" for a past day (LIVE-017)', () => {
     renderCard([], []);
-    expect(screen.getByText('● No violations today')).toBeInTheDocument();
+    expect(screen.getByText('● No violations on Oct 10')).toBeInTheDocument();
+    expect(screen.getByText('Violations · on Oct 10')).toBeInTheDocument();
     expect(screen.getByText('0 open')).toBeInTheDocument();
+  });
+
+  it('LIVE-017 — says "today" only on the current RODS day', () => {
+    const today = formatInTimeZone(new Date(), 'America/New_York', 'yyyy-MM-dd');
+    render(<ViolationsCard driverId="drv-1" date={today} timezone="America/New_York" violations={[]} ongoing={[]} />);
+    expect(screen.getByText('● No violations today')).toBeInTheDocument();
   });
 
   // BUG-003 — the roster said "1 with active violations" while this card said "0 open".

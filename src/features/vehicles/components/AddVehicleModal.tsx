@@ -1,5 +1,5 @@
 // owner: web-vehicles-drivers — 11.2 Add vehicle / Edit unit (web/tz.md §11.2). `vehicles` FULL.
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
 import { useQueryClient } from '@tanstack/react-query';
@@ -10,6 +10,7 @@ import { TOAST_COPY } from '@/shared/ui/copy';
 import { vehicleSchema, type VehicleFormValues } from '@/shared/forms/schemas';
 import { LIMITS, VALIDATION_MESSAGES } from '@/shared/forms/messages';
 import { nonNegativeIntInputProps } from '@/shared/forms/nonNegativeIntInput';
+import { clearable } from '@/shared/forms/clearable';
 import { useCreateVehicle, useUpdateVehicle, type VehicleRow } from '@/shared/api/vehicles';
 import { useDevicesLookup } from '@/shared/api/lookups';
 import { ApiError, formErrorMessage } from '@/shared/api/errors';
@@ -102,11 +103,20 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
   const [sleeperBerth, setSleeperBerth] = useState(initialSleeperBerth);
   const [notes, setNotes] = useState(initialNotes);
 
+  // Fills the `/devices` cache so the ELD-serial pre-check below has something to compare against,
+  // and (LIVE-016) tells the edit form which serial the unit is paired with today. The table row
+  // already carries it (`eldSerial`); the unit profile passes a plain `VehicleRow`.
+  const devicesLookup = useDevicesLookup();
+  const rowSerial = vehicle && 'eldSerial' in vehicle ? (vehicle as { eldSerial?: string | null }).eldSerial : undefined;
+  const pairedSerial =
+    rowSerial ?? (vehicle ? devicesLookup.data?.items.find((d) => d.vehicleId === vehicle.id)?.serial : undefined) ?? '';
+
   const {
     register,
     handleSubmit,
     formState: { errors, dirtyFields },
     setError,
+    resetField,
   } = useForm<VehicleFormValues>({
     resolver: zodResolver(vehicleSchema),
     mode: 'onBlur',
@@ -115,12 +125,21 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
       vin: vehicle?.vin ?? '',
       make: vehicle?.make ?? '',
       model: vehicle?.model ?? '',
-      year: vehicle?.year ?? currentYear,
+      // Create pre-fills this year; editing a unit without a year keeps the input empty.
+      year: vehicle ? (vehicle.year ?? undefined) : currentYear,
       licensePlate: vehicle?.licensePlate ?? '',
       licenseState: vehicle?.plateState ?? '',
       odometer: vehicle?.odometerMi,
+      deviceId: pairedSerial,
     },
   });
+
+  // The device lookup can land after the modal opened: prefill the serial then, unless the user
+  // has already typed in the field.
+  useEffect(() => {
+    if (isEdit && pairedSerial && !dirtyFields.deviceId) resetField('deviceId', { defaultValue: pairedSerial });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only when the paired serial becomes known
+  }, [pairedSerial]);
 
   // WB — a freshly opened, untouched form asked "Discard changes?" on every close: react-hook-form's
   // `isDirty` deep-compares the live values against `defaultValues`, and fields the form registers
@@ -134,8 +153,6 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
     sleeperBerth !== initialSleeperBerth ||
     notes !== initialNotes;
 
-  // Fills the `/devices` cache so the ELD-serial pre-check below has something to compare against.
-  useDevicesLookup();
   const createMutation = useCreateVehicle();
   const updateMutation = useUpdateVehicle(vehicle?.id ?? '');
   const mutation = isEdit ? updateMutation : createMutation;
@@ -162,16 +179,19 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
     const payload = {
       unitNumber: values.unitNumber,
       vin: values.vin,
-      make: values.make,
-      model: values.model,
-      year: values.year,
-      licensePlate: uniques.licensePlate,
-      plateState: uniques.plateState,
+      // CODE-045 — optional; on edit an emptied Make / Model / Year is sent as `null` (cleared).
+      make: isEdit ? clearable(values.make, vehicle?.make) : values.make || undefined,
+      model: isEdit ? clearable(values.model, vehicle?.model) : values.model || undefined,
+      year: values.year ?? (isEdit && vehicle?.year != null ? null : undefined),
+      // CODE-010 — on edit a field the user emptied is sent as `null` (cleared); create never
+      // sends `null`. Clearing the ELD serial unpairs the unit's device.
+      licensePlate: isEdit ? clearable(uniques.licensePlate, vehicle?.licensePlate) : uniques.licensePlate,
+      plateState: isEdit ? clearable(uniques.plateState, vehicle?.plateState) : uniques.plateState,
       fuelType,
       sleeperBerth,
       odometerMi: values.odometer,
-      notes: notes || undefined,
-      deviceId: uniques.deviceId,
+      notes: isEdit ? clearable(notes.trim(), initialNotes) : notes.trim() || undefined,
+      deviceId: isEdit ? clearable(uniques.deviceId, pairedSerial) : uniques.deviceId,
     };
     inFlight.current = true;
     mutation.mutate(payload, {
@@ -258,17 +278,17 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
           </Field>
         </div>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <Field label="Make" required error={errors.make?.message}>
+          <Field label="Make" error={errors.make?.message}>
             <input {...register('make')} maxLength={LIMITS.vehicleMakeModelMax} disabled={submitting} className={inputClass} />
           </Field>
-          <Field label="Model" required error={errors.model?.message}>
+          <Field label="Model" error={errors.model?.message}>
             <input {...register('model')} maxLength={LIMITS.vehicleMakeModelMax} disabled={submitting} className={inputClass} />
           </Field>
-          <Field label="Year" required error={errors.year?.message}>
+          <Field label="Year" error={errors.year?.message}>
             <input
               type="number"
               min={1970}
-              max={currentYear}
+              max={currentYear + 1}
               {...register('year', { valueAsNumber: true })}
               disabled={submitting}
               className={inputClass}

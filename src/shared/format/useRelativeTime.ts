@@ -71,8 +71,9 @@ export function useNowTick(intervalMs: number = RELATIVE_TICK_MS): number {
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
-/** `useRelativeTime(lastSyncedAt)` → `12 minutes ago`, refreshed every 30 s. */
-export function useRelativeTime(value: DateInput, variant: 'long' | 'short' = 'long'): string {
+/** `useRelativeTime(lastSyncedAt)` → `12 minutes ago`, refreshed every 30 s. `timeZone` is the
+ * zone an older value's date is shown in (default: the browser's). */
+export function useRelativeTime(value: DateInput, variant: 'long' | 'short' = 'long', timeZone?: string): string {
   const now = useNowTick();
-  return variant === 'short' ? formatRelativeShort(value, now) : formatRelative(value, now);
+  return variant === 'short' ? formatRelativeShort(value, now, timeZone) : formatRelative(value, now, timeZone);
 }
