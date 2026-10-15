@@ -46,6 +46,7 @@ import { LogEventsCard } from './components/LogEventsCard';
 import { RequestLogEditModal } from './components/RequestLogEditModal';
 import { UnassignedDrivingModal } from './components/UnassignedDrivingModal';
 import {
+  certificationLabel,
   certificationNote,
   driverDayVehicleIds,
   rodsDayStart,
@@ -313,7 +314,7 @@ export default function HosLogsPage() {
           <div className="flex gap-1">
             <dt className="text-text-muted">Certification:</dt>
             <dd className="font-medium">
-              {certification ? (certification.certified ? 'Certified' : 'Uncertified') : EMPTY.dash}
+              {certification ? certificationLabel(certification) : EMPTY.dash}
             </dd>
           </div>
         </dl>
@@ -380,8 +381,11 @@ export default function HosLogsPage() {
             </button>
           </div>
           {certification && (
-            <Badge tone={certification.certified ? 'success' : 'warning'} dot>
-              {certification.certified ? 'Certified' : 'Uncertified'}
+            <Badge
+              tone={certification.certified ? 'success' : certification.recertificationRequired ? 'danger' : 'warning'}
+              dot
+            >
+              {certificationLabel(certification)}
             </Badge>
           )}
         </div>

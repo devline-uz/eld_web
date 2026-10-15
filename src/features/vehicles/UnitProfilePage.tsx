@@ -90,12 +90,18 @@ export default function UnitProfilePage() {
   const queryClient = useQueryClient();
   const { can } = usePermission();
   const [params, setParams] = useSearchParams();
-  const tab = (params.get('tab') as Tab) ?? 'overview';
+  // CODE-085 — the DTC list (`GET /vehicles/:id/dtc`) needs `maintenance` READ, which DISPATCHER no
+  // longer has: the tab is hidden and a deep link to it falls back to the overview.
+  const canDiagnostics = can('maintenance');
+  const visibleTabs = TABS.filter((t) => t !== 'diagnostics' || canDiagnostics);
+  const requestedTab = params.get('tab') as Tab | null;
+  const tab: Tab = requestedTab && visibleTabs.includes(requestedTab) ? requestedTab : 'overview';
 
   const vehicleQuery = useVehicle(id);
   const driverQuery = useVehicleAssignedDriver(id);
-  const deviceQuery = useDevicesForVehicle(id);
-  const dtcQuery = useVehicleDtc(tab === 'diagnostics' ? id : undefined);
+  // CODE-085 — `/devices` needs `devices` READ; without it only the serial on the vehicle row shows.
+  const deviceQuery = useDevicesForVehicle(id, can('devices'));
+  const dtcQuery = useVehicleDtc(tab === 'diagnostics' && canDiagnostics ? id : undefined);
   const activitiesQuery = useVehicleActivities(tab === 'overview' || tab === 'activity' ? id : undefined);
   const telemetryQuery = useVehicleTelemetry(tab === 'overview' ? id : undefined, { limit: 1 });
   const coDriverQuery = useCoDriverPairings({ vehicleId: id, active: true, limit: 1 }, Boolean(id));
@@ -245,7 +251,7 @@ export default function UnitProfilePage() {
       </Card>
 
       <div className="flex h-9 w-fit max-w-full overflow-x-auto rounded-md border border-border">
-        {TABS.map((t) => (
+        {visibleTabs.map((t) => (
           <button
             key={t}
             type="button"
@@ -386,7 +392,7 @@ export default function UnitProfilePage() {
             />
             <div className="mt-2">
               <DetailRow label="Unit number" value={vehicle.unitNumber} />
-              <DetailRow label="ELD device" value={device?.serial ?? 'Not assigned'} />
+              <DetailRow label="ELD device" value={device?.serial ?? vehicle.eldSerial ?? 'Not assigned'} />
               <DetailRow label="Activated on" value={vehicle.activatedAt ? formatCarrier(vehicle.activatedAt, carrierTz, 'shortDate') : '—'} />
               <DetailRow label="VIN" value={vehicle.vin} />
               <DetailRow label="Make / model" value={[vehicle.make, vehicle.model].filter(Boolean).join(' ') || '—'} />
@@ -492,13 +498,18 @@ export default function UnitProfilePage() {
 
       {tab === 'dvir' && (
         <Card>
-          <p className="text-body text-text-muted">
-            DVIR history for this unit lives on{' '}
-            <Link to={`/dvir?vehicleId=${vehicle.id}`} className="text-primary">
-              DVIR &amp; Maintenance
-            </Link>
-            .
-          </p>
+          {can('dvir') ? (
+            <p className="text-body text-text-muted">
+              DVIR history for this unit lives on{' '}
+              <Link to={`/dvir?vehicleId=${vehicle.id}`} className="text-primary">
+                DVIR &amp; Maintenance
+              </Link>
+              .
+            </p>
+          ) : (
+            // CODE-085 — no link to a screen this role would get /403 on.
+            <p className="text-body text-text-muted">Your role does not include DVIR access.</p>
+          )}
         </Card>
       )}
 
@@ -543,7 +554,7 @@ export default function UnitProfilePage() {
       {deleteOpen && (
         <DeleteUnitModal
           vehicle={vehicle}
-          eldSerial={device?.serial ?? null}
+          eldSerial={device?.serial ?? vehicle.eldSerial ?? null}
           onClose={() => setDeleteOpen(false)}
           onDeleted={() => navigate('/vehicles')}
         />

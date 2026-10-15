@@ -8,6 +8,7 @@ import {
   DRIVING_LIMIT_SEC,
   GRID,
   ROW_ORDER,
+  certificationLabel,
   certificationNote,
   connectorsOf,
   fractionOf,
@@ -27,7 +28,7 @@ import {
   segmentTooltip,
   unassignedInDay,
   withImplicitOffDuty,
-  zoneLabel, driverDayVehicleIds, unassignedForVehicles } from './grid';
+  zoneLabel, driverDayVehicleIds, unassignedForVehicles, needsRecertification } from './grid';
 import type { HosViolation, RodsGraphSegment, UnidentifiedSegment } from '@/shared/api/hosLogs';
 
 const TZ = 'America/New_York';
@@ -385,6 +386,37 @@ describe('zone label and certification note', () => {
       ),
     ).toBe('Driver signature required for Sep 9 and Sep 10.');
     expect(certificationNote([{ date: '2026-09-08', certified: true }], TZ)).toBeNull();
+  });
+
+  it('names days that changed after the driver signed separately (B-123, certify option b)', () => {
+    expect(
+      certificationNote(
+        [
+          { date: '2026-09-08', certified: false, certificationCount: 1 },
+          { date: '2026-09-09', certified: false, certificationCount: 0 },
+          { date: '2026-09-10', certified: true, certificationCount: 2 },
+        ],
+        TZ,
+      ),
+    ).toBe(
+      'Driver signature required for Sep 9. Re-certification required for Sep 8 (records changed after the driver signed).',
+    );
+    expect(certificationNote([{ date: '2026-09-08', certified: false, certificationCount: 3 }], TZ)).toBe(
+      'Re-certification required for Sep 8 (records changed after the driver signed).',
+    );
+  });
+
+  it('mirrors the backend re-certification rule', () => {
+    expect(needsRecertification({ certified: false, certificationCount: 1 })).toBe(true);
+    expect(needsRecertification({ certified: false, certificationCount: 0 })).toBe(false);
+    expect(needsRecertification({ certified: false })).toBe(false);
+    expect(needsRecertification({ certified: true, certificationCount: 2 })).toBe(false);
+  });
+
+  it('labels the selected day from the server flag', () => {
+    expect(certificationLabel({ certified: true, recertificationRequired: false })).toBe('Certified');
+    expect(certificationLabel({ certified: false, recertificationRequired: true })).toBe('Re-certification required');
+    expect(certificationLabel({ certified: false, recertificationRequired: false })).toBe('Uncertified');
   });
 });
 

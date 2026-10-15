@@ -12,6 +12,7 @@ import { client } from './client';
 import { endpoints } from './endpoints';
 import { qk, qkRoot } from './queryKeys';
 import { typedCachePolicy } from './queryPolicy';
+import { usePermission } from '@/shared/auth/usePermission';
 import { useDevicesLookup, useDriversLookup, useVehiclesLookup, vehiclesLookupQuery } from './lookups';
 import { compactParams, pagePolicy, usePagedQuery, type PageQueryOptions } from './paging';
 import type { OffsetPage } from './types';
@@ -47,6 +48,9 @@ export interface VehicleRow {
   isDeleted?: boolean;
   /** Backend D-107 — `/vehicle-groups` id, `null` when the unit is in no group. */
   groupId?: string | null;
+  /** CODE-085 — paired ELD serial joined by the API, so roles without `devices` READ
+   * (DISPATCHER / VIEWER) still see it. Older backends omit it. */
+  eldSerial?: string | null;
 }
 
 /** `GET /vehicle-groups` row (backend D-107). */
@@ -257,7 +261,7 @@ export function joinVehicles(vehicles: VehicleRow[], drivers: DriverRow[], devic
     return {
       ...v,
       driver: driverByVehicle.get(v.id) ?? null,
-      eldSerial: device?.serial ?? null,
+      eldSerial: device?.serial ?? v.eldSerial ?? null,
       eldDeviceStatus: device?.status ?? null,
       eldDeviceModel: device?.model ?? null,
       firmwareOutdated: device?.firmwareOutdated ?? false,
@@ -279,8 +283,10 @@ export interface VehiclesListInput {
  * `/devices` lookups (reference-cached, fetched once, never per page) for the DRIVER and
  * ELD SERIAL columns (WD-073). */
 export function useVehiclesList({ params, useWindow, filter }: VehiclesListInput) {
+  const { can } = usePermission();
   const driversQuery = useDriversLookup();
-  const devicesQuery = useDevicesLookup();
+  // CODE-085 — `/devices` needs `devices` READ; without it the serial comes from the row itself.
+  const devicesQuery = useDevicesLookup(can('devices'));
   const drivers = driversQuery.data?.items;
   const devices = devicesQuery.data?.items;
 

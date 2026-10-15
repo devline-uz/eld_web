@@ -11,6 +11,10 @@ import { driversLookupQuery, devicesLookupQuery, vehiclesLookupQuery } from '@/s
 import { vehiclesPageQuery, vehiclesCountQuery, VEHICLES_DEFAULT_PAGE } from '@/shared/api/vehicles';
 import { tripsActiveSliceQuery, tripsKpiQuery } from '@/shared/api/trips';
 import { recentDvirsQuery, recentDefectsQuery, defectsPageQuery, dueSchedulesQuery } from '@/shared/api/dvir';
+import type { PermissionKey } from '@/shared/auth/permissions';
+
+/** READ check for the hovering user (CODE-085) — a prefetch the role can't read would only 403. */
+export type CanRead = (key: PermissionKey) => boolean;
 
 const staleOf = (name: 'list' | 'reference' | 'live') => {
   const stale = cachePolicy(name).staleTime;
@@ -18,16 +22,17 @@ const staleOf = (name: 'list' | 'reference' | 'live') => {
 };
 
 /** The primary list each screen fires on mount (page 1, default filters) — same keys as the page. */
-export const ROUTE_QUERIES: Partial<Record<string, (queryClient: QueryClient) => void>> = {
+export const ROUTE_QUERIES: Partial<Record<string, (queryClient: QueryClient, can: CanRead) => void>> = {
   '/live-fleet': (qc) => {
     void qc.prefetchQuery({ queryKey: qk.liveFleet(), queryFn: () => client.get(endpoints.live.fleet), staleTime: staleOf('live') });
   },
-  '/vehicles': (qc) => {
+  '/vehicles': (qc, can) => {
     void qc.prefetchQuery(vehiclesPageQuery(VEHICLES_DEFAULT_PAGE));
     // UI-004 — the unfiltered count page carries `statusCounts`; no per-status count requests.
     void qc.prefetchQuery(vehiclesCountQuery());
-    void qc.prefetchQuery(driversLookupQuery());
-    void qc.prefetchQuery(devicesLookupQuery());
+    if (can('drivers')) void qc.prefetchQuery(driversLookupQuery());
+    // CODE-085 — DISPATCHER has `devices` NONE; the serial comes on the vehicle row instead.
+    if (can('devices')) void qc.prefetchQuery(devicesLookupQuery());
   },
   '/drivers': (qc) => {
     void qc.prefetchQuery({
@@ -36,21 +41,22 @@ export const ROUTE_QUERIES: Partial<Record<string, (queryClient: QueryClient) =>
       staleTime: staleOf('live'),
     });
   },
-  '/trips': (qc) => {
+  '/trips': (qc, can) => {
     void qc.prefetchQuery(tripsActiveSliceQuery('ASSIGNED'));
     void qc.prefetchQuery(tripsActiveSliceQuery('IN_PROGRESS'));
     void qc.prefetchQuery(tripsActiveSliceQuery('DRAFT'));
     void qc.prefetchQuery(tripsActiveSliceQuery('PLANNED'));
     void qc.prefetchQuery(tripsKpiQuery());
-    void qc.prefetchQuery(driversLookupQuery());
-    void qc.prefetchQuery(vehiclesLookupQuery());
+    if (can('drivers')) void qc.prefetchQuery(driversLookupQuery());
+    if (can('vehicles')) void qc.prefetchQuery(vehiclesLookupQuery());
   },
-  '/dvir': (qc) => {
+  '/dvir': (qc, can) => {
+    if (!can('dvir')) return;
     void qc.prefetchQuery(recentDvirsQuery());
     void qc.prefetchQuery(recentDefectsQuery());
     void qc.prefetchQuery(defectsPageQuery({ page: 1, limit: 10, status: 'OPEN' }));
-    void qc.prefetchQuery(dueSchedulesQuery());
-    void qc.prefetchQuery(driversLookupQuery());
-    void qc.prefetchQuery(vehiclesLookupQuery());
+    if (can('maintenance')) void qc.prefetchQuery(dueSchedulesQuery());
+    if (can('drivers')) void qc.prefetchQuery(driversLookupQuery());
+    if (can('vehicles')) void qc.prefetchQuery(vehiclesLookupQuery());
   },
 };

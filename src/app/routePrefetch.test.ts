@@ -5,7 +5,7 @@ import { createRouteWarmer, ROUTE_LOADERS, WARM_DEBOUNCE_MS, warmRoute } from '.
 import { vehiclesPageQuery, VEHICLES_DEFAULT_PAGE } from '@/shared/api/vehicles';
 import { tripsActiveSliceQuery } from '@/shared/api/trips';
 import { recentDvirsQuery } from '@/shared/api/dvir';
-import { driversLookupQuery } from '@/shared/api/lookups';
+import { devicesLookupQuery, driversLookupQuery } from '@/shared/api/lookups';
 
 function clientWithSpy() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -36,6 +36,23 @@ describe('warmRoute', () => {
     expect(keys).toContain(JSON.stringify(tripsActiveSliceQuery('ASSIGNED').queryKey));
     expect(keys).toContain(JSON.stringify(tripsActiveSliceQuery('IN_PROGRESS').queryKey));
     expect(keys).toContain(JSON.stringify(recentDvirsQuery().queryKey));
+  });
+
+  it('CODE-085: skips the prefetches a DISPATCHER cannot read (devices, DVIR) instead of firing 403s', async () => {
+    const { queryClient, prefetch } = clientWithSpy();
+    const dispatcherCan = (key: string) => !['devices', 'dvir', 'maintenance', 'safety'].includes(key);
+    await warmRoute('/vehicles', queryClient, dispatcherCan);
+    await warmRoute('/dvir', queryClient, dispatcherCan);
+    const keys = keysOf(prefetch);
+    expect(keys).toContain(JSON.stringify(vehiclesPageQuery(VEHICLES_DEFAULT_PAGE).queryKey));
+    expect(keys).not.toContain(JSON.stringify(devicesLookupQuery().queryKey));
+    expect(keys).not.toContain(JSON.stringify(recentDvirsQuery().queryKey));
+  });
+
+  it('still prefetches the device lookup for a role with `devices` READ', async () => {
+    const { queryClient, prefetch } = clientWithSpy();
+    await warmRoute('/vehicles', queryClient, () => true);
+    expect(keysOf(prefetch)).toContain(JSON.stringify(devicesLookupQuery().queryKey));
   });
 
   it('is a no-op for a route without a loader and never throws', async () => {

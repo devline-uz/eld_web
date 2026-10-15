@@ -544,21 +544,45 @@ export function zoneLabel(timezone: string, at: Date = new Date()): string {
   return long.replace(/\s+(Standard|Daylight|Summer)\s+Time$/, '').replace(/\s+Time$/, '');
 }
 
-/** `Driver signature required for Sep 9 and Sep 10.` — built from the real range, never invented. */
+/**
+ * §395.30(b)-(c) / B-123 — the backend's `recertificationRequired()` rule, mirrored for the range
+ * summaries (which carry `certified` + `certificationCount` but not the flag): a day that WAS
+ * certified and whose records changed afterwards must be signed again. A never-certified day only
+ * needs its first signature.
+ */
+export function needsRecertification(day: { certified: boolean; certificationCount?: number }): boolean {
+  return !day.certified && (day.certificationCount ?? 0) > 0;
+}
+
+/** Header / badge text for the selected day's certification (the server sends the B-123 flag). */
+export function certificationLabel(certification: { certified: boolean; recertificationRequired?: boolean }): string {
+  if (certification.certified) return 'Certified';
+  return certification.recertificationRequired ? 'Re-certification required' : 'Uncertified';
+}
+
+function dayList(days: Array<{ date: string }>, timezone: string): string {
+  const labels = days.map((day) => formatInTimeZone(new Date(`${day.date}T12:00:00Z`), timezone, 'MMM d'));
+  const last = labels[labels.length - 1] ?? '';
+  return labels.length === 1 ? last : `${labels.slice(0, -1).join(', ')} and ${last}`;
+}
+
+/**
+ * `Driver signature required for Sep 9 and Sep 10.` — built from the real range, never invented.
+ * Days that changed after they were certified are named separately: `Re-certification required
+ * for Sep 8 (records changed after the driver signed).`
+ */
 export function certificationNote(
-  days: Array<{ date: string; certified: boolean }>,
+  days: Array<{ date: string; certified: boolean; certificationCount?: number }>,
   timezone: string,
 ): string | null {
-  const pending = days.filter((day) => !day.certified);
-  if (pending.length === 0) return null;
-  const labels = pending.map((day) =>
-    formatInTimeZone(new Date(`${day.date}T12:00:00Z`), timezone, 'MMM d'),
-  );
-  const list =
-    labels.length === 1
-      ? labels[0]
-      : `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
-  return `Driver signature required for ${list}.`;
+  const recert = days.filter(needsRecertification);
+  const first = days.filter((day) => !day.certified && !needsRecertification(day));
+  const parts: string[] = [];
+  if (first.length > 0) parts.push(`Driver signature required for ${dayList(first, timezone)}.`);
+  if (recert.length > 0) {
+    parts.push(`Re-certification required for ${dayList(recert, timezone)} (records changed after the driver signed).`);
+  }
+  return parts.length > 0 ? parts.join(' ') : null;
 }
 
 /* ------------------------------------------------------------------ page helpers */

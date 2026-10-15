@@ -70,6 +70,14 @@ describe('notification cache patches', () => {
     expect(client.getQueryState(qk.notifications({ limit: 25, category: 'VIOLATIONS' }))?.isInvalidated).toBe(true);
   });
 
+  it('bumps the ELD connectivity count when the API reports that segment', () => {
+    const client = newClient();
+    client.setQueryData(qk.notifications({ limit: 25 }), page([], { counts: { all: 0, violations: 0, maintenance: 0, connectivity: 0 } }));
+    applyNotificationNew(client, { id: 'c', type: 'eld_status_stale', title: 'ELD connection lost', category: 'CONNECTIVITY' });
+    const list = client.getQueryData<NotificationsPage>(qk.notifications({ limit: 25 }));
+    expect(list?.counts).toEqual({ all: 1, violations: 0, maintenance: 0, connectivity: 1 });
+  });
+
   it('marks one item read everywhere and removes it from unread-only pages', () => {
     const client = newClient();
     client.setQueryData(qk.notifications({ limit: 25 }), page([item('a'), item('b')]));

@@ -2060,8 +2060,11 @@ Ustunlar: `LOAD` (`LD-9912` 600) · `PICKUP` (`Toledo, OH · Shipper Co.`) · `D
 **`Assign driver`** (primary tugma har qatorda).
 
 **Amallar:** `+ Create trip` → 11.10 · `Assign driver` → 11.4 variantı (load uchun) ·
-`Auto-assign` → `POST /trips/auto-assign`, natijada toast
-`3 loads assigned · 1 skipped (no driver with enough hours)`.
+`Auto-assign` → `POST /trips/auto-assign`, natijada toast haqiqiy natijani aytadi:
+`3 loads assigned · 1 left unassigned (1 with no driver free at that time)` — sabablar:
+`no driver free at that time` (shu oynada bo'sh ACTIVE driver yo'q), `without a planned start`
+(`noSchedule`); xato bo'lgan yuklar `· N failed` va description'da `LD-…: sabab` (warning toast).
+Auto-assign HOS soatlarini **tekshirmaydi**, shuning uchun "enough hours" deb yozilmaydi (CODE-055).
 Manba: `GET /trips`, `GET /trips/unassigned-loads`.
 
 **Rol farqlari:** ADMIN/FM/DISPATCHER — bir xil (dispetcherda `trips = FULL`).

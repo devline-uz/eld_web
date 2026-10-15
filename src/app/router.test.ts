@@ -57,13 +57,25 @@ describe('buildRoutes — permission-less route swaps in <ForbiddenPage> (§9, �
     );
   });
 
-  it('§12.1 design omission — Dispatcher gets <ForbiddenPage> on DVIR even though the backend grants READ', () => {
-    const dispatcherPerms: PermissionMap = { ...NO_PERMISSIONS, dvir: 'READ' };
-    const dispatcherRoutes = buildRoutes(dispatcherPerms, 'DISPATCHER');
-    const fmRoutes = buildRoutes(dispatcherPerms, 'FLEET_MANAGER');
+  it('CODE-085 — DVIR / Safety / ELD devices are gated by permission, not by role key', () => {
+    // A DISPATCHER that is granted `dvir` (e.g. an edited role) now reaches the screen, and a custom
+    // role without it gets <ForbiddenPage> — the same rule for every role.
+    const withDvir = buildRoutes({ ...NO_PERMISSIONS, dvir: 'READ' }, 'DISPATCHER');
+    const withoutDvir = buildRoutes({ ...NO_PERMISSIONS }, 'DISPATCHER');
+    expect((findRoute(withDvir, 'dvir').element as { type: unknown }).type).not.toBe(
+      (findRoute(withoutDvir, 'dvir').element as { type: unknown }).type,
+    );
+  });
 
-    expect((findRoute(dispatcherRoutes, 'dvir').element as { type: unknown }).type).not.toBe(
-      (findRoute(fmRoutes, 'dvir').element as { type: unknown }).type,
+  it('CODE-085 — the DVIR report also needs `dvir`; IFTA stays blocked for DISPATCHER by role', () => {
+    const reportsOnly = buildRoutes({ ...NO_PERMISSIONS, reports: 'READ' }, 'FLEET_MANAGER');
+    const reportsAndDvir = buildRoutes({ ...NO_PERMISSIONS, reports: 'READ', dvir: 'READ' }, 'FLEET_MANAGER');
+    expect((findRoute(reportsOnly, 'reports/dvir').element as { type: unknown }).type).not.toBe(
+      (findRoute(reportsAndDvir, 'reports/dvir').element as { type: unknown }).type,
+    );
+    const dispatcher = buildRoutes({ ...NO_PERMISSIONS, reports: 'READ' }, 'DISPATCHER');
+    expect((findRoute(dispatcher, 'reports/ifta').element as { type: unknown }).type).not.toBe(
+      (findRoute(reportsOnly, 'reports/ifta').element as { type: unknown }).type,
     );
   });
 });

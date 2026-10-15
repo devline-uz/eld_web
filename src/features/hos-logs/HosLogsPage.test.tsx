@@ -1017,6 +1017,56 @@ describe('audited fixes WB-061 … WB-073', () => {
     expect(await screen.findByText(/5 events (today|on [A-Z][a-z]{2} \d{1,2}) · 1 driver edit pending review/)).toBeInTheDocument();
   });
 
+  it('LIVE-031 (certify option c) · a carrier-written certification record is never listed or counted', async () => {
+    const carrierCertification = {
+      ...activeEvent,
+      id: '8950',
+      eventType: 4,
+      eventCode: 1,
+      status: null,
+      recordOrigin: 3,
+      annotation: 'Certified RODS day 2026-09-10',
+    };
+    const carrierCertificationProposed = { ...carrierCertification, id: '8951', recordStatus: 3 };
+    const driverCertification = { ...carrierCertification, id: '8952', recordOrigin: 2, annotation: 'Driver certified' };
+    server.use(
+      http.get(url(endpoints.logs.events(DRIVER_ID)), () =>
+        ok({
+          driverId: DRIVER_ID,
+          date: DATE,
+          timezone: TZ,
+          events: [activeEvent, carrierCertification, carrierCertificationProposed, driverCertification, proposedEvent],
+        }),
+      ),
+    );
+    renderPage();
+    // activeEvent + the driver's own certification are active; only `proposedEvent` is pending.
+    expect(await screen.findByText(/2 events (today|on [A-Z][a-z]{2} \d{1,2}) · 1 driver edit pending review/)).toBeInTheDocument();
+    expect(screen.getByText('Driver certified')).toBeInTheDocument();
+    expect(screen.queryByText('Certified RODS day 2026-09-10')).not.toBeInTheDocument();
+  });
+
+  it('B-123 (certify option b) · a day changed after the driver signed reads "Re-certification required"', async () => {
+    server.use(
+      http.get(url(endpoints.logs.day(DRIVER_ID)), () =>
+        ok({
+          ...dayPayload,
+          certification: {
+            certified: false,
+            certifiedAt: null,
+            certifiedById: null,
+            certifierType: null,
+            certificationCount: 1,
+            signatureUrl: null,
+            recertificationRequired: true,
+          },
+        }),
+      ),
+    );
+    renderPage();
+    expect((await screen.findAllByText('Re-certification required')).length).toBeGreaterThan(0);
+  });
+
   it('WB-066 · a malformed or impossible `?date=` falls back to today instead of crashing', async () => {
     expect(validDayKey('banana', '2026-09-18')).toBe('2026-09-18');
     expect(validDayKey('2026-02-31', '2026-09-18')).toBe('2026-09-18');

@@ -138,6 +138,9 @@ export default function NotificationsPanel({ onClose, isPathAllowed }: Notificat
         { key: 'ALL', label: 'All', count: counts.all },
         { key: 'VIOLATIONS', label: 'Violations', count: counts.violations },
         { key: 'MAINTENANCE', label: 'Maintenance', count: counts.maintenance },
+        ...(counts.connectivity !== undefined
+          ? [{ key: 'CONNECTIVITY' as const, label: 'ELD', count: counts.connectivity }]
+          : []),
       ]
     : [];
 

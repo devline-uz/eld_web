@@ -1,6 +1,7 @@
 // Navigation tree — web/tz.md §4.2 (sidebar) and §4.6 (Settings / My account sub-nav).
-// The design wins over the backend permission matrix: Dispatcher has NO `DVIR & Maintenance`
-// and NO `Safety` item even though the backend grants READ, and a direct URL there renders /403.
+// Items are shown by permission only (CODE-085): DISPATCHER has no `DVIR & Maintenance`, `Safety`
+// or `ELD devices` item because its backend matrix now grants NONE for `dvir`, `safety` and
+// `devices` — the same rule applies to any custom role.
 import {
   Bell,
   Building2,
@@ -70,14 +71,12 @@ export const NAV_SECTIONS: NavSection[] = [
         to: '/dvir',
         icon: Wrench,
         perm: 'dvir',
-        hiddenForRoles: ['DISPATCHER'],
       },
       {
         label: 'Safety',
         to: '/safety',
         icon: ShieldCheck,
         perm: 'safety',
-        hiddenForRoles: ['DISPATCHER'],
         badge: 'danger',
       },
     ],
@@ -118,9 +117,6 @@ export const SETTINGS_NAV: SubNavItem[] = [
     to: '/settings/devices',
     icon: Cpu,
     perm: 'devices',
-    // web/roles and screens/dispatcher/ has no "Settings — ELD devices" screenshot even
-    // though the backend grants `devices: READ` to DISPATCHER — the design wins (web/bugs.md).
-    hiddenForRoles: ['DISPATCHER'],
   },
   { label: 'Alert rules', to: '/settings/alerts', icon: Bell, perm: 'alertRules' },
   { label: 'Integrations', to: '/settings/integrations', icon: Link2, perm: 'integrations' },

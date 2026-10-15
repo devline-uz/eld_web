@@ -224,6 +224,25 @@ export function withEffectiveRecordStatus(event: LogEventView): LogEventView {
   return { ...event, storedRecordStatus: event.recordStatus, recordStatus: event.effectiveRecordStatus };
 }
 
+/** §395.30 / Appendix A — event type 4 is the driver's certification of a RODS day (codes 1–9). */
+export const CERTIFICATION_EVENT_TYPE = 4;
+
+/**
+ * LIVE-031 (user decision, certify option c) — a certification record written by the CARRIER
+ * (origin 3) — the retired on-behalf path, active (1), or one ever proposed (3) — is not the
+ * driver's signature, so the web events list never shows it. The row stays in the database and in
+ * every export (eRODS, PDF, CSV); only this list hides it, so counts and filters never see it.
+ */
+export function isCarrierCertificationRecord(event: LogEventView): boolean {
+  return (
+    event.eventType === CERTIFICATION_EVENT_TYPE &&
+    event.eventCode >= 1 &&
+    event.eventCode <= 9 &&
+    event.recordOrigin === RECORD_ORIGIN.carrier &&
+    (event.recordStatus === RECORD_STATUS.active || event.recordStatus === RECORD_STATUS.proposed)
+  );
+}
+
 export function useLogEvents(driverId: string | undefined, date: string) {
   return useQuery({
     queryKey: qk.logEvents(driverId ?? '', date),
@@ -234,7 +253,7 @@ export function useLogEvents(driverId: string | undefined, date: string) {
       });
       return {
         ...response,
-        events: response.events.map(withEffectiveRecordStatus),
+        events: response.events.filter((event) => !isCarrierCertificationRecord(event)).map(withEffectiveRecordStatus),
         carriedIn: response.carriedIn ? withEffectiveRecordStatus(response.carriedIn) : response.carriedIn,
       };
     },
