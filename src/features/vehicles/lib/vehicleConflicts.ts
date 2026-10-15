@@ -87,21 +87,38 @@ export function findVehicleConflicts(
   return found;
 }
 
-/** Client-side pre-check against every `GET /vehicles` / `GET /devices` page already in the cache.
- * A cheap early warning only: the server stays the authority, and a miss here still ends in its 409. */
+/** FE-09/10 — how old a cached page may be and still block a submit: the list cache policy (30 s).
+ * Older or invalidated entries (a search page left behind, the 10-min reference `/devices` lookup
+ * right after an unpair) are ignored, and the server's 409 decides for them. */
+export const PRECHECK_MAX_AGE_MS = 30_000;
+
+/** Client-side pre-check against the fresh `GET /vehicles` / `GET /devices` pages in the cache.
+ * A cheap early warning only: the server stays the authority, and a miss here still ends in its 409.
+ * FE-09/10 — a stale cache must never block: only entries younger than `PRECHECK_MAX_AGE_MS` and
+ * not invalidated count, the newest copy of a row wins over an older page's copy, and a device whose
+ * cached unit is soft-deleted is free (as the backend treats it). */
 export function findCachedVehicleConflicts(
   queryClient: QueryClient,
   values: Parameters<typeof findVehicleConflicts>[1],
   current?: Parameters<typeof findVehicleConflicts>[2],
+  now: number = Date.now(),
 ): VehicleConflictField[] {
+  const fresh = (queryKey: readonly unknown[]) =>
+    queryClient
+      .getQueryCache()
+      .findAll({ queryKey })
+      .filter((q) => !q.state.isInvalidated && now - q.state.dataUpdatedAt <= PRECHECK_MAX_AGE_MS)
+      .map((q) => ({ data: q.state.data as { items?: unknown } | undefined, at: q.state.dataUpdatedAt }))
+      .filter((e): e is { data: { items: unknown[] }; at: number } => !!e.data && Array.isArray(e.data.items)) // skips `qk.vehicle(id)` details
+      .sort((a, b) => a.at - b.at); // oldest first, so the newest copy of a row is set last
   const vehicles = new Map<string, VehicleRow>();
-  for (const [, data] of queryClient.getQueriesData<{ items?: unknown }>({ queryKey: qkRoot.vehicles })) {
-    if (!data || !Array.isArray(data.items)) continue; // skips the `qk.vehicle(id)` detail entries
+  for (const { data } of fresh(qkRoot.vehicles)) {
     for (const row of data.items as VehicleRow[]) if (row?.id) vehicles.set(row.id, row);
   }
-  const devices: DeviceRow[] = [];
-  for (const [, data] of queryClient.getQueriesData<{ items?: unknown }>({ queryKey: qkRoot.devices })) {
-    if (data && Array.isArray(data.items)) devices.push(...(data.items as DeviceRow[]));
+  const devices = new Map<string, DeviceRow>();
+  for (const { data } of fresh(qkRoot.devices)) {
+    for (const row of data.items as DeviceRow[]) if (row?.serial) devices.set(serialKey(row.serial), row);
   }
-  return findVehicleConflicts({ vehicles: [...vehicles.values()], devices }, values, current);
+  const live = [...devices.values()].filter((d) => !(d.vehicleId && vehicles.get(d.vehicleId)?.deletedAt));
+  return findVehicleConflicts({ vehicles: [...vehicles.values()], devices: live }, values, current);
 }

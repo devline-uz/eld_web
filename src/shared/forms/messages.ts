@@ -69,6 +69,7 @@ export const VALIDATION_MESSAGES = {
   personName: 'Use letters, spaces, hyphens, apostrophes or periods only.',
   plateState: 'Use a US state or Canadian province code (e.g. OH, ON).',
   plateStateRequired: 'Enter the issuing state for this plate.',
+  plateRequiredForState: 'Enter the plate number, or clear the issuing state.',
   lastNameMax: 'Last name must be 80 characters or fewer.',
   roleNameMax: 'Role name must be 80 characters or fewer.',
   roleDescriptionMax: 'Description must be 500 characters or fewer.',

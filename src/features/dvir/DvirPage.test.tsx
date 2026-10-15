@@ -207,6 +207,12 @@ describe('DvirPage', () => {
     expect(search).toHaveValue('');
   });
 
+  it('FE-22: the search term is restored from `?q=` on load', async () => {
+    renderPage('/dvir?tab=workOrders&q=brake');
+    await screen.findByRole('heading', { level: 1, name: 'DVIR & Maintenance' });
+    expect(screen.getByRole('textbox', { name: 'Search unit, defect' })).toHaveValue('brake');
+  });
+
   // WB-161 — W-04's `New work order` links here with the unit it was pressed on.
   it('?newWorkOrder= opens 11.18 pre-filled and drops the param', async () => {
     renderPage('/dvir?newWorkOrder=veh_1');

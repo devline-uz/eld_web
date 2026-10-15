@@ -16,7 +16,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Crosshair, MessageSquare, Plus, Search, X } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { qk } from '@/shared/api/queryKeys';
-import { useLiveFleet, hasPosition, type LiveFleetResponse, type LiveFleetUnit } from '@/shared/api/liveFleet';
+import { useLiveFleet, hasPosition, mapMarkerStatus, serverNowMs, type LiveFleetResponse, type LiveFleetUnit } from '@/shared/api/liveFleet';
 import { useGeofences } from '@/shared/api/geofences';
 import { useVehicleTelemetry } from '@/shared/api/vehicles';
 import { trailFromTelemetry } from '@/shared/map/trail';
@@ -49,8 +49,10 @@ import { VIEW_LOGS_NO_DRIVER } from './lib/copy';
 import { matchesUnitSearch } from './lib/unitSearch';
 import { useVehicleMap } from '@/shared/api/lookups';
 import { searchEmptyState } from '@/shared/ui/copy';
+import { refreshedLabel } from './lib/refreshedLabel';
 import {
   applyUnitPatches,
+  appliedFrameAt,
   fleetHasUnit,
   isStaleFrame,
   telemetryUnitPatch,
@@ -74,32 +76,24 @@ type Segment = 'ALL' | 'DRIVING' | 'IDLE';
  * list is windowed (above `VIRTUALIZE_ABOVE` rows, §16.2). */
 const UNIT_ROW_ESTIMATE = 76;
 
-function refreshedLabel(dataUpdatedAt: number): string | null {
-  if (!dataUpdatedAt) return null;
-  const seconds = Math.max(0, Math.floor((Date.now() - dataUpdatedAt) / 1000));
-  if (seconds < 60) return `refreshed ${seconds} second${seconds === 1 ? '' : 's'} ago`;
-  const minutes = Math.floor(seconds / 60);
-  return `refreshed ${minutes} minute${minutes === 1 ? '' : 's'} ago`;
-}
-
 /** `refreshed N seconds ago`, ticking every second (web/tz.md §10 W-02). `Date.now()` is only
  * ever read inside `useState`'s lazy initializer or the interval callback below — never directly
  * in the render body — so this stays outside React's render-purity check. */
-function useRefreshedAgo(dataUpdatedAt: number): string | null {
-  const [label, setLabel] = useState(() => refreshedLabel(dataUpdatedAt));
+function useRefreshedAgo(dataUpdatedAt: number, isFetching: boolean): string | null {
+  const [label, setLabel] = useState(() => refreshedLabel(dataUpdatedAt, isFetching));
 
   useEffect(() => {
-    const timer = setInterval(() => setLabel(refreshedLabel(dataUpdatedAt)), 1000);
+    const timer = setInterval(() => setLabel(refreshedLabel(dataUpdatedAt, isFetching)), 1000);
     return () => clearInterval(timer);
-  }, [dataUpdatedAt]);
+  }, [dataUpdatedAt, isFetching]);
 
   return label;
 }
 
 /** The top-bar subtitle. The 1 s tick lives here, so only this text re-renders every second — not
  * the whole Live Fleet page, list and map (WB-257). */
-export function RefreshedSubtitle({ dataUpdatedAt }: { dataUpdatedAt: number }) {
-  const label = useRefreshedAgo(dataUpdatedAt);
+export function RefreshedSubtitle({ dataUpdatedAt, isFetching = false }: { dataUpdatedAt: number; isFetching?: boolean }) {
+  const label = useRefreshedAgo(dataUpdatedAt, isFetching);
   return <>{`Real-time GPS · ${label ?? 'refreshing…'}`}</>;
 }
 
@@ -384,7 +378,9 @@ export default function LiveFleetPage() {
     }
     const unit = fleet?.items.find((u) => u.vehicleId === payload.vehicleId);
     if (isStaleFrame(patch.lastSeenAt, unit?.lastSeenAt, lastFrameAtRef.current.get(payload.vehicleId))) return;
-    if (patch.lastSeenAt) lastFrameAtRef.current.set(payload.vehicleId, Date.parse(patch.lastSeenAt));
+    // FE-06 — clamp to the server's "now": one future-dated frame (a device clock running fast)
+    // must not mark every later, correctly-timed frame as stale.
+    if (patch.lastSeenAt) lastFrameAtRef.current.set(payload.vehicleId, appliedFrameAt(patch.lastSeenAt, serverNowMs()));
     const pending = pendingPatchesRef.current;
     pending.set(payload.vehicleId, { ...pending.get(payload.vehicleId), ...patch });
     patchFleet(pending);
@@ -401,8 +397,15 @@ export default function LiveFleetPage() {
 
   // The subtitle node changes only with the data; its own 1 s tick re-renders just the text.
   const subtitle = useMemo(
-    () => (fleet.isError ? null : <RefreshedSubtitle dataUpdatedAt={fleet.dataUpdatedAt} />),
-    [fleet.isError, fleet.dataUpdatedAt],
+    () => (fleet.isError ? null : (
+            // Keyed so a new snapshot or fetch state re-initializes the label at once, not 1 s later.
+            <RefreshedSubtitle
+              key={`${fleet.dataUpdatedAt}:${fleet.isFetching}`}
+              dataUpdatedAt={fleet.dataUpdatedAt}
+              isFetching={fleet.isFetching}
+            />
+          )),
+    [fleet.isError, fleet.dataUpdatedAt, fleet.isFetching],
   );
   useDynamicSubtitle(subtitle);
 
@@ -449,7 +452,8 @@ export default function LiveFleetPage() {
         id: u.vehicleId,
         lat: u.lat,
         lon: u.lon,
-        dutyStatus: u.dutyStatus,
+        // FE-05 — grey marker = ELD offline by `connectivity`, as the dashboard KPI counts it.
+        dutyStatus: mapMarkerStatus(u),
         headingDeg: u.headingDeg,
         speedMph: u.speedMph,
         stale: u.isStale,
@@ -635,6 +639,7 @@ export default function LiveFleetPage() {
               layers={activeLayers}
               geofences={geofenceGeoJSON}
               trips={tripGeoJSON}
+              now={serverNowMs}
               className="h-full w-full"
             />
           </Suspense>

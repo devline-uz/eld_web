@@ -1,7 +1,7 @@
 // W-02 — `telemetry.point` → one unit's row in the cached fleet (web/tz.md §7.2, WB-258).
 import { describe, expect, it } from 'vitest';
 import type { LiveFleetResponse, LiveFleetUnit } from '@/shared/api/liveFleet';
-import { applyUnitPatches, fleetHasUnit, isStaleFrame, telemetryUnitPatch, type TelemetryPointPayload } from './telemetryPatch';
+import { appliedFrameAt, applyUnitPatches, fleetHasUnit, isStaleFrame, telemetryUnitPatch, type TelemetryPointPayload } from './telemetryPatch';
 
 const unit = (vehicleId: string): LiveFleetUnit => ({
   vehicleId,
@@ -84,5 +84,22 @@ describe('isStaleFrame (CODE-023)', () => {
 
   it('applies untimed frames as before', () => {
     expect(isStaleFrame(undefined, t('12:00'), Date.parse(t('12:00')))).toBe(false);
+  });
+});
+
+describe('appliedFrameAt (FE-06)', () => {
+  const now = Date.parse('2026-10-15T12:00:00.000Z');
+
+  it('keeps a frame time at or before the server now', () => {
+    expect(appliedFrameAt('2026-10-15T11:59:30.000Z', now)).toBe(now - 30_000);
+  });
+
+  it('clamps a future-dated frame so the next correctly-timed frame is not dropped as stale', () => {
+    const future = '2026-10-15T12:10:00.000Z';
+    const applied = appliedFrameAt(future, now);
+    expect(applied).toBe(now);
+    expect(isStaleFrame('2026-10-15T12:00:05.000Z', null, applied)).toBe(false);
+    // Unclamped, the same frame would have been thrown away.
+    expect(isStaleFrame('2026-10-15T12:00:05.000Z', null, Date.parse(future))).toBe(true);
   });
 });

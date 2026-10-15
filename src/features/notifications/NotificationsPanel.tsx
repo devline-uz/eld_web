@@ -83,7 +83,8 @@ function NotificationRow({ item, onOpen }: { item: NotificationItem; onOpen: (it
           <span className="min-w-0 flex-1 truncate text-body-strong text-text">{item.title}</span>
           {item.createdAt ? (
             <time dateTime={item.createdAt} className="shrink-0 text-caption text-text-muted tabular-nums">
-              {formatRelativeShort(item.createdAt)}
+              {/* FE-07 — past 7 days the age is a date: the carrier's, not the browser's. */}
+              {formatRelativeShort(item.createdAt, undefined, carrierTz)}
             </time>
           ) : null}
         </span>

@@ -41,6 +41,7 @@ import {
 import { AuthBootSkeleton } from './AuthBootSkeleton';
 import { signOutOfGoogle } from './firebase';
 import { IdleWarningModal } from './IdleWarningModal';
+import { broadcastSignOut, markSharedActivity, readSharedActivity, subscribeSharedSession } from './idleSync';
 import {
   NO_PERMISSIONS,
   isRole,
@@ -181,6 +182,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [tokenEpoch, setTokenEpoch] = useState(0);
 
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** FE-23 — this tab's newest activity (the shared copy in `localStorage` is throttled). */
+  const lastLocalActivity = useRef(0);
   /**
    * Session generation (WB-079). Every `resetSession` bumps it; the bridge and every refresh
    * loop compare against the value they started with, so nothing that was in flight when the
@@ -305,10 +308,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const refreshToken = getRefreshToken();
       const accessToken = getAccessToken();
       if (refreshToken) void logoutSession(refreshToken, accessToken).catch(() => undefined);
+      // FE-23 — the refresh token is shared by every tab and is now revoked: end them all.
+      broadcastSignOut(reason);
       resetSession(reason);
     },
     [resetSession],
   );
+
+  /* --- FE-23: another tab signed out → this tab's session (same refresh token) is over too --- */
+  useEffect(() => {
+    if (status !== 'authenticated') return;
+    return subscribeSharedSession({ onSignOut: (reason) => resetSession(reason) });
+  }, [status, resetSession]);
 
   /* --- boot: refresh → me (§6.8) ---------------------------------------------------------- */
   // Without a snapshot this runs behind the full-page skeleton. With one (WD-072) the app is
@@ -379,12 +390,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // the clock; dismissing it (`Stay signed in`) re-runs the effect and arms a fresh 30 minutes.
   // Before this, the timer was only ever re-armed by activity, so a dismissed warning left the
   // session with no idle timer at all (web/bugs.md WB-036).
+  // FE-23 — the clock is shared across tabs (`idleSync`): this tab's activity is published, and
+  // when its timer fires it first checks the newest activity of *any* tab, re-arming for the rest
+  // of the 30 minutes if the user is busy elsewhere. Only a session idle everywhere warns.
   useEffect(() => {
     if (status !== 'authenticated' || idleWarning) return;
-    let idleTimer = setTimeout(() => setIdleWarning(true), IDLE_TIMEOUT_MS);
-    const onActivity = () => {
+    // A (re)armed clock — sign-in, a new tab, `Stay signed in` — is activity.
+    lastLocalActivity.current = Date.now();
+    markSharedActivity(lastLocalActivity.current);
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
+    const arm = () => {
       clearTimeout(idleTimer);
-      idleTimer = setTimeout(() => setIdleWarning(true), IDLE_TIMEOUT_MS);
+      const now = Date.now();
+      const idleFor = now - Math.max(lastLocalActivity.current, readSharedActivity(now));
+      if (idleFor >= IDLE_TIMEOUT_MS) setIdleWarning(true);
+      else idleTimer = setTimeout(arm, IDLE_TIMEOUT_MS - idleFor);
+    };
+    arm();
+    const onActivity = () => {
+      lastLocalActivity.current = Date.now();
+      markSharedActivity(lastLocalActivity.current);
     };
     const events = ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const;
     for (const event of events) window.addEventListener(event, onActivity, { passive: true });
@@ -393,6 +418,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       for (const event of events) window.removeEventListener(event, onActivity);
     };
   }, [status, idleWarning]);
+
+  // FE-23 — while this tab's warning is up, activity in another tab means the user is here: drop
+  // the warning (a fresh 30 minutes is armed) instead of revoking the shared refresh token.
+  useEffect(() => {
+    if (!idleWarning) return;
+    const shownAt = Date.now();
+    return subscribeSharedSession({
+      onActivity: (at) => {
+        if (at > shownAt) setIdleWarning(false);
+      },
+    });
+  }, [idleWarning]);
+
+  /** The countdown ran out: sign out only if no tab has seen activity in the last 30 minutes. */
+  const onIdleCountdownEnd = useCallback(() => {
+    const now = Date.now();
+    if (now - readSharedActivity(now) < IDLE_TIMEOUT_MS) setIdleWarning(false);
+    else signOut('idle');
+  }, [signOut]);
 
   const completeSignIn = useCallback(
     async (pair: TokenPair): Promise<SignInOutcome> => {
@@ -459,6 +503,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           seconds={IDLE_WARNING_MS / 1000}
           onStay={() => setIdleWarning(false)}
           onSignOut={() => signOut('idle')}
+          onExpire={onIdleCountdownEnd}
         />
       ) : null}
     </AuthContext.Provider>

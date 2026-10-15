@@ -230,6 +230,16 @@ describe('form schemas', () => {
     expect(vehicleSchema.safeParse(base).success).toBe(true);
   });
 
+  it('FE-11: an issuing state without a plate is a field error, never silently dropped', () => {
+    const base = { unitNumber: '#101', vin: '1FUJA6CV88LW12345' };
+    for (const licensePlate of [undefined, '', '   ']) {
+      const parsed = vehicleSchema.safeParse({ ...base, licensePlate, licenseState: 'OH' });
+      expect(parsed.success).toBe(false);
+      expect(parsed.error?.issues[0]).toMatchObject({ path: ['licensePlate'], message: M.plateRequiredForState });
+    }
+    expect(vehicleSchema.safeParse({ ...base, licensePlate: 'ABC123', licenseState: 'OH' }).success).toBe(true);
+  });
+
   it('FE-012: driver names take letters, spaces, hyphens, apostrophes and periods only', () => {
     const base = {
       email: 'marcus.webb@universal-logistics.example',
@@ -276,9 +286,9 @@ describe('form schemas', () => {
     expect(firstError(vehicleSchema, { ...base, licensePlate: '@@##$$%%^^&&**((' })).toBe(M.licensePlateFormat);
     expect(firstError(vehicleSchema, { ...base, licensePlate: '-ABC' })).toBe(M.licensePlateFormat);
     for (const deviceId of ['PT30_1C4F', 'pt40-9a1b', '00:1B:44:11:3A:B7']) {
-      expect(vehicleSchema.safeParse({ ...base, deviceId }).success).toBe(true);
+      expect(vehicleSchema.safeParse({ ...base, licensePlate: 'ABC123', deviceId }).success).toBe(true);
     }
-    expect(firstError(vehicleSchema, { ...base, deviceId: 'bad serial!!' })).toBe(M.vehicleEldSerialFormat);
+    expect(firstError(vehicleSchema, { ...base, licensePlate: 'ABC123', deviceId: 'bad serial!!' })).toBe(M.vehicleEldSerialFormat);
   });
 
   it('holds an FMCSA transfer to 8 days and a government address (11.14)', () => {

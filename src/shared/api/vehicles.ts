@@ -227,8 +227,12 @@ export interface VehicleTableRow extends VehicleRow {
 /** Lightweight vehicle list for pickers (Assign driver's unit dropdown, Add driver's "Assigned
  * unit" field) — the session-wide `reference` lookup (`shared/api/lookups.ts`), shared instead of
  * every picker re-fetching. */
-export function useVehiclesPicker() {
-  return useVehiclesLookup();
+/** Unit picker rows. FE-17 — the lookup stops at `LOOKUP_LIMIT` units, so a typed term searches the
+ * server (`GET /vehicles?q=`, one ≤ 200-row page) instead of filtering only what the lookup holds. */
+export function useVehiclesPicker(q?: string) {
+  const lookup = useVehiclesLookup(!q);
+  const search = useQuery({ ...vehiclesPageQuery({ page: 1, limit: 200, q, sort: 'unitNumber:asc' }), enabled: Boolean(q) });
+  return q ? search : lookup;
 }
 
 /** W-03 server-page params — exactly what `VehicleListQueryDto` accepts (page/limit/sort/q/status). */
@@ -256,12 +260,17 @@ export { vehiclesCountQuery };
 export function joinVehicles(vehicles: VehicleRow[], drivers: DriverRow[], devices: DeviceRow[]): VehicleTableRow[] {
   const driverByVehicle = new Map(drivers.filter((d) => d.assignedVehicleId).map((d) => [d.assignedVehicleId as string, d]));
   const deviceByVehicle = new Map(devices.filter((d) => d.vehicleId).map((d) => [d.vehicleId as string, d]));
+  const deviceBySerial = new Map(devices.map((d) => [d.serial, d]));
   return vehicles.map((v) => {
-    const device = deviceByVehicle.get(v.id) ?? null;
+    // FE-08 — the `/vehicles` row's own `eldSerial` (CODE-085) is authoritative; the `/devices`
+    // lookup is reference-cached and can still show the unit's previous pairing right after an
+    // edit. Only an older backend that omits the field (`undefined`) falls back to the lookup.
+    const serverKnowsSerial = v.eldSerial !== undefined;
+    const device = serverKnowsSerial ? (v.eldSerial ? deviceBySerial.get(v.eldSerial) ?? null : null) : deviceByVehicle.get(v.id) ?? null;
     return {
       ...v,
       driver: driverByVehicle.get(v.id) ?? null,
-      eldSerial: device?.serial ?? v.eldSerial ?? null,
+      eldSerial: serverKnowsSerial ? v.eldSerial ?? null : device?.serial ?? null,
       eldDeviceStatus: device?.status ?? null,
       eldDeviceModel: device?.model ?? null,
       firmwareOutdated: device?.firmwareOutdated ?? false,
@@ -502,6 +511,9 @@ export function useCreateVehicle() {
     mutationFn: (payload: CreateVehiclePayload) => client.post<VehicleRow>(endpoints.vehicles.create, payload),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qkRoot.vehicles });
+      // FE-08 — a create may pair an ELD device; the reference-cached `/devices` lookup must not
+      // keep showing it as free (or the unit as unpaired).
+      void queryClient.invalidateQueries({ queryKey: qkRoot.devices });
     },
   });
 }
@@ -514,6 +526,9 @@ export function useUpdateVehicle(id: string) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qkRoot.vehicles });
       void queryClient.invalidateQueries({ queryKey: qk.vehicle(id) });
+      // FE-08 — an edit may re-pair or unpair the ELD device; a stale `/devices` lookup otherwise
+      // prefilled the old serial on the next Edit and silently re-paired it on save.
+      void queryClient.invalidateQueries({ queryKey: qkRoot.devices });
     },
   });
 }

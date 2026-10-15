@@ -567,6 +567,25 @@ describe('W-16 Messages', () => {
     await waitFor(() => expect(posted).toBe('cnv_1'));
   });
 
+  it('LV-06: tags a BROADCAST thread so it is not read as a duplicate of the driver\'s DIRECT one', async () => {
+    const BROADCAST = {
+      ...CONVERSATION,
+      id: 'cnv_b',
+      type: 'BROADCAST',
+      title: 'Weather alert',
+      participants: CONVERSATION.participants.map((p) => ({ ...p, conversationId: 'cnv_b' })),
+    };
+    server.use(
+      http.get(url(endpoints.conversations.list), () => ok({ items: [CONVERSATION, BROADCAST] })),
+      http.get(url(endpoints.drivers.list), () => ok({ items: [DRIVER], page: 1, limit: 500, total: 1, totalPages: 1 })),
+    );
+    renderPage();
+
+    const rows = await screen.findAllByRole('button', { name: /John Smith/ });
+    expect(rows).toHaveLength(2);
+    expect(rows.filter((row) => within(row).queryByText('Broadcast'))).toHaveLength(1);
+  });
+
   it('renders the real unread count and the newest message as the preview line (B-37)', async () => {
     server.use(
       http.get(url(endpoints.conversations.list), () =>

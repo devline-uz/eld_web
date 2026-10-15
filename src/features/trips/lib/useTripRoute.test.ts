@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OSRM_DEMO_URL, ROUTING_BASE_URL, resolveRoutingBaseUrl } from '@/shared/api/endpoints';
 import { tripRouteEnds, type StopType } from '@/shared/api/trips';
-import { fetchRoadRoute, fetchRoadRouteSummary, intermediateTripStops, metersToMiles, orderTripStops } from './useTripRoute';
+import { fetchRoadRoute, fetchRoadRouteSummary, intermediateTripStops, metersToMiles, orderTripStops, stopScheduledAt } from './useTripRoute';
 
 const s = (type: StopType, sequence: number, name: string) => ({ type, sequence, name });
 
@@ -90,5 +90,23 @@ describe('resolveRoutingBaseUrl (CODE-057 / LIVE-010)', () => {
     expect(resolveRoutingBaseUrl('', true)).toBe(OSRM_DEMO_URL);
     expect(resolveRoutingBaseUrl(undefined, false)).toBeNull();
     expect(resolveRoutingBaseUrl('   ', false)).toBeNull();
+  });
+});
+
+// FE-15 — after an edit of the window the board shows the new pickup / delivery times.
+describe('stopScheduledAt', () => {
+  const stop = (type: StopType, sequence: number, scheduledAt: string | null) => ({ type, sequence, scheduledAt });
+  const pickup = stop('PICKUP', 1, '2026-10-20T12:00:00.000Z');
+  const fuel = stop('FUEL', 2, '2026-10-21T08:00:00.000Z');
+  const delivery = stop('DELIVERY', 3, '2026-10-21T18:00:00.000Z');
+  const trip = { stops: [pickup, fuel, delivery], plannedStartAt: '2026-10-22T12:00:00.000Z', plannedEndAt: '2026-10-23T18:00:00.000Z' };
+
+  it('reads the pickup / delivery time from the (edited) trip window, not the stale stop copy', () => {
+    expect(stopScheduledAt(trip, pickup)).toBe('2026-10-22T12:00:00.000Z');
+    expect(stopScheduledAt(trip, delivery)).toBe('2026-10-23T18:00:00.000Z');
+  });
+  it('keeps an intermediate stop\'s own time, and falls back to the stop when the trip has no window', () => {
+    expect(stopScheduledAt(trip, fuel)).toBe('2026-10-21T08:00:00.000Z');
+    expect(stopScheduledAt({ stops: trip.stops, plannedStartAt: null, plannedEndAt: null }, pickup)).toBe('2026-10-20T12:00:00.000Z');
   });
 });

@@ -34,7 +34,7 @@ import { DataTable } from '@/shared/ui/DataTable';
 import { Pagination } from '@/shared/ui/Pagination';
 import { Card } from '@/shared/ui/Card';
 import { ConfirmDelete } from '@/shared/ui/Modal';
-import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
+import { EmptyState, ErrorState, LoadingState, RefreshErrorNotice } from '@/shared/ui/states';
 import { EMPTY_STATE_COPY, searchEmptyState } from '@/shared/ui/copy';
 import { useToast } from '@/shared/ui/Toast';
 import { AddDriverModal } from './components/AddDriverModal';
@@ -515,6 +515,9 @@ export default function DriversPage() {
 
   const isLoading = useWindow ? windowQuery.isLoading : rosterQuery.isLoading;
   const isError = useWindow ? windowQuery.isError : rosterQuery.isError;
+  // FE-20 — a failed background poll (30 s, `retry: false`) keeps the loaded rows: the full
+  // ErrorState only when there is nothing to show, otherwise a one-line notice above the table.
+  const hasData = useWindow ? Boolean(windowQuery.data) : Boolean(rosterQuery.data);
   const refetch = () => (useWindow ? windowQuery.refetch() : rosterQuery.refetch());
 
   const headerSubtitle = useMemo(
@@ -634,9 +637,10 @@ export default function DriversPage() {
       </div>
 
       <Card padded={false} className="xl:flex xl:min-h-0 xl:flex-col">
+        {isError && hasData && <RefreshErrorNotice onRetry={() => void refetch()} />}
         {isLoading ? (
           <LoadingState className="p-4" />
-        ) : isError ? (
+        ) : isError && !hasData ? (
           <ErrorState onRetry={refetch} />
         ) : filtered.length === 0 ? (
           q || countActiveDriverFilters(filters) > 0 ? (

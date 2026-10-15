@@ -1,7 +1,7 @@
 // Trailers list — rows, search, paging, empty/error states, and the read-only (vehicles READ) removals.
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http } from 'msw';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -18,8 +18,7 @@ vi.mock('@/shared/auth/usePermission', () => ({
   usePermission: () => ({ can: (_key: string, level: 'READ' | 'FULL' = 'READ') => level === 'READ' || perm.level === 'FULL' }),
 }));
 
-function renderPage(entry = '/trailers') {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function renderPage(entry = '/trailers', queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   return render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
@@ -129,6 +128,19 @@ describe('Trailers list (server-side)', () => {
     const empty = screen.getByText('No trailers yet').parentElement!;
     expect(within(empty).getByRole('button', { name: 'Import CSV' })).toBeInTheDocument();
     expect(within(empty).getByRole('button', { name: 'Add trailer' })).toBeInTheDocument();
+  });
+
+  it('FE-20: a failed background refetch keeps the loaded rows and shows a non-blocking notice', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderPage('/trailers', queryClient);
+    expect(await screen.findByText('T-4471')).toBeInTheDocument();
+    server.use(http.get(url(endpoints.trailers.list), () => fail(500, 'INTERNAL', 'boom')));
+    await act(async () => {
+      await queryClient.refetchQueries({ type: 'active' });
+    });
+    expect(await screen.findByText('Could not refresh — showing the last loaded data.', {}, { timeout: 8000 })).toBeInTheDocument();
+    expect(screen.getByText('T-4471')).toBeInTheDocument();
+    expect(screen.queryByText('Could not load this page')).not.toBeInTheDocument();
   });
 
   it('shows the error state inside the card with a retry', async () => {

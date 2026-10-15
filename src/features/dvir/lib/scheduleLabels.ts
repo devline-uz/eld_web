@@ -3,7 +3,7 @@
 // INTERVAL and NEXT DUE show both halves, otherwise an Overdue badge next to a future date is
 // unexplained.
 import { formatDistance, formatNumber } from '@/shared/format/numbers';
-import { formatLocal } from '@/shared/format/datetime';
+import { formatDateOnly, formatLocal } from '@/shared/format/datetime';
 import { EMPTY } from '@/shared/format/empty';
 import type { MaintenanceScheduleRow } from '@/shared/api/dvir';
 
@@ -20,10 +20,11 @@ export function scheduleIntervalLabel({ intervalMi, intervalDays }: IntervalFiel
   return parts.length ? `Every ${parts.join(SEP)}` : EMPTY.dash;
 }
 
-/** `12,000 mi · Nov 08, 2026` / `12,000 mi` / `Nov 08, 2026` / `—` */
-export function scheduleNextDueLabel({ nextDueMi, nextDueAt }: NextDueFields): string {
+/** `12,000 mi · Nov 08, 2026` / `12,000 mi` / `Nov 08, 2026` / `—`. FE-07 — the date is the
+ * carrier's calendar day when `timeZone` is given (same as LAST SERVICE), not the browser's. */
+export function scheduleNextDueLabel({ nextDueMi, nextDueAt }: NextDueFields, timeZone?: string): string {
   const parts: string[] = [];
   if (nextDueMi != null) parts.push(formatDistance(nextDueMi));
-  if (nextDueAt) parts.push(formatLocal(nextDueAt, 'shortDate'));
+  if (nextDueAt) parts.push(timeZone ? formatDateOnly(nextDueAt, timeZone) : formatLocal(nextDueAt, 'shortDate'));
   return parts.length ? parts.join(SEP) : EMPTY.dash;
 }

@@ -545,7 +545,13 @@ export default function MessagesPage() {
                   )}
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center justify-between gap-2">
-                      <span className="truncate text-body-strong text-text">{name}</span>
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <span className="truncate text-body-strong text-text">{name}</span>
+                        {/* LV-06 — `POST /messages/broadcast` opens its own BROADCAST thread per
+                            driver beside the 1:1 DIRECT one; without a tag the two rows read as a
+                            duplicate conversation with the same driver. */}
+                        {conversation.type === 'BROADCAST' && <Badge tone="info" className="shrink-0">Broadcast</Badge>}
+                      </span>
                       <span className="shrink-0 text-caption text-text-muted">{formatRelativeShort(conversation.lastMessageAt, undefined, carrierTz)}</span>
                     </span>
                     <span className="flex items-center justify-between gap-2">
@@ -590,7 +596,10 @@ export default function MessagesPage() {
                   <Avatar name={conversationName(selected)} size="md" />
                 )}
                 <div className="min-w-0">
-                  <p className="truncate text-body-strong text-text">{conversationName(selected)}</p>
+                  <p className="flex min-w-0 items-center gap-1.5">
+                    <span className="truncate text-body-strong text-text">{conversationName(selected)}</span>
+                    {selected.type === 'BROADCAST' && <Badge tone="info" className="shrink-0">Broadcast</Badge>}
+                  </p>
                   <p className="text-caption text-text-muted">
                     {selected.type === 'GROUP'
                       ? groupMembersLabel(selected)

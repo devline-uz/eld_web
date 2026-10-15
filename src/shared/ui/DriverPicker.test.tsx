@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import * as Dialog from '@radix-ui/react-dialog';
@@ -37,5 +37,21 @@ describe('DriverPicker', () => {
     await user.type(input, 'carl');
     expect(input).toHaveFocus();
     expect(screen.queryByText('Sarah Chen')).toBeNull();
+  });
+
+  it('FE-17: clears a server search when it closes, by Esc or by a pick', async () => {
+    const user = userEvent.setup();
+    const onSearch = vi.fn();
+    render(<DriverPicker options={options} onSelect={() => {}} onSearch={onSearch} placeholder="Select a driver" />);
+    await user.click(screen.getByText('Select a driver'));
+    await user.type(screen.getByPlaceholderText('Search'), 'sa');
+    await user.keyboard('{Escape}');
+    expect(onSearch).toHaveBeenLastCalledWith('');
+
+    onSearch.mockClear();
+    await user.click(screen.getByText('Select a driver'));
+    await user.type(screen.getByPlaceholderText('Search'), 'sa');
+    await user.click(screen.getByText('Sarah Chen'));
+    expect(onSearch).toHaveBeenLastCalledWith('');
   });
 });

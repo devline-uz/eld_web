@@ -19,7 +19,9 @@ import {
   useDeactivateDriver,
   useImportDrivers,
   useDriverRosterCounts,
+  useDriverRosterWindow,
 } from './drivers';
+import { STALE } from './cache';
 
 function wrapper() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
@@ -39,6 +41,21 @@ afterAll(() => server.close());
 beforeEach(() => {
   setAuthBridge({ getAccessToken: () => 'test-token' });
   setAccessToken('test-token');
+});
+
+describe('FE-21 useDriverRosterWindow', () => {
+  it('uses the live policy (10 s stale + poll), not the 10-min reference cache, for the On/Off duty tabs', async () => {
+    server.use(http.get(url(endpoints.drivers.roster), () => ok({ items: [], page: 1, limit: 200, total: 0, totalPages: 1 })));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { result } = renderHook(() => useDriverRosterWindow({}), {
+      wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>,
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    const query = queryClient.getQueryCache().getAll()[0]!;
+    const options = query.options as { staleTime?: number; refetchInterval?: unknown };
+    expect(options.staleTime).toBe(STALE.live);
+    expect(options.refetchInterval).toBeTypeOf('function');
+  });
 });
 
 describe('UI-015 useDriverRosterCounts', () => {
