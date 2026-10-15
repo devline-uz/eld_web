@@ -30,6 +30,8 @@ import { ApiError } from '@/shared/api/errors';
 import { useVehiclesPicker } from '@/shared/api/vehicles';
 import {
   RECORD_STATUS,
+  REVIEW_REASON,
+  isReplacedDeviceRecord,
   useDriverOpenViolations,
   useLogDay,
   useLogEvents,
@@ -130,6 +132,10 @@ export default function HosLogsPage() {
   // definition the dashboard and the Drivers roster count), so the card can reconcile with them.
   const openViolationsQuery = useDriverOpenViolations(queryDriverId || undefined);
   const eventsQuery = useLogEvents(queryDriverId || undefined, date);
+  // D-163 — `?review=REPLACED_DEVICE` (deep-linkable) narrows the table to the records a replaced
+  // device delivered late; the server filters, so the request carries the same query param.
+  const reviewOnly = params.get('review') === REVIEW_REASON.replacedDevice;
+  const reviewQuery = useLogEvents(reviewOnly ? queryDriverId || undefined : undefined, date, REVIEW_REASON.replacedDevice);
   const rangeQuery = useLogRange(queryDriverId || undefined, shiftDay(date, -7), date);
   // WB-057 — the window is the driver's RODS day ± one day, built from `rodsDayStart` (the helper
   // the grid plots against), never from UTC midnights: for an Eastern terminal the old window
@@ -161,6 +167,7 @@ export default function HosLogsPage() {
   const [showAllRecords, setShowAllRecords] = useState(false);
   const [highlightedEventId, setHighlightedEventId] = useState<string | null>(null);
   const [editTarget, setEditTarget] = useState<LogEventView | null>(null);
+  const [editPrefill, setEditPrefill] = useState<LogEventView | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [unassignedChipOpen, setUnassignedChipOpen] = useState(false);
   // WD-037 — W-15 `Resolve now ›` deep-links to `/hos-logs?unassigned=1`. The param opens 11.13
@@ -230,10 +237,12 @@ export default function HosLogsPage() {
   // The record a proposal is made against: the day's latest active duty change (WB-147). With none,
   // `Add / edit event` proposes a new record instead (B-72) — still only a §395.30 suggestion.
   const editableEvent = activeDutyEvents[activeDutyEvents.length - 1] ?? null;
+  // D-163 — a replaced device's inert record is stored as 3 too, but it is not a proposal.
   const pendingEditCount = useMemo(
-    () => events.filter((event) => event.recordStatus === RECORD_STATUS.proposed).length,
+    () => events.filter((event) => event.recordStatus === RECORD_STATUS.proposed && !isReplacedDeviceRecord(event)).length,
     [events],
   );
+  const reviewCount = useMemo(() => events.filter(isReplacedDeviceRecord).length, [events]);
 
   const locationAt = useCallback(
     (startAt: string) =>
@@ -397,6 +406,7 @@ export default function HosLogsPage() {
               disabled={!queryDriverId || notFound}
               onClick={() => {
                 setEditTarget(editableEvent);
+                setEditPrefill(null);
                 setEditOpen(true);
               }}
             >
@@ -555,7 +565,29 @@ export default function HosLogsPage() {
             highlightedEventId={highlightedEventId}
             onRequestEdit={(event) => {
               setEditTarget(event);
+              setEditPrefill(null);
               setEditOpen(true);
+            }}
+            // D-163 — an inert record cannot be edited; it is re-entered as a new proposal (B-72).
+            onReenter={(event) => {
+              setEditTarget(null);
+              setEditPrefill(event);
+              setEditOpen(true);
+            }}
+            review={{
+              active: reviewOnly,
+              onToggle: (next) => {
+                const merged = new URLSearchParams(params);
+                if (next) merged.set('review', REVIEW_REASON.replacedDevice);
+                else merged.delete('review');
+                setParams(merged, { replace: true });
+              },
+              count: reviewCount,
+              events: reviewQuery.data?.events ?? [],
+              carriedIn: reviewQuery.data?.carriedIn ?? null,
+              isLoading: reviewQuery.isLoading,
+              isError: reviewQuery.isError,
+              onRetry: () => void reviewQuery.refetch(),
             }}
             onViewAll={() => setShowAllRecords(true)}
           />
@@ -570,6 +602,7 @@ export default function HosLogsPage() {
           dateLabel={dateLabel}
           timezone={timezone}
           event={editTarget}
+          prefill={editPrefill}
           graph={day?.graph ?? []}
           onClose={() => setEditOpen(false)}
         />

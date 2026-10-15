@@ -1370,3 +1370,69 @@ describe('LIVE-019 / CODE-064 / LIVE-031 · driver lookup, not-found and the URL
     expect(screen.queryByText(/No violations/)).not.toBeInTheDocument();
   });
 });
+
+describe('W-08 · replaced device records (D-163)', () => {
+  const flaggedEvent = {
+    ...activeEvent,
+    id: '8950',
+    eventDateTime: '2026-09-10T20:00:00.000Z',
+    recordStatus: 3,
+    recordOrigin: 2,
+    status: 'OFF',
+    annotation: 'Sent late from the old phone',
+    reviewReason: 'REPLACED_DEVICE',
+    reviewDeviceLabel: 'Pixel 7',
+  };
+
+  function useFlaggedHandlers(seen: URLSearchParams[]) {
+    server.use(
+      http.get(url(endpoints.logs.events(DRIVER_ID)), ({ request }) => {
+        const search = new URL(request.url).searchParams;
+        seen.push(search);
+        const all = [activeEvent, supersededEvent, proposedEvent, flaggedEvent];
+        const events = search.get('review') === 'REPLACED_DEVICE' ? [flaggedEvent] : all;
+        return ok({ driverId: DRIVER_ID, date: DATE, timezone: TZ, events, carriedIn: null });
+      }),
+    );
+  }
+
+  it('counts the flagged record, keeps it out of "pending review", and filters through ?review=', async () => {
+    const seen: URLSearchParams[] = [];
+    useFlaggedHandlers(seen);
+    renderPage();
+    const button = await screen.findByRole('button', { name: /Needs review/ });
+    expect(await within(button).findByText('1')).toBeInTheDocument();
+    // proposedEvent is the only real proposal — the inert flagged record is not one.
+    expect(screen.getByText(/1 driver edit pending review/)).toBeInTheDocument();
+    expect(screen.queryByText('Sent late from the old phone')).not.toBeInTheDocument();
+
+    await userEvent.click(button);
+    const note = await screen.findByText('Sent late from the old phone');
+    const row = note.closest('tr')!;
+    expect(within(row).getByText('Replaced device')).toBeInTheDocument();
+    expect(within(row).getByText('Not counted')).toBeInTheDocument();
+    expect(seen.some((search) => search.get('review') === 'REPLACED_DEVICE' && search.get('date') === DATE)).toBe(true);
+    expect(screen.queryByText('Loading · shipper #4821')).not.toBeInTheDocument();
+  });
+
+  it('re-enters the inert record through 11.11 as a new proposal (hosEdit FULL)', async () => {
+    useFlaggedHandlers([]);
+    renderPage();
+    await userEvent.click(await screen.findByRole('button', { name: /Needs review/ }));
+    const row = (await screen.findByText('Sent late from the old phone')).closest('tr')!;
+    await userEvent.click(within(row).getByRole('button', { name: 'Row actions' }));
+    await userEvent.click(await screen.findByText('Re-enter as a new record'));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('Not counted · from a replaced device')).toBeInTheDocument();
+  });
+
+  it('a viewer sees the badge and the filter, never the row menu', async () => {
+    currentCan = (_perm, level) => level !== 'FULL';
+    useFlaggedHandlers([]);
+    renderPage();
+    await userEvent.click(await screen.findByRole('button', { name: /Needs review/ }));
+    const row = (await screen.findByText('Sent late from the old phone')).closest('tr')!;
+    expect(within(row).getByText('Replaced device')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Row actions' })).not.toBeInTheDocument();
+  });
+});

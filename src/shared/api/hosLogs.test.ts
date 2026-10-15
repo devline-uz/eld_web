@@ -4,6 +4,8 @@ import {
   RECORD_ORIGIN,
   RECORD_STATUS,
   isCarrierCertificationRecord,
+  isInactiveReviewRecord,
+  isReplacedDeviceRecord,
   withEffectiveRecordStatus,
   type LogEventView,
 } from './hosLogs';
@@ -45,5 +47,21 @@ describe('isCarrierCertificationRecord (LIVE-031, certify option c)', () => {
     expect(isCarrierCertificationRecord({ ...cert, eventType: 3 })).toBe(false);
     expect(isCarrierCertificationRecord({ ...cert, eventCode: 0 })).toBe(false);
     expect(isCarrierCertificationRecord({ ...cert, recordStatus: RECORD_STATUS.superseded })).toBe(false);
+  });
+});
+
+describe('replaced device records (D-163)', () => {
+  const flagged = { ...base, reviewReason: 'REPLACED_DEVICE', reviewDeviceLabel: 'Pixel 7' } as LogEventView;
+
+  it('isReplacedDeviceRecord reads reviewReason, tolerating older servers without it', () => {
+    expect(isReplacedDeviceRecord(flagged)).toBe(true);
+    expect(isReplacedDeviceRecord({ ...base, reviewReason: null })).toBe(false);
+    expect(isReplacedDeviceRecord(base)).toBe(false);
+  });
+
+  it('isInactiveReviewRecord: a flagged record stored inert, never an active flagged one or a plain proposal', () => {
+    expect(isInactiveReviewRecord({ ...flagged, recordStatus: RECORD_STATUS.proposed })).toBe(true);
+    expect(isInactiveReviewRecord(flagged)).toBe(false);
+    expect(isInactiveReviewRecord({ ...base, recordStatus: RECORD_STATUS.proposed })).toBe(false);
   });
 });

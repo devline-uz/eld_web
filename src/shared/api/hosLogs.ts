@@ -49,6 +49,24 @@ export const RECORD_ORIGIN = {
   unidentified: 4,
 } as const;
 
+/** D-163 — why the server flagged a record for review. Only a replaced device today. */
+export type ReviewReason = 'REPLACED_DEVICE';
+export const REVIEW_REASON = { replacedDevice: 'REPLACED_DEVICE' } as const satisfies Record<string, ReviewReason>;
+
+/** D-163 — sent late from a device the driver was signed out of by a login on another device. */
+export function isReplacedDeviceRecord(event: Pick<LogEventView, 'reviewReason'>): boolean {
+  return event.reviewReason === REVIEW_REASON.replacedDevice;
+}
+
+/**
+ * D-163 — a flagged driver-entered record is stored inert (recordStatus 3) and counts toward
+ * nothing. It is NOT a carrier/driver proposal awaiting acceptance, so it never feeds the
+ * "N driver edits pending review" count and is never painted as one.
+ */
+export function isInactiveReviewRecord(event: Pick<LogEventView, 'reviewReason' | 'recordStatus'>): boolean {
+  return isReplacedDeviceRecord(event) && event.recordStatus !== RECORD_STATUS.active;
+}
+
 /* ------------------------------------------------------------------ GET /logs/:driverId */
 
 export interface RodsGraphSegment {
@@ -121,6 +139,12 @@ export interface LogEventView {
   editorType: 'DRIVER' | 'CARRIER' | 'SYSTEM' | null;
   editReason: string | null;
   vehicleId: string | null;
+  /** MR-23 — eventType 3 records only: PC / YM / NONE (cleared). Absent from older servers. */
+  specialCondition?: 'NONE' | 'PC' | 'YM' | null;
+  /** D-163 — set when a replaced device delivered the record late. Absent from older servers. */
+  reviewReason?: ReviewReason | null;
+  /** D-163 — label of the replaced device the record came from (e.g. "Pixel 7"). */
+  reviewDeviceLabel?: string | null;
 }
 
 export interface RodsCertification {
@@ -182,7 +206,8 @@ export interface LogRangeResponse {
 
 export interface LogEventsResponse {
   driverId: string;
-  date: string;
+  /** D-163 — `null` only for `?review=` without `date` (every flagged record of the driver). */
+  date: string | null;
   timezone: string;
   /** Includes superseded (2), proposed (3) and rejected (4) records — the audit trail. */
   events: LogEventView[];
@@ -243,12 +268,13 @@ export function isCarrierCertificationRecord(event: LogEventView): boolean {
   );
 }
 
-export function useLogEvents(driverId: string | undefined, date: string) {
+/** `review` (D-163) narrows the day to the records a replaced device delivered late. */
+export function useLogEvents(driverId: string | undefined, date: string, review?: ReviewReason) {
   return useQuery({
-    queryKey: qk.logEvents(driverId ?? '', date),
+    queryKey: qk.logEvents(driverId ?? '', date, review),
     queryFn: async ({ signal }) => {
       const response = await client.get<LogEventsResponse>(endpoints.logs.events(driverId as string), {
-        params: { date },
+        params: review ? { date, review } : { date },
         signal,
       });
       return {

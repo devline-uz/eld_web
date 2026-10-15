@@ -114,6 +114,16 @@ function eventsFor(driverId: string, date: string): MockLogEvent[] {
       editorType: null,
       editReason: null,
       vehicleId,
+      specialCondition: null,
+      // MR-13 aliases (required by `LogEventView` in openapi.json).
+      eventId: `evt_${date.replace(/-/g, '')}_${i + 1}`,
+      odometerMi: 993_100 + i * 47,
+      engineHours: 12_400 + i,
+      malfunctionCode: null,
+      diagnosticCode: null,
+      // D-163 — every event view carries the review pair; null unless a replaced device sent it.
+      reviewReason: null,
+      reviewDeviceLabel: null,
       // Documented spellings (openapi.json example) — the contract deviation is recorded.
       occurredAt: segment.startAt,
       dutyStatus: status === 'D' ? 'D' : status === 'OFF' ? 'OFF' : status === 'SB' ? 'SB' : 'ON',
@@ -153,6 +163,24 @@ function eventsFor(driverId: string, date: string): MockLogEvent[] {
       annotation: 'Proposed by driver — awaiting review',
     },
   );
+  // D-163 — drv_1 also has one driver-entered record a replaced device sent late: stored inert
+  // (recordStatus 3), never drawn and never counted, flagged for the fleet manager's review.
+  if (driverId === 'drv_1') {
+    rows.push({
+      ...base,
+      id: `${base.id}_replaced`,
+      eventId: `${base.id}_replaced`,
+      eventSequenceId: 1200,
+      recordStatus: 3,
+      recordOrigin: 2,
+      status: 'OFF',
+      eventCode: 1,
+      dutyStatus: 'OFF',
+      annotation: null,
+      reviewReason: 'REPLACED_DEVICE',
+      reviewDeviceLabel: 'Pixel 7',
+    });
+  }
   return rows;
 }
 
@@ -216,7 +244,18 @@ export const hosWriteHandlers = [
 
   http.get(url(endpoints.logs.events(':driverId')), ({ params, request }) => {
     const driverId = String(params.driverId);
-    const date = new URL(request.url).searchParams.get('date') ?? today();
+    const search = new URL(request.url).searchParams;
+    const review = search.get('review');
+    // D-163 — `review=REPLACED_DEVICE`: with `date` that day's flagged records; without it every
+    // flagged record of the driver with `date: null` (backend `getReviewEvents`, max 500).
+    if (review === 'REPLACED_DEVICE') {
+      const flagged = (day: string) => eventsFor(driverId, day).filter((event) => event.reviewReason === review);
+      const reviewDate = search.get('date');
+      return reviewDate
+        ? ok({ driverId, date: reviewDate, timezone: TZ, events: flagged(reviewDate), carriedIn: null })
+        : ok({ driverId, date: null, timezone: TZ, events: flagged(today()), carriedIn: null });
+    }
+    const date = search.get('date') ?? today();
     return ok({ driverId, date, timezone: TZ, events: eventsFor(driverId, date) });
   }),
 

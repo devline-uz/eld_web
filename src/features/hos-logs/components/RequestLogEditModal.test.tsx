@@ -188,3 +188,62 @@ describe('LIVE-020 — field errors clear when the field changes', () => {
     expect(within(dialog).queryByText('End time must be after the start time.')).not.toBeInTheDocument();
   });
 });
+
+describe('D-163 — re-entering a replaced device record (prefill, event = null)', () => {
+  const FLAGGED: LogEventView = {
+    ...EVENT,
+    id: '9100',
+    eventType: 3,
+    eventCode: 1,
+    recordStatus: 3,
+    recordOrigin: 2,
+    status: null,
+    specialCondition: 'PC',
+    locationName: 'Dayton, OH',
+    totalVehicleMiles: 993700,
+    reviewReason: 'REPLACED_DEVICE',
+    reviewDeviceLabel: 'Pixel 7',
+  };
+
+  function renderPrefilled() {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ToastProvider>
+          <RequestLogEditModal
+            driverId="drv_1"
+            driverName="John Smith"
+            date="2026-09-10"
+            dateLabel="Sep 10, 2026"
+            timezone="America/New_York"
+            event={null}
+            prefill={FLAGGED}
+            graph={[]}
+            onClose={vi.fn()}
+          />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+    return screen.getByRole('dialog');
+  }
+
+  it('seeds the new-record form and proposes a NEW record (B-72), never an edit of the inert row', async () => {
+    mutate.mockClear();
+    propose.mockClear();
+    const user = userEvent.setup();
+    const dialog = renderPrefilled();
+    expect(within(dialog).getByRole('combobox', { name: /Location/ })).toHaveValue('Dayton, OH');
+    expect(within(dialog).getByText('Not counted · from a replaced device')).toBeInTheDocument();
+    await user.type(within(dialog).getByRole('textbox', { name: /Reason for the edit/ }), 'Re-entered from Pixel 7.');
+    await user.click(within(dialog).getByRole('button', { name: 'Send edit request' }));
+    expect(mutate).not.toHaveBeenCalled();
+    expect(propose).toHaveBeenCalledTimes(1);
+    expect(propose.mock.calls[0]![0]).toMatchObject({
+      status: 'OFF',
+      proposedSpecial: 'PC',
+      eventDateTime: '2026-09-10T18:26:58.000Z',
+      odometerMi: 993700,
+      location: { name: 'Dayton, OH' },
+      annotation: 'Re-entered from Pixel 7.',
+    });
+  });
+});

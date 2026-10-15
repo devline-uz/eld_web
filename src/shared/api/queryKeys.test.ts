@@ -23,6 +23,14 @@ describe('qk factory', () => {
       '2026-09-08',
     ]);
     expect(qk.logEvents('drv_1', '2026-09-10')).toEqual(['logs', 'drv_1', 'events', '2026-09-10']);
+    // D-163 — the review filter extends the day key (so the day's invalidation covers it).
+    expect(qk.logEvents('drv_1', '2026-09-10', 'REPLACED_DEVICE')).toEqual([
+      'logs',
+      'drv_1',
+      'events',
+      '2026-09-10',
+      'REPLACED_DEVICE',
+    ]);
     expect(qk.editRequests('drv_1')).toEqual(['logs', 'drv_1', 'edit-requests', 'ALL']);
     expect(qk.editRequests('drv_1', 'PENDING')).toEqual([
       'logs',

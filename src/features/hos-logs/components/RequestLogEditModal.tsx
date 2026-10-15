@@ -51,6 +51,12 @@ function chipToProposal(chip: ChipValue): { status: RodsDutyStatus; special: Pro
   return { status: chip, special: 'NONE' };
 }
 
+/** The chip a seed record opens on: its duty status, or PC/YM for an eventType 3 record. */
+function seedChip(seed: LogEventView | null): ChipValue {
+  if (seed?.specialCondition === 'PC' || seed?.specialCondition === 'YM') return seed.specialCondition;
+  return seed?.status ?? 'ON';
+}
+
 /** The six chips the design draws, in its order. */
 const CHIPS: Chip[] = [
   { value: 'OFF', label: 'OFF duty', dot: 'bg-neutral' },
@@ -71,6 +77,12 @@ export interface RequestLogEditModalProps {
   /** The record the proposal is made against. `null` ⇒ the day has no duty record and the form
    * proposes a new one (B-72, `POST /logs/:driverId/events`). */
   event: LogEventView | null;
+  /**
+   * D-163 — with `event === null`, a record whose values seed the NEW-record form: a replaced
+   * device's inert record (recordStatus 3) cannot be edited, only re-entered as a fresh §395.30
+   * proposal the driver accepts. Ignored when `event` is set.
+   */
+  prefill?: LogEventView | null;
   /** Today's graph, used to keep the proposal off automatic driving time. */
   graph: RodsGraphSegment[];
   onClose: () => void;
@@ -83,9 +95,11 @@ export function RequestLogEditModal({
   dateLabel,
   timezone,
   event,
+  prefill = null,
   graph,
   onClose,
 }: RequestLogEditModalProps) {
+  const seed = event ?? prefill;
   const { toast } = useToast();
   const editMutation = useCreateEditRequest(driverId);
   const proposeMutation = useProposeLogEvent(driverId);
@@ -94,24 +108,24 @@ export function RequestLogEditModal({
   // would post two §395.30 proposals. The ref closes that same-tick window.
   const inFlight = useRef(false);
 
-  const startDefault = event ? formatInTimeZone(new Date(event.eventDateTime), timezone, 'HH:mm:ss') : '';
+  const startDefault = seed ? formatInTimeZone(new Date(seed.eventDateTime), timezone, 'HH:mm:ss') : '';
   const [startTime, setStartTime] = useState(startDefault);
   const [endTime, setEndTime] = useState('');
-  const statusDefault: ChipValue = event?.status ?? 'ON';
+  const statusDefault: ChipValue = seedChip(seed);
   const [chipValue, setChipValue] = useState<ChipValue>(statusDefault);
   const { status, special } = chipToProposal(chipValue);
   const [notifyDriver, setNotifyDriver] = useState(true);
   // B-39 (shipped) — a location may be a name only. A place picked from the geocoder adds its
   // coordinates; a typed name that was never picked is sent as `{ name }`.
-  const locationDefault = event?.locationName ?? '';
+  const locationDefault = seed?.locationName ?? '';
   const [locationText, setLocationText] = useState(locationDefault);
   const [place, setPlace] = useState<Place | null>(null);
   const locationChanged = locationText.trim() !== locationDefault.trim();
   const placeSearch = usePlaceSearch(locationText, locationChanged && !place);
   const odometerDefault =
-    event?.totalVehicleMiles === null || event?.totalVehicleMiles === undefined
+    seed?.totalVehicleMiles === null || seed?.totalVehicleMiles === undefined
       ? ''
-      : String(event.totalVehicleMiles);
+      : String(seed.totalVehicleMiles);
   const [odometer, setOdometer] = useState(odometerDefault);
   const [engineHours, setEngineHours] = useState('');
   const [reason, setReason] = useState('');
@@ -198,7 +212,8 @@ export function RequestLogEditModal({
     // sent as a name-only correction (B-39). A cleared field sends nothing either.
     const location: ProposalLocation | undefined = place
       ? { lat: place.lat, lon: place.lon, name: place.name }
-      : locationChanged && locationText.trim()
+      : // A re-entered record (D-163) carries its prefilled location: a new record has none yet.
+        (locationChanged || (!event && prefill)) && locationText.trim()
         ? { name: locationText.trim() }
         : undefined;
     const common = {
@@ -506,7 +521,9 @@ export function RequestLogEditModal({
           <p className="tabular mt-1 text-body text-text">
             {event
               ? `${event.status ?? '—'} ${startDefault ? startDefault.slice(0, 5) : '—'} → ${originalEnd ?? '—'}`
-              : 'No record on this day'}
+              : prefill
+                ? 'Not counted · from a replaced device'
+                : 'No record on this day'}
           </p>
         </div>
         <div className="rounded-md bg-bg-subtle p-3">

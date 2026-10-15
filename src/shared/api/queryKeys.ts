@@ -51,7 +51,11 @@ export const qk = {
   logDay: (driverId: string, date: string) => ['logs', driverId, 'day', date] as const,
   logRange: (driverId: string, from: string, to: string) =>
     ['logs', driverId, 'range', from, to] as const,
-  logEvents: (driverId: string, date: string) => ['logs', driverId, 'events', date] as const,
+  // D-163 — the `review` filter extends the day key, so invalidating `logEvents(d, date)` covers it.
+  logEvents: (driverId: string, date: string, review?: string) =>
+    review
+      ? (['logs', driverId, 'events', date, review] as const)
+      : (['logs', driverId, 'events', date] as const),
   editRequests: (driverId: string, status?: string) =>
     ['logs', driverId, 'edit-requests', status ?? 'ALL'] as const,
   unidentified: (params?: QueryParams) => ['unidentified', p(params)] as const,

@@ -62,6 +62,7 @@ this box — see `web/decisions.md` WD-001). WS: `http://localhost:3002`, namesp
 - [x] Available hours · Violations today · Certification last 8 days · Log events (superseded/proposed toggle)
 - [x] 11.11 Request a log edit · 11.12 Certify logs (ADMIN only) · 11.13 Unassigned driving
 - [x] Gaps recorded: B-6 violations endpoints; B-2 also blocks `Available hours`; B-35 blocks the grid caption; new B-38 (engine hours on log events), B-39 (PC/YM + notify on the edit-request DTO)
+- [x] D-163 replaced-device records (2026-10-15, WD-120): `Replaced device` badge + tooltip, inert rows `Not counted`, `Needs review` filter (`?review=REPLACED_DEVICE`) with day count, `Re-enter as a new record` → 11.11 prefilled (B-72); MSW + component + contract tests
 
 ## Phase 5 — Compliance (`web-dvir-safety`)
 - [x] W-09 DVIR & Maintenance (4 tabs) + 11.15 drawer · 11.16 work order · 11.17 resolve defect

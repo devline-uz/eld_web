@@ -11,7 +11,7 @@ import { formatInTimeZone } from 'date-fns-tz';
 import { Card, SectionHeader } from '@/shared/ui/Card';
 import { Button } from '@/shared/ui/Button';
 import { DataTable } from '@/shared/ui/DataTable';
-import { DutyBadge, type DutyStatus } from '@/shared/ui/Badge';
+import { Badge, DutyBadge, type DutyStatus } from '@/shared/ui/Badge';
 import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
 import { EMPTY_STATE_COPY } from '@/shared/ui/copy';
 import { cn } from '@/shared/ui/cn';
@@ -21,7 +21,13 @@ import { usePermission } from '@/shared/auth/usePermission';
 import { EMPTY, formatEngineHours, formatOdometer } from '@/shared/format';
 import { formatNumber } from '@/shared/format/numbers';
 import { EVENT_WINDOW, eventWindowSize } from '../eventWindow';
-import { RECORD_ORIGIN, RECORD_STATUS, type LogEventView } from '@/shared/api/hosLogs';
+import {
+  RECORD_ORIGIN,
+  RECORD_STATUS,
+  isInactiveReviewRecord,
+  isReplacedDeviceRecord,
+  type LogEventView,
+} from '@/shared/api/hosLogs';
 import { LogRecordModal } from './LogRecordModal';
 import { telemetryFlags } from '../telemetryChecks';
 
@@ -46,6 +52,46 @@ function originCell(event: LogEventView) {
   return <span className="text-text-muted">ELD · automatic</span>;
 }
 
+/** D-163 — the exact tooltip agreed with the mobile team (2026-10-15). */
+function replacedDeviceTooltip(event: Pick<LogEventView, 'reviewDeviceLabel'>): string {
+  return `Sent from ${event.reviewDeviceLabel?.trim() || 'a replaced device'} after the driver signed in on another device. Needs review.`;
+}
+
+/** D-163 — `Replaced device` on every flagged row; `Not counted` when the record is stored inert. */
+function ReviewBadges({ event }: { event: LogEventView }) {
+  if (!isReplacedDeviceRecord(event)) return null;
+  const tooltip = replacedDeviceTooltip(event);
+  return (
+    <>
+      <span title={tooltip} className="inline-flex">
+        <Badge tone="warning" dot>
+          Replaced device
+        </Badge>
+        <span className="sr-only">{tooltip}</span>
+      </span>
+      {isInactiveReviewRecord(event) && (
+        <span title="Inactive record — not drawn on the graph and not counted toward hours." className="inline-flex">
+          <Badge outline>Not counted</Badge>
+        </span>
+      )}
+    </>
+  );
+}
+
+/** D-163 — the `Needs review` filter (`GET /logs/:driverId/events?review=REPLACED_DEVICE`). */
+export interface LogEventsReviewFilter {
+  /** The filter is on: the table lists the server's flagged records only, every record status. */
+  active: boolean;
+  onToggle: (next: boolean) => void;
+  /** Flagged records of the day (from the unfiltered list) — the count indicator. */
+  count: number;
+  events: LogEventView[];
+  carriedIn?: LogEventView | null;
+  isLoading: boolean;
+  isError: boolean;
+  onRetry: () => void;
+}
+
 export interface LogEventsCardProps {
   events: LogEventView[];
   /**
@@ -64,6 +110,10 @@ export interface LogEventsCardProps {
   /** Set by a click on the 24-hour grid — the row scrolls into view and highlights. */
   highlightedEventId: string | null;
   onRequestEdit: (event: LogEventView) => void;
+  /** D-163 — re-enter a replaced device's inert record as a new §395.30 proposal. */
+  onReenter?: (event: LogEventView) => void;
+  /** D-163 — absent ⇒ no `Needs review` control (older callers). */
+  review?: LogEventsReviewFilter;
   onViewAll: () => void;
   /** LIVE-017 — "today" or "on Oct 8" (`dayPhrase`); defaults to "today". */
   dayLabel?: string;
@@ -81,6 +131,8 @@ export function LogEventsCard({
   pendingEditCount,
   highlightedEventId,
   onRequestEdit,
+  onReenter,
+  review,
   onViewAll,
   dayLabel = 'today',
 }: LogEventsCardProps) {
@@ -90,13 +142,24 @@ export function LogEventsCard({
   // WB-196 — `View full record` used to be a dead `#event-…` anchor; it opens the record instead.
   const [recordEvent, setRecordEvent] = useState<LogEventView | null>(null);
 
+  const reviewOnly = Boolean(review?.active);
+  const reviewEvents = review?.events;
+  const reviewCarriedIn = review?.carriedIn ?? null;
   const visible = useMemo(() => {
+    // D-163 — flagged records are mostly inert (status 3): the filter shows them whatever the
+    // `Show superseded…` checkbox says, or the manager could never see what needs review.
+    if (reviewOnly) {
+      const flagged = reviewEvents ?? [];
+      return reviewCarriedIn ? [reviewCarriedIn, ...flagged] : flagged;
+    }
     const inDay = showAllRecords
       ? events
       : events.filter((event) => event.recordStatus === RECORD_STATUS.active);
     return carriedIn ? [carriedIn, ...inDay] : inDay;
-  }, [events, carriedIn, showAllRecords]);
-  const carriedId = carriedIn?.id ?? null;
+  }, [events, carriedIn, showAllRecords, reviewOnly, reviewEvents, reviewCarriedIn]);
+  const carriedId = (reviewOnly ? reviewCarriedIn : carriedIn)?.id ?? null;
+  const loading = reviewOnly ? review!.isLoading : isLoading;
+  const failed = reviewOnly ? review!.isError : isError;
   // LIVE-015 — impossible odometer / engine-hour readings are flagged, never silently shown.
   const flags = useMemo(() => telemetryFlags(carriedIn ? [carriedIn, ...events] : events), [events, carriedIn]);
   const [requestedRows, setRequestedRows] = useState(EVENT_WINDOW);
@@ -193,7 +256,15 @@ export function LogEventsCard({
         id: 'origin',
         header: 'ORIGIN',
         enableSorting: false,
-        cell: ({ row }) => originCell(row.original),
+        cell: ({ row }) =>
+          isReplacedDeviceRecord(row.original) ? (
+            <span className="inline-flex flex-wrap items-center gap-1.5">
+              {originCell(row.original)}
+              <ReviewBadges event={row.original} />
+            </span>
+          ) : (
+            originCell(row.original)
+          ),
       },
       {
         id: 'notes',
@@ -228,23 +299,48 @@ export function LogEventsCard({
             </Button>
           }
         />
-        <label className="mt-3 flex items-center gap-2 text-body text-text-secondary" data-print-hide="">
-          <input
-            type="checkbox"
-            checked={showAllRecords}
-            onChange={(event) => onToggleShowAll(event.target.checked)}
-          />
-          Show superseded and proposed records
-        </label>
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2" data-print-hide="">
+          <label className="flex items-center gap-2 text-body text-text-secondary">
+            <input
+              type="checkbox"
+              checked={showAllRecords}
+              disabled={reviewOnly}
+              onChange={(event) => onToggleShowAll(event.target.checked)}
+            />
+            Show superseded and proposed records
+          </label>
+          {review && (
+            <Button
+              variant={reviewOnly ? 'primary' : 'secondary'}
+              size="sm"
+              aria-pressed={reviewOnly}
+              onClick={() => review.onToggle(!reviewOnly)}
+            >
+              <AlertTriangle size={16} strokeWidth={1.75} />
+              Needs review
+              {review.count > 0 && (
+                <span
+                  className={cn(
+                    'tabular-nums rounded-full px-1.5 text-badge',
+                    reviewOnly ? 'bg-bg-surface text-primary' : 'bg-warning-soft text-warning',
+                  )}
+                  aria-label={`${review.count} record${review.count === 1 ? '' : 's'} from a replaced device`}
+                >
+                  {formatNumber(review.count)}
+                </span>
+              )}
+            </Button>
+          )}
+        </div>
       </div>
       <div ref={bodyRef} className="px-card pb-card">
-        {isLoading ? (
+        {loading ? (
           <LoadingState />
-        ) : isError ? (
+        ) : failed ? (
           <ErrorState
             title="Could not load log events"
             description="The §395 record list did not respond. Your data is safe — try again in a moment."
-            onRetry={onRetry}
+            onRetry={reviewOnly ? review!.onRetry : onRetry}
           />
         ) : (
           <>
@@ -259,7 +355,9 @@ export function LogEventsCard({
                     'line-through text-text-muted opacity-70',
                   row.recordStatus === RECORD_STATUS.rejected &&
                     'line-through text-text-muted opacity-70',
-                  row.recordStatus === RECORD_STATUS.proposed && 'bg-info-soft',
+                  // D-163 — an inert replaced-device record is no proposal: muted, never `--info-soft`.
+                  row.recordStatus === RECORD_STATUS.proposed && !isReplacedDeviceRecord(row) && 'bg-info-soft',
+                  isInactiveReviewRecord(row) && 'text-text-muted opacity-70',
                   row.id === carriedId && 'bg-bg-subtle',
                   row.id === highlightedEventId && 'bg-primary-soft',
                 )
@@ -273,6 +371,7 @@ export function LogEventsCard({
                         onRequestEdit={
                           row.recordStatus === RECORD_STATUS.active && row.status !== null ? () => onRequestEdit(row) : undefined
                         }
+                        onReenter={onReenter && isInactiveReviewRecord(row) ? () => onReenter(row) : undefined}
                         onCopyId={() => {
                           void navigator.clipboard?.writeText(row.id);
                           toast({ kind: 'success', title: 'Event ID copied' });
@@ -283,11 +382,18 @@ export function LogEventsCard({
                   : undefined
               }
               emptyState={
+                reviewOnly ? (
+                  <EmptyState
+                    title="No records need review"
+                    description="Nothing on this day was sent from a replaced device."
+                  />
+                ) : (
                 <EmptyState
                   className="print:gap-1 print:py-3 [&>span:first-child]:print:hidden"
                   title={EMPTY_STATE_COPY.hosLogsDay.title}
                   description={EMPTY_STATE_COPY.hosLogsDay.description}
                 />
+                )
               }
             />
             {windowed && (
@@ -335,11 +441,14 @@ function TelemetryValue({ warning, children }: { warning?: string; children: Rea
 
 function RowMenu({
   onRequestEdit,
+  onReenter,
   onCopyId,
   onViewRecord,
 }: {
   /** Absent when the row cannot be edited (QA CODE-027). */
   onRequestEdit?: () => void;
+  /** D-163 — only on a replaced device's inert record. */
+  onReenter?: () => void;
   onCopyId: () => void;
   onViewRecord: () => void;
 }) {
@@ -348,6 +457,11 @@ function RowMenu({
       {onRequestEdit && (
         <button type="button" className={menuItemClass} onClick={onRequestEdit}>
           Request an edit
+        </button>
+      )}
+      {onReenter && (
+        <button type="button" className={menuItemClass} onClick={onReenter}>
+          Re-enter as a new record
         </button>
       )}
       <button type="button" className={menuItemClass} onClick={onViewRecord}>

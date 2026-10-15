@@ -1,5 +1,5 @@
 // GENERATED FILE — do not edit by hand.
-// Source: backend/docs/openapi.json (222 paths, 276 typed operations).
+// Source: backend/docs/openapi.json (224 paths, 278 typed operations).
 // Regenerate: npm run gen:types   (scripts/generate-api-types.mjs)
 //
 // The backend documents payloads as OpenAPI examples, so these shapes are inferred structurally.
@@ -1495,6 +1495,8 @@ export type MobileCoDriverSwitchResponse = {
     accessToken: string;
     refreshToken: string;
     tokenType: string;
+    driverId: string;
+    replacedDevice: unknown;
   };
   traceId: string;
   timestamp: string;
@@ -2358,7 +2360,11 @@ export type IngestEventsResponse = {
   sequenceIds: {
     drv_1: number[];
   };
-  warnings: unknown[];
+  warnings: Array<{
+    code: string;
+    detail: string;
+    informational: boolean;
+  }>;
   malfunctions: unknown[];
   diagnostics: unknown[];
   unidentifiedSegmentIds: unknown[];
@@ -2385,6 +2391,7 @@ export type IngestBleStateResponse = {
   bleState: string;
   connectionType: string;
   disconnectedAlert: boolean;
+  clockDriftSec: number;
 };
 
 /** POST /api/ingest/device-status */
@@ -2392,6 +2399,7 @@ export type IngestDeviceStatusResponse = {
   storedEventsCount: number;
   backlogAlert: boolean;
   codes: unknown[];
+  clockDriftSec: number;
   model: string;
   vinMismatch: boolean;
   systemVars: {
@@ -3376,6 +3384,8 @@ export type TripsAutoAssignResponse = {
     driverId: string;
   }>;
   skipped: number;
+  noSchedule: number;
+  failed: unknown[];
 };
 
 /** GET /api/safety/events — list item */
@@ -3388,6 +3398,28 @@ export type SafetyListEventsItem = {
 
 /** GET /api/safety/events */
 export type SafetyListEventsResponse = OffsetPage<SafetyListEventsItem>;
+
+/** GET /api/safety/summary */
+export type SafetySummaryResponse = {
+  from: string;
+  to: string;
+  current: {
+    total: number;
+    harsh: number;
+    speeding: number;
+    seatbelt: number;
+    coached: number;
+    pendingCoaching: number;
+  };
+  previous: {
+    total: number;
+    harsh: number;
+    speeding: number;
+    seatbelt: number;
+    coached: number;
+    pendingCoaching: number;
+  };
+};
 
 /** PATCH /api/safety/events/{id} */
 export type SafetyUpdateEventResponse = {
@@ -3516,6 +3548,7 @@ export type LiveFleetFleetResponse = {
     shiftEndsAt: string;
     eldSerial: string;
     bleState: string;
+    driverDutyStatus: string;
     recordStatus: string;
     connectivity: string;
     isStale: boolean;
@@ -3531,6 +3564,7 @@ export type DashboardSummaryResponse = {
       vehicleId: string;
       unitNumber: string;
       dutyStatus: string;
+      driverDutyStatus: string;
       recordStatus: string;
       connectivity: string;
       isStale: boolean;
@@ -3543,6 +3577,14 @@ export type DashboardSummaryResponse = {
       moving: number;
       idle: number;
       offline: number;
+      driverDuty: {
+        assigned: number;
+        DRIVING: number;
+        ON_DUTY: number;
+        SLEEPER: number;
+        OFF_DUTY: number;
+        UNKNOWN: number;
+      };
     };
   };
   violations: {
@@ -3557,6 +3599,8 @@ export type DashboardSummaryResponse = {
   unidentified: {
     total: number;
     totalDurationSec: number;
+    awaitingDriver: number;
+    awaitingDriverDurationSec: number;
   };
   notifications: {
     unreadCount: number;
@@ -3711,6 +3755,15 @@ export type ReportsDownloadResponse = {
   downloadUrl: string;
   expiresAt: string;
   fileName: string;
+};
+
+/** POST /api/client-errors */
+export type ClientErrorsReportResponse = {
+  data: {
+    accepted: number;
+  };
+  traceId: string;
+  timestamp: string;
 };
 
 /** Operation → success payload, keyed by `METHOD /api/path`. */
@@ -3966,6 +4019,7 @@ export interface ApiOperations {
   'POST /api/trips/{id}/assign': TripsAssignResponse;
   'POST /api/trips/auto-assign': TripsAutoAssignResponse;
   'GET /api/safety/events': SafetyListEventsResponse;
+  'GET /api/safety/summary': SafetySummaryResponse;
   'PATCH /api/safety/events/{id}': SafetyUpdateEventResponse;
   'GET /api/safety/scorecard': SafetyScorecardResponse;
   'POST /api/safety/coaching': SafetyCoachResponse;
@@ -3991,4 +4045,5 @@ export interface ApiOperations {
   'GET /api/reports/fmcsa-pack': ReportsFmcsaPackResponse;
   'GET /api/reports/{id}': ReportsGetResponse;
   'GET /api/reports/{id}/download': ReportsDownloadResponse;
+  'POST /api/client-errors': ClientErrorsReportResponse;
 }
