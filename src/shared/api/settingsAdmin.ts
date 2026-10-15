@@ -16,6 +16,7 @@ import { qk, qkRoot } from './queryKeys';
 import { typedCachePolicy } from './queryPolicy';
 import type { OffsetPage } from './types';
 import type { CarrierRow } from './carrier';
+import { useOptionalAuth } from '@/shared/auth/AuthProvider';
 import type { PermissionKey, PermissionLevel } from '@/shared/auth/permissions';
 
 /* ------------------------------------------------------------------ Carrier — W-17 */
@@ -36,9 +37,20 @@ export function useSetVirtualEld() {
 }
 export function useUpdateCarrier() {
   const qc = useQueryClient();
+  const refreshUser = useOptionalAuth()?.refreshUser;
   return useMutation({
     mutationFn: (dto: Partial<CarrierRow>) => client.patch<CarrierRow>(endpoints.carrier.root, dto),
-    onSuccess: (data) => qc.setQueryData(qk.carrier, data),
+    onSuccess: (data, dto) => {
+      qc.setQueryData(qk.carrier, data);
+      // FE-03 — `useCarrierTimezone()` reads the carrier zone from `/auth/me`
+      // (`user.homeTerminalTimezone`), not from `qk.carrier`. Re-read the session so Live Fleet,
+      // DVIR, audit, Messages and notifications switch zone without a reload; the dashboard summary
+      // carries its own zone label, so it is refetched too.
+      if (dto.timezone !== undefined) {
+        void refreshUser?.().catch(() => undefined);
+        void qc.invalidateQueries({ queryKey: qk.dashboardSummary });
+      }
+    },
   });
 }
 

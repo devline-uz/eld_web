@@ -12,7 +12,7 @@ import { formatPercent } from '@/shared/format/numbers';
 import { allocatePercents } from '../lib/allocatePercents';
 import { DONUT_LABEL, dutyLegendLabel } from '../lib/dutyLegendLabel';
 import { CIRCUMFERENCE, DONUT_RADIUS, DONUT_SIZE, DONUT_THICKNESS, donutArcs } from '../lib/donutArcs';
-import { DONUT_SEGMENTS, driverDutyOf, summarizeDriverDuty, type DonutDutyStatus } from '../lib/driverDuty';
+import { DONUT_SEGMENTS, driverDutyOf, notLiveLine, summarizeDriverDuty, type DonutDutyStatus } from '../lib/driverDuty';
 
 const SEGMENT_COLOR: Record<DonutDutyStatus, string> = {
   DRIVING: 'var(--color-success)',
@@ -38,10 +38,15 @@ export default function DutyDonut({
   const onDuty = summary.onDuty;
   // A stale status (ELD silent / past its plausibility cap) is still counted by the driver's last
   // known status, as the Drivers list does — say so under the legend.
-  const lastKnown = units.filter((u) => {
+  const lastKnownUnits = units.filter((u) => {
     const status = u.isStale ? driverDutyOf(u) : null;
     return status !== null && status !== 'UNKNOWN';
-  }).length;
+  });
+  const lastKnown = lastKnownUnits.length;
+  // FE-04 — `isStale` is broader than "ELD offline": it also covers a status past its 16 h/24 h
+  // plausibility cap while the ELD is ONLINE. Only units whose `connectivity` is ELD_OFFLINE (the
+  // dashboard KPI's definition) may be called "ELD offline".
+  const eldOffline = lastKnownUnits.filter((u) => u.connectivity === 'ELD_OFFLINE').length;
   const percents = allocatePercents(
     counted.map((s) => s.count),
     total,
@@ -121,7 +126,7 @@ export default function DutyDonut({
         ))}
         {lastKnown > 0 && (
           <p className="text-caption text-text-muted">
-            {`${lastKnown} ${lastKnown === 1 ? 'driver is' : 'drivers are'} not reporting live (ELD offline) — last known status shown`}
+            {notLiveLine(lastKnown, eldOffline)}
           </p>
         )}
       </div>

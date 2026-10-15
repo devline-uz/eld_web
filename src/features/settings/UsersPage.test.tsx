@@ -2,7 +2,7 @@
 // filtering, the pending-invitations card, and the row actions (resend invite, disable user).
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http } from 'msw';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -24,12 +24,11 @@ vi.mock('@/shared/auth/AuthProvider', () => ({
   useAuth: () => ({ user: { id: 'current_caller_id', email: 'sarah.chen@example.com', roleKey: authState.roleKey } }),
 }));
 
-function renderPage() {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function renderPage(queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } }), route = '/settings/users') {
   return render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
-        <MemoryRouter>
+        <MemoryRouter initialEntries={[route]}>
           <UsersPage />
         </MemoryRouter>
       </ToastProvider>
@@ -124,6 +123,23 @@ describe('UsersPage — W-18', () => {
     expect(screen.queryByRole('button', { name: 'Revoke' })).not.toBeInTheDocument();
   });
 
+  it('FE-20: a failed background refetch keeps the loaded rows and shows a non-blocking notice', async () => {
+    server.use(
+      http.get(url(endpoints.users.list), () =>
+        ok([{ id: 'usr_1', email: 'anna.weiss@example.com', firstName: 'Anna', lastName: 'Weiss', status: 'ACTIVE', role: { key: 'FLEET_MANAGER', name: 'Fleet manager' } }]),
+      ),
+    );
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderPage(queryClient);
+    expect(await screen.findByText('Anna Weiss')).toBeInTheDocument();
+    server.use(http.get(url(endpoints.users.list), () => fail(500, 'INTERNAL_ERROR', 'Boom')));
+    await act(async () => {
+      await queryClient.refetchQueries({ type: 'active' });
+    });
+    expect(await screen.findByText('Could not refresh — showing the last loaded data.', {}, { timeout: 8000 })).toBeInTheDocument();
+    expect(screen.getByText('Anna Weiss')).toBeInTheDocument();
+  });
+
   it('shows an in-card error with Retry on failure', async () => {
     server.use(http.get(url(endpoints.users.list), () => fail(500, 'INTERNAL_ERROR', 'Boom')));
     renderPage();
@@ -152,6 +168,23 @@ describe('UsersPage — W-18', () => {
     await user.type(screen.getByPlaceholderText('Search user or email…'), 'anna');
     expect(screen.getByText('Anna Weiss')).toBeInTheDocument();
     expect(screen.queryByText('Sarah Chen')).not.toBeInTheDocument();
+  });
+
+  it('FE-22: the role tab and the search are restored from the URL', async () => {
+    server.use(
+      http.get(url(endpoints.users.list), () =>
+        ok([
+          { id: 'usr_1', email: 'anna.weiss@example.com', firstName: 'Anna', lastName: 'Weiss', status: 'ACTIVE', role: { key: 'FLEET_MANAGER', name: 'Fleet manager' } },
+          { id: 'usr_2', email: 'sarah.chen@example.com', firstName: 'Sarah', lastName: 'Chen', status: 'ACTIVE', role: { key: 'ADMIN', name: 'Admin' } },
+          { id: 'usr_3', email: 'sam.admin@example.com', firstName: 'Sam', lastName: 'Admin', status: 'ACTIVE', role: { key: 'ADMIN', name: 'Admin' } },
+        ]),
+      ),
+    );
+    renderPage(undefined, '/settings/users?segment=ADMIN&q=sarah');
+    expect(await screen.findByText('Sarah Chen')).toBeInTheDocument();
+    expect(screen.queryByText('Anna Weiss')).not.toBeInTheDocument();
+    expect(screen.queryByText('Sam Admin')).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Search user or email…')).toHaveValue('sarah');
   });
 
   it('resends an invitation and disables an active user from the row menu', async () => {

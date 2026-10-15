@@ -93,7 +93,7 @@ describe('DutyDonut — LIVE-002 driver duty', () => {
     render(
       <DutyDonut
         units={[
-          unit('DRIVING', { dutyStatus: 'ELD_OFFLINE', isStale: true }),
+          unit('DRIVING', { dutyStatus: 'ELD_OFFLINE', isStale: true, connectivity: 'ELD_OFFLINE' }),
           unit('ON_DUTY', { dutyStatus: 'INACTIVE' }),
           unit('ON_DUTY', { dutyStatus: 'IDLE' }),
           unit('OFF_DUTY'),
@@ -118,5 +118,26 @@ describe('DutyDonut — LIVE-002 driver duty', () => {
     rerender(<DutyDonut units={[unit('DRIVING'), unit(null)]} onSegmentClick={onSegmentClick} />);
     await userEvent.click(screen.getByRole('button', { name: /Status unknown/ }));
     expect(onSegmentClick).not.toHaveBeenCalled();
+  });
+});
+
+// FE-04 — "ELD offline" only for units whose `connectivity` says so (the dashboard KPI's definition).
+describe('DutyDonut not-live line', () => {
+  it('drops "(ELD offline)" when the stale status is a plausibility cap on an ONLINE ELD', () => {
+    render(<DutyDonut units={[unit('ON_DUTY', { dutyStatus: 'ELD_OFFLINE', isStale: true, connectivity: 'ONLINE' })]} />);
+    expect(screen.getByText('1 driver is not reporting live — last known status shown')).toBeInTheDocument();
+    expect(screen.queryByText(/ELD offline/)).not.toBeInTheDocument();
+  });
+
+  it('names the ELD-offline share when the reasons are mixed', () => {
+    render(
+      <DutyDonut
+        units={[
+          unit('ON_DUTY', { dutyStatus: 'ELD_OFFLINE', isStale: true, connectivity: 'ONLINE' }),
+          unit('DRIVING', { dutyStatus: 'ELD_OFFLINE', isStale: true, connectivity: 'ELD_OFFLINE' }),
+        ]}
+      />,
+    );
+    expect(screen.getByText('2 drivers are not reporting live (1 with ELD offline) — last known status shown')).toBeInTheDocument();
   });
 });

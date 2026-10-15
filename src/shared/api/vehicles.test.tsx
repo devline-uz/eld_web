@@ -26,7 +26,11 @@ import {
   useImportVehicles,
   useVehicleCounts,
   deviceConnection,
+  joinVehicles,
+  type DeviceRow,
+  type VehicleRow,
 } from './vehicles';
+import { qk } from './queryKeys';
 
 function wrapper() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
@@ -208,5 +212,75 @@ describe('mutations', () => {
     result.current.mutate({ vehicles: [{ unitNumber: '201', vin: '1FUJGLDR8LLLL0001' }] });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data?.imported).toBe(36);
+  });
+});
+
+// FE-08 — vehicle create/update must refetch the reference-cached `/devices` lookup, and the
+// `/vehicles` row's own `eldSerial` must beat a stale lookup in the table join.
+describe('FE-08 — stale ELD serial after a vehicle edit', () => {
+  const device = (serial: string, vehicleId: string | null, status = 'ACTIVE'): DeviceRow =>
+    ({ id: `dev_${serial}`, serial, model: `M-${serial}`, status, vehicleId, bleState: 'DISCONNECTED', firmwareVersion: null, firmwareOutdated: false }) as DeviceRow;
+  const vehicle = (eldSerial?: string | null): VehicleRow =>
+    ({ id: 'veh_1', unitNumber: '#101', ...(eldSerial === undefined ? {} : { eldSerial }) }) as VehicleRow;
+  const STALE = [device('PT30_OLD5', 'veh_1', 'ACTIVE'), device('PT30_NEW7', null, 'INACTIVE')];
+  const joinOne = (v: VehicleRow) => {
+    const row = joinVehicles([v], [], STALE)[0];
+    if (!row) throw new Error('joinVehicles dropped the row');
+    return row;
+  };
+
+  it('joinVehicles: the server serial wins over the stale lookup, with that device\'s model/status', () => {
+    const row = joinOne(vehicle('PT30_NEW7'));
+    expect(row.eldSerial).toBe('PT30_NEW7');
+    expect(row.eldDeviceModel).toBe('M-PT30_NEW7');
+    expect(row.eldDeviceStatus).toBe('INACTIVE');
+  });
+
+  it('joinVehicles: a server null (unpaired) is not overridden by the stale lookup', () => {
+    const row = joinOne(vehicle(null));
+    expect(row.eldSerial).toBeNull();
+    expect(row.eldDeviceModel).toBeNull();
+  });
+
+  it('joinVehicles: an older backend that omits eldSerial still falls back to the lookup', () => {
+    const row = joinOne(vehicle());
+    expect(row.eldSerial).toBe('PT30_OLD5');
+  });
+
+  function clientWithStaleDevices() {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    queryClient.setQueryData(qk.devices({ limit: 500 }), { items: STALE, page: 1, limit: 500, total: 2, totalPages: 1 });
+    function Wrapper({ children }: { children: ReactNode }) {
+      return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+    }
+    return { queryClient, Wrapper };
+  }
+
+  it('useUpdateVehicle invalidates the devices lookup on success', async () => {
+    server.use(http.patch(url(endpoints.vehicles.update(':id')), () => ok({ id: 'veh_1', unitNumber: '#101' })));
+    const { queryClient, Wrapper } = clientWithStaleDevices();
+    const { result } = renderHook(() => useUpdateVehicle('veh_1'), { wrapper: Wrapper });
+    expect(queryClient.getQueryState(qk.devices({ limit: 500 }))?.isInvalidated).toBe(false);
+    result.current.mutate({ deviceId: 'PT30_NEW7' });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(queryClient.getQueryState(qk.devices({ limit: 500 }))?.isInvalidated).toBe(true);
+  });
+
+  it('useCreateVehicle invalidates the devices lookup on success', async () => {
+    server.use(http.post(url(endpoints.vehicles.create), () => ok({ id: 'veh_new', unitNumber: '#200' })));
+    const { queryClient, Wrapper } = clientWithStaleDevices();
+    const { result } = renderHook(() => useCreateVehicle(), { wrapper: Wrapper });
+    result.current.mutate({ unitNumber: '200', vin: '1FUJGLDR8LLLL9999', deviceId: 'PT30_NEW7' });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(queryClient.getQueryState(qk.devices({ limit: 500 }))?.isInvalidated).toBe(true);
+  });
+
+  it('useDeleteVehicle invalidates the devices lookup on success', async () => {
+    server.use(http.delete(url(endpoints.vehicles.remove(':id')), () => ok({ id: 'veh_1', status: 'INACTIVE' })));
+    const { queryClient, Wrapper } = clientWithStaleDevices();
+    const { result } = renderHook(() => useDeleteVehicle(), { wrapper: Wrapper });
+    result.current.mutate('veh_1');
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(queryClient.getQueryState(qk.devices({ limit: 500 }))?.isInvalidated).toBe(true);
   });
 });

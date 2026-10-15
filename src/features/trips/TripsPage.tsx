@@ -56,7 +56,7 @@ import { AssignLoadModal } from './components/AssignLoadModal';
 import { MarkDeliveredModal } from './components/MarkDeliveredModal';
 import { TripFiltersDrawer, TripFilterChips } from './components/TripFiltersDrawer';
 import { RoutePreview } from './components/RoutePreview';
-import { intermediateTripStops, orderTripStops } from './lib/useTripRoute';
+import { intermediateTripStops, orderTripStops, stopScheduledAt } from './lib/useTripRoute';
 import { PeriodDropdown } from './components/PeriodDropdown';
 import {
   CANCEL_TRIP_DESCRIPTION,
@@ -74,6 +74,13 @@ import {
 import { parseTripFilters, writeTripFilters, matchesTripFilters, EMPTY_TRIP_FILTERS, countActiveTripFilters } from './lib/filters';
 
 type Segment = 'ACTIVE' | 'SCHEDULED' | 'COMPLETED' | 'UNASSIGNED';
+const SEGMENTS: readonly Segment[] = ['ACTIVE', 'SCHEDULED', 'COMPLETED', 'UNASSIGNED'];
+const DEFAULT_LIMIT = 25;
+
+function positiveIntParam(raw: string | null, fallback: number): number {
+  const value = Number(raw);
+  return Number.isInteger(value) && value > 0 ? value : fallback;
+}
 
 export default function TripsPage() {
   const { can } = usePermission();
@@ -83,11 +90,35 @@ export default function TripsPage() {
   const queryClient = useQueryClient();
   const canFull = can('trips', 'FULL');
 
-  const [segment, setSegmentState] = useState<Segment>('ACTIVE');
-  const [search, setSearch] = useState('');
+  // FE-22 — segment, search, page and page size live in the URL (web/tz.md list rule), like the
+  // 11.23 filters: a reload or a shared link reopens the same board.
+  const [params, setParams] = useSearchParams();
+  const rawSegment = params.get('segment');
+  const segment: Segment = SEGMENTS.includes(rawSegment as Segment) ? (rawSegment as Segment) : 'ACTIVE';
+  const page = positiveIntParam(params.get('page'), 1);
+  const limit = positiveIntParam(params.get('limit'), DEFAULT_LIMIT);
+  // The box keeps its own text (typing never waits on a router update); `q` mirrors it.
+  const [search, setSearchState] = useState(() => params.get('q') ?? '');
   const debouncedSearch = useDebouncedValue(search, 300);
-  const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(25);
+  /** Writes list params in one navigation (two `setParams` in one handler would drop the first). */
+  function patchParams(patch: Record<string, string | null>) {
+    const next = new URLSearchParams(params);
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === null || value === '') next.delete(key);
+      else next.set(key, value);
+    }
+    setParams(next, { replace: true });
+  }
+  function setPage(next: number) {
+    patchParams({ page: next > 1 ? String(next) : null });
+  }
+  function setLimit(next: number) {
+    patchParams({ limit: next === DEFAULT_LIMIT ? null : String(next), page: null });
+  }
+  function setSearch(next: string) {
+    setSearchState(next);
+    patchParams({ q: next, page: null });
+  }
   const [selectedTripId, setSelectedTripId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [assignLoad, setAssignLoad] = useState<TripRow | null>(null);
@@ -97,17 +128,15 @@ export default function TripsPage() {
   const [cancelTrip, setCancelTrip] = useState<TripRow | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filtersRevision, setFiltersRevision] = useState(0);
-  const [params, setParams] = useSearchParams();
 
   const filters = useMemo(() => parseTripFilters(params), [params]);
   const activeFilterCount = countActiveTripFilters(filters);
   function applyFilters(next: typeof filters) {
-    setPage(1);
+    // `writeTripFilters` also drops `page`.
     setParams(writeTripFilters(params, next), { replace: true });
   }
   function setSegment(next: Segment) {
-    setPage(1);
-    setSegmentState(next);
+    patchParams({ segment: next === 'ACTIVE' ? null : next, page: null });
     // LIVE-029 — the route panel follows the tab: a trip picked on Active is not kept on Scheduled.
     setSelectedTripId(null);
   }
@@ -359,6 +388,9 @@ export default function TripsPage() {
     {
       accessorKey: 'number',
       header: 'TRIP',
+      // FE-22 — a header sort here only reordered the 25 rows of the current page (the board is
+      // paged, Completed on the server); no sort beats a misleading one until the API sorts by it.
+      enableSorting: false,
       // Plain text, not link-blue: the ID opens nothing on its own — the row click selects the trip
       // for the route panel (QA UI-018).
       cell: ({ row }) => <span className="whitespace-nowrap font-semibold text-text">{row.original.number}</span>,
@@ -551,12 +583,10 @@ export default function TripsPage() {
               value={search}
               onChange={(e) => {
                 setSearch(e.target.value);
-                setPage(1);
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Escape' && search) {
                   setSearch('');
-                  setPage(1);
                 }
               }}
               aria-label="Search trips"
@@ -569,7 +599,6 @@ export default function TripsPage() {
                 aria-label="Clear search"
                 onClick={() => {
                   setSearch('');
-                  setPage(1);
                 }}
                 className="flex size-6 items-center justify-center rounded-md text-text-muted hover:bg-bg-subtle hover:text-text"
               >
@@ -731,7 +760,6 @@ export default function TripsPage() {
                   onPageChange={setPage}
                   onLimitChange={(l) => {
                     setLimit(l);
-                    setPage(1);
                   }}
                 />
                 {trips.truncated && segment !== 'COMPLETED' ? (
@@ -773,13 +801,14 @@ export default function TripsPage() {
                 <ol className="mt-4 flex flex-col gap-3">
                   {orderTripStops(selectedTrip.stops).map((stop) => {
                     const done = stop.status === 'COMPLETED' || stop.status === 'ARRIVED';
+                    const scheduledAt = stopScheduledAt(selectedTrip, stop);
                     const label =
                       stop.status === 'COMPLETED'
                         ? stop.departedAt
                           ? `${formatInTz(stop.departedAt, carrierTz, 'time')} · departed`
                           : 'completed'
-                        : stop.scheduledAt
-                          ? `${formatInTz(stop.scheduledAt, carrierTz, 'time')} · ETA`
+                        : scheduledAt
+                          ? `${formatInTz(scheduledAt, carrierTz, 'time')} · ETA`
                           : 'pending';
                     return (
                       <li key={stop.id} className="flex gap-2">

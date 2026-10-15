@@ -361,6 +361,15 @@ describe('WB-270 audit log pagination', () => {
     await pager(/1–10 of 20 entries/);
   });
 
+  it('FE-22: a reload keeps the filters with the page — the URL carries both', async () => {
+    renderPage('/settings/audit-log?page=2&action=UPDATE&q=role&range=last7');
+    // Page 2 of the 20 UPDATE rows, not page 2 of all 23.
+    await pager(/11–20 of 20 entries/);
+    expect(screen.getByLabelText('Filter by action')).toHaveValue('UPDATE');
+    expect(screen.getByPlaceholderText('Search action, object or user…')).toHaveValue('role');
+    expect(screen.getByText('Last 7 days')).toBeInTheDocument();
+  });
+
   it('a page past the end snaps back to the last page', async () => {
     renderPage('/settings/audit-log?page=9');
     await pager(/21–23 of 23 entries/);

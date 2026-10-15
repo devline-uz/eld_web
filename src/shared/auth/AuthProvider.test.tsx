@@ -26,6 +26,7 @@ import {
 } from './authEvents';
 import type * as FirebaseModule from './firebase';
 import { clearTokens, getAccessToken, getRefreshToken } from './tokenStore';
+import { SHARED_SESSION_KEYS, resetSharedActivityThrottle } from './idleSync';
 
 const signOutOfGoogle = vi.fn(() => Promise.resolve());
 vi.mock('./firebase', async (importOriginal) => ({
@@ -1019,6 +1020,106 @@ describe('30-minute idle timeout (§17)', () => {
       await vi.advanceTimersByTimeAsync(IDLE_TIMEOUT_MS + IDLE_WARNING_MS + 5_000);
     });
     expect(screen.queryByText('Still there?')).not.toBeInTheDocument();
+  });
+});
+
+/* ------------------------------------------------------------- FE-23 cross-tab idle clock */
+
+describe('idle timeout across tabs (FE-23)', () => {
+  let logouts = 0;
+  async function signedIn() {
+    logouts = 0;
+    resetSharedActivityThrottle();
+    server.use(
+      http.post(url(endpoints.auth.signIn), () => ok(PAIR)),
+      http.get(url(endpoints.auth.me), () => ok(ME_DISPATCHER)),
+      http.post(url(endpoints.auth.signOut), () => {
+        logouts += 1;
+        return ok({ success: true });
+      }),
+    );
+    const view = setup();
+    await waitFor(() => expect(status()).toBe('unauthenticated'));
+    await act(async () => {
+      await view.signInWithPassword('a@b.example', 'pw');
+    });
+    return view;
+  }
+  /** Another tab records activity: `localStorage` changes and this tab gets a `storage` event. */
+  function otherTabActivity() {
+    const at = String(Date.now());
+    window.localStorage.setItem(SHARED_SESSION_KEYS.activity, at);
+    window.dispatchEvent(new StorageEvent('storage', { key: SHARED_SESSION_KEYS.activity, newValue: at }));
+  }
+
+  it('activity in another tab keeps this (idle) tab from warning', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await signedIn();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(IDLE_TIMEOUT_MS - 60_000);
+    });
+    act(() => otherTabActivity());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(IDLE_TIMEOUT_MS - 60_000);
+    });
+    expect(screen.queryByText('Still there?')).not.toBeInTheDocument();
+    expect(status()).toBe('authenticated');
+  });
+
+  it('activity in another tab while the warning is up dismisses it — the shared token is not revoked', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await signedIn();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(IDLE_TIMEOUT_MS + 1_000);
+    });
+    expect(screen.getByText('Still there?')).toBeInTheDocument();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+      otherTabActivity();
+    });
+    expect(screen.queryByText('Still there?')).not.toBeInTheDocument();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(IDLE_WARNING_MS + 1_000);
+    });
+    expect(status()).toBe('authenticated');
+    expect(logouts).toBe(0);
+    expect(window.localStorage.getItem(RT_KEY)).not.toBeNull();
+  });
+
+  it('the countdown ending does not sign out when another tab was active (missed storage event)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await signedIn();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(IDLE_TIMEOUT_MS + 1_000);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+      window.localStorage.setItem(SHARED_SESSION_KEYS.activity, String(Date.now())); // no event
+      await vi.advanceTimersByTimeAsync(IDLE_WARNING_MS);
+    });
+    expect(status()).toBe('authenticated');
+    expect(logouts).toBe(0);
+  });
+
+  it('a sign-out in another tab ends this tab\'s session without a second logout call', async () => {
+    await signedIn();
+    expect(status()).toBe('authenticated');
+    await act(async () => {
+      window.localStorage.removeItem(RT_KEY);
+      window.dispatchEvent(
+        new StorageEvent('storage', { key: SHARED_SESSION_KEYS.signOut, newValue: JSON.stringify({ reason: 'idle', at: Date.now() }) }),
+      );
+    });
+    await waitFor(() => expect(status()).toBe('unauthenticated'));
+    expect(logouts).toBe(0);
+  });
+
+  it('signing out here tells the other tabs', async () => {
+    const view = await signedIn();
+    await act(async () => {
+      view.auth.signOut();
+    });
+    expect(JSON.parse(window.localStorage.getItem(SHARED_SESSION_KEYS.signOut) ?? '{}')).toMatchObject({ reason: null });
   });
 });
 

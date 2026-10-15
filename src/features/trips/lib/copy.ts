@@ -42,6 +42,9 @@ export const TRIP_NOT_EDITABLE = ERROR_MESSAGES.TRIP_NOT_EDITABLE as string;
 /** Row-menu `title` on the disabled `Delete trip` item and the 409 `TRIP_IN_PROGRESS` toast. */
 export const TRIP_IN_PROGRESS = ERROR_MESSAGES.TRIP_IN_PROGRESS as string;
 /** 404 from `PATCH` / `DELETE /trips/:id` — someone else removed it first. */
+/** FE-14 — fallback for a 409 status conflict without a server message (the server's own
+ * "This trip was changed by someone else (it is now …). Refresh and try again." is shown first). */
+export const TRIP_CHANGED_CONCURRENTLY = 'This trip was changed by someone else. Reload and try again.';
 export const TRIP_NOT_FOUND = 'This trip no longer exists. The list has been refreshed.';
 /** `PATCH` cannot null a number or a date (`UpdateTripDto` has no nullable fields). */
 export const TRIP_FIELD_NOT_CLEARABLE = 'This value can be changed but not cleared.';

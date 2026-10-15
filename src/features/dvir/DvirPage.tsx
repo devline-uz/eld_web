@@ -123,7 +123,9 @@ export default function DvirPage() {
   const { toast } = useToast();
 
   const tab = (params.get('tab') as Tab) ?? 'dvirs';
-  const [search, setSearch] = useState('');
+  // FE-22 — the search is kept in the URL (`?q=`) with the filters and page; the box keeps its own
+  // text so typing never waits on a router update.
+  const [search, setSearch] = useState(() => params.get('q') ?? '');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filtersRevision, setFiltersRevision] = useState(0);
   const filters = useMemo(() => parseDvirFilters(params), [params]);
@@ -144,8 +146,9 @@ export default function DvirPage() {
   }
   function changeSearch(value: string) {
     setSearch(value);
-    if (!params.has('page')) return;
     const next = new URLSearchParams(params);
+    if (value) next.set('q', value);
+    else next.delete('q');
     next.delete('page');
     setParams(next, { replace: true });
   }
@@ -1167,7 +1170,7 @@ function SchedulesTab({ search, onRows }: { search: string; onRows: (rows: Sched
                   id: 'nextDue',
                   header: 'NEXT DUE',
                   cell: ({ row }) => (
-<span className="tabular-nums text-text">{scheduleNextDueLabel(row.original)}</span>
+<span className="tabular-nums text-text">{scheduleNextDueLabel(row.original, carrierTz)}</span>
                   ),
                 },
                 {

@@ -7,7 +7,7 @@
 // the carrier's own timezone (§8.3).
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { endOfDay, startOfDay } from 'date-fns';
+import { endOfDay, format, startOfDay } from 'date-fns';
 import { useQueries, useQueryClient } from '@tanstack/react-query';
 import { Search, Upload, Filter } from 'lucide-react';
 import { Can } from '@/shared/auth/Can';
@@ -95,6 +95,19 @@ function positiveIntParam(raw: string | null, fallback: number): number {
   return Number.isInteger(value) && value > 0 ? value : fallback;
 }
 
+/** FE-22 — the presets the date-range picker offers; anything else in `?range=` falls back. */
+const RANGE_PRESETS: readonly DateRangePreset[] = ['today', 'yesterday', 'last7', 'last14', 'last30', 'thisMonth', 'lastMonth', 'thisQuarter', 'last8Hos', 'custom'];
+const DEFAULT_RANGE_PRESET: DateRangePreset = 'last30';
+
+/** `yyyy-MM-dd` ⇄ a local calendar date (the picker's days are browser-local, as before). */
+function dayParam(raw: string | null): Date | null {
+  const m = raw ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw) : null;
+  if (!m) return null;
+  const date = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return date.getMonth() === Number(m[2]) - 1 ? date : null;
+}
+const toDayParam = (d: Date) => format(d, 'yyyy-MM-dd');
+
 const startOfDayMs = (d: Date) => startOfDay(d).getTime();
 const endOfDayMs = (d: Date) => endOfDay(d).getTime();
 
@@ -109,17 +122,29 @@ export default function AuditLogPage() {
   const usersQuery = useUsersList();
   const [params, setParams] = useSearchParams();
 
-  const [search, setSearch] = useState('');
+  // FE-22 — the search, every filter and the date range live in the URL next to `?page=`: a reload
+  // used to keep page 3 while dropping the filters, i.e. page 3 of the unfiltered log.
+  const [search, setSearch] = useState(() => params.get('q') ?? '');
   // WB-043 — the filter row §10 W-23 draws: `All users ▾` (`actorId` IS a real server-side param
   // on `GET /audit-log`, web/backend-gaps.md — `objectType`/`objectId`/`actorId` only) · `All
   // actions ▾` and the `Last 30 days ▾` date range (both gap B-64 — no server support, filtered
   // over the loaded window only, same limitation `search` already has) · `Filters`
   // (opens the drawer for `Object type`, the other server-supported param).
-  const [actorId, setActorId] = useState<string>('');
-  const [action, setAction] = useState<string>('');
-  const [dateRange, setDateRange] = useState<DateRange>(() => resolvePreset('last30'));
-  const [datePreset, setDatePreset] = useState<DateRangePreset>('last30');
-  const [objectType, setObjectType] = useState<string>('');
+  const actorId = params.get('actor') ?? '';
+  const action = params.get('action') ?? '';
+  const objectType = params.get('objectType') ?? '';
+  const rawPreset = params.get('range') as DateRangePreset | null;
+  const customFrom = dayParam(params.get('from'));
+  const customTo = dayParam(params.get('to'));
+  const datePreset: DateRangePreset =
+    rawPreset && RANGE_PRESETS.includes(rawPreset) && (rawPreset !== 'custom' || (customFrom && customTo)) ? rawPreset : DEFAULT_RANGE_PRESET;
+  const customKey = datePreset === 'custom' ? `${params.get('from')}|${params.get('to')}` : '';
+  const dateRange = useMemo<DateRange>(
+    () => (datePreset === 'custom' && customFrom && customTo ? { from: customFrom, to: customTo } : resolvePreset(datePreset)),
+    // `customKey` stands in for the two parsed dates (new objects every render).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [datePreset, customKey],
+  );
   const [filtersOpen, setFiltersOpen] = useState(false);
   // The filter signature the user pressed `Stop` on — a new search/filter starts a new walk.
   const [stoppedFor, setStoppedFor] = useState<string | null>(null);
@@ -138,34 +163,37 @@ export default function AuditLogPage() {
     if (key === 'limit' || value === 1) next.delete('page');
     setParams(next, { replace: true });
   }
-  /** Every filter, the search and the date range re-page from page 1. */
-  function resetPage() {
-    if (!params.has('page')) return;
+  /** Every filter, the search and the date range re-page from page 1 — in one navigation. */
+  function setFilterParams(patch: Record<string, string | null>) {
     const next = new URLSearchParams(params);
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === null || value === '') next.delete(key);
+      else next.set(key, value);
+    }
     next.delete('page');
     setParams(next, { replace: true });
   }
   function changeSearch(next: string) {
     setSearch(next);
-    resetPage();
+    setFilterParams({ q: next });
   }
   function changeAction(next: string) {
-    setAction(next);
-    resetPage();
+    setFilterParams({ action: next });
   }
   function changeDateRange(range: DateRange, preset: DateRangePreset) {
-    setDateRange(range);
-    setDatePreset(preset);
-    resetPage();
+    const custom = preset === 'custom';
+    setFilterParams({
+      range: preset === DEFAULT_RANGE_PRESET ? null : preset,
+      from: custom ? toDayParam(range.from) : null,
+      to: custom ? toDayParam(range.to) : null,
+    });
   }
   // actorId/objectType are real server params — changing either starts a new cursor chain.
   function setActorFilter(next: string) {
-    setActorId(next);
-    resetPage();
+    setFilterParams({ actor: next });
   }
   function setObjectTypeFilter(next: string) {
-    setObjectType(next);
-    resetPage();
+    setFilterParams({ objectType: next });
   }
 
   const rangeStartMs = startOfDayMs(dateRange.from);
@@ -266,13 +294,8 @@ export default function AuditLogPage() {
   );
 
   function clearAllFilters() {
-    setActorId('');
-    setAction('');
-    setObjectType('');
-    setDatePreset('last30');
-    setDateRange(resolvePreset('last30'));
     setSearch('');
-    resetPage();
+    setFilterParams({ q: null, actor: null, action: null, objectType: null, range: null, from: null, to: null });
   }
 
   function loadOlder() {

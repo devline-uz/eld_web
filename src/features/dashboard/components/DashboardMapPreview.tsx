@@ -3,7 +3,7 @@
 // Dashboard's `React.lazy()` call points at, so the map chunk only loads on screens that draw one.
 import FleetMap from '@/shared/map/FleetMap';
 import { Badge, DutyBadge } from '@/shared/ui/Badge';
-import type { LiveFleetUnit } from '@/shared/api/liveFleet';
+import { mapMarkerStatus, type LiveFleetUnit } from '@/shared/api/liveFleet';
 
 const LEGEND: LiveFleetUnit['dutyStatus'][] = ['DRIVING', 'ON_DUTY', 'SLEEPER', 'OFF_DUTY'];
 
@@ -17,13 +17,14 @@ export default function DashboardMapPreview({ units }: { units: LiveFleetUnit[] 
     <div className="relative h-map-preview overflow-hidden rounded-md xl:mt-1 xl:h-map-preview-xl">
       <FleetMap
         preview
-        units={units.map((u) => ({ id: u.vehicleId, lat: u.lat!, lon: u.lon!, dutyStatus: u.dutyStatus, headingDeg: u.headingDeg, stale: u.isStale }))}
+        units={units.map((u) => ({ id: u.vehicleId, lat: u.lat!, lon: u.lon!, dutyStatus: mapMarkerStatus(u), headingDeg: u.headingDeg, stale: u.isStale }))}
       />
       <div className="pointer-events-none absolute bottom-2 left-2 flex flex-wrap gap-2 rounded-md bg-bg-surface/90 p-2 shadow-card">
         {LEGEND.map((status) => (
           <DutyBadge key={status} status={status} />
         ))}
-        {/* The map draws ELD offline in slate grey (FleetMap FE-009) — the legend says so. */}
+        {/* The map draws ELD offline in slate grey (FleetMap FE-009) — the legend says so. Grey means
+            `connectivity: ELD_OFFLINE` on an ACTIVE unit, the KPI's definition (FE-05). */}
         <Badge tone="neutral">
           <span aria-hidden className="size-1.5 rounded-full bg-text-muted" />
           ELD offline

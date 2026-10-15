@@ -12,7 +12,7 @@ import { qk } from '@/shared/api/queryKeys';
 import { VALIDATION_MESSAGES } from '@/shared/forms/messages';
 import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/client';
 import { ToastProvider } from '@/shared/ui/Toast';
-import type { VehicleRow } from '@/shared/api/vehicles';
+import { joinVehicles, type DeviceRow, type VehicleRow } from '@/shared/api/vehicles';
 import { AddVehicleModal } from './AddVehicleModal';
 import { DeleteUnitModal } from './DeleteUnitModal';
 import { AssignDriverModal } from './AssignDriverModal';
@@ -232,6 +232,89 @@ describe('11.2 Edit unit — clearing optional fields', () => {
     // CODE-044 — the plate goes out in the API's canonical form (no spaces/dashes).
     expect(body).toMatchObject({ licensePlate: '4821JG', plateState: 'OH', deviceId: 'PT30_1C4F' });
     expect(body).not.toHaveProperty('notes');
+  });
+});
+
+// FE-08 — after an edit re-pairs unit A from serial S to T, the reference-cached `/devices` lookup
+// (10 min) still says A owns S. Reopening Edit prefilled S, and saving an unrelated change sent
+// `deviceId: S`, silently re-pairing the old ELD. The `/vehicles` row's `eldSerial` must win.
+describe('11.2 Edit unit — stale /devices cache never re-pairs the old serial (FE-08)', () => {
+  const staleDevice = (serial: string, vehicleId: string | null): DeviceRow => ({
+    id: `dev_${serial}`,
+    serial,
+    model: 'PT30',
+    status: 'ACTIVE',
+    vehicleId,
+    bleState: 'DISCONNECTED',
+    firmwareVersion: null,
+    firmwareOutdated: false,
+  } as DeviceRow);
+  // What the cache still holds after the S -> T edit: S on veh_1, T free.
+  const STALE_DEVICES = [staleDevice('PT30_OLD5', 'veh_1'), staleDevice('PT30_NEW7', null)];
+  const joinOne = (v: VehicleRow) => {
+    const row = joinVehicles([v], [], STALE_DEVICES)[0];
+    if (!row) throw new Error('joinVehicles dropped the row');
+    return row;
+  };
+
+  function seededClient() {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } } });
+    queryClient.setQueryData(qk.devices({ limit: 500 }), { items: STALE_DEVICES, page: 1, limit: 500, total: 2, totalPages: 1 });
+    return queryClient;
+  }
+
+  async function editNotesAndSave(vehicle: VehicleRow) {
+    let body: Record<string, unknown> | undefined;
+    server.use(
+      http.patch(url(endpoints.vehicles.update(':id')), async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>;
+        return ok({ ...VEHICLE });
+      }),
+    );
+    const user = userEvent.setup();
+    render(
+      <QueryClientProvider client={seededClient()}>
+        <ToastProvider>
+          <AddVehicleModal vehicle={vehicle} onClose={() => {}} />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+    return { user, getBody: () => body };
+  }
+
+  it('the table row (joined with the stale lookup) prefills the server serial T and saving keeps T', async () => {
+    const row = joinOne({ ...VEHICLE, eldSerial: 'PT30_NEW7' });
+    expect(row.eldSerial).toBe('PT30_NEW7');
+    const { user, getBody } = await editNotesAndSave(row);
+    expect(screen.getByLabelText(/ELD serial/)).toHaveValue('PT30_NEW7');
+    await user.type(screen.getByLabelText(/Notes/), 'Reefer');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await screen.findByText('Unit 101 updated');
+    expect(getBody()?.deviceId).not.toBe('PT30_OLD5');
+    expect(getBody()).toMatchObject({ notes: 'Reefer', deviceId: 'PT30_NEW7' });
+  });
+
+  it('a unit the server reports unpaired (eldSerial null) is not prefilled from the stale lookup', async () => {
+    const row = joinOne({ ...VEHICLE, eldSerial: null });
+    expect(row.eldSerial).toBeNull();
+    const { user, getBody } = await editNotesAndSave(row);
+    expect(screen.getByLabelText(/ELD serial/)).toHaveValue('');
+    await user.type(screen.getByLabelText(/Notes/), 'Reefer');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await screen.findByText('Unit 101 updated');
+    expect(getBody()).not.toHaveProperty('deviceId');
+  });
+
+  it('the unit profile (plain GET /vehicles/:id row, eldSerial null) is not prefilled from the stale lookup either', async () => {
+    const { user, getBody } = await editNotesAndSave({ ...VEHICLE, eldSerial: null });
+    expect(screen.getByLabelText(/ELD serial/)).toHaveValue('');
+    await user.type(screen.getByLabelText(/Notes/), 'Reefer');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await screen.findByText('Unit 101 updated');
+    expect(getBody()).not.toHaveProperty('deviceId');
   });
 });
 

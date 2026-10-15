@@ -51,6 +51,13 @@ export function isStaleFrame(frameAt: string | null | undefined, unitLastSeenAt:
   return Number.isFinite(seen) && at < seen - STALE_FRAME_SLACK_MS;
 }
 
+/** FE-06 — the time recorded as a unit's newest applied frame: the frame's own time, but never
+ * later than `nowMs` (the server's clock), so a future-dated frame cannot block the next ones. */
+export function appliedFrameAt(frameAt: string, nowMs: number): number {
+  const at = Date.parse(frameAt);
+  return Number.isFinite(at) ? Math.min(at, nowMs) : at;
+}
+
 /** True when the cached fleet holds the frame's unit, i.e. a patch has a row to land on. */
 export function fleetHasUnit(fleet: LiveFleetResponse | undefined, vehicleId: string): boolean {
   return Boolean(fleet?.items.some((unit) => unit.vehicleId === vehicleId));

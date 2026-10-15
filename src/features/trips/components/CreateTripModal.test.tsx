@@ -42,11 +42,28 @@ vi.mock('@/shared/map/geocode', async (importOriginal) => ({
 }));
 
 // The route preview renders its stops as `P | 1:name | … | D` so the order is assertable without a map.
+// FE-18 — `routeSummary.next` is what the preview reports through `onSummary` on "emit route".
+const routeSummary = vi.hoisted(() => ({ next: { distanceMi: 0, durationSec: null as number | null } }));
 vi.mock('./RoutePreview', () => ({
-  RoutePreview: ({ pickup, delivery, waypoints = [] }: { pickup: { name: string } | null; delivery: { name: string } | null; waypoints?: { name: string }[] }) => (
-    <p data-testid="route-preview">
-      {[`P:${pickup?.name}`, ...waypoints.map((w, i) => `${i + 1}:${w.name}`), `D:${delivery?.name}`].join(' | ')}
-    </p>
+  RoutePreview: ({
+    pickup,
+    delivery,
+    waypoints = [],
+    onSummary,
+  }: {
+    pickup: { name: string } | null;
+    delivery: { name: string } | null;
+    waypoints?: { name: string }[];
+    onSummary?: (summary: { distanceMi: number; durationSec: number | null }) => void;
+  }) => (
+    <>
+      <p data-testid="route-preview">
+        {[`P:${pickup?.name}`, ...waypoints.map((w, i) => `${i + 1}:${w.name}`), `D:${delivery?.name}`].join(' | ')}
+      </p>
+      <button type="button" onClick={() => onSummary?.(routeSummary.next)}>
+        emit route
+      </button>
+    </>
   ),
 }));
 
@@ -131,6 +148,62 @@ describe('CreateTripModal — QA fix: ACTIVE drivers only', () => {
     renderModal();
     await vi.waitFor(() => expect(requestedStatuses.length).toBeGreaterThan(0));
     expect(requestedStatuses.every((s) => s === 'ACTIVE')).toBe(true);
+  });
+});
+
+describe('CreateTripModal — FE-17 driver / unit pickers past the page cap', () => {
+  it('says only the first N are listed and searches drivers and units on the server (`q`)', async () => {
+    const driverQs: (string | null)[] = [];
+    const unitQs: (string | null)[] = [];
+    renderModal();
+    server.use(
+      http.get(url(endpoints.drivers.list), ({ request }) => {
+        const q = new URL(request.url).searchParams.get('q');
+        driverQs.push(q);
+        return q
+          ? ok({ items: [{ ...VERIFIED_DRIVER, id: 'drv_far', firstName: 'Zed', lastName: 'Far' }], page: 1, limit: 200, total: 1, totalPages: 1 })
+          : ok({ items: [UNVERIFIED_DRIVER, VERIFIED_DRIVER], page: 1, limit: 200, total: 250, totalPages: 2 });
+      }),
+      http.get(url(endpoints.vehicles.list), ({ request }) => {
+        const q = new URL(request.url).searchParams.get('q');
+        unitQs.push(q);
+        return q
+          ? ok({ items: [{ id: 'veh_far', unitNumber: '777', status: 'ACTIVE' }], page: 1, limit: 200, total: 1, totalPages: 1 })
+          : ok({ items: [{ id: 'veh_1', unitNumber: '101', status: 'ACTIVE' }], page: 1, limit: 500, total: 600, totalPages: 2 });
+      }),
+    );
+    // The default handlers from `renderModal` may already have answered — refetch through a new search.
+    const user = userEvent.setup();
+    await user.click(driverTriggerButton());
+    await user.type(await screen.findByPlaceholderText('Search'), 'zed');
+    await user.click(await screen.findByText('Zed Far'));
+    expect(driverQs).toContain('zed');
+    expect(driverTriggerButton()).toHaveTextContent('Zed Far');
+
+    const unitLabel = screen
+      .getByText((content, el) => el?.tagName === 'SPAN' && el.classList.contains('text-label') && content.trim().startsWith('Unit'))
+      .closest('label')!;
+    await user.click(within(unitLabel).getByRole('button'));
+    await user.type(await screen.findByPlaceholderText('Search'), '777');
+    await user.click(await screen.findByText('#777'));
+    expect(unitQs).toContain('777');
+    expect(within(unitLabel).getByRole('button')).toHaveTextContent('#777');
+  });
+
+  it('shows the "showing first N" hint when the server holds more rows than the picker page', async () => {
+    // `renderModal` registers its own handlers first; `server.use` prepends, so register after it.
+    renderModal();
+    server.use(
+      http.get(url(endpoints.drivers.list), () =>
+        ok({ items: [UNVERIFIED_DRIVER, VERIFIED_DRIVER], page: 1, limit: 200, total: 250, totalPages: 2 }),
+      ),
+      http.get(url(endpoints.vehicles.list), () =>
+        ok({ items: [{ id: 'veh_1', unitNumber: '101', status: 'ACTIVE' }], page: 1, limit: 200, total: 600, totalPages: 3 }),
+      ),
+    );
+    expect(await screen.findByText('Showing 2 of 250 drivers — search by name to find another.')).toBeInTheDocument();
+    // The 500-row lookup walks 200-row API pages (one row each here).
+    expect(await screen.findByText('Showing 3 of 600 units — search by unit number to find another.')).toBeInTheDocument();
   });
 });
 
@@ -619,6 +692,53 @@ describe('CreateTripModal — dirty close, payload and 422 mapping', () => {
     expect(posts[0]!.estimatedDriveSec).toBe(6 * 3600);
   });
 
+  it('FE-18: a drive time over the API cap is a field error and nothing is sent', async () => {
+    let posts = 0;
+    renderModal();
+    server.use(
+      http.post(url(endpoints.trips.create), () => {
+        posts += 1;
+        return ok({ id: 'trp_1', number: 'TR-1' });
+      }),
+    );
+    const user = await fillValidForm();
+    await user.type(screen.getByPlaceholderText('h'), '5000');
+
+    expect(screen.getByText('Estimated drive time must be 2,777 h or less.')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Create trip' }));
+    await user.click(screen.getByRole('button', { name: 'Save as draft' }));
+    expect(posts).toBe(0);
+  });
+
+  it('FE-18: a 0.0 mi route does not fill Distance, a real one does', async () => {
+    renderModal();
+    const user = await fillValidForm();
+    const distance = screen.getByPlaceholderText('mi') as HTMLInputElement;
+
+    routeSummary.next = { distanceMi: 0, durationSec: 30 };
+    await user.click(screen.getByRole('button', { name: 'emit route' }));
+    expect(distance.value).toBe('');
+
+    routeSummary.next = { distanceMi: 74.2, durationSec: 4000 };
+    await user.click(screen.getByRole('button', { name: 'emit route' }));
+    expect(distance.value).toBe('74.2');
+  });
+
+  it('FE-18: a 422 on `estimatedDriveSec` is labelled in the banner', async () => {
+    renderModal();
+    server.use(
+      http.post(url(endpoints.trips.create), () =>
+        fail(422, 'VALIDATION_FAILED', 'Check the highlighted fields and try again.', {
+          estimatedDriveSec: 'Number must be less than or equal to 10000000',
+        }),
+      ),
+    );
+    const user = await fillValidForm();
+    await user.click(screen.getByRole('button', { name: 'Create trip' }));
+
+    expect(await screen.findByText('Estimated drive time: Number must be less than or equal to 10000000.')).toBeInTheDocument();
+  });
+
   it('saves as a draft via `draft: true` and shows the draft toast', async () => {
     const posts: Record<string, unknown>[] = [];
     renderModal();
@@ -669,9 +789,32 @@ describe('CreateTripModal — dirty close, payload and 422 mapping', () => {
 
     await user.click(screen.getByRole('button', { name: 'Create trip' }));
 
-    expect(await screen.findByText('Stop 2 location: String must contain at most 200 character(s).')).toBeInTheDocument();
+    // FE-16 — payload `stops.1` is the delivery when no intermediate stop was added.
+    expect(await screen.findByText('Delivery location: String must contain at most 200 character(s).')).toBeInTheDocument();
     expect(scrolled).toHaveBeenCalled();
     Element.prototype.scrollIntoView = original;
+  });
+
+  it('FE-16: a server error on payload `stops.1` names UI "Stop 1", and `stops.2` the delivery', async () => {
+    renderModal();
+    server.use(
+      http.post(url(endpoints.trips.create), () =>
+        fail(422, 'VALIDATION_FAILED', 'Request validation failed.', {
+          issues: [
+            { path: ['stops', 1, 'scheduledAt'], code: 'custom', message: 'Must be between pickup and delivery' },
+            { path: ['stops', 2, 'name'], code: 'too_big', message: 'Too long' },
+          ],
+        }),
+      ),
+    );
+    const user = await fillValidForm();
+    await user.click(screen.getByRole('button', { name: '+ Add an intermediate stop' }));
+    const stopLabel = screen.getByText((content, el) => el?.tagName === 'SPAN' && content.trim() === 'Stop 1 location').closest('label')!;
+    await user.type(within(stopLabel).getByRole('combobox'), 'Springfield dock');
+
+    await user.click(screen.getByRole('button', { name: 'Create trip' }));
+
+    expect(await screen.findByText('Stop 1 window: Must be between pickup and delivery. Delivery location: Too long.')).toBeInTheDocument();
   });
 
   it('maps a 422 on `number` onto the Trip / load ID field', async () => {
@@ -1029,6 +1172,34 @@ describe('CreateTripModal — edit mode (`PATCH /trips/:id`)', () => {
 
     expect(await screen.findByText('Delivered and cancelled trips can no longer be edited.')).toBeInTheDocument();
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('FE-14: a 409 status conflict shows the server sentence (not "IN_PROGRESS.") with a Reload that closes', async () => {
+    const { onClose } = renderEdit();
+    const message = 'This trip was changed by someone else (it is now in progress). Refresh and try again.';
+    server.use(http.patch(url(endpoints.trips.update(':id')), () => fail(409, 'CONFLICT', message, { status: 'IN_PROGRESS' })));
+    const user = userEvent.setup();
+    await user.type(screen.getByDisplayValue('Acme'), ' Inc');
+
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(screen.queryByText(/^IN_PROGRESS\.?$/)).not.toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Reload' }));
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('FE-14: a Prisma-style 409 `{ target }` is not read as a field map', async () => {
+    renderEdit();
+    server.use(http.patch(url(endpoints.trips.update(':id')), () => fail(409, 'CONFLICT', 'Unique constraint failed', { target: ['number'] })));
+    const user = userEvent.setup();
+    await user.type(screen.getByDisplayValue('Acme'), ' Inc');
+
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('That value is already in use.');
+    expect(screen.queryByText(/number\./)).not.toBeInTheDocument();
   });
 });
 

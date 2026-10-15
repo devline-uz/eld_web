@@ -41,6 +41,14 @@ function Picker({ value, options, onSelect, onSearch, placeholder, triggerVarian
     return options.filter((o) => `${o.name} ${o.context}`.toLowerCase().includes(q));
   }, [options, query]);
 
+  // FE-17 — closing (Esc, outside click or a pick) clears the term, and a server-searched list is
+  // told so: it must not stay filtered by a term the user can no longer see.
+  function close() {
+    if (query) onSearch?.('');
+    setQuery('');
+    setOpen(false);
+  }
+
   return (
     <Popover.Root
       open={open}
@@ -49,10 +57,10 @@ function Picker({ value, options, onSelect, onSearch, placeholder, triggerVarian
           setContainer(
             (triggerRef.current?.closest('[role="dialog"]') as HTMLElement | null) ?? undefined,
           );
+          setOpen(true);
         } else {
-          setQuery('');
+          close();
         }
-        setOpen(next);
       }}
     >
       <Popover.Trigger asChild>
@@ -98,7 +106,7 @@ function Picker({ value, options, onSelect, onSearch, placeholder, triggerVarian
                   disabled={option.disabled}
                   onClick={() => {
                     onSelect(option);
-                    setOpen(false);
+                    close();
                   }}
                   className="flex w-full items-center gap-2 rounded-md p-2 text-left hover:bg-bg-subtle disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent"
                 >

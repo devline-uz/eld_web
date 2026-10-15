@@ -17,8 +17,10 @@ import { Menu, RefreshCw, Search } from 'lucide-react';
 import { useMatches } from 'react-router-dom';
 import { useCarrier } from '@/shared/api/carrier';
 import { applyNotificationNew, useUnreadNotificationCount } from '@/shared/api/notifications';
+import { humanizeTimestamps } from '@/features/notifications/lib/bodyText';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import type { Role } from '@/shared/auth/permissions';
+import { useCarrierTimezone } from '@/shared/auth/useCarrierTimezone';
 import { usePermission } from '@/shared/auth/usePermission';
 import { useReportReadyShell } from '@/shared/realtime/reportReady';
 import { useRealtimeEvent } from '@/shared/realtime/useRealtimeEvent';
@@ -191,6 +193,12 @@ function usePageMeta(): RouteHandle {
   return { title: APP_NAME };
 }
 
+function toastDescription(notification: { body?: string; occurredAt?: unknown; createdAt?: string }, carrierTz: string): string | undefined {
+  if (notification.body) return humanizeTimestamps(notification.body, carrierTz);
+  const iso = typeof notification.occurredAt === 'string' ? notification.occurredAt : notification.createdAt;
+  return iso ? humanizeTimestamps(iso, carrierTz) : undefined;
+}
+
 export function Topbar({ onOpenNav }: { onOpenNav?: () => void } = {}) {
   const { user, isAuthenticated } = useAuth();
   const { can } = usePermission();
@@ -208,13 +216,17 @@ export function Topbar({ onOpenNav }: { onOpenNav?: () => void } = {}) {
   const [accountOpen, setAccountOpen] = useState(false);
   const palette = useMemo(() => buildPaletteConfig(can, role), [can, role]);
   const unread = useUnreadNotificationCount(isAuthenticated);
+  const carrierTz = useCarrierTimezone();
 
   // §7.3 `notification.new` on the auto-joined `user:{id}` room: patch the panel cache, bell dot,
   // and a toast only for CRITICAL.
   useRealtimeEvent('notification.new', ({ notification }) => {
     applyNotificationNew(queryClient, notification);
     if (notification.severity === 'CRITICAL') {
-      toast({ kind: 'error', title: notification.title, description: notification.body });
+      // FE-02 — same carrier-zone rendering as the bell panel (`humanizeTimestamps`): an ISO instant
+      // in the body must not reach the toast as raw UTC. A body-less alert falls back to its own
+      // ISO timestamp field (`occurredAt`, else `createdAt`), also shown in the carrier zone.
+      toast({ kind: 'error', title: notification.title, description: toastDescription(notification, carrierTz) });
     }
   });
 

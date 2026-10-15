@@ -47,6 +47,23 @@ export interface LiveFleetUnit {
 }
 
 export type LiveRecordStatus = 'ACTIVE' | 'INACTIVE' | 'OUT_OF_SERVICE';
+
+/**
+ * FE-05 — the colour a map marker is drawn in. The grey "ELD offline" marker means exactly what the
+ * dashboard KPI "units with ELD offline" and `/live/fleet` `connectivity: ELD_OFFLINE` mean: an
+ * ACTIVE unit whose paired ELD has gone silent — whatever its last duty status (an OFF/SB unit with a
+ * silent ELD is grey too). A status that is merely stale while the ELD is ONLINE (past its 16 h/24 h
+ * plausibility cap — `dutyStatus` reads ELD_OFFLINE then) keeps the driver's last known duty colour
+ * and is drawn dimmed through `stale: isStale`, never grey.
+ */
+export function mapMarkerStatus(
+  unit: Pick<LiveFleetUnit, 'dutyStatus' | 'driverDutyStatus' | 'connectivity' | 'recordStatus'>,
+): DutyStatus {
+  if (unit.connectivity === 'ELD_OFFLINE' && unit.recordStatus === 'ACTIVE') return 'ELD_OFFLINE';
+  if (unit.dutyStatus === 'ELD_OFFLINE') return unit.driverDutyStatus ?? 'INACTIVE';
+  return unit.dutyStatus;
+}
+
 /** Backend `live-fleet.mapper.ts#DriverDutyStatus` — the HOS engine's effective status (PC = OFF, YM = ON). */
 export type DriverDutyStatus = 'DRIVING' | 'ON_DUTY' | 'SLEEPER' | 'OFF_DUTY';
 export type LiveConnectivity = 'NO_DEVICE' | 'ELD_OFFLINE' | 'ONLINE';
@@ -56,12 +73,35 @@ export interface LiveFleetResponse {
   generatedAt: string;
 }
 
+/**
+ * FE-06 — browser clock minus server clock, learnt from each `GET /live/fleet` `generatedAt`. Marker
+ * motion ages a fix against "now"; a browser clock 2 min fast made every fix look too old to glide
+ * from (and a slow one made old fixes look fresh). `generatedAt` is stamped before the response
+ * is sent, so the estimate errs by at most the response's own latency.
+ */
+let serverClockOffsetMs = 0;
+
+/** Records the server's clock from a response timestamp received just now (unparsable → ignored). */
+export function noteServerClock(serverIso: string | null | undefined, receivedAt = Date.now()): void {
+  const server = serverIso ? Date.parse(serverIso) : NaN;
+  if (Number.isFinite(server)) serverClockOffsetMs = server - receivedAt;
+}
+
+/** "Now" on the server's clock (`Date.now()` until a fleet response has been seen). */
+export function serverNowMs(): number {
+  return Date.now() + serverClockOffsetMs;
+}
+
 /** `useLiveFleet()` — one query, shared by the Dashboard live-fleet card and the Live Fleet
  * screen. `cachePolicy('live')` is the §6.4 10s-stale/30s-poll pair, gated on tab visibility. */
 export function useLiveFleet() {
   return useQuery({
     queryKey: qk.liveFleet(),
-    queryFn: ({ signal }) => client.get<LiveFleetResponse>(endpoints.live.fleet, { signal }),
+    queryFn: async ({ signal }) => {
+      const fleet = await client.get<LiveFleetResponse>(endpoints.live.fleet, { signal });
+      noteServerClock(fleet.generatedAt);
+      return fleet;
+    },
     ...typedCachePolicy<LiveFleetResponse>('live'),
   });
 }

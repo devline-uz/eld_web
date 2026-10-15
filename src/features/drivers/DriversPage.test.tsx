@@ -2,7 +2,7 @@
 // served by MSW per web/backend-gaps.md).
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -51,8 +51,7 @@ function LocationProbe() {
   return <output data-testid="location">{`${location.pathname}${location.search}`}</output>;
 }
 
-function renderPage(initialEntries: string[] = ['/drivers']) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function renderPage(initialEntries: string[] = ['/drivers'], queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   return render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
@@ -575,6 +574,23 @@ describe('W-06 Drivers', () => {
     expect(
       screen.getByText(new RegExp(`^58 drivers · ${number(onDuty)} on duty · `)),
     ).toBeInTheDocument();
+  });
+
+  it('FE-20: a failed background refetch keeps the loaded rows and shows a non-blocking notice', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderPage(['/drivers'], queryClient);
+    expect(await screen.findByText('John Smith')).toBeInTheDocument();
+    server.use(
+      http.get(url(endpoints.drivers.roster), () =>
+        HttpResponse.json({ statusCode: 500, code: 'INTERNAL_ERROR', message: 'Boom' }, { status: 500 }),
+      ),
+    );
+    await act(async () => {
+      await queryClient.refetchQueries({ type: 'active' });
+    });
+    expect(await screen.findByText('Could not refresh — showing the last loaded data.', {}, { timeout: 8000 })).toBeInTheDocument();
+    expect(screen.getByText('John Smith')).toBeInTheDocument();
+    expect(screen.queryByText('Could not load this page')).not.toBeInTheDocument();
   });
 
   it('error: renders <ErrorState> with Retry when the list fails', async () => {

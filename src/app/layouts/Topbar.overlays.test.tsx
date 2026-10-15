@@ -326,6 +326,28 @@ describe('11.27 Notifications panel', () => {
     const unread = queryClient.getQueryData<NotificationsPage>(qk.notifications({ unreadOnly: true, limit: 1 }));
     expect(unread?.total).toBe(6);
   });
+
+  it('FE-02: the CRITICAL toast renders an ISO instant in the body in the carrier zone, like the bell', async () => {
+    state.connected = true;
+    renderTopbar();
+    await screen.findByRole('button', { name: 'Notifications, 4 unread' });
+    const handler = state.socketHandlers.get('notification.new');
+    act(() =>
+      handler?.({
+        notification: {
+          id: 'live_iso',
+          type: 'x',
+          title: 'HOS violation',
+          body: 'John Smith: 11-hour limit exceeded at 2026-10-08T18:05:00.000Z.',
+          severity: 'CRITICAL',
+        },
+      }),
+    );
+    expect(await screen.findByText('HOS violation')).toBeInTheDocument();
+    // Carrier zone in the auth fixture is America/New_York → 14:05 EDT.
+    expect(screen.queryByText(/2026-10-08T18:05/)).not.toBeInTheDocument();
+    expect(screen.getByText(/limit exceeded at Oct 08, 14:05/)).toBeInTheDocument();
+  });
 });
 
 describe('11.26 Account menu', () => {
