@@ -8,10 +8,13 @@ export function IdleWarningModal({
   seconds,
   onStay,
   onSignOut,
+  onExpire = onSignOut,
 }: {
   seconds: number;
   onStay: () => void;
   onSignOut: () => void;
+  /** FE-23 — the countdown ran out (the caller may still find activity in another tab). */
+  onExpire?: () => void;
 }) {
   const [remaining, setRemaining] = useState(seconds);
 
@@ -21,8 +24,8 @@ export function IdleWarningModal({
   }, []);
 
   useEffect(() => {
-    if (remaining <= 0) onSignOut();
-  }, [remaining, onSignOut]);
+    if (remaining <= 0) onExpire();
+  }, [remaining, onExpire]);
 
   return (
     <Modal

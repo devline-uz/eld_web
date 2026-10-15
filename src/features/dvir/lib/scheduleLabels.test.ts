@@ -28,4 +28,9 @@ describe('scheduleNextDueLabel', () => {
   it('dash when none', () => {
     expect(scheduleNextDueLabel({ nextDueMi: null, nextDueAt: null })).toBe('—');
   });
+  it('FE-07: the date is the carrier\'s calendar day, whatever the browser zone', () => {
+    // 03:00Z on Nov 8 is still Nov 7 in Denver.
+    expect(scheduleNextDueLabel({ nextDueMi: null, nextDueAt: '2026-11-08T03:00:00.000Z' }, 'America/Denver')).toBe('Nov 07, 2026');
+    expect(scheduleNextDueLabel({ nextDueMi: 12_000, nextDueAt: '2026-11-08T03:00:00.000Z' }, 'Asia/Tokyo')).toBe('12,000 mi · Nov 08, 2026');
+  });
 });

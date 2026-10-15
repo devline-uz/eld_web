@@ -130,7 +130,10 @@ export const driverRosterWindowQuery = (
 });
 
 export function useDriverRosterWindow(serverFilters: Omit<DriverRosterParams, 'page' | 'limit'>, enabled = true) {
-  return useQuery({ ...driverRosterWindowQuery(serverFilters), enabled });
+  // FE-21 — the On duty / Off duty tabs read this window, and duty status changes by the minute:
+  // the `reference` policy (10 min, no poll) left a driver who went OFF on the On duty tab for up
+  // to 10 min while the tab counts (`live`) had already moved. Same `live` policy as server mode.
+  return useQuery({ ...driverRosterWindowQuery(serverFilters), ...typedCachePolicy<OffsetPage<DriverRosterEntry>>('live'), enabled });
 }
 
 /** Rows the segment counters read in one pass; `client.list` walks the API's 200-row maximum. */

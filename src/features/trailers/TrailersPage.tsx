@@ -19,7 +19,7 @@ import { Card } from '@/shared/ui/Card';
 import { InventoryTabs } from '@/shared/ui/InventoryTabs';
 import { DataTable } from '@/shared/ui/DataTable';
 import { Pagination } from '@/shared/ui/Pagination';
-import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
+import { EmptyState, ErrorState, LoadingState, RefreshErrorNotice } from '@/shared/ui/states';
 import { EMPTY_STATE_COPY, searchEmptyState } from '@/shared/ui/copy';
 import { useToast } from '@/shared/ui/Toast';
 import { TrailerModal } from './components/TrailerModal';
@@ -207,9 +207,11 @@ export default function TrailersPage() {
       </div>
 
       <Card padded={false} className="xl:flex xl:min-h-0 xl:flex-col">
+        {/* FE-20 — a failed refetch keeps the loaded rows; the full ErrorState only with no data. */}
+        {list.isError && list.data && <RefreshErrorNotice onRetry={() => void list.refetch()} />}
         {list.isPending ? (
           <LoadingState className="p-4" />
-        ) : list.isError ? (
+        ) : list.isError && !list.data ? (
           <ErrorState onRetry={() => void list.refetch()} />
         ) : total === 0 ? (
           debouncedSearch || segment !== 'ALL' ? (

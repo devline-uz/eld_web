@@ -37,6 +37,20 @@ export function intermediateTripStops<T extends Pick<TripStopRow, 'type' | 'sequ
   return orderTripStops(stops).filter((s) => s !== pickup && s !== delivery);
 }
 
+/** FE-15 — a stop's scheduled time on the board. The route's pickup / delivery show the trip's own
+ * window (`plannedStartAt` / `plannedEndAt`): create copies the window into those two stops, but
+ * `PATCH /trips/:id` cannot change stop times (backend gap), so after an edit of the window the
+ * stops' `scheduledAt` is stale while the window is current. Other stops keep their `scheduledAt`. */
+export function stopScheduledAt<T extends Pick<TripStopRow, 'type' | 'sequence' | 'scheduledAt'>>(
+  trip: { stops: readonly T[]; plannedStartAt?: string | null; plannedEndAt?: string | null },
+  stop: T,
+): string | null {
+  const { pickup, delivery } = tripRouteEnds(trip.stops);
+  if (stop === pickup && trip.plannedStartAt) return trip.plannedStartAt;
+  if (stop === delivery && trip.plannedEndAt) return trip.plannedEndAt;
+  return stop.scheduledAt;
+}
+
 function stopPoint(stop: RouteStop | null): LatLon | null {
   return stop && validLatLon(stop.latitude, stop.longitude) ? { lat: stop.latitude as number, lon: stop.longitude as number } : null;
 }

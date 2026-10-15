@@ -100,6 +100,22 @@ export function ErrorState({
   );
 }
 
+/** FE-20 — a background refetch failed but the last loaded rows are still on screen: say so in one
+ * line above them (non-blocking) instead of replacing them with the full `ErrorState`. */
+export function RefreshErrorNotice({ onRetry }: { onRetry?: () => void }) {
+  return (
+    <div role="status" className="flex items-center gap-2 border-b border-border bg-warning-soft px-4 py-2 text-caption text-text-secondary">
+      <AlertTriangle size={14} strokeWidth={1.75} className="shrink-0 text-warning" aria-hidden />
+      <span className="flex-1">Could not refresh — showing the last loaded data.</span>
+      {onRetry && (
+        <Button variant="link" size="sm" onClick={onRetry}>
+          Retry
+        </Button>
+      )}
+    </div>
+  );
+}
+
 export interface ForbiddenStateProps {
   screenName: string;
   onBack?: () => void;

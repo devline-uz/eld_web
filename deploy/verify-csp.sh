@@ -30,7 +30,11 @@ echo "▸ build → $WORK/dist"
     npx vite build --mode production --outDir "$WORK/dist" --emptyOutDir --logLevel warn
 )
 
-sed "s#^set \$eld_map_hosts .*#set \$eld_map_hosts     \"$MAP_HOST\";#" \
+# The snippet ships the CSP as Report-Only (LV-04); verification always runs it ENFORCING, so this
+# run proves the policy is safe to flip on in production.
+sed -e "s#^set \$eld_map_hosts .*#set \$eld_map_hosts     \"$MAP_HOST\";#" \
+    -e "s#^add_header Content-Security-Policy-Report-Only #add_header Content-Security-Policy #" \
+    -e "s#^\# add_header Content-Security-Policy \$eld_csp always;##" \
   "$WEB/deploy/nginx-security-headers.conf" > "$WORK/security-headers.conf"
 
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=eldadmin.stackyard.uz" \

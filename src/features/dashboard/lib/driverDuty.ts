@@ -61,3 +61,11 @@ export function summarizeDriverDuty(units: DutyUnit[]): DriverDutySummary {
   const onDuty = ON_DUTY_SEGMENTS.reduce((sum, status) => sum + counts[status], 0);
   return { assigned, onDuty, counts };
 }
+
+/** FE-04 — "(ELD offline)" only when every not-live driver's ELD is offline; a mix names the
+ * offline share; none (plausibility cap on an ONLINE ELD) gets no reason. */
+export function notLiveLine(notLive: number, eldOffline: number): string {
+  const who = `${notLive} ${notLive === 1 ? 'driver is' : 'drivers are'} not reporting live`;
+  const reason = eldOffline === 0 ? '' : eldOffline === notLive ? ' (ELD offline)' : ` (${eldOffline} with ELD offline)`;
+  return `${who}${reason} — last known status shown`;
+}

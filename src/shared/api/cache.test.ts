@@ -99,7 +99,12 @@ describe('§6.4 cache policies', () => {
   // WB-056: the backend repo is a sibling checkout, absent in this repo's own CI and on a web-only
   // clone — skip (reason in the test title) instead of failing. Set ELD_REQUIRE_BACKEND_SCHEMA=1
   // wherever both repos are checked out to make a missing schema a hard failure again.
-  const schemaPath = resolve(process.cwd(), '../backend/prisma/schema.prisma');
+  // FE-24: this monorepo names the sibling `eld_backend`; `backend` is kept for other checkouts
+  // (same order as scripts/openapi-spec-path.mjs).
+  const schemaCandidates = ['../eld_backend/prisma/schema.prisma', '../backend/prisma/schema.prisma'].map((rel) =>
+    resolve(process.cwd(), rel),
+  );
+  const schemaPath = schemaCandidates.find((path) => existsSync(path)) ?? schemaCandidates[0]!;
   const skipEnumGuard = !existsSync(schemaPath) && process.env.ELD_REQUIRE_BACKEND_SCHEMA !== '1';
   const enumGuardTitle = skipEnumGuard
     ? `matches the backend Prisma enums — skipped: ${schemaPath} not found (backend repo not checked out)`

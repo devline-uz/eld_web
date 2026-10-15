@@ -24,7 +24,7 @@ import {
   type PickerOption,
 } from '@/shared/ui/DriverPicker';
 import { useToast } from '@/shared/ui/Toast';
-import { useDriversList } from '@/shared/api/drivers';
+import { useDriversList, type DriverRow } from '@/shared/api/drivers';
 import { useVehiclesPicker } from '@/shared/api/vehicles';
 import { useDriverHos } from '@/shared/api/drivers';
 import {
@@ -32,6 +32,7 @@ import {
   useUpdateTrip,
   blocksAssignment,
   isTripNumberTaken,
+  isTripChangedConcurrently,
   isTripNotEditable,
   isTripNotFound,
   tripScheduleConflict,
@@ -48,6 +49,7 @@ import { formatHosHours } from '@/shared/format/hos';
 import {
   PICK_PLACE_MESSAGE,
   TRAILER_LOOKUP_ERROR,
+  TRIP_CHANGED_CONCURRENTLY,
   TRIP_FIELD_NOT_CLEARABLE,
   TRIP_NOT_EDITABLE,
   TRIP_NOT_FOUND,
@@ -81,7 +83,11 @@ const TRIP_LIMITS = {
   rateUsd: 1_000_000,
   /** QA FE-012 — a realistic gross load (the DTO's INT4 cap is 1,000,000). */
   weightLbs: 200_000,
+  /** FE-18 — `estimatedDriveSec` is capped at 10,000,000 s by the DTO: whole hours under that. */
+  estimatedDriveHours: 2_777,
 } as const;
+
+const DRIVE_HOURS_MAX_MESSAGE = `Estimated drive time must be ${TRIP_LIMITS.estimatedDriveHours.toLocaleString('en-US')} h or less.`;
 
 /** LIVE-007 — the windows are typed in the carrier's zone (helpers in `../lib/zonedInput`): the
  * pickup window runs from today through the same day one year from now, both in that zone,
@@ -235,18 +241,29 @@ const SERVER_FIELD_LABEL: Record<string, string> = {
   trailerId: 'Trailer',
   notes: 'Notes',
   stops: 'Stops',
+  estimatedDriveSec: 'Estimated drive time',
   commodity: 'Commodity',
 };
 
-/** `stops.2.name` → `Stop 3 location`; any other path → its label from the table above. */
-function serverFieldLabel(field: string): string | undefined {
+/** `stops.2.name` → `Stop 1 location`; any other path → its label from the table above.
+ * FE-16 — the payload index counts the pickup (and skips blank stops), the form numbers only the
+ * intermediate stops from 1: `stopLabels[i]` is the form's name for payload stop `i` ("Pickup",
+ * "Stop 1", "Delivery"). Without it (nothing was sent) the payload position is used. */
+function serverFieldLabel(field: string, stopLabels?: readonly string[]): string | undefined {
   const stop = /^stops\.(\d+)(?:\.(\w+))?$/.exec(field);
   if (stop) {
-    const n = Number(stop[1]) + 1;
+    const name = stopLabels?.[Number(stop[1])] ?? `Stop ${Number(stop[1]) + 1}`;
     const part = stop[2] === 'scheduledAt' ? 'window' : stop[2] === 'name' || stop[2] === 'address' ? 'location' : null;
-    return part ? `Stop ${n} ${part}` : `Stop ${n}`;
+    return part ? `${name} ${part}` : name;
   }
   return SERVER_FIELD_LABEL[field] ?? SERVER_FIELD_LABEL[field.split('.')[0] ?? field];
+}
+
+/** FE-17 — "Showing 200 of 340 drivers — search by name to find another." when a picker page is capped. */
+function pickerCapHint(page: { items?: unknown[]; total?: number } | undefined, noun: string, by: string): string | undefined {
+  const shown = page?.items?.length ?? 0;
+  const total = page?.total ?? 0;
+  return total > shown ? `Showing ${shown} of ${total} ${noun} — search by ${by} to find another.` : undefined;
 }
 
 function Field({
@@ -400,9 +417,12 @@ export function CreateTripModal({
   const [destinationCoords, setDestinationCoords] = useState<Coords | null>(null);
   /** Rule 6 — a 422 detail with no visible input, and any other rejection, lands here. */
   const [banner, setBanner] = useState<string | null>(null);
+  // FE-14 — the trip changed under the dispatcher (409 status conflict): the banner offers Reload.
+  const [staleTrip, setStaleTrip] = useState(false);
+  const sentStopLabels = useRef<string[]>([]);
   // The banner heads this tall `lg` modal while Create / Save sits in the footer — scrolled down
   // to the rate or the stops, a refusal used to appear out of sight. Bring it into view.
-  const bannerRef = useRef<HTMLParagraphElement>(null);
+  const bannerRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (banner) bannerRef.current?.scrollIntoView?.({ block: 'nearest' });
   }, [banner]);
@@ -536,9 +556,26 @@ export function CreateTripModal({
   const dirty =
     isDirty || estimatedDriveHours !== (original?.hours ?? '') || intermediateStops.length > 0;
 
+  // FE-17 — drivers (one 200-row page) and units (a 500-row lookup) are searched on the server
+  // (`q`, debounced) once the user types, so a fleet past either cap can still find anyone; until
+  // then the Field hint says only the first N are listed.
+  const [driverSearch, setDriverSearch] = useState('');
+  const [unitSearch, setUnitSearch] = useState('');
+  const [debouncedDriverSearch, setDebouncedDriverSearch] = useState('');
+  const [debouncedUnitSearch, setDebouncedUnitSearch] = useState('');
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedDriverSearch(driverSearch.trim());
+      setDebouncedUnitSearch(unitSearch.trim());
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [driverSearch, unitSearch]);
   // QA fix — only ACTIVE drivers can be dispatched (`?status=ACTIVE`).
-  const driversQuery = useDriversList({ limit: 200, status: 'ACTIVE' });
-  const vehiclesQuery = useVehiclesPicker();
+  const driversQuery = useDriversList({ limit: 200, status: 'ACTIVE', q: debouncedDriverSearch || undefined });
+  const vehiclesQuery = useVehiclesPicker(debouncedUnitSearch || undefined);
+  // The picked driver / unit are remembered: a later search can drop them from the result page.
+  const [pickedDriver, setPickedDriver] = useState<DriverRow | null>(null);
+  const [pickedUnit, setPickedUnit] = useState<PickerOption | undefined>(undefined);
   // Trailers are searched on the server (`q` over number + VIN) — the fleet can exceed one 200-row
   // page, so the picker shows the first page of ACTIVE trailers and says so until the user types.
   const [trailerSearch, setTrailerSearch] = useState('');
@@ -599,9 +636,14 @@ export function CreateTripModal({
     [trailersQuery.data],
   );
 
-  const selectedDriver = (driversQuery.data?.items ?? []).find((d) => d.id === driverId) ?? null;
-  const selectedDriverOption = driverOptions.find((o) => o.id === driverId);
-  const selectedUnitOption = unitOptions.find((o) => o.id === vehicleId);
+  const selectedDriver =
+    (driversQuery.data?.items ?? []).find((d) => d.id === driverId) ?? (pickedDriver?.id === driverId ? pickedDriver : null);
+  const selectedDriverOption =
+    driverOptions.find((o) => o.id === driverId) ??
+    (selectedDriver ? { id: selectedDriver.id, name: `${selectedDriver.firstName} ${selectedDriver.lastName}`, context: selectedDriver.homeTerminalName } : undefined);
+  const selectedUnitOption = unitOptions.find((o) => o.id === vehicleId) ?? (pickedUnit?.id === vehicleId ? pickedUnit : undefined);
+  const driverHint = pickerCapHint(driversQuery.data, 'drivers', 'name');
+  const unitHint = pickerCapHint(vehiclesQuery.data, 'units', 'unit number');
   const selectedTrailerOption = trailerId ? pickedTrailer : undefined;
   const trailerTotal = trailersQuery.data?.total ?? 0;
   const trailerShown = trailersQuery.data?.items?.length ?? 0;
@@ -615,6 +657,9 @@ export function CreateTripModal({
 
   const estimatedDriveSec =
     Number(estimatedDriveHours) > 0 ? Math.round(Number(estimatedDriveHours) * 3600) : 0;
+  // FE-18 — 5,000 h used to reach the API and come back as an unlabeled "Number must be less than
+  // or equal to 10000000" banner. It lives outside react-hook-form, so it is checked by hand.
+  const driveHoursError = Number(estimatedDriveHours) > TRIP_LIMITS.estimatedDriveHours ? DRIVE_HOURS_MAX_MESSAGE : null;
   // QA UI-010 — a driver with no drive, shift or cycle time left cannot legally drive at all.
   const driverOutOfHours =
     !driverHos.isLoading &&
@@ -636,7 +681,8 @@ export function CreateTripModal({
   const autoHours = useRef<string | null>(null);
   function applyRouteSummary(summary: RouteSummary) {
     const currentDistance = getValues('distanceMi');
-    if (currentDistance === undefined || currentDistance === autoDistance.current) {
+    // FE-18 — a route under ~80 m rounds to 0.0 mi, which the Distance rule (> 0) then refuses.
+    if (summary.distanceMi > 0 && (currentDistance === undefined || currentDistance === autoDistance.current)) {
       setValue('distanceMi', summary.distanceMi, { shouldDirty: true, shouldValidate: true });
       autoDistance.current = summary.distanceMi;
     }
@@ -665,7 +711,7 @@ export function CreateTripModal({
     // mutate() returns immediately, so RHF's isSubmitting never covered the request — guard on the
     // mutation itself or a double click creates two trips. `isPending` only flips on the next
     // render, so two clicks in the same tick both passed it (QA FE-004): a same-tick ref too.
-    if (submitInFlight.current || createMutation.isPending || assignmentBlocked) return;
+    if (submitInFlight.current || createMutation.isPending || assignmentBlocked || driveHoursError) return;
     // With a geocoder configured, pickup and delivery must be picked places (coordinates), not
     // free text. Without one (`VITE_MAP_API_KEY` unset) free text stays the only option.
     // CODE-058 — a dispatched trip puts its unit (and driver/trailer) on the schedule; without a
@@ -723,6 +769,13 @@ export function CreateTripModal({
         : null,
     ];
     const stops = allStops.filter((stop): stop is CreateTripStopInput => stop !== null);
+    // FE-16 — the form's name for each payload stop, so a server error on `stops.N` reads as the
+    // stop the user sees ("Stop 1 window", "Delivery location"), not its payload position.
+    sentStopLabels.current = [
+      ...(values.origin?.trim() ? ['Pickup'] : []),
+      ...named.map((stop) => `Stop ${intermediateStops.indexOf(stop) + 1}`),
+      ...(values.destination?.trim() ? ['Delivery'] : []),
+    ];
     createMutation.mutate(
       {
         number: values.reference,
@@ -792,6 +845,9 @@ export function CreateTripModal({
     const unmapped: string[] = [];
     for (const [field, message] of Object.entries(error.fieldErrors)) {
       const formField = SERVER_FIELD_MAP[field];
+      // FE-14 — a 409's `details` is conflict metadata (`{ status }`, Prisma `{ target }`), not a
+      // field map: only a known form field is taken from it; the rest falls to the generic message.
+      if (error.status === 409 && !formField) continue;
       // Edit mode renders the trip ID / assignment read-only — their errors go to the banner.
       if (formField && !(editing && READ_ONLY_IN_EDIT.has(formField))) {
         setError(formField, { message });
@@ -799,7 +855,7 @@ export function CreateTripModal({
         continue;
       }
       // No input renders this field's error — rule 6 says it belongs in the banner.
-      const label = serverFieldLabel(field);
+      const label = serverFieldLabel(field, editing ? undefined : sentStopLabels.current);
       const sentence = /[.!?]$/.test(message) ? message : `${message}.`;
       unmapped.push(label ? `${label}: ${sentence}` : sentence);
     }
@@ -817,8 +873,9 @@ export function CreateTripModal({
 
   /** Edit mode — `PATCH /trips/:id` with only the editable fields that differ from the trip. */
   function onSubmitEdit(values: CreateTripValues) {
-    if (!trip || !original || submitInFlight.current || updateMutation.isPending) return;
+    if (!trip || !original || submitInFlight.current || updateMutation.isPending || driveHoursError) return;
     setBanner(null);
+    setStaleTrip(false);
     const patch: UpdateTripPayload = {};
     let blocked = false;
 
@@ -900,6 +957,14 @@ export function CreateTripModal({
           onClose();
           return;
         }
+        // FE-14 — 409 status conflict (the driver started it / another dispatcher changed it): the
+        // server's sentence, not the raw `details.status` ("IN_PROGRESS."); the board is refetched
+        // (`useUpdateTrip`) and Reload closes this stale form so it can be reopened on fresh data.
+        if (isTripChangedConcurrently(error)) {
+          setBanner(error.message && error.message !== 'Request failed' ? error.message : TRIP_CHANGED_CONCURRENTLY);
+          setStaleTrip(true);
+          return;
+        }
         if (applyServerFieldErrors(error)) return;
         showGenericError(error);
       },
@@ -968,9 +1033,14 @@ export function CreateTripModal({
         className="flex flex-col gap-4"
       >
         {banner && (
-          <p ref={bannerRef} role="alert" className="rounded-md bg-danger-soft p-3 text-body text-danger">
-            {banner}
-          </p>
+          <div ref={bannerRef} role="alert" className="flex items-center justify-between gap-3 rounded-md bg-danger-soft p-3 text-body text-danger">
+            <p>{banner}</p>
+            {staleTrip && (
+              <Button type="button" variant="secondary" size="sm" onClick={onClose}>
+                Reload
+              </Button>
+            )}
+          </div>
         )}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <Field label="Trip / load ID" required={!editing} error={errors.reference?.message}>
@@ -1189,13 +1259,15 @@ export function CreateTripModal({
             </div>
           ) : (
             <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <Field label="Driver" error={errors.driverId?.message}>
+              <Field label="Driver" error={errors.driverId?.message} hint={driverHint}>
                 <DriverPicker
                   value={selectedDriverOption}
                   options={driverOptions}
-                  onSelect={(o) =>
-                    setValue('driverId', o.id, { shouldValidate: true, shouldDirty: true })
-                  }
+                  onSearch={setDriverSearch}
+                  onSelect={(o) => {
+                    setPickedDriver((driversQuery.data?.items ?? []).find((d) => d.id === o.id) ?? null);
+                    setValue('driverId', o.id, { shouldValidate: true, shouldDirty: true });
+                  }}
                   placeholder="Select a driver"
                 />
                 {driverId && driverOutOfHours && (
@@ -1214,13 +1286,15 @@ export function CreateTripModal({
                   </span>
                 )}
               </Field>
-              <Field label="Unit" required error={errors.vehicleId?.message}>
+              <Field label="Unit" required error={errors.vehicleId?.message} hint={unitHint}>
                 <UnitPicker
                   value={selectedUnitOption}
                   options={unitOptions}
-                  onSelect={(o) =>
-                    setValue('vehicleId', o.id, { shouldValidate: true, shouldDirty: true })
-                  }
+                  onSearch={setUnitSearch}
+                  onSelect={(o) => {
+                    setPickedUnit(o);
+                    setValue('vehicleId', o.id, { shouldValidate: true, shouldDirty: true });
+                  }}
                   placeholder="Select a unit"
                 />
               </Field>
@@ -1273,10 +1347,11 @@ export function CreateTripModal({
               className={inputClass}
             />
           </Field>
-          <Field label="Estimated drive time" hint="Drives the HOS check below.">
+          <Field label="Estimated drive time" hint="Drives the HOS check below." error={driveHoursError ?? undefined}>
             <input
               type="number"
               min={0}
+              max={TRIP_LIMITS.estimatedDriveHours}
               step={0.5}
               inputMode="decimal"
               value={estimatedDriveHours}

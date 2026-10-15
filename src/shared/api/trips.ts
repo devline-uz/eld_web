@@ -636,7 +636,7 @@ export function useUpdateTrip(tripId: string) {
     // A 404 (deleted elsewhere) or 409 `TRIP_NOT_EDITABLE` (delivered / cancelled since the board
     // loaded) means the cached row is stale — refetch so the board stops offering the edit.
     onError: (error) => {
-      if (isTripNotFound(error) || isTripNotEditable(error)) void queryClient.invalidateQueries({ queryKey: qkRoot.trips });
+      if (isTripNotFound(error) || isTripNotEditable(error) || isTripChangedConcurrently(error)) void queryClient.invalidateQueries({ queryKey: qkRoot.trips });
     },
   });
 }
@@ -651,6 +651,13 @@ export const isTripDeletable = (trip: Pick<TripRow, 'status'>): boolean => trip.
 /** 409 `TRIP_NOT_EDITABLE` — `PATCH /trips/:id` on a DELIVERED / CANCELLED trip. */
 export function isTripNotEditable(error: unknown): boolean {
   return error instanceof ApiError && error.code === 'TRIP_NOT_EDITABLE';
+}
+
+/** FE-14 — 409 `CONFLICT` with `details: { status }` (backend CODE-024 `tripStatusChanged`): the
+ * driver app or another dispatcher moved the trip's status between the read and the write. The
+ * `status` in `details` is the trip's new status, not a form field. */
+export function isTripChangedConcurrently(error: unknown): error is ApiError {
+  return error instanceof ApiError && error.status === 409 && error.code === 'CONFLICT' && typeof error.details.status === 'string';
 }
 
 /** 409 `TRIP_IN_PROGRESS` — `DELETE /trips/:id` on a trip the driver is running. */

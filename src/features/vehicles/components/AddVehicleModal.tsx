@@ -108,8 +108,15 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
   // already carries it (`eldSerial`); the unit profile passes a plain `VehicleRow`.
   const devicesLookup = useDevicesLookup();
   const rowSerial = vehicle && 'eldSerial' in vehicle ? (vehicle as { eldSerial?: string | null }).eldSerial : undefined;
+  // FE-08 — the vehicle's own `eldSerial` (from `/vehicles`, CODE-085) wins, including `null`
+  // ("not paired"): falling back to the reference-cached `/devices` lookup on `null` prefilled a
+  // stale serial and re-paired it on save. Only an older backend that omits the field falls back.
   const pairedSerial =
-    rowSerial ?? (vehicle ? devicesLookup.data?.items.find((d) => d.vehicleId === vehicle.id)?.serial : undefined) ?? '';
+    (rowSerial !== undefined
+      ? rowSerial
+      : vehicle
+        ? devicesLookup.data?.items.find((d) => d.vehicleId === vehicle.id)?.serial
+        : undefined) ?? '';
 
   const {
     register,

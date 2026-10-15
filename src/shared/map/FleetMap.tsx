@@ -72,6 +72,8 @@ export interface FleetMapProps {
   trail?: ReadonlyArray<readonly [number, number]>;
   /** Small embedded preview (Dashboard card): the wheel scrolls the page, never zooms the map. */
   preview?: boolean;
+  /** FE-06 — "now" on the server's clock, to age each fix; a skewed browser clock froze markers. */
+  now?: () => number;
 }
 
 const SOURCE_ID = 'fleet-units';
@@ -560,6 +562,7 @@ export default function FleetMap({
   onFollowChange,
   trail,
   preview = false,
+  now = Date.now,
 }: FleetMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -716,7 +719,7 @@ export default function FleetMap({
     const animate = canAnimate();
     if (animate) {
       const headings = overlayRef.current.headings;
-      const wallNow = Date.now();
+      const wallNow = now();
       motionRef.current!.update(
         valid.map((u) => ({
           id: u.id,
@@ -775,7 +778,7 @@ export default function FleetMap({
       if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
       frameRef.current = null;
     };
-  }, [units, ready]);
+  }, [units, ready, now]);
 
   /** The W-02 layer chips — `visibility` only, so hiding a layer never drops its source data. */
   useEffect(() => {

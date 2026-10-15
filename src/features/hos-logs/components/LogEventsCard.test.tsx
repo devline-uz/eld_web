@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { ToastProvider } from '@/shared/ui/Toast';
 import { RECORD_ORIGIN, RECORD_STATUS, type LogEventView } from '@/shared/api/hosLogs';
 import { LogEventsCard } from './LogEventsCard';
+import { VIRTUALIZE_ABOVE } from '@/shared/ui/virtualRows';
 import { EVENT_WINDOW, eventWindowSize } from '../eventWindow';
 
 vi.mock('@/shared/auth/usePermission', () => ({ usePermission: () => ({ can: () => false }) }));
@@ -65,10 +66,13 @@ describe('LogEventsCard windowing', () => {
     const original = Element.prototype.scrollIntoView;
     Element.prototype.scrollIntoView = scroll;
     try {
-      renderCard(2000);
+      // FE-25: the smallest day that is still windowed (one row past the threshold). Rendering and
+      // then re-rendering all 2,000 rows timed out (20 s) under full-suite load.
+      const total = VIRTUALIZE_ABOVE + 1;
+      renderCard(total);
       expect(bodyRows()).toHaveLength(EVENT_WINDOW);
-      await userEvent.setup().click(screen.getByRole('button', { name: 'View all events' }));
-      expect(bodyRows()).toHaveLength(2000);
+      await userEvent.setup({ delay: null }).click(screen.getByRole('button', { name: 'View all events' }));
+      expect(bodyRows()).toHaveLength(total);
       expect(scroll).toHaveBeenCalled();
     } finally {
       Element.prototype.scrollIntoView = original;

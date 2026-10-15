@@ -47,6 +47,12 @@ export const vehicleSchema = z
   .refine((v) => !v.licensePlate || Boolean(v.licenseState), {
     path: ['licenseState'],
     message: M.plateStateRequired,
+  })
+  // FE-11 — and a state means nothing without its plate: it used to be dropped on submit without a
+  // word (create), and clearing the plate on edit silently erased the state as well.
+  .refine((v) => !v.licenseState || Boolean(v.licensePlate), {
+    path: ['licensePlate'],
+    message: M.plateRequiredForState,
   });
 export type VehicleFormValues = z.infer<typeof vehicleSchema>;
 

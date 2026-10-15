@@ -14,7 +14,7 @@ import { Avatar } from '@/shared/ui/Avatar';
 import { DataTable } from '@/shared/ui/DataTable';
 import { Card, SectionHeader } from '@/shared/ui/Card';
 import { ConfirmDelete, Modal } from '@/shared/ui/Modal';
-import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
+import { EmptyState, ErrorState, LoadingState, RefreshErrorNotice } from '@/shared/ui/states';
 import { searchEmptyState } from '@/shared/ui/copy';
 import { useToast } from '@/shared/ui/Toast';
 import { formatRelative } from '@/shared/format/relative';
@@ -43,6 +43,7 @@ import { SETTINGS_REASON, SETTINGS_TOAST, countLabel } from './lib/copy';
 import { usePageHeader } from '@/app/layouts/Topbar';
 
 type Segment = 'ALL' | 'ADMIN' | 'FLEET_MANAGER' | 'DISPATCHER' | 'VIEWER';
+const SEGMENTS: readonly Segment[] = ['ALL', 'ADMIN', 'FLEET_MANAGER', 'DISPATCHER', 'VIEWER'];
 
 const ROLE_BADGE_TONE: Record<string, 'violet' | 'info' | 'success' | 'neutral'> = {
   SUPER_ADMIN: 'violet',
@@ -69,8 +70,6 @@ export default function UsersPage() {
   const updateUser = useUpdateUser();
   const deleteUser = useDeleteUser();
 
-  const [segment, setSegment] = useState<Segment>('ALL');
-  const [search, setSearch] = useState('');
   const [inviteOpen, setInviteOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<{ user: UserRow; mode: 'profile' | 'role' } | null>(
     null,
@@ -84,6 +83,24 @@ export default function UsersPage() {
     reason: 'self' | 'lastAdmin';
   } | null>(null);
   const [params, setParams] = useSearchParams();
+  // FE-22 — the role tab and the search live in the URL like the 11.23 filters (a reload or a
+  // shared link keeps them). The box keeps its own text so typing never waits on the router.
+  const rawSegment = params.get('segment');
+  const segment: Segment = SEGMENTS.includes(rawSegment as Segment) ? (rawSegment as Segment) : 'ALL';
+  const [search, setSearchState] = useState(() => params.get('q') ?? '');
+  function setListParam(key: 'segment' | 'q', value: string | null) {
+    const next = new URLSearchParams(params);
+    if (value) next.set(key, value);
+    else next.delete(key);
+    setParams(next, { replace: true });
+  }
+  function setSegment(next: Segment) {
+    setListParam('segment', next === 'ALL' ? null : next);
+  }
+  function setSearch(next: string) {
+    setSearchState(next);
+    setListParam('q', next);
+  }
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [filtersRevision, setFiltersRevision] = useState(0);
   const filters = useMemo(() => parseUserFilters(params), [params]);
@@ -360,9 +377,11 @@ export default function UsersPage() {
       />
 
       <Card padded={false}>
+        {/* FE-20 — a failed refetch keeps the loaded rows; the full ErrorState only with no data. */}
+        {usersQuery.isError && usersQuery.data && <RefreshErrorNotice onRetry={() => void usersQuery.refetch()} />}
         {isLoading ? (
           <LoadingState className="p-4" />
-        ) : usersQuery.isError ? (
+        ) : usersQuery.isError && !usersQuery.data ? (
           <ErrorState onRetry={() => usersQuery.refetch()} />
         ) : filtered.length === 0 ? (
           search || countActiveUserFilters(filters) > 0 ? (
