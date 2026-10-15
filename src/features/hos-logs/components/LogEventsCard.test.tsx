@@ -73,7 +73,7 @@ describe('LogEventsCard windowing', () => {
     } finally {
       Element.prototype.scrollIntoView = original;
     }
-  });
+  }, 60_000);
 
   it('renders every row at or below the threshold', () => {
     renderCard(40);

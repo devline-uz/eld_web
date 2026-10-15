@@ -9,8 +9,7 @@ import { openapi } from './openapi';
  * the telemetry read path) shipped in backend Phase 13 (2026-09-24) and was removed; a new entry
  * needs a B-NN id in backend-gaps.md. */
 const KNOWN_GAPS = new Set<string>([
-  // B-272 — client error intake, being built in parallel (WD-119).
-  '/api/client-errors',
+  // B-272 (/api/client-errors) shipped and is documented in openapi.json — removed.
 ]);
 
 const SOURCE = readFileSync(

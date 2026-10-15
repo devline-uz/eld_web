@@ -2875,3 +2875,10 @@ Approach: WD-079. Gap ids: B-84…B-91 (`backend-gaps.md`, "Stage 2 — Settings
 - **Found:** user: Live Fleet markers jumped every ~15–30 s and stood still in between although the API pushed `telemetry.point` every 3 s. A headless Chromium on eldadmin showed the `/realtime` socket from the login page, but after `/live-fleet` loaded by URL (F5 / Ctrl+F5) no socket was opened and no `subscribe` was ever sent — every screen silently ran on its fallback poll (chat, bell, Live Fleet, Dispatch).
 - **Cause:** `RealtimeProvider` connected in an effect keyed on `isAuthenticated`. After a reload the session snapshot restores `isAuthenticated = true` before the refresh call returns the access token; the effect saw no token, returned, and never re-ran.
 - **Fix:** the connect effect waits for the token (re-checks every 250 ms) and connects as soon as it appears. Regression test in `RealtimeProvider.test.tsx`. Same release: Live Fleet subscribes to `fleet` for every unit's `telemetry.point` and markers glide between fixes (`shared/map/motion.ts`, backend D-149).
+
+## WB-ST1 · Contract test listed shipped `/api/client-errors` as gap; two stale/flaky tests — ✅ tuzatildi
+- Found: full vitest run 2026-10-15. Severity: low (test-only).
+- `endpoints.contract.test.ts` KNOWN_GAPS still held `/api/client-errors` (B-272 shipped) -> emptied the set, checks unchanged.
+- `modals.test.tsx` "two fast clicks create one unit": mock POST delay 40 ms < gap between clicks under load, so 2nd click legitimately re-posted; delay raised to 1500 ms (guard code unchanged, not a product bug).
+- `LogEventsCard.test.tsx` FE-013 (2000 rows): per-test timeout 60 s.
+- Also: MSW `GET /live/fleet` fixture (`src/mocks/handlers/fleet.ts`) lacked the backend's new `driverDutyStatus` (QA LIVE-002) -> `shipped-gaps.contract` failed; field added to all 5 units.

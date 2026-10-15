@@ -354,7 +354,7 @@ describe('11.2 Add vehicle — double submit', () => {
     server.use(
       http.post(url(endpoints.vehicles.create), async () => {
         posts += 1;
-        await new Promise((r) => setTimeout(r, 40));
+        await new Promise((r) => setTimeout(r, 1500));
         return ok({ ...VEHICLE, id: 'veh_new' });
       }),
     );
