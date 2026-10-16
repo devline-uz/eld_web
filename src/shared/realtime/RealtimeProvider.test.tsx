@@ -131,14 +131,31 @@ describe('RealtimeProvider', () => {
     expect(invalidateSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('treats a server-rejected token as a sign-out path, not a retry', async () => {
-    const queryClient = new QueryClient();
-    renderProvider(queryClient);
+  it('an expired token on the socket refreshes and reconnects instead of signing out', async () => {
+    refreshAccessToken.mockResolvedValueOnce('fresh-token');
+    renderProvider(new QueryClient());
+    await waitFor(() => expect(lastSocket).not.toBeNull());
+    act(() => lastSocket!.trigger('connect'));
+
+    act(() => lastSocket!.trigger('disconnect', 'io server disconnect'));
+
+    await waitFor(() => expect(lastSocket!.connect).toHaveBeenCalled());
+    expect(lastSocket!.auth).toEqual({ token: 'fresh-token' });
+    expect(signOut).not.toHaveBeenCalled();
+    // not an access change: no /auth/me re-read
+    expect(refreshUser).not.toHaveBeenCalled();
+  });
+
+  it('a server-rejected socket whose refresh fails leaves the sign-out to the refresh path', async () => {
+    refreshAccessToken.mockRejectedValueOnce(new Error('401'));
+    renderProvider(new QueryClient());
     await waitFor(() => expect(lastSocket).not.toBeNull());
 
     act(() => lastSocket!.trigger('disconnect', 'io server disconnect'));
 
-    expect(signOut).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(refreshAccessToken).toHaveBeenCalled());
+    expect(lastSocket!.connect).not.toHaveBeenCalled();
+    expect(signOut).not.toHaveBeenCalled();
   });
 
   describe('CODE-012 — auth.revoked (access changed on the server)', () => {
