@@ -1,8 +1,8 @@
 // owner: web-vehicles-drivers — 11.2 Add vehicle / Edit unit (web/tz.md §11.2). `vehicles` FULL.
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useForm } from 'react-hook-form';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { useToast } from '@/shared/ui/Toast';
@@ -12,7 +12,7 @@ import { LIMITS, VALIDATION_MESSAGES } from '@/shared/forms/messages';
 import { nonNegativeIntInputProps } from '@/shared/forms/nonNegativeIntInput';
 import { clearable } from '@/shared/forms/clearable';
 import { useCreateVehicle, useUpdateVehicle, type VehicleRow } from '@/shared/api/vehicles';
-import { useDevicesLookup } from '@/shared/api/lookups';
+import { devicesLookupQuery } from '@/shared/api/lookups';
 import { ApiError, formErrorMessage } from '@/shared/api/errors';
 import { conflictField } from '@/shared/api/conflicts';
 import {
@@ -106,7 +106,9 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
   // Fills the `/devices` cache so the ELD-serial pre-check below has something to compare against,
   // and (LIVE-016) tells the edit form which serial the unit is paired with today. The table row
   // already carries it (`eldSerial`); the unit profile passes a plain `VehicleRow`.
-  const devicesLookup = useDevicesLookup();
+  // The ELD-serial dropdown lists this inventory, so it is re-read whenever the modal opens — a
+  // device registered or freed a moment ago must show up.
+  const devicesLookup = useQuery({ ...devicesLookupQuery(), refetchOnMount: 'always' });
   const rowSerial = vehicle && 'eldSerial' in vehicle ? (vehicle as { eldSerial?: string | null }).eldSerial : undefined;
   // FE-08 — the vehicle's own `eldSerial` (from `/vehicles`, CODE-085) wins, including `null`
   // ("not paired"): falling back to the reference-cached `/devices` lookup on `null` prefilled a
@@ -117,6 +119,15 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
       : vehicle
         ? devicesLookup.data?.items.find((d) => d.vehicleId === vehicle.id)?.serial
         : undefined) ?? '';
+
+  /** Registered devices not installed in any unit (plus, on edit, the unit's own device). */
+  const serialOptions = useMemo(() => {
+    const free = (devicesLookup.data?.items ?? [])
+      .filter((d) => d.status === 'UNASSIGNED' && !d.vehicleId)
+      .map((d) => d.serial);
+    if (pairedSerial && !free.includes(pairedSerial)) free.unshift(pairedSerial);
+    return free.sort((a, b) => a.localeCompare(b));
+  }, [devicesLookup.data, pairedSerial]);
 
   const {
     register,
@@ -287,7 +298,20 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
             <input {...register('unitNumber')} placeholder="e.g. 126" disabled={submitting} className={inputClass} />
           </Field>
           <Field label="ELD serial" error={errors.deviceId?.message}>
-            <input {...register('deviceId')} placeholder="PT30_1C4F" maxLength={LIMITS.vehicleEldSerialMax} disabled={submitting} className={inputClass} />
+            <select {...register('deviceId')} disabled={submitting || devicesLookup.isPending} className={inputClass}>
+              <option value="">
+                {devicesLookup.isPending
+                  ? 'Loading devices…'
+                  : serialOptions.length === 0
+                    ? 'No unassigned ELD devices'
+                    : 'Not paired'}
+              </option>
+              {serialOptions.map((serial) => (
+                <option key={serial} value={serial}>
+                  {serial}
+                </option>
+              ))}
+            </select>
           </Field>
         </div>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">

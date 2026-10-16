@@ -224,7 +224,7 @@ describe('11.2 Edit unit — clearing optional fields', () => {
     await user.clear(screen.getByLabelText(/License plate/));
     await user.clear(screen.getByLabelText(/Issuing state/));
     await user.clear(screen.getByLabelText(/Notes/));
-    await user.clear(screen.getByLabelText(/ELD serial/));
+    await user.selectOptions(screen.getByLabelText(/ELD serial/), '');
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await screen.findByText('Unit 101 updated');
@@ -461,7 +461,7 @@ describe('11.2 Add vehicle — double submit', () => {
 
     await user.type(screen.getByPlaceholderText('e.g. 126'), '126');
     await user.type(screen.getByLabelText(/^VIN/), '1FUJGLDR8LLLL9999');
-    const [make, model] = screen.getAllByRole('textbox').slice(2);
+    const [make, model] = screen.getAllByRole('textbox').slice(1);
     await user.type(make!, 'Freightliner');
     await user.type(model!, 'Cascadia');
 
@@ -746,5 +746,37 @@ describe('11.6 Import vehicles — no invented state', () => {
 
     for (const box of screen.getAllByRole('checkbox')) expect(box).toBeEnabled();
     for (const select of screen.getAllByRole('combobox')) expect(select).toBeEnabled();
+  });
+});
+
+describe('11.2 Add vehicle — ELD serial dropdown', () => {
+  it('lists only registered devices that are not installed in a unit', async () => {
+    const device = (serial: string, status: string, vehicleId: string | null) => ({
+      id: `dev_${serial}`,
+      serial,
+      model: 'PT30',
+      status,
+      vehicleId,
+      bleState: 'DISCONNECTED',
+      firmwareVersion: null,
+      firmwareOutdated: false,
+      lastHeartbeatAt: null,
+    });
+    server.use(
+      http.get(url(endpoints.devices.list), () =>
+        ok({
+          items: [device('PT30_FREE', 'UNASSIGNED', null), device('PT30_USED', 'ASSIGNED', 'veh_9'), device('PT30_BAD1', 'FAULTY', null)],
+          page: 1,
+          limit: 500,
+          total: 3,
+          totalPages: 1,
+        }),
+      ),
+    );
+    renderWithProviders(<AddVehicleModal onClose={() => {}} />);
+
+    expect(await screen.findByRole('option', { name: 'PT30_FREE' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'PT30_USED' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'PT30_BAD1' })).not.toBeInTheDocument();
   });
 });
