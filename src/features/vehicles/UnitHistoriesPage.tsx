@@ -36,6 +36,8 @@ export default function UnitHistoriesPage() {
   const carrierTz = useCarrierTimezone();
   // "Today" is the carrier's calendar day, not the UTC one (a UTC date is tomorrow in the US evening).
   const date = params.get('date') ?? todayInTz(carrierTz);
+  // F3-26 — a past `?date=` is named, never called "today".
+  const dayLabel = date === todayInTz(carrierTz) ? 'today' : `on ${formatLocal(`${date}T00:00:00`, 'shortDate')}`;
   const [segmentFilter, setSegmentFilter] = useState<SegmentFilter>('ALL');
 
   const vehicleQuery = useVehicle(id);
@@ -411,7 +413,7 @@ export default function UnitHistoriesPage() {
           <div className="grid grid-cols-1 xl:grid-cols-[1fr_348px] gap-4">
             <Card padded={false}>
               <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 p-4 pb-0 sm:p-card sm:pb-0">
-                <SectionHeader title="Movement segments" subtitle={`${segments.length} segments today · drive, stop and idle`} />
+                <SectionHeader title="Movement segments" subtitle={`${segments.length} segments ${dayLabel} · drive, stop and idle`} />
                 {hasTrack && (
                   <Button variant="ghost" size="sm" onClick={() => setHoveredMarker(hoveredMarker ? null : (segments[0]?.marker ?? null))}>
                     View on map

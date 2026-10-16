@@ -31,6 +31,8 @@ const TEMPLATE_COLUMNS = [
   'fuelType',
   'odometerMi',
   'notes',
+  // F3-16 — the only column `pairDevices` pairs from (an `eldSerial` column is sent as this too).
+  'deviceSerial',
 ];
 
 export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
@@ -63,6 +65,7 @@ export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
             '',
             '',
             'DIESEL',
+            '',
             '',
             '',
           ],
@@ -278,7 +281,7 @@ export function ImportVehiclesModal({ onClose }: { onClose: () => void }) {
             checked={pairDevices}
             onChange={(e) => setPairDevices(e.target.checked)}
           />
-          Pair ELD devices automatically — match the ELD serial column to unpaired devices
+          Pair ELD devices automatically — match the deviceSerial column to unpaired devices
         </label>
         <label className="flex items-center gap-2 text-body text-text">
           <input

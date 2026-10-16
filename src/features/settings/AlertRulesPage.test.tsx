@@ -11,8 +11,15 @@ import { endpoints } from '@/shared/api/endpoints';
 import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/client';
 import { ToastProvider } from '@/shared/ui/Toast';
 import AlertRulesPage from './AlertRulesPage';
+import type * as AuthProviderModule from '@/shared/auth/AuthProvider';
 
 let canFull = true;
+// F3-11 — `/auth/me`'s `hasComplianceEmail` (undefined: no session / older backend).
+const session = vi.hoisted(() => ({ hasComplianceEmail: undefined as boolean | undefined }));
+vi.mock('@/shared/auth/AuthProvider', async (importOriginal) => ({
+  ...(await importOriginal<typeof AuthProviderModule>()),
+  useOptionalAuth: () => ({ user: { homeTerminalTimezone: 'America/New_York', hasComplianceEmail: session.hasComplianceEmail } }),
+}));
 vi.mock('@/shared/auth/usePermission', () => ({
   usePermission: () => ({ can: (_key: string, level?: string) => (level === 'FULL' ? canFull : true) }),
 }));
@@ -35,7 +42,7 @@ const RULE = {
   severity: 'CRITICAL',
   conditions: [{ event: 'hos_violation' }],
   channels: ['IN_APP', 'EMAIL'],
-  recipients: { roles: ['Fleet managers'] },
+  recipients: { roles: ['FLEET_MANAGER'] },
   enabled: true,
 };
 
@@ -44,6 +51,7 @@ afterEach(() => {
   server.resetHandlers();
   resetAuthBridge();
   canFull = true;
+  session.hasComplianceEmail = undefined;
 });
 afterAll(() => server.close());
 
@@ -59,6 +67,43 @@ describe('AlertRulesPage — W-21', () => {
     await screen.findByText('No alert rules yet');
     expect(screen.getByText('Not available')).toBeInTheDocument();
     expect(screen.getByText(/SMS is not part of this product/)).toBeInTheDocument();
+  });
+
+  // F3-11 — a Fleet Manager has alert rules FULL but no `carrierSettings`: GET /carrier is a 403,
+  // which said "No compliance email set" even when one is set.
+  it.each([
+    [true, 'Compliance email is set on the company profile (managed by an admin)'],
+    [false, 'No compliance email set on the company profile'],
+  ])('F3-11: a 403 on GET /carrier reads `hasComplianceEmail` from the session (%s)', async (has, text) => {
+    session.hasComplianceEmail = has;
+    server.use(
+      http.get(url(endpoints.alertRules.list), () => ok([])),
+      http.get(url(endpoints.carrier.root), () => fail(403, 'FORBIDDEN', 'Forbidden')),
+    );
+    renderPage();
+    await screen.findByText('No alert rules yet');
+    expect(await screen.findByText(text)).toBeInTheDocument();
+  });
+
+  it('F3-11: a 403 with no `hasComplianceEmail` claims nothing', async () => {
+    server.use(
+      http.get(url(endpoints.alertRules.list), () => ok([])),
+      http.get(url(endpoints.carrier.root), () => fail(403, 'FORBIDDEN', 'Forbidden')),
+    );
+    renderPage();
+    await screen.findByText('No alert rules yet');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.queryByText('No compliance email set on the company profile')).not.toBeInTheDocument();
+  });
+
+  it('F3-11: names the compliance email, or says none is set, when GET /carrier answers', async () => {
+    server.use(
+      http.get(url(endpoints.alertRules.list), () => ok([])),
+      http.get(url(endpoints.carrier.root), () => ok({ id: 'carrier', name: 'Acme', timezone: 'America/New_York', complianceEmail: null })),
+    );
+    session.hasComplianceEmail = true;
+    renderPage();
+    expect(await screen.findByText('No compliance email set on the company profile')).toBeInTheDocument();
   });
 
   it('shows the empty state, then an error state on failure', async () => {
@@ -91,6 +136,18 @@ describe('AlertRulesPage — W-21', () => {
     await user.type(screen.getByPlaceholderText('Search rule…'), 'Speeding');
     expect(screen.getByText('Speeding')).toBeInTheDocument();
     expect(screen.queryByText('HOS violation')).not.toBeInTheDocument();
+  });
+
+  it('shows recipient role keys and legacy labels as human labels (F3-01)', async () => {
+    const legacy = { ...RULE, id: 'alr_2', name: 'Legacy rule', recipients: { roles: ['Dispatchers'] } };
+    const seeded = { ...RULE, id: 'alr_3', name: 'Seeded rule', recipients: { roles: ['SUPER_ADMIN', 'ADMIN', 'FLEET_MANAGER', 'DISPATCHER'] } };
+    server.use(http.get(url(endpoints.alertRules.list), () => ok([RULE, legacy, seeded])));
+    renderPage();
+    await screen.findByText('HOS violation');
+    expect(screen.getByText('Fleet managers')).toBeInTheDocument();
+    expect(screen.getByText('Dispatchers')).toBeInTheDocument();
+    expect(screen.getByText('Super Admin, Admins, Fleet managers, Dispatchers')).toBeInTheDocument();
+    expect(screen.queryByText(/FLEET_MANAGER/)).not.toBeInTheDocument();
   });
 
   it('renders a muted rule with no recipients as "—" and Muted', async () => {

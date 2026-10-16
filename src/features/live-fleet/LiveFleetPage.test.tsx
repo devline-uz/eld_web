@@ -7,7 +7,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
-import { ok, url } from '@/mocks/envelope';
+import { fail, ok, url } from '@/mocks/envelope';
 import { endpoints } from '@/shared/api/endpoints';
 import { EMPTY_STATE_COPY } from '@/shared/ui/copy';
 import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/client';
@@ -104,6 +104,35 @@ describe('W-02 Live Fleet', () => {
     expect(within(oos).queryByText('Inactive')).not.toBeInTheDocument();
     expect(within(oos).getByText('No device')).toBeInTheDocument();
   });
+
+  it('F3-03: a failed 30 s poll keeps the map mounted and the unit list, with a non-blocking notice', async () => {
+    let failNow = false;
+    const unit = {
+      vehicleId: 'v1', unitNumber: '101', driverId: 'd1', driverName: 'John Smith', driverPhone: null,
+      dutyStatus: 'DRIVING', speedMph: 55, headingDeg: 90, odometerMi: 1000, lat: 40, lon: -90,
+      locationLabel: 'Somewhere', lastSeenAt: new Date().toISOString(), driveRemainingSec: 3600, shiftEndsAt: null,
+      eldSerial: 'PT30_1', bleState: 'CONNECTED', recordStatus: 'ACTIVE', connectivity: 'ONLINE', isStale: false, staleSince: null,
+    };
+    server.use(
+      http.get(url(endpoints.live.fleet), () =>
+        failNow ? fail(503, 'SERVICE_UNAVAILABLE', 'Down.') : ok({ items: [unit], generatedAt: new Date().toISOString() }),
+      ),
+    );
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderPage('/live-fleet', queryClient);
+    expect(await screen.findByText('Unit 101')).toBeInTheDocument();
+    const map = await screen.findByTestId('fleet-map');
+    failNow = true;
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: qk.liveFleet() }).catch(() => {});
+    });
+    expect(
+      await screen.findByText('Could not refresh — showing the last loaded data.', {}, { timeout: 10000 }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId('fleet-map')).toBe(map);
+    expect(screen.getByText('Unit 101')).toBeInTheDocument();
+    expect(screen.queryByText('Map could not be loaded')).toBeNull();
+  }, 20000);
 
   it('renders the exact empty-state copy when no units are reporting', async () => {
     server.use(http.get(url(endpoints.live.fleet), () => ok({ items: [], generatedAt: new Date().toISOString() })));
@@ -397,6 +426,53 @@ describe('W-02 Live Fleet — stage 3', () => {
     await user.click(close);
     expect(screen.queryByRole('heading', { name: 'Unit #104' })).not.toBeInTheDocument();
     expect(screen.getByTestId('location')).toHaveTextContent(/^\/live-fleet$/);
+  });
+
+  it('F3-25: selecting a unit, searching and picking a segment are kept in the URL; a reload restores them', async () => {
+    const user = userEvent.setup();
+    const { unmount } = renderPage('/live-fleet?unit=veh_2');
+    expect(await screen.findByRole('heading', { name: 'Unit #104' }, { timeout: 8000 })).toBeInTheDocument();
+
+    await user.click(screen.getByText('Unit #101').closest('button')!);
+    expect(await screen.findByRole('heading', { name: 'Unit #101' })).toBeInTheDocument();
+    expect(screen.getByTestId('location')).toHaveTextContent('unit=veh_1');
+
+    await user.click(screen.getByRole('button', { name: /^Driving/ }));
+    await user.type(screen.getByRole('searchbox', { name: 'Search units' }), '101');
+    const location = screen.getByTestId('location').textContent!;
+    expect(location).toContain('segment=DRIVING');
+    expect(location).toContain('q=101');
+
+    // Closing the card drops only `unit`, never the search or the segment.
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.getByTestId('location')).not.toHaveTextContent('unit=');
+    expect(screen.getByTestId('location')).toHaveTextContent('segment=DRIVING');
+    unmount();
+
+    renderPage('/live-fleet?unit=veh_1&q=101&segment=DRIVING');
+    expect(await screen.findByRole('heading', { name: 'Unit #101' }, { timeout: 8000 })).toBeInTheDocument();
+    expect(screen.getByRole('searchbox', { name: 'Search units' })).toHaveValue('101');
+    expect(screen.getByRole('button', { name: /^Driving/ })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('F3-24: the detail card shows no live speed or countdowns for a stale or ELD-offline unit', async () => {
+    server.use(
+      http.get(url(endpoints.live.fleet), () =>
+        ok({
+          items: [
+            { ...unitRow('veh_9', '#109', 'drv_9'), speedMph: 61, odometerMi: 1200, driveRemainingSec: 3600,
+              shiftEndsAt: new Date(Date.now() + 3 * 3_600_000).toISOString(), isStale: true, connectivity: 'ELD_OFFLINE' },
+          ],
+          generatedAt: new Date().toISOString(),
+        }),
+      ),
+    );
+    renderPage('/live-fleet?unit=veh_9');
+    await screen.findByRole('heading', { name: 'Unit #109' }, { timeout: 8000 });
+    const speed = screen.getByText('Speed / Odometer').nextElementSibling!;
+    expect(speed).toHaveTextContent('— · 1,200 mi');
+    expect(screen.getByText('Drive time left').nextElementSibling).toHaveTextContent('—');
+    expect(screen.getByText('Shift ends in').nextElementSibling).toHaveTextContent('—');
   });
 
   it('View logs for a unit with a driver opens that driver\'s logs', async () => {

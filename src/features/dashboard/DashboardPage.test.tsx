@@ -278,6 +278,54 @@ describe('W-01 Fleet Dashboard', () => {
     expect(screen.getByText('Active vehicles')).toBeInTheDocument();
   });
 
+  it('F3-03: a failed background poll keeps the loaded KPIs and donut, with a non-blocking notice', async () => {
+    let failNow = false;
+    server.use(
+      http.get(url(endpoints.dashboard.summary), () =>
+        failNow
+          ? fail(503, 'SERVICE_UNAVAILABLE', 'Down.')
+          : ok(
+              buildSummary({
+                liveFleet: { items: [{ vehicleId: 'v1', unitNumber: '#101', driverId: 'd1', dutyStatus: 'DRIVING', lat: null, lon: null }] },
+                vehicles: { active: 7, total: 9 },
+              }),
+            ),
+      ),
+      violationsPage([]),
+    );
+    const { queryClient } = renderPage();
+    expect(await screen.findByText('of 9', {}, { timeout: 8000 })).toBeInTheDocument();
+    failNow = true;
+    await act(async () => {
+      await queryClient.refetchQueries({ type: 'active' }).catch(() => {});
+    });
+    expect(
+      await screen.findByText('Could not refresh — showing the last loaded data.', {}, { timeout: 10000 }),
+    ).toBeInTheDocument();
+    expect(screen.getByText('of 9')).toBeInTheDocument();
+    expect(screen.queryByText('Could not load the fleet')).toBeNull();
+    expect(screen.queryByText('Could not load duty status')).toBeNull();
+  }, 20000);
+
+  it('F3-09: a duty-donut segment opens the Drivers roster filtered by fStatus', async () => {
+    server.use(
+      http.get(url(endpoints.dashboard.summary), () =>
+        ok(
+          buildSummary({
+            liveFleet: { items: [{ vehicleId: 'v1', unitNumber: '#101', driverId: 'd1', dutyStatus: 'DRIVING', lat: null, lon: null }] },
+          }),
+        ),
+      ),
+      violationsPage([]),
+    );
+    renderPage();
+    const segment = (await screen.findAllByTestId('duty-donut-segment', {}, { timeout: 8000 })).find(
+      (el) => el.getAttribute('data-status') === 'DRIVING',
+    )!;
+    await userEvent.setup().click(segment);
+    expect(screen.getByTestId('location')).toHaveTextContent('/drivers?fStatus=DRIVING');
+  });
+
   it('FE-002: card error copy follows the error status — a 403 is not "the service did not respond"', async () => {
     server.use(
       http.get(url(endpoints.dashboard.summary), () => fail(403, 'FORBIDDEN', 'Forbidden.')),

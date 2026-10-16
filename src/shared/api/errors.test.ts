@@ -119,6 +119,17 @@ describe('backend Phase 13 codes (2026-09-24)', () => {
 });
 
 describe('formErrorMessage', () => {
+  it('F3-08: an open-trips 409 shows the server sentence, a plain 409 CONFLICT the generic copy', () => {
+    const message = 'This driver still has open trips (TR-1001). Reassign or cancel them before changing their status.';
+    const openTrips = new ApiError(409, {
+      code: 'CONFLICT',
+      message,
+      details: { openTrips: [{ id: 'trp_1', number: 'TR-1001', status: 'ASSIGNED' }] },
+    });
+    expect(formErrorMessage(openTrips)).toBe(message);
+    expect(formErrorMessage(new ApiError(409, { code: 'CONFLICT', message: 'dup' }))).toBe(ERROR_MESSAGES.CONFLICT);
+  });
+
   const issues = (list: { path: string; message: string }[]) =>
     new ApiError(422, { code: 'VALIDATION_FAILED', details: { issues: list.map((i) => ({ ...i, code: 'too_big' })) } });
 

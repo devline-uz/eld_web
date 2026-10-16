@@ -155,7 +155,8 @@ export default function UnitProfilePage() {
     return <NotFoundState title="Unit not found" backLabel="Back to vehicles" onBack={() => navigate('/vehicles')} />;
   }
   if (vehicleQuery.isLoading) return <LoadingState rows={8} />;
-  if (vehicleQuery.isError || !vehicleQuery.data) {
+  // F3-03 — a failed background refetch keeps the loaded unit on screen.
+  if (!vehicleQuery.data) {
     return <ErrorState title="Could not load this unit" onRetry={() => vehicleQuery.refetch()} />;
   }
 
@@ -488,7 +489,8 @@ export default function UnitProfilePage() {
         <Card>
           <p className="text-body text-text-muted">
             Trip history for this unit lives on{' '}
-            <Link to={`/trips?vehicleId=${vehicle.id}`} className="text-primary">
+            {/* F3-17 — Trips filters by unit on `fUnit`; `vehicleId` was ignored. */}
+            <Link to={`/trips?fUnit=${encodeURIComponent(vehicle.id)}`} className="text-primary">
               Dispatch &amp; Trips
             </Link>
             .
@@ -501,7 +503,8 @@ export default function UnitProfilePage() {
           {can('dvir') ? (
             <p className="text-body text-text-muted">
               DVIR history for this unit lives on{' '}
-              <Link to={`/dvir?vehicleId=${vehicle.id}`} className="text-primary">
+              {/* F3-17 — DVIR has no unit filter; its `?q=` search matches the unit number. */}
+              <Link to={`/dvir?q=${encodeURIComponent(vehicle.unitNumber)}`} className="text-primary">
                 DVIR &amp; Maintenance
               </Link>
               .

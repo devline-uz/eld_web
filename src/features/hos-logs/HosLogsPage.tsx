@@ -481,7 +481,7 @@ export default function HosLogsPage() {
             <div className="mt-4">
               {dayQuery.isLoading ? (
                 <LoadingState rows={4} />
-              ) : dayQuery.isError || !day || !dayIsUsable ? (
+              ) : !day || !dayIsUsable ? (
                 <ErrorState
                   title="Could not load this RODS day"
                   description="The log service did not respond. Your data is safe — try again in a moment."
@@ -526,12 +526,13 @@ export default function HosLogsPage() {
               ongoing={day?.ongoingViolations ?? []}
               openTotal={openViolationsQuery.data?.total}
               isLoading={!day && (dayQuery.isLoading || !queryDriverId)}
-              isError={dayQuery.isError || Boolean(day && !dayIsUsable)}
+              isError={(dayQuery.isError && !day) || Boolean(day && !dayIsUsable)}
             />
             <CertificationCard
               days={rangeQuery.data?.days ?? []}
               isLoading={rangeQuery.isLoading}
-              isError={rangeQuery.isError}
+              // F3-03 — a failed background refetch keeps the loaded days on screen.
+              isError={rangeQuery.isError && !rangeQuery.data}
               onRetry={() => void rangeQuery.refetch()}
               onSelectDate={(next) => setParam({ date: next })}
               reminderNote={certificationNote(rangeQuery.data?.days ?? [], timezone)}
@@ -545,7 +546,7 @@ export default function HosLogsPage() {
             carriedIn={rawEvents ? (eventsQuery.data?.carriedIn ?? null) : null}
             timezone={timezone}
             isLoading={eventsQuery.isLoading}
-            isError={eventsQuery.isError}
+            isError={eventsQuery.isError && !eventsQuery.data}
             onRetry={() => void eventsQuery.refetch()}
             showAllRecords={showAllRecords}
             onToggleShowAll={setShowAllRecords}

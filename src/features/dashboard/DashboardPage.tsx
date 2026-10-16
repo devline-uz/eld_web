@@ -25,7 +25,7 @@ import { Card, SectionHeader } from '@/shared/ui/Card';
 import { DataTable } from '@/shared/ui/DataTable';
 import { Pagination } from '@/shared/ui/Pagination';
 import { EMPTY_STATE_COPY } from '@/shared/ui/copy';
-import { EmptyState, ErrorState } from '@/shared/ui/states';
+import { EmptyState, ErrorState, RefreshErrorNotice } from '@/shared/ui/states';
 import { KpiCard, KpiRowSkeleton } from '@/shared/ui/KpiCard';
 import { SeverityBadge } from '@/shared/ui/Badge';
 import { formatCarrier, timezoneAbbreviation } from '@/shared/format/datetime';
@@ -155,6 +155,10 @@ export default function DashboardPage() {
   const openViolationsKpi = violations.data ? violationsTotal : (summary.data?.violations.total ?? null);
 
   const kpiLoading = summary.isLoading;
+  // F3-03 — a failed background poll keeps the last loaded data on screen (React Query keeps
+  // `data`); only a failure with nothing loaded yet shows the error state.
+  const summaryFailed = summary.isError && !summary.data;
+  const violationsFailed = violations.isError && !violations.data;
   const activeVehicles = summary.data?.vehicles.active;
   const totalVehicles = summary.data?.vehicles.total;
   const outOfServiceVehicles = summary.data?.vehicles.outOfService ?? 0;
@@ -221,9 +225,9 @@ export default function DashboardPage() {
         <div className="grid grid-cols-1 gap-card-gap sm:grid-cols-2 xl:grid-cols-4">
           <KpiCard
             label="Active vehicles"
-            value={summary.isError ? '—' : formatNumber(activeVehicles)}
+            value={summaryFailed ? '—' : formatNumber(activeVehicles)}
             hint={
-              summary.isError
+              summaryFailed
                 ? undefined
                 : `of ${formatNumber(totalVehicles)}${outOfServiceVehicles > 0 ? ` · ${formatNumber(outOfServiceVehicles)} out of service` : ''}`
             }
@@ -232,7 +236,7 @@ export default function DashboardPage() {
           />
           <KpiCard
             label="Drivers on duty"
-            value={summary.isError ? '—' : formatNumber(onDutyCount)}
+            value={summaryFailed ? '—' : formatNumber(onDutyCount)}
             icon={Users}
             iconTone="success"
           />
@@ -244,9 +248,9 @@ export default function DashboardPage() {
           />
           <KpiCard
             label="Unassigned driving"
-            value={summary.isError ? '—' : formatDuration(unassignedTotalSec)}
+            value={summaryFailed ? '—' : formatDuration(unassignedTotalSec)}
             chip={
-              summary.isError
+              summaryFailed
                 ? undefined
                 : {
                     // CODE-029 — carrier-assigned segments the driver has not confirmed yet are
@@ -270,7 +274,7 @@ export default function DashboardPage() {
             <SectionHeader
               title="Live fleet"
               subtitle={
-                summary.isError
+                summaryFailed
                   ? undefined
                   : // QA LIVE-011 — units whose paired ELD is silent > 30 min; Settings › ELD
                     // devices counts devices (incl. unpaired ones), hence "units with".
@@ -288,10 +292,13 @@ export default function DashboardPage() {
               }
             />
           </div>
+          {summary.isError && summary.data && (
+            <RefreshErrorNotice onRetry={() => void summary.refetch()} />
+          )}
           <div className="p-card pt-4">
             {summary.isLoading ? (
               MAP_PLACEHOLDER
-            ) : summary.isError ? (
+            ) : summaryFailed ? (
               <ErrorState
                 title="Could not load the fleet"
                 description={loadErrorCopy(summary.error)}
@@ -315,19 +322,19 @@ export default function DashboardPage() {
         <Card>
           <SectionHeader
             title="Duty status · now"
-            subtitle={summary.isError ? undefined : `${driverCount} assigned drivers · ${onDutyCount} on duty`}
+            subtitle={summaryFailed ? undefined : `${driverCount} assigned drivers · ${onDutyCount} on duty`}
           />
           <div className="mt-4">
             {summary.isLoading ? (
               <div className="h-40 animate-pulse rounded-md bg-bg-subtle" />
-            ) : summary.isError ? (
+            ) : summaryFailed ? (
               <ErrorState
                 title="Could not load duty status"
                 description={loadErrorCopy(summary.error)}
                 onRetry={() => void summary.refetch()}
               />
             ) : (
-              <DutyDonut units={units} onSegmentClick={(status) => navigate(`/drivers?status=${status}`)} />
+              <DutyDonut units={units} onSegmentClick={(status) => navigate(`/drivers?fStatus=${status}`)} />
             )}
           </div>
         </Card>
@@ -344,9 +351,12 @@ export default function DashboardPage() {
             View all ›
           </button>
         </div>
+        {violations.isError && violations.data && (
+          <RefreshErrorNotice onRetry={() => void violations.refetch()} />
+        )}
         {violations.isLoading ? (
           <DataTable data={[]} columns={columns} caption="HOS violations and alerts" isLoading />
-        ) : violations.isError ? (
+        ) : violationsFailed ? (
           <div className="p-card">
             <ErrorState
               title="Could not load violations"

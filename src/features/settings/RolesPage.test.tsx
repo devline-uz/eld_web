@@ -1,7 +1,7 @@
 // web/tz.md W-19 — the ADMIN column is never editable and shows the sanctioned disabled chip,
 // plus the Roles tab, the Access log tab, cell cycling, search filtering and role deletion.
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { http } from 'msw';
+import { delay, http } from 'msw';
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -11,12 +11,15 @@ import { endpoints } from '@/shared/api/endpoints';
 import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/client';
 import { ToastProvider } from '@/shared/ui/Toast';
 import { NO_PERMISSIONS } from '@/shared/auth/permissions';
+import { formatCarrier } from '@/shared/format/datetime';
 import RolesPage from './RolesPage';
 
 // Current-user role for the super-admin guard (`roleKey` is what `/auth/me` returned).
 const authState = vi.hoisted(() => ({ roleKey: 'ADMIN' }));
 vi.mock('@/shared/auth/AuthProvider', () => ({
   useAuth: () => ({ user: { id: 'current_caller_id', email: 'caller@example.com', roleKey: authState.roleKey } }),
+  // `useCarrierTimezone()` — the session's carrier zone (`/auth/me`).
+  useOptionalAuth: () => ({ user: { homeTerminalTimezone: 'America/Chicago' } }),
 }));
 
 vi.mock('@/shared/auth/usePermission', () => ({ usePermission: () => ({ can: () => true }) }));
@@ -204,6 +207,23 @@ describe('RolesPage — W-19 permission matrix', () => {
     expect(await screen.findByText('Role · Dispatcher')).toBeInTheDocument();
   });
 
+  // F3-11 — without `carrierSettings` (GET /carrier 403) the Access log fell back to UTC.
+  it('F3-11: Access log times use the session\'s carrier zone when GET /carrier is forbidden', async () => {
+    const user = userEvent.setup();
+    const createdAt = '2026-10-15T03:00:00.000Z';
+    server.use(
+      http.get(url(endpoints.carrier.root), () => fail(403, 'FORBIDDEN', 'Forbidden')),
+      http.get(url(endpoints.auditLog.list), () =>
+        ok({ items: [{ id: '1', createdAt, actorType: 'USER', action: 'UPDATE', objectType: 'Role', objectLabel: 'Role · Dispatcher' }], nextCursor: null }),
+      ),
+    );
+    renderPage();
+    await screen.findByText('View vehicles / Add & edit vehicles');
+    await user.click(screen.getByRole('button', { name: 'Access log' }));
+    await screen.findByText('Role · Dispatcher');
+    expect(screen.getByText(formatCarrier(createdAt, 'America/Chicago', 'dateTimeSeconds'))).toBeInTheDocument();
+  });
+
   it('shows an in-card error for the Access log tab when the audit fetch fails, and Retry re-fetches', async () => {
     const user = userEvent.setup();
     server.use(http.get(url(endpoints.auditLog.list), () => fail(500, 'INTERNAL_ERROR', 'Boom')));
@@ -380,5 +400,53 @@ describe('RolesPage — stage-2', () => {
     renderPage();
     await screen.findByText('View vehicles / Add & edit vehicles');
     expect(screen.getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['PERMISSION', 'ADMIN', 'QA Auditor']);
+  });
+});
+
+describe('RolesPage — F3-05 quick clicks', () => {
+  function serveDispatcher() {
+    let stored: Record<string, string> = { ...NO_PERMISSIONS };
+    const bodies: Record<string, string>[] = [];
+    server.use(
+      http.get(url(endpoints.roles.list), () =>
+        ok([
+          { id: 'rol_admin', key: 'ADMIN', name: 'Admin', isSystem: true, permissions: { ...NO_PERMISSIONS }, userCount: 1 },
+          { id: 'rol_disp', key: 'DISPATCHER', name: 'Dispatcher', isSystem: true, permissions: stored, userCount: 1 },
+        ]),
+      ),
+      http.patch(url(endpoints.roles.update('rol_disp')), async ({ request }) => {
+        const body = (await request.json()) as { permissions: Record<string, string> };
+        bodies.push(body.permissions);
+        await delay(100);
+        stored = body.permissions; // the backend replaces the whole map
+        return ok({ id: 'rol_disp', key: 'DISPATCHER', permissions: stored });
+      }),
+    );
+    return { bodies, stored: () => stored };
+  }
+  const changed = (p: Record<string, string>) => Object.keys(p).filter((k) => p[k] !== 'NONE');
+
+  it('two quick clicks on different cells both survive, one PATCH at a time', async () => {
+    const api = serveDispatcher();
+    renderPage();
+    const cells = await screen.findAllByRole('button', { name: /— DISPATCHER: No access/i });
+    const user = userEvent.setup();
+    await user.click(cells[0]!);
+    await user.click(cells[1]!);
+    // Shown at once, before the server answers.
+    expect(cells[0]).toHaveAccessibleName(/Read only/);
+    expect(cells[1]).toHaveAccessibleName(/Read only/);
+    await waitFor(() => expect(changed(api.stored())).toHaveLength(2));
+    expect(api.bodies.length).toBeLessThanOrEqual(2);
+  });
+
+  it('a double click on one cell reaches FULL', async () => {
+    const api = serveDispatcher();
+    renderPage();
+    const cells = await screen.findAllByRole('button', { name: /— DISPATCHER: No access/i });
+    const user = userEvent.setup();
+    await user.dblClick(cells[0]!);
+    await waitFor(() => expect(Object.values(api.stored())).toContain('FULL'));
+    await waitFor(() => expect(cells[0]).toHaveAccessibleName(/Full access/));
   });
 });

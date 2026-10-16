@@ -53,6 +53,21 @@ describe('IntegrationsPage — W-22', () => {
     expect(await screen.findByText('Retry', {}, { timeout: 8000 })).toBeInTheDocument();
   });
 
+  // F3-11 — without `carrierSettings` (GET /carrier 403) key dates were read in UTC.
+  it('F3-11: API key dates use the session\'s carrier zone when GET /carrier is forbidden', async () => {
+    const createdAt = '2026-10-15T03:00:00.000Z';
+    server.use(
+      http.get(url(endpoints.carrier.root), () => fail(403, 'FORBIDDEN', 'Forbidden')),
+      http.get(url(endpoints.apiKeys.list), () =>
+        ok([{ id: 'key_1', name: 'McLeod TMS', prefix: 'obk_ABCD', scopes: ['reports:read'], lastUsedAt: null, expiresAt: null, revokedAt: null, createdAt }]),
+      ),
+    );
+    renderPage();
+    await screen.findByText('McLeod TMS');
+    // No AuthProvider here: `useCarrierTimezone()` falls back to America/New_York (Oct 14), not UTC (Oct 15).
+    expect(screen.getByText('Oct 14, 2026')).toBeInTheDocument();
+  });
+
   it('hides Connect and the API-keys row menu for a READ-only caller', async () => {
     canFull = false;
     server.use(

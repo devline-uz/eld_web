@@ -291,7 +291,10 @@ describe('CreateTripModal — submit', () => {
       moveStop,
       noDriver,
       noPost = false,
+      stopWindow,
     }: {
+      /** Typed into `Stop 1 window`; `'bad'` stands for a date the browser itself rejected. */
+      stopWindow?: string;
       /** The form is expected to refuse the submit — no POST is awaited. */
       noPost?: boolean;
       noDriver?: boolean;
@@ -337,6 +340,16 @@ describe('CreateTripModal — submit', () => {
         .getByText((content, el) => el?.tagName === 'SPAN' && content.trim() === `Stop ${index + 1} location`)
         .closest('label')!;
       await user.type(within(stopLabel).getByRole('combobox'), name);
+    }
+    if (stopWindow !== undefined) {
+      const input = screen.getByLabelText(/^Stop 1 window/);
+      if (stopWindow === 'bad') {
+        // A real browser leaves `value` empty and flags `badInput`; jsdom only does the former.
+        // React only fires onChange on a real change, so start from a typed value.
+        fireEvent.change(input, { target: { value: `${format(addDays(new Date(), 1), 'yyyy-MM-dd')}T11:00` } });
+        Object.defineProperty(input, 'validity', { value: { badInput: true } });
+        fireEvent.change(input, { target: { value: '' } });
+      } else fireEvent.change(input, { target: { value: stopWindow } });
     }
     if (moveStop) {
       const [stopNumber, position] = moveStop;
@@ -415,6 +428,47 @@ describe('CreateTripModal — submit', () => {
     expect(screen.queryByText('Required')).toBeNull();
   });
 
+  // F3-15 — the API refuses stop times that go backwards along the route; say so before sending.
+  it('F3-15: refuses a stop window after the delivery, under that stop, with no POST', async () => {
+    const posts = await fillRequiredAndSubmit(`${tomorrow}T08:00`, `${tomorrow}T14:00`, {
+      intermediate: 'Springfield, OH',
+      stopWindow: `${tomorrow}T16:00`,
+      noPost: true,
+    });
+    const error = await screen.findByText('Stop times must not go backwards along the route.');
+    expect(screen.getByLabelText(/^Stop 1 window/).closest('label')).toContainElement(error);
+    expect(posts).toHaveLength(0);
+  });
+
+  it('F3-15: refuses a stop window before the pickup', async () => {
+    const posts = await fillRequiredAndSubmit(`${tomorrow}T08:00`, `${tomorrow}T14:00`, {
+      intermediate: 'Springfield, OH',
+      stopWindow: `${tomorrow}T07:00`,
+      noPost: true,
+    });
+    expect(await screen.findByText('Stop times must not go backwards along the route.')).toBeInTheDocument();
+    expect(posts).toHaveLength(0);
+  });
+
+  it('F3-15: a stop window the browser rejected is an error, not silently dropped', async () => {
+    const posts = await fillRequiredAndSubmit(`${tomorrow}T08:00`, `${tomorrow}T14:00`, {
+      intermediate: 'Springfield, OH',
+      stopWindow: 'bad',
+      noPost: true,
+    });
+    const error = await screen.findByText('Enter a valid date and time.');
+    expect(screen.getByLabelText(/^Stop 1 window/).closest('label')).toContainElement(error);
+    expect(posts).toHaveLength(0);
+  });
+
+  it('F3-15: a stop window between pickup and delivery is sent', async () => {
+    const posts = await fillRequiredAndSubmit(`${tomorrow}T08:00`, `${tomorrow}T14:00`, {
+      intermediate: 'Springfield, OH',
+      stopWindow: `${tomorrow}T11:00`,
+    });
+    expect((posts[0]!.stops as { scheduledAt?: string }[])[1]!.scheduledAt).toBe(carrierIso(`${tomorrow}T11:00`));
+  });
+
   // WB-164 — `+ Add an intermediate stop` had no `onClick`; `CreateTripPayload.stops` is real.
   it('sends an added intermediate stop between the pickup and the delivery', async () => {
     const posts = await fillRequiredAndSubmit(`${tomorrow}T08:00`, `${tomorrow}T14:00`, { intermediate: 'Springfield, OH' });
@@ -482,6 +536,14 @@ describe('CreateTripModal — date, distance and rate validation', () => {
     await user.click(screen.getByRole('button', { name: 'Create trip' }));
   }
   const day = (offset: number) => format(addDays(new Date(), offset), 'yyyy-MM-dd');
+
+  // L3-04 — the delivery window was only checked after every other field passed, so it showed
+  // up on a second submit. It is now reported with the other required errors.
+  it('L3-04: the first submit reports the missing delivery window with the other required fields', async () => {
+    await fillAndSubmit({ pickup: `${day(2)}T08:00` });
+    expect(await screen.findByText(/Set a delivery time/)).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Trip \/ load ID/).closest('label')).toHaveTextContent(/required/i);
+  });
 
   it('rejects a pickup before today', async () => {
     await fillAndSubmit({ pickup: `${day(-1)}T08:00` });

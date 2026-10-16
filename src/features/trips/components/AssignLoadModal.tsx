@@ -7,6 +7,7 @@ import { Avatar } from '@/shared/ui/Avatar';
 import { useToast } from '@/shared/ui/Toast';
 import { useDriversHosClocks, useDriversList, type DriverHosCell } from '@/shared/api/drivers';
 import { formatHosHours } from '@/shared/format/hos';
+import { useDebouncedValue } from '@/shared/hooks/useDebouncedValue';
 import { useAssignTrip, blocksAssignment, type TripRow } from '@/shared/api/trips';
 import { formErrorMessage } from '@/shared/api/errors';
 import { assignmentFieldError, type AssignmentField } from '../lib/assignmentErrors';
@@ -27,7 +28,9 @@ export function AssignLoadModal({ load, onClose }: { load: TripRow; onClose: () 
   const listRef = useRef<HTMLDivElement>(null);
 
   // QA fix — an INACTIVE driver cannot take a load; the server filters (`?status=ACTIVE`).
-  const listWindow = { q: query || undefined, limit: 25, status: 'ACTIVE' };
+  // F3-18 — debounced: every keystroke used to send `GET /drivers` plus the HOS-clock roster.
+  const debouncedQuery = useDebouncedValue(query, 300);
+  const listWindow = { q: debouncedQuery || undefined, limit: 25, status: 'ACTIVE' };
   const driversQuery = useDriversList(listWindow);
   // B-1 roster (bulk) for the rendered rows' HOS clocks — same `q`/`limit` page, joined by id.
   const rowIds = useMemo(() => (driversQuery.data?.items ?? []).map((d) => d.id), [driversQuery.data]);
@@ -35,6 +38,9 @@ export function AssignLoadModal({ load, onClose }: { load: TripRow; onClose: () 
   const mutation = useAssignTrip(load.id);
 
   const selectedDriver = useMemo(() => driversQuery.data?.items.find((d) => d.id === selectedId) ?? null, [driversQuery.data, selectedId]);
+  // F3-18 — only a driver the list shows counts as picked: one a new search hides was still
+  // submitted, unseen, and skipped the e-mail-verification block below.
+  const pickedId = selectedDriver?.id ?? null;
   const blocked = blocksAssignment(selectedDriver as { emailVerified?: boolean | null } | null);
 
   return (
@@ -54,14 +60,14 @@ export function AssignLoadModal({ load, onClose }: { load: TripRow; onClose: () 
           <Button
             variant="primary"
             size="lg"
-            disabled={!selectedId || blocked || mutation.isPending}
+            disabled={!pickedId || blocked || mutation.isPending}
             loading={mutation.isPending}
             onClick={() => {
               // `mutate()` returns immediately — without this a double click assigns twice.
-              if (!selectedId || mutation.isPending) return;
+              if (!pickedId || mutation.isPending) return;
               setFieldError(null);
               mutation.mutate(
-                { driverId: selectedId, notify },
+                { driverId: pickedId, notify },
                 {
                   onSuccess: () => {
                     toast({ kind: 'success', title: `Load ${load.number} assigned` });
@@ -93,6 +99,8 @@ export function AssignLoadModal({ load, onClose }: { load: TripRow; onClose: () 
             // to its radio; it never submits the modal, and does nothing when nothing matches.
             if (e.key !== 'Enter') return;
             e.preventDefault();
+            // F3-18 — the list still shows the previous term until the debounce settles.
+            if (debouncedQuery !== query) return;
             const first = driversQuery.data?.items[0];
             if (!first) return;
             setSelectedId(first.id);
@@ -125,7 +133,7 @@ export function AssignLoadModal({ load, onClose }: { load: TripRow; onClose: () 
         >
           {(driversQuery.data?.items ?? []).map((driver) => {
             const name = [driver.firstName, driver.lastName].filter(Boolean).join(' ') || driver.username || 'Unnamed driver';
-            const checked = selectedId === driver.id;
+            const checked = pickedId === driver.id;
             return (
               <label
                 key={driver.id}

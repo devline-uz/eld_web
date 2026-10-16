@@ -134,6 +134,21 @@ describe('11.2 Edit unit — duplicate values', () => {
     expect(screen.getByLabelText(/ELD serial/).closest('label')).toContainElement(error);
   });
 
+  // F3-14 — a retired device is a 409 too, but the serial is not "assigned to another unit".
+  it('a 409 DEVICE_RETIRED says the device is retired, not that the serial is taken', async () => {
+    server.use(
+      http.patch(url(endpoints.vehicles.update(':id')), () =>
+        fail(409, 'DEVICE_RETIRED', 'This ELD device is retired and cannot be paired to a unit.', {
+          eldSerial: 'This ELD device is retired and cannot be paired to a unit.',
+        }),
+      ),
+    );
+    await saveEdit('102');
+    const error = await screen.findByText(VALIDATION_MESSAGES.eldDeviceRetired);
+    expect(screen.getByLabelText(/ELD serial/).closest('label')).toContainElement(error);
+    expect(screen.queryByText(VALIDATION_MESSAGES.eldSerialTaken)).not.toBeInTheDocument();
+  });
+
   it('a 404 without an ELD serial keeps the generic toast', async () => {
     server.use(http.patch(url(endpoints.vehicles.update(':id')), () => fail(404, 'NOT_FOUND', 'Vehicle not found.')));
     await saveEdit('102');

@@ -39,7 +39,7 @@ import { useVirtualRows } from '@/shared/ui/virtualRows';
 import { Button } from '@/shared/ui/Button';
 import { LiveUnitBadge, LiveUnitNote } from '@/shared/ui/LiveUnitStatus';
 import { EMPTY_STATE_COPY } from '@/shared/ui/copy';
-import { EmptyState, ErrorState } from '@/shared/ui/states';
+import { EmptyState, ErrorState, RefreshErrorNotice } from '@/shared/ui/states';
 import { formatSpeed, formatOdometer } from '@/shared/format/numbers';
 import { useRelativeTime } from '@/shared/format/useRelativeTime';
 import { useCountdown, useCountdownFromSeconds, formatCountdown } from '@/shared/hooks/useCountdown';
@@ -71,6 +71,11 @@ type Layer = MapLayer;
 const TRAFFIC_UNCONFIGURED_TITLE = 'Traffic layer not available';
 
 type Segment = 'ALL' | 'DRIVING' | 'IDLE';
+
+/** `?segment=` — anything but a known segment is `All`. */
+function parseSegment(value: string | null): Segment {
+  return value === 'DRIVING' || value === 'IDLE' ? value : 'ALL';
+}
 
 /** Estimated height of one unit row (three text lines + `py-3`), refined by measurement once the
  * list is windowed (above `VIRTUALIZE_ABOVE` rows, §16.2). */
@@ -251,6 +256,9 @@ function DetailCard({
   const navigate = useNavigate();
   const driveLeft = useCountdownFromSeconds(unit.driveRemainingSec);
   const shiftEnds = useCountdown(unit.shiftEndsAt);
+  // F3-24 — like the list row (UI-003): a stale or ELD-offline snapshot has no live speed, and its
+  // HOS countdowns would keep ticking from a frozen clock.
+  const offline = unit.dutyStatus === 'ELD_OFFLINE' || unit.isStale;
 
   return (
     <div className="absolute inset-x-2 bottom-2 z-10 max-h-[85%] overflow-y-auto rounded-lg bg-bg-surface p-4 shadow-pop sm:inset-x-auto sm:bottom-auto sm:right-4 sm:top-16 sm:max-h-none sm:w-detail-card sm:overflow-visible">
@@ -281,7 +289,7 @@ function DetailCard({
         <div className="flex justify-between">
           <dt className="text-text-muted">Speed / Odometer</dt>
           <dd className="tabular-nums font-semibold text-text">
-            {formatSpeed(unit.speedMph)} · {formatOdometer(unit.odometerMi)} mi
+            {offline ? '—' : formatSpeed(unit.speedMph)} · {formatOdometer(unit.odometerMi)} mi
           </dd>
         </div>
         <div className="flex justify-between">
@@ -290,15 +298,23 @@ function DetailCard({
         </div>
         <div className="flex justify-between">
           <dt className="text-text-muted">Drive time left</dt>
-          <dd className={`tabular-nums font-semibold ${driveLeft === 0 ? 'text-danger' : 'text-text'}`}>
-            {formatCountdown(driveLeft)}
-          </dd>
+          {offline ? (
+            <dd className="tabular-nums font-semibold text-text-muted">—</dd>
+          ) : (
+            <dd className={`tabular-nums font-semibold ${driveLeft === 0 ? 'text-danger' : 'text-text'}`}>
+              {formatCountdown(driveLeft)}
+            </dd>
+          )}
         </div>
         <div className="flex justify-between">
           <dt className="text-text-muted">Shift ends in</dt>
-          <dd className={`tabular-nums font-semibold ${shiftEnds < 1200 ? 'text-danger' : 'text-warning'}`}>
-            {formatCountdown(shiftEnds)}
-          </dd>
+          {offline ? (
+            <dd className="tabular-nums font-semibold text-text-muted">—</dd>
+          ) : (
+            <dd className={`tabular-nums font-semibold ${shiftEnds < 1200 ? 'text-danger' : 'text-warning'}`}>
+              {formatCountdown(shiftEnds)}
+            </dd>
+          )}
         </div>
         <div className="flex justify-between">
           <dt className="text-text-muted">ELD</dt>
@@ -343,13 +359,37 @@ export default function LiveFleetPage() {
   const { can } = usePermission();
   const queryClient = useQueryClient();
   const fleet = useLiveFleet();
-  const [query, setQuery] = useState('');
-  const [segment, setSegment] = useState<Segment>('ALL');
+  // F3-03 — a failed 30 s poll keeps the last snapshot (and the mounted map) on screen; only a
+  // failure with nothing loaded yet shows the error state.
+  const fleetFailed = fleet.isError && !fleet.data;
   const [activeLayers, setActiveLayers] = useState<Set<Layer>>(() => new Set(['Vehicles']));
   // `?unit=<vehicleId>` (Vehicles → `Track on map`) opens the page with that unit selected; the
-  // map flies to the selected unit and the list scrolls it into view.
+  // map flies to the selected unit and the list scrolls it into view. F3-25 — the URL is the
+  // source of truth for the selection, the search (`q`) and the segment, so a reload or a shared
+  // link reopens the same view; every change replaces the history entry.
   const [searchParams, setSearchParams] = useSearchParams();
-  const [selectedId, setSelectedId] = useState<string | null>(() => searchParams.get('unit'));
+  const selectedId = searchParams.get('unit');
+  const query = searchParams.get('q') ?? '';
+  const segment = parseSegment(searchParams.get('segment'));
+  // `setSearchParams` changes identity with every URL change; the ref keeps `selectUnit` stable
+  // for `memo(UnitListRow)`.
+  const setSearchParamsRef = useRef(setSearchParams);
+  useEffect(() => {
+    setSearchParamsRef.current = setSearchParams;
+  }, [setSearchParams]);
+  const updateParams = useCallback((key: 'unit' | 'q' | 'segment', value: string | null) => {
+    setSearchParamsRef.current(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (value) next.set(key, value);
+        else next.delete(key);
+        return next;
+      },
+      { replace: true },
+    );
+  }, []);
+  const setQuery = (value: string) => updateParams('q', value);
+  const setSegment = (value: Segment) => updateParams('segment', value === 'ALL' ? null : value);
   const [flashId, setFlashId] = useState<string | null>(null);
   // Follow mode: the camera rides the selected unit until the dispatcher drags the map; selecting a
   // unit (re)enables it, the `Follow` button turns it back on.
@@ -397,7 +437,7 @@ export default function LiveFleetPage() {
 
   // The subtitle node changes only with the data; its own 1 s tick re-renders just the text.
   const subtitle = useMemo(
-    () => (fleet.isError ? null : (
+    () => (fleetFailed ? null : (
             // Keyed so a new snapshot or fetch state re-initializes the label at once, not 1 s later.
             <RefreshedSubtitle
               key={`${fleet.dataUpdatedAt}:${fleet.isFetching}`}
@@ -405,7 +445,7 @@ export default function LiveFleetPage() {
               isFetching={fleet.isFetching}
             />
           )),
-    [fleet.isError, fleet.dataUpdatedAt, fleet.isFetching],
+    [fleetFailed, fleet.dataUpdatedAt, fleet.isFetching],
   );
   useDynamicSubtitle(subtitle);
 
@@ -462,10 +502,13 @@ export default function LiveFleetPage() {
     [filtered],
   );
   // One callback for every row, so `memo(UnitListRow)` can skip unchanged rows.
-  const selectUnit = useCallback((vehicleId: string) => {
-    setSelectedId(vehicleId);
-    setFollow(true);
-  }, []);
+  const selectUnit = useCallback(
+    (vehicleId: string) => {
+      updateParams('unit', vehicleId);
+      setFollow(true);
+    },
+    [updateParams, setFollow],
+  );
   const selectFromMap = selectUnit;
 
   const selected = units.find((u) => u.vehicleId === selectedId) ?? null;
@@ -533,6 +576,7 @@ export default function LiveFleetPage() {
             ))}
           </div>
         </div>
+        {fleet.isError && fleet.data && <RefreshErrorNotice onRetry={() => void fleet.refetch()} />}
         <div className="min-h-0 flex-1 overflow-y-auto">
           {fleet.isLoading ? (
             <div className="flex flex-col gap-3 p-4">
@@ -540,7 +584,7 @@ export default function LiveFleetPage() {
                 <div key={i} className="h-14 animate-pulse rounded-md bg-bg-subtle" />
               ))}
             </div>
-          ) : fleet.isError ? (
+          ) : fleetFailed ? (
             <div className="p-4">
               <ErrorState title="Could not load the fleet" onRetry={() => void fleet.refetch()} />
             </div>
@@ -622,7 +666,7 @@ export default function LiveFleetPage() {
           </div>
         )}
 
-        {fleet.isError ? (
+        {fleetFailed ? (
           <div className="flex h-full items-center justify-center">
             <ErrorState title="Map could not be loaded" onRetry={() => void fleet.refetch()} />
           </div>
@@ -648,14 +692,7 @@ export default function LiveFleetPage() {
         {selected && (
           <DetailCard
             unit={selected}
-            onClose={() => {
-              setSelectedId(null);
-              if (searchParams.has('unit')) {
-                const next = new URLSearchParams(searchParams);
-                next.delete('unit');
-                setSearchParams(next, { replace: true });
-              }
-            }}
+            onClose={() => updateParams('unit', null)}
             canMessage={can('messaging', 'FULL')}
           />
         )}

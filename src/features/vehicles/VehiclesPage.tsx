@@ -5,6 +5,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import type { ColumnDef } from '@tanstack/react-table';
 import { useMutation } from '@tanstack/react-query';
 import { Search, Plus, Download, Filter, Upload, X } from 'lucide-react';
+import { useDebouncedValue } from '@/shared/hooks/useDebouncedValue';
 import { liveFleetHref } from '@/shared/lib/liveFleetHref';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Can } from '@/shared/auth/Can';
@@ -75,16 +76,6 @@ const CONNECTIVITY_NOTE: Record<LiveConnectivity, string | undefined> = {
   ONLINE: undefined,
 };
 
-function useDebounced<T>(value: T, ms: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useMemo(() => {
-    const timer = setTimeout(() => setDebounced(value), ms);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
-  return debounced;
-}
-
 /** `?page=abc` is `NaN` and `?page=0` / `?page=-3` are pages no server can answer — both reached
  * `GET /vehicles` verbatim and rendered a `NaN–NaN of 57` footer. Anything that is not a positive
  * integer falls back to the default. */
@@ -105,7 +96,7 @@ export default function VehiclesPage() {
   const segment: Segment = rawSegment && rawSegment in SEGMENT_LABEL ? (rawSegment as Segment) : 'ALL';
   const q = params.get('q') ?? '';
   const [searchInput, setSearchInput] = useState(q);
-  const debouncedSearch = useDebounced(searchInput, 300);
+  const debouncedSearch = useDebouncedValue(searchInput, 300);
   const page = positiveIntParam(params.get('page'), 1);
   const limit = positiveIntParam(params.get('limit'), 10);
 

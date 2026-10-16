@@ -14,6 +14,7 @@ export const VALIDATION_MESSAGES = {
   vinTaken: 'A unit with this VIN already exists.',
   eldSerialUnknown: 'No ELD device with this serial is registered.',
   eldSerialTaken: 'This ELD serial is already assigned to another unit.',
+  eldDeviceRetired: 'This ELD device is retired and cannot be paired to a unit.',
   licensePlateTaken: 'This license plate is already registered for this state.',
   usernameTaken: 'A driver with this username already exists.',
   driverEmailTaken: 'A driver with this email address already exists.',

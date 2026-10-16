@@ -367,3 +367,25 @@ describe('11.1 Create a geofence — no silent validation', () => {
     expect(screen.queryByText(/Check the highlighted fields/)).not.toBeInTheDocument();
   });
 });
+
+describe('11.1 Create a geofence — a fresh form each time (F3-12)', () => {
+  it('drops the previous entry after the modal is closed and opened again', async () => {
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const ui = (open: boolean) => (
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <CreateGeofenceModal open={open} onClose={() => {}} />
+        </ToastProvider>
+      </QueryClientProvider>
+    );
+    const { rerender } = render(ui(true));
+    await user.click(screen.getByRole('button', { name: 'Address' }));
+    await user.type(screen.getByPlaceholderText('Columbus terminal'), 'Old fence');
+    rerender(ui(false));
+    rerender(ui(true));
+
+    expect(await screen.findByPlaceholderText('Columbus terminal')).toHaveValue('');
+    expect(screen.getByRole('button', { name: 'Rectangle' })).toHaveAttribute('aria-pressed', 'true');
+  });
+});

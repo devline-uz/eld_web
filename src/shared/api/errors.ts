@@ -119,6 +119,7 @@ export const ERROR_MESSAGES: Record<string, string> = {
   // --- fleet ----------------------------------------------------------------------------------
   VEHICLE_NOT_FOUND: 'Unit not found.',
   DEVICE_NOT_FOUND: 'Device not found.',
+  DEVICE_RETIRED: 'This ELD device is retired and cannot be paired to a unit.',
   DEVICE_ALREADY_PAIRED: 'That device is already paired with another unit.',
   VEHICLE_OUT_OF_SERVICE: 'This unit is out of service.',
   ODOMETER_ANOMALY: 'The odometer reading does not match the recorded mileage.',
@@ -315,6 +316,10 @@ export function formErrorMessage(
         .join(' ');
     }
   }
+  // F3-08 — a 409 CONFLICT refusing a status change / delete over open trips (`details.openTrips`)
+  // carries a user-facing sentence naming the trips; the generic CONFLICT copy ("That value is
+  // already in use.") would misstate it.
+  if (error instanceof ApiError && openTripsOf(error)) return error.message;
   if (error instanceof ApiError || error instanceof NetworkError) return toUserMessage(error);
   return 'Something went wrong.';
 }

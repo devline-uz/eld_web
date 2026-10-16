@@ -9,7 +9,7 @@ import { useToast } from '@/shared/ui/Toast';
 import { TOAST_COPY } from '@/shared/ui/copy';
 import { trailerSchema, type TrailerFormValues } from '@/shared/forms/schemas';
 import { VALIDATION_MESSAGES } from '@/shared/forms/messages';
-import { ApiError, formErrorMessage } from '@/shared/api/errors';
+import { ApiError, formErrorMessage, openTripsOf } from '@/shared/api/errors';
 import {
   useCreateTrailer,
   useUpdateTrailer,
@@ -76,6 +76,13 @@ export function TrailerModal({ trailer, onClose }: { trailer?: TrailerRow; onClo
         onClose();
       },
       onError: (error: unknown) => {
+        // F3-07 — the same 409 CONFLICT also refuses deactivating a trailer on open trips
+        // (`details.openTrips`): say that under Status, in the server's own words.
+        if (error instanceof ApiError && openTripsOf(error)) {
+          if (isEdit) setError('status', { message: error.message });
+          else toast({ kind: 'error', title: error.message });
+          return;
+        }
         if (error instanceof ApiError && error.status === 409) {
           // `number` is unique among non-deleted trailers and is the only unique column — the list is
           // server-paged, so there is no client pre-check; the 409 is the authority.

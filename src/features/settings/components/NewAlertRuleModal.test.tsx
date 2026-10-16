@@ -86,7 +86,8 @@ describe('NewAlertRuleModal — Q-2 SMS', () => {
     await user.selectOptions(screen.getByDisplayValue('Warning'), 'CRITICAL');
     await user.click(screen.getByRole('checkbox', { name: 'In-app' })); // now off
     await user.click(screen.getByRole('checkbox', { name: 'Webhook' })); // now on
-    await user.selectOptions(screen.getByDisplayValue('Fleet managers'), 'Dispatchers');
+    await user.click(screen.getByRole('checkbox', { name: 'Fleet managers' })); // now off
+    await user.click(screen.getByRole('checkbox', { name: 'Dispatchers' })); // now on
     await user.click(screen.getByRole('switch')); // Quiet hours off
     await user.click(screen.getByRole('checkbox', { name: 'Enable the rule immediately' })); // off
 
@@ -102,7 +103,8 @@ describe('NewAlertRuleModal — Q-2 SMS', () => {
     };
     expect(body.severity).toBe('CRITICAL');
     expect(body.channels).toEqual(['EMAIL', 'WEBHOOK']);
-    expect(body.recipients.roles).toEqual(['Dispatchers']);
+    // F3-01 — role keys, which the alert worker matches; never the display labels.
+    expect(body.recipients.roles).toEqual(['DISPATCHER']);
     expect(body.quietHours).toBeUndefined();
     expect(body.enabled).toBe(false);
   });
@@ -271,7 +273,66 @@ describe('NewAlertRuleModal — conditions, Repeat and edit mode', () => {
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() => expect(patched!.name).toBe('Geofence exit v2'));
-    expect(patched!.conditions).toEqual([{ event: 'geofence.exit' }]);
+    // F3-02 — only what changed is PATCHed (the legacy role label is re-saved as its key).
+    expect(patched).toEqual({ name: 'Geofence exit v2', recipients: { roles: ['DISPATCHER'] } });
+  });
+
+  it('an edited condition on a custom rule is PATCHed', async () => {
+    const user = userEvent.setup();
+    let patched: Record<string, unknown> | null = null;
+    server.use(
+      http.patch(url(endpoints.alertRules.update('alr_7')), async ({ request }) => {
+        patched = (await request.json()) as Record<string, unknown>;
+        return ok(RULE);
+      }),
+    );
+    renderWithClient(
+      <ToastProvider>
+        <NewAlertRuleModal rule={RULE} mode="edit" onClose={() => {}} />
+      </ToastProvider>,
+    );
+    await user.selectOptions(
+      screen.getByRole('combobox', { name: 'Condition event' }),
+      'safety.harsh',
+    );
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() => expect(patched!.conditions).toEqual([{ event: 'safety.harsh' }]));
+    expect(patched).not.toHaveProperty('channels');
+  });
+
+  it('a system rule never sends conditions (F3-02) and keeps its subject-driver recipient', async () => {
+    const user = userEvent.setup();
+    let patched: Record<string, unknown> | null = null;
+    const systemRule = {
+      ...RULE,
+      id: 'alr_sys',
+      key: 'default_trip_assigned',
+      name: 'Trip assigned',
+      severity: 'INFO' as const,
+      conditions: [{ event: 'alert.trip_assigned' }],
+      channels: ['IN_APP' as const],
+      recipients: { subjectDriver: true },
+      isSystem: true,
+    };
+    server.use(
+      http.patch(url(endpoints.alertRules.update('alr_sys')), async ({ request }) => {
+        patched = (await request.json()) as Record<string, unknown>;
+        return ok(systemRule);
+      }),
+    );
+    renderWithClient(
+      <ToastProvider>
+        <NewAlertRuleModal rule={systemRule} mode="edit" onClose={() => {}} />
+      </ToastProvider>,
+    );
+    expect(screen.getByRole('combobox', { name: 'Condition event' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '+ Add a condition' })).toBeDisabled();
+    await user.type(screen.getByDisplayValue('Trip assigned'), ' (driver)');
+    await user.selectOptions(screen.getByDisplayValue('Info'), 'CRITICAL');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() =>
+      expect(patched).toEqual({ name: 'Trip assigned (driver)', severity: 'CRITICAL' }),
+    );
   });
 
   it('duplicate mode seeds a copy and POSTs a new rule', async () => {
@@ -319,7 +380,8 @@ describe('NewAlertRuleModal — payload honesty', () => {
 
     await waitFor(() => expect(patched).not.toBeNull());
     expect(patched).not.toHaveProperty('key');
-    expect(patched!.quietHours).toEqual(quietHours);
+    // Untouched, so not re-sent: the server keeps the rule's own window.
+    expect(patched).not.toHaveProperty('quietHours');
   });
 
   it('refuses a rule with no delivery channel and sends nothing', async () => {
@@ -365,5 +427,131 @@ describe('NewAlertRuleModal — payload honesty', () => {
 
     expect(await screen.findByText(/greater than 0/)).toBeInTheDocument();
     expect(sent).toBe(false);
+  });
+});
+
+/* ------------------------------------------- F3-01: recipients are role keys */
+
+describe('NewAlertRuleModal — recipient role keys (F3-01)', () => {
+  function renderModal(props: React.ComponentProps<typeof NewAlertRuleModal>) {
+    return renderWithClient(
+      <ToastProvider>
+        <NewAlertRuleModal {...props} />
+      </ToastProvider>,
+    );
+  }
+
+  function capturePatch(id: string) {
+    const box: { body: Record<string, unknown> | null } = { body: null };
+    server.use(
+      http.patch(url(endpoints.alertRules.update(id)), async ({ request }) => {
+        box.body = (await request.json()) as Record<string, unknown>;
+        return ok(RULE);
+      }),
+    );
+    return box;
+  }
+
+  it('a new rule shows human labels and sends FLEET_MANAGER by default', async () => {
+    const user = userEvent.setup();
+    let body: { recipients?: unknown } | null = null;
+    server.use(
+      http.post(url(endpoints.alertRules.create), async ({ request }) => {
+        body = (await request.json()) as { recipients?: unknown };
+        return ok({ id: 'alr_9' }, 201);
+      }),
+    );
+    renderModal({ onClose: () => {} });
+    expect(screen.getByRole('checkbox', { name: 'Fleet managers' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Admins' })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Dispatchers' })).not.toBeChecked();
+    await user.type(screen.getByPlaceholderText('Break required soon'), 'Keys');
+    await user.click(screen.getByRole('checkbox', { name: 'Admins' }));
+    await user.click(screen.getByRole('button', { name: 'Create rule' }));
+    await waitFor(() => expect(body!.recipients).toEqual({ roles: ['ADMIN', 'FLEET_MANAGER'] }));
+  });
+
+  it('editing a rule stored with legacy labels preselects them and saves keys', async () => {
+    const user = userEvent.setup();
+    const patch = capturePatch('alr_7');
+    renderModal({
+      rule: { ...RULE, recipients: { roles: ['Fleet managers', 'Dispatchers'] } },
+      mode: 'edit',
+      onClose: () => {},
+    });
+    expect(screen.getByRole('checkbox', { name: 'Fleet managers' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Dispatchers' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Admins' })).not.toBeChecked();
+    await user.type(screen.getByDisplayValue('Geofence exit'), ' v2');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() =>
+      expect(patch.body!.recipients).toEqual({ roles: ['FLEET_MANAGER', 'DISPATCHER'] }),
+    );
+  });
+
+  it('maps the other legacy labels to fleet managers', async () => {
+    renderModal({
+      rule: { ...RULE, recipients: { roles: ['Assigned fleet manager', 'Safety team'] } },
+      mode: 'edit',
+      onClose: () => {},
+    });
+    expect(screen.getByRole('checkbox', { name: 'Fleet managers' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Dispatchers' })).not.toBeChecked();
+  });
+
+  it('editing a seeded rule keeps every stored key, including roles the form does not offer', async () => {
+    const user = userEvent.setup();
+    const patch = capturePatch('alr_7');
+    renderModal({
+      rule: {
+        ...RULE,
+        recipients: { roles: ['SUPER_ADMIN', 'ADMIN', 'FLEET_MANAGER', 'DISPATCHER'] },
+      },
+      mode: 'edit',
+      onClose: () => {},
+    });
+    expect(screen.getByRole('checkbox', { name: 'Super Admin' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Admins' })).toBeChecked();
+    await user.click(screen.getByRole('checkbox', { name: 'Dispatchers' })); // now off
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    await waitFor(() =>
+      expect(patch.body!.recipients).toEqual({ roles: ['ADMIN', 'FLEET_MANAGER', 'SUPER_ADMIN'] }),
+    );
+  });
+
+  it('keeps the subject driver and user recipients the form does not edit', async () => {
+    const user = userEvent.setup();
+    const patch = capturePatch('alr_7');
+    renderModal({
+      rule: { ...RULE, recipients: { subjectDriver: true, userIds: ['u-1'] } },
+      mode: 'edit',
+      onClose: () => {},
+    });
+    for (const name of ['Admins', 'Fleet managers', 'Dispatchers']) {
+      expect(screen.getByRole('checkbox', { name })).not.toBeChecked();
+    }
+    await user.type(screen.getByDisplayValue('Geofence exit'), ' v2');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    // Untouched recipients are not re-sent at all, so the server keeps them as they are.
+    await waitFor(() => expect(patch.body).toEqual({ name: 'Geofence exit v2' }));
+  });
+
+  it('refuses a rule with no recipient at all and sends nothing', async () => {
+    const user = userEvent.setup();
+    let sent = false;
+    server.use(
+      http.post(url(endpoints.alertRules.create), () => {
+        sent = true;
+        return ok({ id: 'alr_9' }, 201);
+      }),
+    );
+    renderModal({ onClose: () => {} });
+    await user.type(screen.getByPlaceholderText('Break required soon'), 'Nobody');
+    await user.click(screen.getByRole('checkbox', { name: 'Fleet managers' })); // now off
+    await user.click(screen.getByRole('button', { name: 'Create rule' }));
+    expect(await screen.findByText('Choose at least one recipient.')).toBeInTheDocument();
+    expect(sent).toBe(false);
+    await user.click(screen.getByRole('checkbox', { name: 'Dispatchers' }));
+    expect(screen.queryByText('Choose at least one recipient.')).not.toBeInTheDocument();
   });
 });

@@ -654,6 +654,24 @@ export default function FleetMap({
       const id = e.features?.[0]?.properties?.id as string | undefined;
       if (id) onSelectUnit?.(id);
     });
+    // F3-23 — a cluster bubble zooms in to the level where it splits into its units.
+    map.on('click', CLUSTER_LAYER, (e) => {
+      const feature = e.features?.[0];
+      const clusterId = feature?.properties?.cluster_id as number | undefined;
+      const source = map.getSource(SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+      if (clusterId === undefined || !source || feature?.geometry.type !== 'Point') return;
+      const center = feature.geometry.coordinates as [number, number];
+      void source
+        .getClusterExpansionZoom(clusterId)
+        .then((zoom) => map.easeTo({ center, zoom }))
+        .catch(() => {});
+    });
+    map.on('mouseenter', CLUSTER_LAYER, () => {
+      map.getCanvas().style.cursor = 'pointer';
+    });
+    map.on('mouseleave', CLUSTER_LAYER, () => {
+      map.getCanvas().style.cursor = '';
+    });
     // Only a hand-made drag (it has an `originalEvent`) ends follow mode — our own easeTo/jumpTo don't.
     map.on('dragstart', (e: { originalEvent?: unknown }) => {
       if (e?.originalEvent) followRef.current.onFollowChange?.(false);

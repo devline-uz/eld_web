@@ -18,6 +18,12 @@ describe('normalizeImportRow — CSV strings to the `POST /vehicles/import` row 
     ).toEqual({ unitNumber: '7320', vin: '1XPBD49X3PD732001', year: 2023, odometerMi: 154220, fuelType: 'DIESEL' });
   });
 
+  // F3-16 — the API pairs from `deviceSerial` only and strips `eldSerial` silently.
+  it('sends an `eldSerial` column as `deviceSerial`', () => {
+    expect(normalizeImportRow({ unitNumber: '1', eldSerial: ' ELD-9 ' })).toEqual({ unitNumber: '1', deviceSerial: 'ELD-9' });
+    expect(normalizeImportRow({ deviceSerial: 'A', eldSerial: 'B' })).toEqual({ deviceSerial: 'A' });
+  });
+
   it('leaves a non-numeric value as typed so the server names it', () => {
     expect(normalizeImportRow({ year: 'twenty' })).toEqual({ year: 'twenty' });
   });

@@ -426,6 +426,24 @@ describe('W-11 Dispatch & Trips', () => {
     expect(params().get('q')).toBe('4821');
   });
 
+  it('F3-10: the Completed tab sends the search to the server as q (driver / city search)', async () => {
+    usePopulatedTrips();
+    const sentQ: (string | null)[] = [];
+    server.use(
+      http.get(url(endpoints.trips.list), ({ request }) => {
+        const params = new URL(request.url).searchParams;
+        if (params.get('status') === 'DELIVERED') sentQ.push(params.get('q'));
+        return ok({ items: [], page: 1, limit: 25, total: 0, totalPages: 1 });
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage(null, '/trips?segment=COMPLETED');
+    const search = await screen.findByRole('textbox', { name: 'Search trips' });
+    expect(search).toHaveAttribute('placeholder', 'Search trip, driver, city…');
+    await user.type(search, 'Columbus');
+    await waitFor(() => expect(sentQ).toContain('columbus'));
+  });
+
   it('FE-22: the TRIP column has no page-only header sort', async () => {
     usePopulatedTrips();
     renderPage();

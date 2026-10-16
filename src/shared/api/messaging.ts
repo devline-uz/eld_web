@@ -10,8 +10,8 @@
 //      than fabricating a message count the API cannot back up;
 //   3. leaves the last-message body as "unavailable" (no extra per-conversation fetch) until
 //      B-37 ships — see the empty preview line in `MessagesPage`, not a guess here.
-import { useMemo } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMemo, useState } from 'react';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { client } from './client';
 import { endpoints } from './endpoints';
 import { qk, qkRoot } from './queryKeys';
@@ -136,10 +136,52 @@ export function useConversationsList(currentUserId: string | undefined) {
 export function useMessages(conversationId: string | undefined) {
   return useQuery({
     queryKey: qk.messages(conversationId ?? ''),
-    queryFn: ({ signal }) => client.list<MessageRow>(endpoints.conversations.messages(conversationId as string), { limit: 100 }, { signal }),
+    queryFn: ({ signal }) =>
+      client.list<MessageRow>(endpoints.conversations.messages(conversationId as string), { limit: MESSAGES_PAGE_SIZE }, { signal }),
     enabled: Boolean(conversationId),
     ...typedCachePolicy<OffsetPage<MessageRow>>('conversation'),
   });
+}
+
+/** `GET /conversations/:id/messages` pages newest-first; `useMessages` holds page 1. */
+const MESSAGES_PAGE_SIZE = 100;
+
+/**
+ * F3-20 — the thread past the newest page: pages 2, 3… of the same newest-first listing, loaded
+ * only on request ("Load earlier messages"). The server pages by offset, so a message that arrives
+ * meanwhile shifts every page by one — rows repeat (de-duplicated by the caller), none are skipped.
+ * Page 1 stays in `useMessages`, the cache realtime pushes and sends write to.
+ */
+export function useEarlierMessages(conversationId: string | undefined, newest: OffsetPage<MessageRow> | undefined) {
+  // Per conversation: opening another thread starts from its newest page again.
+  const [requestedFor, setRequestedFor] = useState<string | null>(null);
+  const requested = Boolean(conversationId) && requestedFor === conversationId;
+  const query = useInfiniteQuery({
+    queryKey: qk.messages(conversationId ?? '', { earlier: true }),
+    queryFn: ({ pageParam, signal }) =>
+      client.list<MessageRow>(
+        endpoints.conversations.messages(conversationId as string),
+        { page: pageParam, limit: MESSAGES_PAGE_SIZE },
+        { signal },
+      ),
+    initialPageParam: 2,
+    getNextPageParam: (last: OffsetPage<MessageRow>) => (last.page < last.totalPages ? last.page + 1 : undefined),
+    enabled: requested,
+    // Older messages do not change; refetching every loaded page on focus would only cost.
+    staleTime: Infinity,
+  });
+  const items = useMemo(() => (requested ? (query.data?.pages ?? []).flatMap((page) => page.items) : []), [requested, query.data]);
+  const hasMore = requested ? query.hasNextPage : (newest?.totalPages ?? 1) > 1;
+  return {
+    items,
+    hasMore,
+    isLoading: requested && (query.isFetching || query.isLoading),
+    isError: requested && query.isError,
+    loadMore: () => {
+      if (!requested) setRequestedFor(conversationId ?? null);
+      else void query.fetchNextPage();
+    },
+  };
 }
 
 export interface SendMessagePayload {

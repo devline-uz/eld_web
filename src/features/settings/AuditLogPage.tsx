@@ -7,7 +7,8 @@
 // the carrier's own timezone (§8.3).
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { endOfDay, format, startOfDay } from 'date-fns';
+import { addDays, format } from 'date-fns';
+import { fromZonedTime } from 'date-fns-tz';
 import { useQueries, useQueryClient } from '@tanstack/react-query';
 import { Search, Upload, Filter } from 'lucide-react';
 import { Can } from '@/shared/auth/Can';
@@ -16,15 +17,16 @@ import { Badge, type BadgeTone } from '@/shared/ui/Badge';
 import { Avatar } from '@/shared/ui/Avatar';
 import { Card } from '@/shared/ui/Card';
 import { Drawer } from '@/shared/ui/Modal';
-import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
+import { EmptyState, ErrorState, LoadingState, RefreshErrorNotice } from '@/shared/ui/states';
 import { EMPTY_STATE_COPY } from '@/shared/ui/copy';
-import { formatCarrier } from '@/shared/format/datetime';
+import { formatCarrier, todayInTz } from '@/shared/format/datetime';
+import { useCarrierTimezone } from '@/shared/auth/useCarrierTimezone';
 import { toCsv } from '@/shared/lib/csv';
 import { client } from '@/shared/api/client';
 import { endpoints } from '@/shared/api/endpoints';
 import { qk } from '@/shared/api/queryKeys';
 import { typedCachePolicy } from '@/shared/api/queryPolicy';
-import { useCarrier, useUsersList, type AuditEntry } from '@/shared/api/settingsAdmin';
+import { useUsersList, type AuditEntry } from '@/shared/api/settingsAdmin';
 import { DateRangePicker, resolvePreset, type DateRange, type DateRangePreset } from '@/shared/ui/DateRangePicker';
 import { FilterDrawer, FilterGroup, FilterCheckbox } from '@/shared/ui/FilterDrawer';
 import { Pagination } from '@/shared/ui/Pagination';
@@ -99,7 +101,7 @@ function positiveIntParam(raw: string | null, fallback: number): number {
 const RANGE_PRESETS: readonly DateRangePreset[] = ['today', 'yesterday', 'last7', 'last14', 'last30', 'thisMonth', 'lastMonth', 'thisQuarter', 'last8Hos', 'custom'];
 const DEFAULT_RANGE_PRESET: DateRangePreset = 'last30';
 
-/** `yyyy-MM-dd` ⇄ a local calendar date (the picker's days are browser-local, as before). */
+/** `yyyy-MM-dd` ⇄ a calendar date (the picker hands back plain `Date`s; only y/m/d is meant). */
 function dayParam(raw: string | null): Date | null {
   const m = raw ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw) : null;
   if (!m) return null;
@@ -108,8 +110,10 @@ function dayParam(raw: string | null): Date | null {
 }
 const toDayParam = (d: Date) => format(d, 'yyyy-MM-dd');
 
-const startOfDayMs = (d: Date) => startOfDay(d).getTime();
-const endOfDayMs = (d: Date) => endOfDay(d).getTime();
+/** F3-19 — a picked day's bounds in the carrier zone the rows are shown in (they used to be
+ * browser-local days: a Tashkent browser on a Denver carrier was 13 hours off on "Today"). */
+const startOfDayMs = (d: Date, timeZone: string) => fromZonedTime(`${toDayParam(d)}T00:00:00`, timeZone).getTime();
+const endOfDayMs = (d: Date, timeZone: string) => startOfDayMs(addDays(d, 1), timeZone) - 1;
 
 // Known object types the design's own row examples name (§10 W-23) — the real, useful set to
 // pick from before any entries have loaded; the drawer also folds in whatever else shows up in
@@ -117,8 +121,9 @@ const endOfDayMs = (d: Date) => endOfDay(d).getTime();
 const KNOWN_OBJECT_TYPES = ['Driver', 'Vehicle', 'Trip', 'WorkOrder', 'Role', 'User', 'Report'];
 
 export default function AuditLogPage() {
-  const carrierQuery = useCarrier();
-  const timezone = carrierQuery.data?.timezone ?? 'UTC';
+  // F3-11 — the carrier zone from the session (`/auth/me`): GET /carrier needs `carrierSettings`,
+  // so a role without it (Fleet Manager) used to see UTC.
+  const timezone = useCarrierTimezone();
   const usersQuery = useUsersList();
   const [params, setParams] = useSearchParams();
 
@@ -140,10 +145,14 @@ export default function AuditLogPage() {
     rawPreset && RANGE_PRESETS.includes(rawPreset) && (rawPreset !== 'custom' || (customFrom && customTo)) ? rawPreset : DEFAULT_RANGE_PRESET;
   const customKey = datePreset === 'custom' ? `${params.get('from')}|${params.get('to')}` : '';
   const dateRange = useMemo<DateRange>(
-    () => (datePreset === 'custom' && customFrom && customTo ? { from: customFrom, to: customTo } : resolvePreset(datePreset)),
+    () =>
+      datePreset === 'custom' && customFrom && customTo
+        ? { from: customFrom, to: customTo }
+        : // F3-19 — presets count back from the carrier's today, not the browser's.
+          resolvePreset(datePreset, dayParam(todayInTz(timezone)) ?? new Date()),
     // `customKey` stands in for the two parsed dates (new objects every render).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [datePreset, customKey],
+    [datePreset, customKey, timezone],
   );
   const [filtersOpen, setFiltersOpen] = useState(false);
   // The filter signature the user pressed `Stop` on — a new search/filter starts a new walk.
@@ -196,8 +205,8 @@ export default function AuditLogPage() {
     setFilterParams({ objectType: next });
   }
 
-  const rangeStartMs = startOfDayMs(dateRange.from);
-  const rangeEndMs = endOfDayMs(dateRange.to);
+  const rangeStartMs = startOfDayMs(dateRange.from, timezone);
+  const rangeEndMs = endOfDayMs(dateRange.to, timezone);
   const serverParams = { limit: CHUNK_SIZE, actorId: actorId || undefined, objectType: objectType || undefined };
   const filterSignature = JSON.stringify([search.trim(), action, rangeStartMs, rangeEndMs, actorId, objectType]);
   const localFilterActive = Boolean(search.trim()) || Boolean(action) || datePreset !== 'last30';
@@ -232,7 +241,9 @@ export default function AuditLogPage() {
   const firstQuery = chunkQueries[0];
   const lastQuery = chunkQueries[chunkQueries.length - 1];
   const isLoading = firstQuery?.isLoading ?? true;
-  const isError = chunkQueries.some((q) => q.isError);
+  // F3-03 — a chunk whose background refetch failed still has its rows: keep them on screen.
+  const isError = chunkQueries.some((q) => q.isError && q.data === undefined);
+  const refreshFailed = chunkQueries.some((q) => q.isError && q.data !== undefined);
   const isFetching = chunkQueries.some((q) => q.isFetching);
   // A later chunk still in flight means older entries exist even though its cursor is not known yet.
   const hasOlder = lastQuery?.data ? Boolean(lastQuery.data.nextCursor) : chunkQueries.length > 1;
@@ -409,6 +420,7 @@ export default function AuditLogPage() {
       {/* flex-1 lets the table area absorb any spare card height, so Pagination sits at the card
           bottom (the WB-264 pattern). */}
       <Card padded={false} className="flex flex-col">
+        {refreshFailed && !isError && <RefreshErrorNotice onRetry={retry} />}
         <div className="flex-1">
           {isLoading && items.length === 0 ? (
             <LoadingState className="p-4" />

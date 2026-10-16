@@ -192,6 +192,20 @@ describe('W-04 Unit profile — four states', () => {
     expect(screen.getByText('Updated just now')).toBeInTheDocument();
   });
 
+  // F3-17 — `/trips?vehicleId=` and `/dvir?vehicleId=` were ignored: Trips filters on `fUnit`,
+  // DVIR has no unit filter but searches unit numbers through `?q=`.
+  it.each([
+    ['trips', 'Dispatch & Trips', '/trips?fUnit=0f3c2a1e-0000-4000-8000-000000000001'],
+    ['dvir', 'DVIR & Maintenance', '/dvir?q=%23101'],
+  ])('F3-17: the %s tab links with the parameter that page reads', async (tab, name, href) => {
+    server.use(
+      http.get(url(endpoints.vehicles.detail('0f3c2a1e-0000-4000-8000-000000000001')), () => ok(VEHICLE)),
+      http.get(url(endpoints.vehicles.activities('0f3c2a1e-0000-4000-8000-000000000001')), () => ok({ items: [] })),
+    );
+    renderPage(`/vehicles/0f3c2a1e-0000-4000-8000-000000000001?tab=${tab}`);
+    expect(await screen.findByRole('link', { name })).toHaveAttribute('href', href);
+  });
+
   it('"Track on map" opens Live fleet with this unit selected (stage 3)', async () => {
     server.use(
       http.get(url(endpoints.vehicles.detail('0f3c2a1e-0000-4000-8000-000000000001')), () => ok(VEHICLE)),

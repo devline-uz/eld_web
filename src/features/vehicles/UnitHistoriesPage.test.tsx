@@ -62,12 +62,12 @@ function emptyHistories() {
   };
 }
 
-function renderPage() {
+function renderPage(entry = '/vehicles/veh_1/histories') {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
       <ToastProvider>
-        <MemoryRouter initialEntries={['/vehicles/veh_1/histories']}>
+        <MemoryRouter initialEntries={[entry]}>
           <Routes>
             <Route path="/vehicles/:id/histories" element={<UnitHistoriesPage />} />
           </Routes>
@@ -117,6 +117,13 @@ describe('W-05 Unit histories — states', () => {
     server.use(http.get(url(endpoints.vehicles.histories('veh_1')), () => ok(emptyHistories())));
     renderPage();
     expect(await screen.findByText(/0 segments today/)).toBeInTheDocument();
+  });
+
+  it('F3-26: a past day says which day its segments are from, not "today"', async () => {
+    server.use(http.get(url(endpoints.vehicles.histories('veh_1')), () => ok(emptyHistories())));
+    renderPage('/vehicles/veh_1/histories?date=2026-09-01');
+    expect(await screen.findByText(/0 segments on Sep 01, 2026/)).toBeInTheDocument();
+    expect(screen.queryByText(/segments today/)).not.toBeInTheDocument();
   });
 
   // WB-161 — the `Export` button had no `onClick` at all.

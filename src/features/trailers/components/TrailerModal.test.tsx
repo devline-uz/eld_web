@@ -114,6 +114,21 @@ describe('Add trailer', () => {
     expect(await screen.findByText(VALIDATION_MESSAGES.trailerNumberTaken)).toBeInTheDocument();
   });
 
+  it('F3-07: an open-trips 409 on deactivate is shown under Status, not as a taken number', async () => {
+    const message = 'This trailer still has open trips (TR-1001). Reassign or cancel them before changing its status.';
+    server.use(
+      http.patch(url(endpoints.trailers.update('trl_1')), () =>
+        fail(409, 'CONFLICT', message, { openTrips: [{ id: 'trp_1', number: 'TR-1001', status: 'IN_PROGRESS' }] }),
+      ),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<TrailerModal trailer={TRAILER} onClose={() => {}} />);
+    await user.selectOptions(screen.getByRole('combobox'), 'INACTIVE');
+    await user.click(screen.getByRole('button', { name: 'Save changes' }));
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(screen.queryByText(VALIDATION_MESSAGES.trailerNumberTaken)).toBeNull();
+  });
+
   it('asks before discarding a dirty form, not an untouched one', async () => {
     const onClose = vi.fn();
     const user = userEvent.setup();
