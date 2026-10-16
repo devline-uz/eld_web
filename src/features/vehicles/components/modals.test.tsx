@@ -222,7 +222,7 @@ describe('11.2 Edit unit — clearing optional fields', () => {
     );
     expect(screen.getByLabelText(/ELD serial/)).toHaveValue('PT30_1C4F');
     await user.clear(screen.getByLabelText(/License plate/));
-    await user.clear(screen.getByLabelText(/Issuing state/));
+    await user.selectOptions(screen.getByLabelText(/Issuing state/), '');
     await user.clear(screen.getByLabelText(/Notes/));
     await user.selectOptions(screen.getByLabelText(/ELD serial/), '');
     await user.click(screen.getByRole('button', { name: 'Save changes' }));
