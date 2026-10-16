@@ -544,6 +544,12 @@ export const fleetWriteHandlers = [
       lastHeartbeatAt: null,
       storedEventsCount: 0,
     };
+    // A retired (deleted) device frees its serial — registering it again re-activates that row.
+    const retired = DEVICES.find((d) => d.serial === created.serial && d.status === 'RETIRED');
+    if (retired) {
+      Object.assign(retired, { ...created, id: retired.id });
+      return ok(retired, 201);
+    }
     if (DEVICES.some((d) => d.serial === created.serial)) {
       return fail(409, 'DUPLICATE_SERIAL', 'A device with this serial is already registered.', {
         serial: 'A device with this serial is already registered.',
