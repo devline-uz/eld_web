@@ -235,6 +235,35 @@ describe('W-08 · header and timezone', () => {
   });
 });
 
+describe('WB-279 · while the driver is still resolving', () => {
+  it('shows loading (not "Could not load this RODS day") and never requests /logs/undefined', async () => {
+    let releaseDrivers: () => void = () => undefined;
+    const driversGate = new Promise<void>((resolve) => {
+      releaseDrivers = resolve;
+    });
+    const dayPaths: string[] = [];
+    server.use(
+      http.get(url(endpoints.drivers.list), async () => {
+        await driversGate;
+        return ok({ items: [driver], page: 1, limit: 200, total: 1, totalPages: 1 });
+      }),
+      http.get(url('/logs/:driverId'), ({ params }) => {
+        dayPaths.push(String(params.driverId));
+        return ok(dayPayload);
+      }),
+    );
+    renderPage();
+    // the vehicle picker resolves first; the drivers list is held back
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(screen.queryByText('Could not load this RODS day')).not.toBeInTheDocument();
+
+    releaseDrivers();
+    expect(await screen.findByText('14:26:58', undefined, { timeout: 5_000 })).toBeInTheDocument();
+    expect(dayPaths).not.toContain('undefined');
+    expect(dayPaths).toContain(DRIVER_ID);
+  });
+});
+
 describe('W-08 · role gating (§10 W-08 role table)', () => {
   // CODE-029 — the driver certifies in the app; no web role (not even ADMIN) gets a certify action.
   it('offers no `Certify all` even to an administrator and says the driver certifies in the app', async () => {

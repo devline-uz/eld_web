@@ -489,7 +489,10 @@ export default function HosLogsPage() {
               }
             />
             <div className="mt-4">
-              {dayQuery.isLoading ? (
+              {/* WB-279 — while the driver (and so his zone) is still resolving the day query is
+                  disabled, not failed: show loading, and never `refetch()` it — that bypasses
+                  `enabled` and requested `/logs/undefined`. */}
+              {dayQuery.isLoading || !queryDriverId ? (
                 <LoadingState rows={4} />
               ) : !day || !dayIsUsable ? (
                 <ErrorState
