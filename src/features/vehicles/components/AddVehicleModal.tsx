@@ -9,6 +9,7 @@ import { useToast } from '@/shared/ui/Toast';
 import { TOAST_COPY } from '@/shared/ui/copy';
 import { vehicleSchema, type VehicleFormValues } from '@/shared/forms/schemas';
 import { LIMITS, VALIDATION_MESSAGES } from '@/shared/forms/messages';
+import { CA_PROVINCES, US_STATES } from '@/shared/forms/usStates';
 import { nonNegativeIntInputProps } from '@/shared/forms/nonNegativeIntInput';
 import { clearable } from '@/shared/forms/clearable';
 import { useCreateVehicle, useUpdateVehicle, type VehicleRow } from '@/shared/api/vehicles';
@@ -349,18 +350,32 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
             <input {...register('licensePlate')} disabled={submitting} className={inputClass} />
           </Field>
           <Field label="Issuing state" error={errors.licenseState?.message}>
-            <input
+            <select
               {...register('licenseState', {
-                // An untouched optional input defaults to '' — zod's `.optional()` only skips
-                // validation on `undefined`, not on an empty string, so `.length(2)` would
-                // reject a field the user never typed into (web/bugs.md WB-012 pattern).
+                // The blank option posts '' — zod's `.optional()` only skips validation on
+                // `undefined`, not on an empty string, so `.length(2)` would reject a state the
+                // user never picked (web/bugs.md WB-012 pattern).
                 setValueAs: (v: string) => (v === '' ? undefined : v),
               })}
-              maxLength={2}
-              placeholder="OH"
               disabled={submitting}
               className={inputClass}
-            />
+            >
+              <option value="">—</option>
+              <optgroup label="United States">
+                {US_STATES.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="Canada">
+                {CA_PROVINCES.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </optgroup>
+            </select>
           </Field>
           <Field label="Odometer at activation" error={errors.odometer?.message}>
             <input
