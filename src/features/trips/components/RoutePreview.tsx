@@ -52,8 +52,9 @@ export function RoutePreview({
       <Suspense fallback={<div className="size-full animate-pulse bg-bg-subtle" />}>
         <RouteMap pickup={route.pickup} delivery={route.delivery} waypoints={route.waypoints} line={route.line} approximate={route.approximate} />
       </Suspense>
+      {/* L3-05 — top-left: the bottom edge belongs to the map's attribution control. */}
       {!route.routing && route.approximate && (
-        <span className="absolute bottom-1 left-1 rounded bg-bg-surface px-1.5 py-0.5 text-caption text-text-muted">
+        <span className="absolute top-1 left-1 rounded bg-bg-surface px-1.5 py-0.5 text-caption text-text-muted">
           {route.routingConfigured ? 'Approximate route (straight line)' : 'Straight line — road routing is not configured'}
         </span>
       )}

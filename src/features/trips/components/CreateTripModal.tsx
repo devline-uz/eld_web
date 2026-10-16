@@ -72,6 +72,8 @@ const RATE_MESSAGE = 'Enter a rate greater than 0.';
 const RATE_DECIMALS_MESSAGE = 'Use at most 2 decimal places.';
 /** CODE-058 — mirrors the API's 422 `plannedEndAt` for a trip that puts a unit on the schedule. */
 const DELIVERY_REQUIRED_MESSAGE = 'Set a delivery time — without one the unit and driver stay booked indefinitely.';
+/** F3-15 — mirrors the API's `StopsDto` rule: set stop times never go backwards along the route. */
+const STOP_ORDER_MESSAGE = 'Stop times must not go backwards along the route.';
 
 /** `CreateTripDto` limits (backend trips.dto.ts) the shared `tripSchema` does not carry. */
 const TRIP_LIMITS = {
@@ -129,6 +131,13 @@ function buildTripSchema(original: OriginalWindows | undefined, timeZone: string
       .string()
       .optional()
       .superRefine((value, ctx) => {
+        // L3-04 — CODE-058's "delivery required" joins the other required errors on the first
+        // submit (it used to be checked only once everything else passed). Edit mode and drafts
+        // may leave it blank.
+        if (!value && !original && !draft) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, message: DELIVERY_REQUIRED_MESSAGE });
+          return;
+        }
         if (!value || value === original?.end) return;
         const end = parseZonedInput(value, timeZone);
         if (!end) ctx.addIssue({ code: z.ZodIssueCode.custom, message: INVALID_DATE_MESSAGE });
@@ -329,6 +338,8 @@ interface IntermediateStop {
   name: string;
   coords: Coords | null;
   scheduledAt: string;
+  /** F3-15 — the browser rejected the typed date (Feb 30): `scheduledAt` is `''` but not blank. */
+  badDate?: boolean;
 }
 
 /** Moves the stop with `key` to `toIndex`; the others shift to make room (array order is the
@@ -405,6 +416,8 @@ export function CreateTripModal({
   // extra stops are collected here and sent between the pickup and the delivery.
   const [intermediateStops, setIntermediateStops] = useState<IntermediateStop[]>([]);
   const nextStopKey = useRef(1);
+  /** F3-15 — a stop window error per stop `key` (invalid date / out of route order). */
+  const [stopWindowErrors, setStopWindowErrors] = useState<Record<number, string>>({});
   /** QA FE-004 — set on the click, cleared when the request settles (same tick as the click). */
   const submitInFlight = useRef(false);
   /** `1…N` — the position picker every intermediate stop shows. */
@@ -693,9 +706,35 @@ export function CreateTripModal({
     }
   }
 
+  /** F3-15 — the stop windows live outside react-hook-form, so they are checked by hand: a date
+   * the browser rejected is an error (it used to be dropped from the payload in silence), and a set
+   * time must not go backwards along the route — after the pickup, before the delivery, and not
+   * before an earlier stop (the API's `StopsDto` rule). Blank-named stops are not sent, so skipped. */
+  function validateStopWindows(): boolean {
+    const { scheduledStart, scheduledEnd } = getValues();
+    const delivery = parseZonedInput(scheduledEnd, carrierTz);
+    let previous = parseZonedInput(scheduledStart, carrierTz);
+    const found: Record<number, string> = {};
+    for (const stop of intermediateStops) {
+      if (stop.name.trim() === '') continue;
+      if (stop.badDate) {
+        found[stop.key] = INVALID_DATE_MESSAGE;
+        continue;
+      }
+      if (!stop.scheduledAt) continue;
+      const at = parseZonedInput(stop.scheduledAt, carrierTz);
+      if (!at) found[stop.key] = INVALID_DATE_MESSAGE;
+      else if ((previous && at < previous) || (delivery && at > delivery)) found[stop.key] = STOP_ORDER_MESSAGE;
+      else previous = at;
+    }
+    setStopWindowErrors(found);
+    return Object.keys(found).length === 0;
+  }
+
   /** CODE-059 — "Save as draft" validates against the sparse draft rules, not the full form. */
   function submitDraft() {
     clearErrors();
+    const stopsValid = validateStopWindows();
     const parsed = draftSchema.safeParse(getValues());
     if (!parsed.success) {
       for (const issue of parsed.error.issues) {
@@ -704,6 +743,7 @@ export function CreateTripModal({
       }
       return;
     }
+    if (!stopsValid) return;
     onSubmit(parsed.data as CreateTripValues, true);
   }
 
@@ -712,6 +752,7 @@ export function CreateTripModal({
     // mutation itself or a double click creates two trips. `isPending` only flips on the next
     // render, so two clicks in the same tick both passed it (QA FE-004): a same-tick ref too.
     if (submitInFlight.current || createMutation.isPending || assignmentBlocked || driveHoursError) return;
+    if (!validateStopWindows()) return;
     // With a geocoder configured, pickup and delivery must be picked places (coordinates), not
     // free text. Without one (`VITE_MAP_API_KEY` unset) free text stays the only option.
     // CODE-058 — a dispatched trip puts its unit (and driver/trailer) on the schedule; without a
@@ -1027,9 +1068,11 @@ export function CreateTripModal({
       <form
         id="create-trip-form"
         noValidate
-        onSubmit={(e) =>
-          void handleSubmit((values) => (editing ? onSubmitEdit(values) : onSubmit(values, false)))(e)
-        }
+        onSubmit={(e) => {
+          // F3-15 — the stop windows are reported together with the form's own errors.
+          if (!editing) validateStopWindows();
+          void handleSubmit((values) => (editing ? onSubmitEdit(values) : onSubmit(values, false)))(e);
+        }}
         className="flex flex-col gap-4"
       >
         {banner && (
@@ -1181,19 +1224,20 @@ export function CreateTripModal({
                     className={inputClass}
                   />
                 </Field>
-                <Field label={`Stop ${index + 1} window`}>
+                <Field label={`Stop ${index + 1} window`} error={stopWindowErrors[stop.key]}>
                   <input
                     type="datetime-local"
                     value={stop.scheduledAt}
                     min={pickupMinInput}
                     max={pickupMaxInput}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const { value } = e.target;
+                      const badDate = e.currentTarget.validity?.badInput === true;
                       setIntermediateStops((prev) =>
-                        prev.map((s) =>
-                          s.key === stop.key ? { ...s, scheduledAt: e.target.value } : s,
-                        ),
-                      )
-                    }
+                        prev.map((s) => (s.key === stop.key ? { ...s, scheduledAt: value, badDate } : s)),
+                      );
+                      setStopWindowErrors(({ [stop.key]: _cleared, ...rest }) => rest);
+                    }}
                     className={`${inputClass} w-full min-w-0 tabular-nums`}
                   />
                 </Field>

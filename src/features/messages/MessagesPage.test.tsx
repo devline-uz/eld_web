@@ -686,6 +686,92 @@ describe('W-16 Messages', () => {
 // WB-165 / WB-171 / WB-172 — stage-2 regressions: the dirty-close bypass in the New-message
 // modal, the no-match empty state and the dead `Call` button.
 describe('W-16 Messages — stage-2 fixes', () => {
+  it('F3-04: a draft stays with its conversation and never sends to another driver', async () => {
+    const at = '2026-09-12T15:00:00.000Z';
+    const conv = (id: string, driverId: string) => ({
+      ...CONVERSATION,
+      id,
+      participants: [
+        { id: `${id}a`, conversationId: id, userId: 'usr_1', driverId: null, lastReadAt: at, mutedUntil: null },
+        { id: `${id}b`, conversationId: id, userId: null, driverId, lastReadAt: at, mutedUntil: null },
+      ],
+    });
+    const sentTo: string[] = [];
+    server.use(
+      http.get(url(endpoints.conversations.list), () => ok({ items: [conv('cnv_a', 'drv_a'), conv('cnv_b', 'drv_b')] })),
+      http.get(url(endpoints.drivers.list), () =>
+        ok({
+          items: [
+            { ...DRIVER, id: 'drv_a', firstName: 'Alice', lastName: 'Ames' },
+            { ...DRIVER, id: 'drv_b', firstName: 'Bob', lastName: 'Brown' },
+          ],
+          page: 1,
+          limit: 500,
+          total: 2,
+          totalPages: 1,
+        }),
+      ),
+      http.get(url(endpoints.conversations.messages(':id')), () => ok({ items: [], page: 1, limit: 100, total: 0, totalPages: 1 })),
+      http.post(url(endpoints.conversations.sendMessage(':id')), async ({ request, params }) => {
+        const body = (await request.json()) as { body: string; clientId: string };
+        sentTo.push(`${String(params.id)}:${body.body}`);
+        return ok({ id: 'm1', conversationId: params.id, senderUserId: 'usr_1', senderDriverId: null, body: body.body, attachmentId: null, clientId: body.clientId, sentAt: at, deliveredAt: null, readAt: null });
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByText('Alice Ames'));
+    await user.type(screen.getByPlaceholderText('Write a message to Alice Ames…'), 'Alice, your load is cancelled');
+    await user.click(screen.getAllByText('Bob Brown')[0]!);
+    const composerB = await screen.findByPlaceholderText('Write a message to Bob Brown…');
+    expect(composerB).toHaveValue('');
+    await user.type(composerB, '{Enter}');
+    expect(sentTo).toEqual([]);
+
+    await user.click(screen.getAllByText('Alice Ames')[0]!);
+    expect(await screen.findByPlaceholderText('Write a message to Alice Ames…')).toHaveValue('Alice, your load is cancelled');
+  });
+
+  // F3-20 — the thread showed only the newest 100 messages with no way to read further back.
+  it('F3-20: "Load earlier messages" pages back through the thread, without duplicates', async () => {
+    const msg = (id: string, body: string, sentAt: string) => ({
+      id, conversationId: 'cnv_1', senderUserId: null, senderDriverId: 'drv_1', body,
+      attachmentId: null, clientId: null, sentAt, deliveredAt: null, readAt: null,
+    });
+    const pages: string[] = [];
+    usePopulatedConversations();
+    server.use(
+      http.get(url(endpoints.conversations.messages(':id')), ({ request }) => {
+        const page = new URL(request.url).searchParams.get('page') ?? '1';
+        pages.push(page);
+        if (page === '1') return ok({ items: [msg('msg_new', 'Newest message', '2026-09-12T15:00:00.000Z')], page: 1, limit: 100, total: 3, totalPages: 3 });
+        if (page === '2') return ok({ items: [msg('msg_new', 'Newest message', '2026-09-12T15:00:00.000Z'), msg('msg_mid', 'Middle message', '2026-09-11T15:00:00.000Z')], page: 2, limit: 100, total: 3, totalPages: 3 });
+        return ok({ items: [msg('msg_old', 'Oldest message', '2026-09-10T15:00:00.000Z')], page: 3, limit: 100, total: 3, totalPages: 3 });
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByText('John Smith'));
+    await screen.findByText('Newest message');
+    await user.click(screen.getByRole('button', { name: 'Load earlier messages' }));
+    expect(await screen.findByText('Middle message')).toBeInTheDocument();
+    expect(screen.getAllByText('Newest message')).toHaveLength(1);
+    await user.click(screen.getByRole('button', { name: 'Load earlier messages' }));
+    expect(await screen.findByText('Oldest message')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Load earlier messages' })).not.toBeInTheDocument();
+    expect(pages).toEqual(['1', '2', '3']);
+  });
+
+  it('F3-20: no "Load earlier messages" when the whole thread is loaded', async () => {
+    usePopulatedConversations();
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(await screen.findByText('John Smith'));
+    await screen.findByText('On schedule.');
+    expect(screen.queryByRole('button', { name: 'Load earlier messages' })).not.toBeInTheDocument();
+  });
+
   it('shows the search empty state (not "No conversations yet") when nothing matches', async () => {
     usePopulatedConversations();
     const user = userEvent.setup();

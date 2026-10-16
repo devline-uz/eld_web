@@ -11,10 +11,17 @@ import { ok, url } from '@/mocks/envelope';
 import { endpoints } from '@/shared/api/endpoints';
 import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/client';
 import { ToastProvider } from '@/shared/ui/Toast';
+import { fromZonedTime } from 'date-fns-tz';
 import DvirPage from './DvirPage';
 import { PageHeaderProvider, PageHeading } from '@/app/layouts/Topbar';
+import type * as CarrierTimezoneModule from '@/shared/auth/useCarrierTimezone';
 
 let mockCan = (_key: string, _level?: 'READ' | 'FULL') => true;
+let mockCarrierTz = 'America/New_York';
+vi.mock('@/shared/auth/useCarrierTimezone', async (importOriginal) => ({
+  ...(await importOriginal<typeof CarrierTimezoneModule>()),
+  useCarrierTimezone: () => mockCarrierTz,
+}));
 vi.mock('@/shared/auth/usePermission', () => ({ usePermission: () => ({ can: (k: string, l?: 'READ' | 'FULL') => mockCan(k, l) }) }));
 vi.mock('@/shared/auth/Can', () => ({
   Can: ({ perm, level, children }: { perm: string; level?: 'READ' | 'FULL'; children: React.ReactNode }) =>
@@ -42,6 +49,8 @@ afterEach(() => {
   server.resetHandlers();
   resetAuthBridge();
   mockCan = () => true;
+  mockCarrierTz = 'America/New_York';
+  vi.useRealTimers();
 });
 afterAll(() => server.close());
 
@@ -58,6 +67,24 @@ describe('DvirPage', () => {
     expect(await screen.findByText('Overdue services')).toBeInTheDocument();
     expect(await screen.findByText('DVIRs today')).toBeInTheDocument();
     expect(await screen.findByText('Vehicles out of service')).toBeInTheDocument();
+  });
+
+  // F3-19 — "DVIRs today" counted the browser's day; the table shows carrier-zone times.
+  it('F3-19: "DVIRs today" counts the carrier\'s day, not the browser\'s', async () => {
+    // A carrier zone whole hours away from the browser's, so their "today" differs.
+    mockCarrierTz = new Date('2026-10-15T12:00:00Z').getTimezoneOffset() === 600 ? 'Asia/Tokyo' : 'Pacific/Honolulu';
+    vi.useFakeTimers({ toFake: ['Date'], now: fromZonedTime('2026-10-15T23:30:00', mockCarrierTz) });
+    const dvir = (id: string, local: string) => ({
+      id, driverId: 'drv_1', vehicleId: 'veh_1', type: 'PRE_TRIP', odometerMi: 100000,
+      submittedAt: fromZonedTime(local, mockCarrierTz).toISOString(), vehicleCondition: 'SATISFACTORY', repairStatus: 'NOT_REQUIRED',
+    });
+    server.use(
+      http.get(url(endpoints.dvir.list), () =>
+        ok({ items: [dvir('dvir_1', '2026-10-15T00:30:00'), dvir('dvir_2', '2026-10-14T23:00:00')], page: 1, limit: 200, total: 2, totalPages: 1 }),
+      ),
+    );
+    renderPage();
+    expect(await screen.findByText('1 no-defect')).toBeInTheDocument();
   });
 
   it('UI-011: an OVERDUE service is listed apart as "Overdue by …" — never "Due in" via Math.abs', async () => {

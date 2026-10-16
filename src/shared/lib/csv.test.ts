@@ -78,3 +78,27 @@ describe('toCsv / escapeCsvField (WB-135)', () => {
     expect(parseCsvRows(text)).toEqual(rows);
   });
 });
+
+describe('escapeCsvField — formula injection (F3-06)', () => {
+  it('prefixes a single quote to cells starting with = + - @ tab or CR', () => {
+    expect(escapeCsvField('=HYPERLINK("http://evil.example","x")')).toBe(
+      '"\'=HYPERLINK(""http://evil.example"",""x"")"',
+    );
+    expect(escapeCsvField('+cmd|calc')).toBe("'+cmd|calc");
+    expect(escapeCsvField('-2+3')).toBe("'-2+3");
+    expect(escapeCsvField('@SUM(A1)')).toBe("'@SUM(A1)");
+    expect(escapeCsvField('\t=1')).toBe("'\t=1");
+    expect(escapeCsvField('\r=1')).toBe('"\'\r=1"');
+  });
+
+  it('keeps negative numbers numeric and leaves other text alone', () => {
+    expect(escapeCsvField(-12.5)).toBe('-12.5');
+    expect(escapeCsvField('-12')).toBe('-12');
+    expect(escapeCsvField('-0.75')).toBe('-0.75');
+    expect(escapeCsvField('Sarah = admin')).toBe('Sarah = admin');
+  });
+
+  it('neutralises every cell of a toCsv export', () => {
+    expect(toCsv([['driver'], ['=1+1'], ['@x']])).toBe("driver\r\n'=1+1\r\n'@x");
+  });
+});

@@ -13,8 +13,9 @@ import { DataTable } from '@/shared/ui/DataTable';
 import { Pagination } from '@/shared/ui/Pagination';
 import { Card } from '@/shared/ui/Card';
 import { ConfirmDelete, Modal } from '@/shared/ui/Modal';
-import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
+import { EmptyState, ErrorState, LoadingState, RefreshErrorNotice } from '@/shared/ui/states';
 import { searchEmptyState } from '@/shared/ui/copy';
+import { useDebouncedValue } from '@/shared/hooks/useDebouncedValue';
 import { useToast } from '@/shared/ui/Toast';
 import { formErrorMessage } from '@/shared/api/errors';
 import { formatRelative } from '@/shared/format/relative';
@@ -74,6 +75,8 @@ export default function DevicesPage() {
   const [segment, setSegment] = useState<Segment>('ALL');
   const [kind, setKind] = useState<DeviceKind>('ALL');
   const [search, setSearch] = useState('');
+  // F3-22 — debounced: one `GET /devices?q=` per keystroke before.
+  const debouncedSearch = useDebouncedValue(search.trim(), 300);
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(25);
   const [registerOpen, setRegisterOpen] = useState(false);
@@ -88,11 +91,11 @@ export default function DevicesPage() {
   // narrowed result — `GET /devices?page=3` for a 1-page result answers an empty page, which this
   // screen renders as "No results for …" / "No devices registered yet" although matches exist.
   // Adjusted during render, not in an effect (react.dev "you might not need an effect").
-  const listKey = JSON.stringify([search, segment, kind]);
+  const listKey = JSON.stringify([debouncedSearch, segment, kind]);
   const [prevListKey, setPrevListKey] = useState(listKey);
   const requestedPage = listKey === prevListKey ? page : 1;
   if (listKey !== prevListKey) setPrevListKey(listKey);
-  const devicesQuery = useDevicesList({ page: requestedPage, limit, q: search || undefined, status: statusFilter, virtual: kind === 'ALL' ? undefined : kind === 'TEST' ? 'true' : 'false' });
+  const devicesQuery = useDevicesList({ page: requestedPage, limit, q: debouncedSearch || undefined, status: statusFilter, virtual: kind === 'ALL' ? undefined : kind === 'TEST' ? 'true' : 'false' });
   const totalPages = devicesQuery.data?.totalPages ?? 1;
   const currentPage = devicesQuery.isLoading ? requestedPage : Math.min(requestedPage, Math.max(1, totalPages));
   if (currentPage !== page) setPage(currentPage);
@@ -302,6 +305,8 @@ export default function DevicesPage() {
               type="search"
               aria-label="Search serial or unit"
               value={search}
+              // F3-22 — `DeviceListQueryDto.q` is `.max(200)`; longer is a 422 and an error card.
+              maxLength={200}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search serial or unit…"
               className="w-full min-w-0 bg-transparent text-body outline-none sm:w-56"
@@ -320,9 +325,10 @@ export default function DevicesPage() {
       </div>
 
       <Card padded={false}>
+        {devicesQuery.isError && devicesQuery.data && <RefreshErrorNotice onRetry={() => void devicesQuery.refetch()} />}
         {devicesQuery.isLoading ? (
           <LoadingState className="p-4" />
-        ) : devicesQuery.isError ? (
+        ) : devicesQuery.isError && !devicesQuery.data ? (
           <ErrorState onRetry={() => devicesQuery.refetch()} />
         ) : filteredBySegment.length === 0 ? (
           search ? (

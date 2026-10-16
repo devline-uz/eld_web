@@ -195,6 +195,20 @@ describe('FleetMap — GeoJSON source + symbol layer (style configured)', () => 
     expect(onSelectUnit).toHaveBeenCalledWith('v2');
   });
 
+  it('F3-23: clicking a cluster bubble zooms in to where it breaks apart', async () => {
+    render(<FleetMap units={UNITS} />);
+    const map = FakeMap.instances[0]!;
+    act(() => map.fire('load'));
+    const source = map.getSource('fleet-units') as unknown as FakeGeoJSONSource & { getClusterExpansionZoom?: unknown };
+    source.getClusterExpansionZoom = vi.fn(() => Promise.resolve(9));
+
+    map.fireLayer('click', 'fleet-clusters', {
+      features: [{ properties: { cluster_id: 7 }, geometry: { type: 'Point', coordinates: [-83, 40] } }],
+    });
+    await vi.waitFor(() => expect(map.easeTo).toHaveBeenCalledWith(expect.objectContaining({ center: [-83, 40], zoom: 9 })));
+    expect(source.getClusterExpansionZoom).toHaveBeenCalledWith(7);
+  });
+
   it('patches the existing source on a units update instead of remounting the map', () => {
     const { rerender } = render(<FleetMap units={UNITS} />);
     const map = FakeMap.instances[0]!;

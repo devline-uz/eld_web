@@ -11,7 +11,11 @@ const NUMERIC_COLUMNS = new Set(['year', 'odometerMi']);
  */
 export function normalizeImportRow(row: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const [key, raw] of Object.entries(row)) {
+  for (const [column, raw] of Object.entries(row)) {
+    // F3-16 — the API pairs devices from `deviceSerial` only and strips an `eldSerial` column in
+    // silence; the panel calls it "ELD serial" everywhere, so that header is accepted as an alias.
+    const key = column === 'eldSerial' ? 'deviceSerial' : column;
+    if (key !== column && 'deviceSerial' in row) continue;
     const value = typeof raw === 'string' ? raw.trim() : raw;
     if (value === '' || value === undefined || value === null) continue;
     if (NUMERIC_COLUMNS.has(key) && typeof value === 'string' && /^-?\d+$/.test(value)) {

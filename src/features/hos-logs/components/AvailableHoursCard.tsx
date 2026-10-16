@@ -59,7 +59,7 @@ export function AvailableHoursCard({ driverId }: { driverId: string }) {
       <div className="mt-4">
         {query.isLoading ? (
           <LoadingState rows={4} />
-        ) : query.isError || !query.data ? (
+        ) : !query.data ? (
           <ErrorState
             title="Could not load available hours"
             description="The hours-of-service clocks did not respond. Your data is safe — try again in a moment."

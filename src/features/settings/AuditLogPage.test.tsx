@@ -11,9 +11,18 @@ import { ok, fail, url } from '@/mocks/envelope';
 import { endpoints } from '@/shared/api/endpoints';
 import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/client';
 import { ToastProvider } from '@/shared/ui/Toast';
+import { fromZonedTime } from 'date-fns-tz';
+import { formatCarrier } from '@/shared/format/datetime';
 import AuditLogPage from './AuditLogPage';
+import type * as CarrierTimezoneModule from '@/shared/auth/useCarrierTimezone';
 
 let auditLogPerm = true;
+// F3-11 — the carrier zone comes from the session (`/auth/me`), never GET /carrier.
+let mockCarrierTz = 'America/New_York';
+vi.mock('@/shared/auth/useCarrierTimezone', async (importOriginal) => ({
+  ...(await importOriginal<typeof CarrierTimezoneModule>()),
+  useCarrierTimezone: () => mockCarrierTz,
+}));
 vi.mock('@/shared/auth/usePermission', () => ({
   usePermission: () => ({ can: (key: string) => (key === 'auditLog' ? auditLogPerm : true) }),
 }));
@@ -383,5 +392,48 @@ describe('WB-270 audit log pagination', () => {
     await pager(/1–100 of 150 entries/);
     expect(bodyRows()).toBe(100);
     expect(screen.getByRole('table')).not.toHaveAttribute('aria-rowcount');
+  });
+});
+
+// F3-19 — the date range was cut on browser-local days while the rows show carrier-zone times.
+describe('F3-19 / F3-11 audit log in the carrier zone', () => {
+  // A carrier zone whole hours away from the browser's, so their "today" differs.
+  const CARRIER_TZ = new Date('2026-10-15T12:00:00Z').getTimezoneOffset() === 600 ? 'Asia/Tokyo' : 'Pacific/Honolulu';
+  const NOW = fromZonedTime('2026-10-15T23:30:00', CARRIER_TZ);
+  const at = (local: string) => fromZonedTime(local, CARRIER_TZ).toISOString();
+  afterEach(() => {
+    vi.useRealTimers();
+    mockCarrierTz = 'America/New_York';
+  });
+
+  it('F3-19: "Today" is the carrier\'s day, not the browser\'s', async () => {
+    vi.useFakeTimers({ toFake: ['Date'], now: NOW });
+    mockCarrierTz = CARRIER_TZ;
+    server.use(
+      http.get(url(endpoints.auditLog.list), () =>
+        ok({
+          items: [
+            { ...entry('1', 'UPDATE', 'Role · Early today'), createdAt: at('2026-10-15T00:30:00') },
+            { ...entry('2', 'UPDATE', 'Role · Late yesterday'), createdAt: at('2026-10-14T23:30:00') },
+          ],
+          nextCursor: null,
+        }),
+      ),
+    );
+    renderPage('/settings/audit-log?range=today');
+    expect(await screen.findByText('Role · Early today')).toBeInTheDocument();
+    expect(screen.queryByText('Role · Late yesterday')).not.toBeInTheDocument();
+  });
+
+  it('F3-11: without `carrierSettings` (GET /carrier 403) times use the session\'s carrier zone, not UTC', async () => {
+    const createdAt = '2026-10-15T03:00:00.000Z';
+    server.use(
+      http.get(url(endpoints.carrier.root), () => fail(403, 'FORBIDDEN', 'Forbidden')),
+      http.get(url(endpoints.auditLog.list), () => ok({ items: [{ ...entry('1', 'UPDATE', 'Role · Dispatcher'), createdAt }], nextCursor: null })),
+    );
+    renderPage('/settings/audit-log?range=custom&from=2026-10-01&to=2026-10-31');
+    await screen.findByText('Role · Dispatcher');
+    expect(screen.getByText(formatCarrier(createdAt, 'America/New_York', 'dateTimeSeconds'))).toBeInTheDocument();
+    expect(screen.queryByText(formatCarrier(createdAt, 'UTC', 'dateTimeSeconds'))).not.toBeInTheDocument();
   });
 });

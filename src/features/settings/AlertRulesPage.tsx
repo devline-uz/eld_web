@@ -7,11 +7,12 @@ import { Plus, Search, AlertTriangle, ShieldCheck, Info } from 'lucide-react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
+import { useOptionalAuth } from '@/shared/auth/AuthProvider';
 import { Button } from '@/shared/ui/Button';
 import { Badge } from '@/shared/ui/Badge';
 import { Card, SectionHeader } from '@/shared/ui/Card';
 import { ConfirmDelete } from '@/shared/ui/Modal';
-import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
+import { EmptyState, ErrorState, LoadingState, RefreshErrorNotice } from '@/shared/ui/states';
 import { useToast } from '@/shared/ui/Toast';
 import { formErrorMessage } from '@/shared/api/errors';
 import { useAlertRulesList, useUpdateAlertRule, useDeleteAlertRule, useTestAlertRule, useCarrier, type AlertRuleRow, type AlertSeverity } from '@/shared/api/settingsAdmin';
@@ -19,10 +20,13 @@ import { useNotificationChannels, useUpdateNotificationChannels } from '@/shared
 import { NewAlertRuleModal } from './components/NewAlertRuleModal';
 import { SETTINGS_TOAST, countLabel } from './lib/copy';
 import { describeCondition } from './lib/alertConditions';
+import { describeRecipientRoles } from './lib/alertRecipients';
 import { describeAlertTestResult } from './lib/alertTestResult';
 import { usePageHeader } from '@/app/layouts/Topbar';
 
 type Segment = 'ALL' | 'ACTIVE' | 'MUTED';
+
+const NO_COMPLIANCE_EMAIL = 'No compliance email set on the company profile';
 
 const SEVERITY_ICON: Record<AlertSeverity, ReactNode> = {
   CRITICAL: <AlertTriangle size={16} strokeWidth={1.75} className="text-danger" />,
@@ -42,6 +46,17 @@ export default function AlertRulesPage() {
   const { toast } = useToast();
   const rulesQuery = useAlertRulesList();
   const carrierQuery = useCarrier();
+  // F3-11 — GET /carrier needs `carrierSettings`; a Fleet Manager gets a 403 and was told "No
+  // compliance email set" even when one is. `/auth/me`'s `hasComplianceEmail` says whether one is
+  // set without the address; until either answers, nothing is claimed.
+  const hasComplianceEmail = useOptionalAuth()?.user?.hasComplianceEmail;
+  const complianceEmailNote = carrierQuery.data
+    ? carrierQuery.data.complianceEmail ?? NO_COMPLIANCE_EMAIL
+    : hasComplianceEmail === true
+      ? 'Compliance email is set on the company profile (managed by an admin)'
+      : hasComplianceEmail === false && carrierQuery.isError
+        ? NO_COMPLIANCE_EMAIL
+        : '—';
   const updateRule = useUpdateAlertRule();
   const deleteRule = useDeleteAlertRule();
   const testRule = useTestAlertRule();
@@ -101,7 +116,7 @@ export default function AlertRulesPage() {
             <div>
               <p className="text-body-strong text-text">Email</p>
               <p className="text-caption text-text-muted">
-                {carrierQuery.data?.complianceEmail ?? 'No compliance email set on the company profile'}
+                {complianceEmailNote}
               </p>
             </div>
             <button
@@ -216,9 +231,10 @@ export default function AlertRulesPage() {
         <div className="p-card pb-0">
           <SectionHeader title="Rules" subtitle="Evaluated in real time against ELD telemetry" />
         </div>
+        {rulesQuery.isError && rulesQuery.data && <RefreshErrorNotice onRetry={() => void rulesQuery.refetch()} />}
         {rulesQuery.isLoading ? (
           <LoadingState className="p-4" />
-        ) : rulesQuery.isError ? (
+        ) : rulesQuery.isError && !rulesQuery.data ? (
           <ErrorState onRetry={() => rulesQuery.refetch()} />
         ) : filtered.length === 0 ? (
           <EmptyState title="No alert rules yet" description="Create a rule to get notified when telemetry crosses a threshold." />
@@ -238,7 +254,7 @@ export default function AlertRulesPage() {
                   <p className="text-caption text-text-muted">{rule.conditions.map(describeCondition).join(', ')}</p>
                 </div>
                 <div className="shrink-0 sm:text-right">
-                  <p className="text-caption text-text-secondary">{(rule.recipients.roles ?? []).join(', ') || '—'}</p>
+                  <p className="text-caption text-text-secondary">{describeRecipientRoles(rule.recipients.roles) || '—'}</p>
                   <Badge tone={isMuted(rule) ? 'neutral' : 'success'}>{isMuted(rule) ? 'Muted' : 'Active'}</Badge>
                 </div>
                 {canFull && (

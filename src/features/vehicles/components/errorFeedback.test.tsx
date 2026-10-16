@@ -1,12 +1,13 @@
 // Silent-failure sweep — every 400/422 from a vehicles form lands somewhere the user can see:
 // under the input it names, or spelled out (`formErrorMessage`) instead of a bare generic line.
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { http } from 'msw';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { server } from '@/mocks/server';
 import { fail, ok, url } from '@/mocks/envelope';
+import { qk, qkRoot } from '@/shared/api/queryKeys';
 import { endpoints } from '@/shared/api/endpoints';
 import { ToastProvider } from '@/shared/ui/Toast';
 import type { VehicleRow } from '@/shared/api/vehicles';
@@ -152,5 +153,50 @@ describe('11.6 Import vehicles — no silent dead end', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('The file has no unit rows.');
     expect(screen.getByRole('button', { name: 'Import units' })).toBeDisabled();
+  });
+
+  // F3-16 — "Pair ELD devices automatically" is on by default, but the template had no column the
+  // API pairs from (`deviceSerial`), so nothing was ever paired.
+  it('F3-16: the template carries the `deviceSerial` column the pairing option reads', async () => {
+    let blob: Blob | undefined;
+    const create = vi.spyOn(URL, 'createObjectURL').mockImplementation((b) => {
+      blob = b as Blob;
+      return 'blob:template';
+    });
+    const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    renderWithProviders(<ImportVehiclesModal onClose={() => {}} />);
+    fireEvent.click(screen.getByRole('button', { name: /template/i }));
+    const header = (await blob!.text()).split(/\r?\n/)[0]!.split(',');
+    expect(header).toContain('deviceSerial');
+    create.mockRestore();
+    revoke.mockRestore();
+    click.mockRestore();
+  });
+
+  it('F3-16: an import refreshes devices and Live Fleet (a row may pair a device or add a unit)', async () => {
+    const bodies: Array<{ vehicles: Array<Record<string, unknown>> }> = [];
+    server.use(
+      http.post(url(endpoints.vehicles.import), async ({ request }) => {
+        bodies.push((await request.json()) as { vehicles: Array<Record<string, unknown>> });
+        return ok({ imported: 1, updated: 0, failed: [] });
+      }),
+    );
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
+    const user = userEvent.setup();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ToastProvider>
+          <ImportVehiclesModal onClose={() => {}} />
+        </ToastProvider>
+      </QueryClientProvider>,
+    );
+    const file = new File(['unitNumber,vin,eldSerial\n201,1FUJGLDR8LLLL0001,ELD-9\n'], 'units.csv', { type: 'text/csv' });
+    await user.upload(document.querySelector('input[type="file"]') as HTMLInputElement, file);
+    await user.click(await screen.findByRole('button', { name: 'Import 1 unit' }));
+    await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: qkRoot.devices }));
+    expect(bodies[0]!.vehicles[0]).toMatchObject({ deviceSerial: 'ELD-9' });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: qk.liveFleet() });
   });
 });

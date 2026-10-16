@@ -120,6 +120,9 @@ export interface MeResponse {
   avatarUrl?: string | null;
   carrierName?: string | null;
   homeTerminalTimezone?: string;
+  /** F3-11 — whether the company profile has a compliance email (the address itself is behind
+   * `carrierSettings` on `GET /carrier`). Absent from older backends. */
+  hasComplianceEmail?: boolean;
 }
 
 export function fetchMe(accessToken: string, signal?: AbortSignal): Promise<MeResponse> {

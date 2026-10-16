@@ -93,6 +93,8 @@ export interface AuthUser {
   avatarUrl: string | null;
   carrierName: string;
   homeTerminalTimezone: string;
+  /** F3-11 — `/auth/me`'s `hasComplianceEmail`; undefined when the backend does not send it. */
+  hasComplianceEmail?: boolean;
 }
 
 /** What a sign-in attempt resolved to; the page routes on it. */
@@ -144,6 +146,7 @@ function toAuthUser(me: MeResponse): AuthUser {
     avatarUrl: me.avatarUrl ?? null,
     carrierName: me.carrierName ?? '',
     homeTerminalTimezone: me.homeTerminalTimezone ?? 'America/Chicago',
+    ...(typeof me.hasComplianceEmail === 'boolean' ? { hasComplianceEmail: me.hasComplianceEmail } : {}),
   };
 }
 

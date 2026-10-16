@@ -159,6 +159,22 @@ describe('11.28 Command palette', () => {
     expect(screen.queryByRole('dialog', { name: 'Command palette' })).not.toBeInTheDocument();
   });
 
+  // F3-21 — for 250 ms after a keystroke the list still held the previous term's hits, so an
+  // Enter right after typing opened a result for a term no longer in the box.
+  it('F3-21: Enter right after typing never opens the previous term\'s result', async () => {
+    const { user } = renderTopbar('ADMIN');
+    await user.keyboard('{Control>}k{/Control}');
+    const dialog = await screen.findByRole('dialog', { name: 'Command palette' });
+    const combobox = within(dialog).getByRole('combobox');
+    await user.type(combobox, 'smith');
+    await within(dialog).findByRole('option', { name: /John Smith\s*Unit #101/ });
+
+    await user.type(combobox, 'zz{Enter}');
+    expect(location()).toBe('/');
+    expect(screen.getByRole('dialog', { name: 'Command palette' })).toBeInTheDocument();
+    expect(within(dialog).queryByRole('option', { name: /John Smith\s*Unit #101/ })).not.toBeInTheDocument();
+  });
+
   it('VIEWER: write actions and forbidden pages are absent from the DOM', async () => {
     const { user } = renderTopbar('VIEWER');
     await user.keyboard('{Control>}k{/Control}');

@@ -514,6 +514,8 @@ export function useCreateVehicle() {
       // FE-08 — a create may pair an ELD device; the reference-cached `/devices` lookup must not
       // keep showing it as free (or the unit as unpaired).
       void queryClient.invalidateQueries({ queryKey: qkRoot.devices });
+      // L3-03 — the Live Fleet "All N" chip counts the cached `/live/fleet` rows.
+      void queryClient.invalidateQueries({ queryKey: qk.liveFleet() });
     },
   });
 }
@@ -561,6 +563,8 @@ export function useDeleteVehicle() {
       void queryClient.invalidateQueries({ queryKey: qkRoot.devices });
       // W-01 `Vehicles` KPI tile reads its totals from the dashboard aggregate.
       void queryClient.invalidateQueries({ queryKey: qk.dashboardSummary });
+      // L3-03 — a deleted unit leaves the Live Fleet roster (and its "All N" chip).
+      void queryClient.invalidateQueries({ queryKey: qk.liveFleet() });
     },
   });
 }
@@ -619,6 +623,9 @@ export function useImportVehicles() {
       client.post<ImportSummary>(endpoints.vehicles.import, payload),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: qkRoot.vehicles });
+      // F3-16 — rows may pair ELD devices; L3-03 — new units join the Live Fleet roster count.
+      void queryClient.invalidateQueries({ queryKey: qkRoot.devices });
+      void queryClient.invalidateQueries({ queryKey: qk.liveFleet() });
     },
   });
 }

@@ -26,11 +26,12 @@ import { Badge } from '@/shared/ui/Badge';
 import { Card, SectionHeader } from '@/shared/ui/Card';
 import { ConfirmDelete, Modal } from '@/shared/ui/Modal';
 import { DataTable } from '@/shared/ui/DataTable';
-import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
+import { EmptyState, ErrorState, LoadingState, RefreshErrorNotice } from '@/shared/ui/states';
 import { useToast } from '@/shared/ui/Toast';
 import { orDash } from '@/shared/format/empty';
 import { formatRelative } from '@/shared/format/relative';
 import { formatCarrier } from '@/shared/format/datetime';
+import { useCarrierTimezone } from '@/shared/auth/useCarrierTimezone';
 import { formErrorMessage } from '@/shared/api/errors';
 import {
   useIntegrationsList,
@@ -40,7 +41,6 @@ import {
   useRevokeApiKey,
   useIntegrationsCatalog,
   useSendWebhookTest,
-  useCarrier,
   webhookUrlOf,
   type IntegrationProvider,
   type ApiKeyRow,
@@ -108,7 +108,9 @@ export default function IntegrationsPage() {
   const disconnect = useDisconnectIntegration();
   const revokeKey = useRevokeApiKey();
   const sendWebhookTest = useSendWebhookTest();
-  const carrierTimezone = useCarrier().data?.timezone ?? 'UTC';
+  // F3-11 — the carrier zone from the session (`/auth/me`): GET /carrier needs `carrierSettings`,
+  // so a role without it (Fleet Manager) used to see UTC.
+  const carrierTimezone = useCarrierTimezone();
   // WB-251 — the Custom webhook needs a URL and a signing secret, so it connects through a modal.
   const [webhookModal, setWebhookModal] = useState<{ mode: 'connect' | 'configure'; name: string } | null>(null);
   // WB-QA-S-01 — McLeod / WEX / Comdata / QuickBooks / Slack connect with credentials, never `config: {}`.
@@ -235,9 +237,10 @@ export default function IntegrationsPage() {
         </Button>
       </div>
 
+      {integrationsQuery.isError && integrationsQuery.data && <RefreshErrorNotice onRetry={() => void integrationsQuery.refetch()} />}
       {integrationsQuery.isLoading ? (
         <LoadingState rows={4} />
-      ) : integrationsQuery.isError ? (
+      ) : integrationsQuery.isError && !integrationsQuery.data ? (
         <Card>
           <ErrorState
             title="Could not load integrations"
@@ -329,9 +332,10 @@ export default function IntegrationsPage() {
             </Button>
           </Can>
         </div>
+        {apiKeysQuery.isError && apiKeysQuery.data && <RefreshErrorNotice onRetry={() => void apiKeysQuery.refetch()} />}
         {apiKeysQuery.isLoading ? (
           <LoadingState className="p-4" />
-        ) : apiKeysQuery.isError ? (
+        ) : apiKeysQuery.isError && !apiKeysQuery.data ? (
           <ErrorState
             title="Could not load API keys"
             description="The key list did not load. Existing keys keep working — try again in a moment."
@@ -382,9 +386,10 @@ export default function IntegrationsPage() {
             </Button>
           }
         >
+          {catalogQuery.isError && catalogQuery.data && <RefreshErrorNotice onRetry={() => void catalogQuery.refetch()} />}
           {catalogQuery.isLoading ? (
             <LoadingState rows={4} />
-          ) : catalogQuery.isError ? (
+          ) : catalogQuery.isError && !catalogQuery.data ? (
             <ErrorState onRetry={() => catalogQuery.refetch()} />
           ) : (catalogQuery.data ?? []).length === 0 ? (
             <EmptyState title="No connectors listed" description="The marketplace has nothing to show right now." />

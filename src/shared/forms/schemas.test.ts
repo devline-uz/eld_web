@@ -353,7 +353,7 @@ describe('form schemas', () => {
     severity: 'WARNING' as const,
     conditions: [{ event: 'hos.break_due', params: { withinMin: 30 } }],
     channels: ['IN_APP', 'EMAIL', 'WEBHOOK'] as const,
-    recipients: { roles: ['Fleet managers'] },
+    recipients: { roles: ['FLEET_MANAGER'] },
     quietHours: { from: '22:00', to: '06:00', timezone: 'America/New_York' },
     enabled: true,
   };

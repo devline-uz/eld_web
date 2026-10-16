@@ -1,7 +1,7 @@
 // web/tz.md §10 W-03 — the exact empty-state copy and a populated render with the join columns.
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -374,6 +374,31 @@ describe('W-03 Vehicles', () => {
     await vi.waitFor(() => expect(sorts).toContain('unitNumber:desc'));
     // YEAR has no server sort — not offered as a sort button
     expect(screen.queryByRole('button', { name: 'YEAR' })).not.toBeInTheDocument();
+  });
+
+  // F3-13 — the old debounce started its timer inside `useMemo` and never cleared it, so every
+  // keystroke reached `GET /vehicles?q=`. Only the settled term may be requested.
+  it('F3-13: typing a search term requests only the settled term, not each keystroke', async () => {
+    const terms: string[] = [];
+    usePopulatedFleet();
+    server.use(
+      http.get(url(endpoints.vehicles.list), ({ request }) => {
+        const params = new URL(request.url).searchParams;
+        terms.push(params.get('q') ?? '');
+        return ok({ items: [VEHICLE_ROW], page: 1, limit: Number(params.get('limit') ?? 10), total: 1, totalPages: 1 });
+      }),
+    );
+    renderPage();
+    await screen.findByText('#101');
+    const box = screen.getByPlaceholderText('Search unit #, VIN, plate…');
+    for (const value of ['1', '10', '101']) {
+      fireEvent.change(box, { target: { value } });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    await vi.waitFor(() => expect(terms).toContain('101'));
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(terms).not.toContain('1');
+    expect(terms).not.toContain('10');
   });
 
   // Regression — a `page` query param that is not a positive integer used to reach `Number()`

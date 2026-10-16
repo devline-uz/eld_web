@@ -1,14 +1,15 @@
 // owner: web-settings-admin — W-19 Settings · Roles & permissions (web/tz.md §10 W-19).
 // Design: web/roles and screens/admin panel/Settings — permission matrix across roles.jpg
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useMemo, useRef, useState } from 'react';
 import { Plus, RefreshCw, Check, Eye, Minus, Search } from 'lucide-react';
 import { Can } from '@/shared/auth/Can';
 import { usePermission } from '@/shared/auth/usePermission';
 import { useAuth } from '@/shared/auth/AuthProvider';
+import { useCarrierTimezone } from '@/shared/auth/useCarrierTimezone';
 import { Button } from '@/shared/ui/Button';
 import { Badge } from '@/shared/ui/Badge';
 import { Card, SectionHeader } from '@/shared/ui/Card';
-import { EmptyState, ErrorState, LoadingState } from '@/shared/ui/states';
+import { EmptyState, ErrorState, LoadingState, RefreshErrorNotice } from '@/shared/ui/states';
 import { ConfirmDelete } from '@/shared/ui/Modal';
 import { useToast } from '@/shared/ui/Toast';
 import { formErrorMessage } from '@/shared/api/errors';
@@ -18,7 +19,6 @@ import {
   useUpdateRole,
   useDeleteRole,
   useAuditLog,
-  useCarrier,
   type RoleRow,
 } from '@/shared/api/settingsAdmin';
 import type { PermissionKey, PermissionLevel, Role } from '@/shared/auth/permissions';
@@ -54,7 +54,9 @@ export default function RolesPage() {
     key === 'SUPER_ADMIN' ? 'Super Admin cannot be edited' : key === 'ADMIN' && !superAdmin ? SETTINGS_REASON.superAdminOnly : undefined;
   const { toast } = useToast();
   const rolesQuery = useRolesList();
-  const carrierQuery = useCarrier();
+  // F3-11 — the carrier zone from the session (`/auth/me`): GET /carrier needs `carrierSettings`,
+  // so a role without it (Fleet Manager) used to see UTC.
+  const timezone = useCarrierTimezone();
   const updateRole = useUpdateRole();
   const deleteRole = useDeleteRole();
 
@@ -73,6 +75,40 @@ export default function RolesPage() {
 
   const auditLogQuery = useAuditLog({ objectType: 'Role', limit: 25 });
 
+  // F3-05 — the PATCH replaces the whole permission map, so quick clicks used to overwrite each
+  // other. Each click now updates the role's desired map at once (shown optimistically), and one
+  // save per role runs at a time, always sending the newest map.
+  type PermissionMap = RoleRow['permissions'];
+  const [pendingPermissions, setPendingPermissions] = useState<Record<string, PermissionMap>>({});
+  const desiredPermissions = useRef<Record<string, PermissionMap>>({});
+  const savingRoles = useRef(new Set<string>());
+  const permissionsOf = (role: RoleRow) => pendingPermissions[role.id] ?? role.permissions;
+
+  async function saveRolePermissions(id: string) {
+    if (savingRoles.current.has(id)) return; // the running save picks up the newest map
+    savingRoles.current.add(id);
+    let sent: PermissionMap | undefined;
+    try {
+      while (desiredPermissions.current[id] && desiredPermissions.current[id] !== sent) {
+        sent = desiredPermissions.current[id];
+        await updateRole.mutateAsync({ id, dto: { permissions: sent } });
+      }
+      // Keep the optimistic map until the list shows what the server saved.
+      await rolesQuery.refetch();
+    } catch (error) {
+      toast({ kind: 'error', title: formErrorMessage(error) });
+      void rolesQuery.refetch();
+    } finally {
+      savingRoles.current.delete(id);
+      delete desiredPermissions.current[id];
+      setPendingPermissions((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    }
+  }
+
   function cycleCell(roleKey: string, keys: PermissionKey[]) {
     const role = roleByKey[roleKey];
     const firstKey = keys[0];
@@ -81,16 +117,14 @@ export default function RolesPage() {
     // silently no-opped clicks on the FLEET_MANAGER/DISPATCHER/VIEWER columns the design and the
     // `isAdminCol` disabled-state below both treat as editable (web/bugs.md WB-033).
     if (!role || lockReason(role.key) || !firstKey) return;
-    const current = role.permissions[firstKey] ?? 'NONE';
+    const base = desiredPermissions.current[role.id] ?? role.permissions;
+    const current = base[firstKey] ?? 'NONE';
     const next = NEXT_LEVEL[current];
-    const permissions = { ...role.permissions };
+    const permissions = { ...base };
     for (const k of keys) permissions[k] = next;
-    updateRole.mutate(
-      { id: role.id, dto: { permissions } },
-      {
-        onError: (error) => toast({ kind: 'error', title: formErrorMessage(error) }),
-      },
-    );
+    desiredPermissions.current[role.id] = permissions;
+    setPendingPermissions((prev) => ({ ...prev, [role.id]: permissions }));
+    void saveRolePermissions(role.id);
   }
 
   /**
@@ -138,7 +172,8 @@ export default function RolesPage() {
     );
   }
 
-  if (rolesQuery.isError) {
+  // F3-03 — a failed background refetch keeps the loaded matrix on screen.
+  if (rolesQuery.isError && !rolesQuery.data) {
     return (
       <Card>
         <ErrorState onRetry={() => rolesQuery.refetch()} />
@@ -251,7 +286,7 @@ export default function RolesPage() {
                       {columns.map((c) => {
                         const role = roleByKey[c.key];
                         const primaryKey = row.keys[0] as PermissionKey;
-                        const level = role?.permissions[primaryKey] ?? 'NONE';
+                        const level = (role ? permissionsOf(role)[primaryKey] : undefined) ?? 'NONE';
                         const lock = lockReason(c.key);
                         return (
                           <td key={c.key} className="px-3 text-center">
@@ -326,9 +361,10 @@ export default function RolesPage() {
 
       {tab === 'access-log' && (
         <Card padded={false}>
+          {auditLogQuery.isError && auditLogQuery.data && <RefreshErrorNotice onRetry={() => void auditLogQuery.refetch()} />}
           {auditLogQuery.isLoading ? (
             <LoadingState className="p-4" />
-          ) : auditLogQuery.isError ? (
+          ) : auditLogQuery.isError && !auditLogQuery.data ? (
             <ErrorState onRetry={() => auditLogQuery.refetch()} />
           ) : (auditLogQuery.data?.items.length ?? 0) === 0 ? (
             <EmptyState title="No events match these filters" description="Try a wider date range or clear the filters." />
@@ -346,7 +382,7 @@ export default function RolesPage() {
                   {auditLogQuery.data?.items.map((entry) => (
                     <tr key={entry.id} className="h-row border-b border-border last:border-0">
                       <td className="px-3 tabular-nums text-text">
-                        {formatCarrier(entry.createdAt, carrierQuery.data?.timezone ?? 'UTC', 'dateTimeSeconds')}
+                        {formatCarrier(entry.createdAt, timezone, 'dateTimeSeconds')}
                       </td>
                       <td className="px-3">
                         <Badge tone={entry.action === 'DELETE' ? 'danger' : entry.action === 'CREATE' ? 'success' : 'info'}>

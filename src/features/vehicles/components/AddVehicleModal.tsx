@@ -230,6 +230,12 @@ export function AddVehicleModal({ vehicle, onClose }: { vehicle?: VehicleRow; on
           setError('deviceId', { message: VALIDATION_MESSAGES.eldSerialUnknown });
           return;
         }
+        // F3-14 — a retired device is a 409 as well, but not a taken serial: the conflict rules
+        // below would read `DEVICE` and say "already assigned to another unit".
+        if (error instanceof ApiError && error.code === 'DEVICE_RETIRED') {
+          setError('deviceId', { message: VALIDATION_MESSAGES.eldDeviceRetired });
+          return;
+        }
         if (error instanceof ApiError && error.status === 409) {
           const field = conflictField(error, VEHICLE_CONFLICT_RULES);
           if (field) {

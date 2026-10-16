@@ -88,9 +88,22 @@ export function parseCsv(text: string): Array<Record<string, string>> {
 // a double quote, CR or LF; inner quotes are doubled.
 const NEEDS_QUOTING = /[",\r\n]/;
 
-/** Escapes one CSV field per RFC 4180. */
+/**
+ * F3-06 — spreadsheet formula injection (OWASP "CSV injection"). A cell that starts with
+ * `= + - @`, a tab or a CR is run as a formula by Excel / Sheets / LibreOffice, so it is prefixed
+ * with a single quote and shown as text. Negative numbers stay numbers: a `number` value can never
+ * carry a formula, and a string that is exactly a plain number (`-12`, `-0.5`) is left as-is so
+ * numeric columns still sort and sum. Anything else (`-2+3`, `-cmd|…`) is neutralised.
+ */
+const FORMULA_START = /^[=+\-@\t\r]/;
+const PLAIN_NUMBER = /^-?\d+(\.\d+)?$/;
+
+/** Escapes one CSV field per RFC 4180, with formula-looking text neutralised (F3-06). */
 export function escapeCsvField(value: string | number | null | undefined): string {
-  const text = value == null ? '' : String(value);
+  let text = value == null ? '' : String(value);
+  if (typeof value === 'string' && FORMULA_START.test(text) && !PLAIN_NUMBER.test(text)) {
+    text = `'${text}`;
+  }
   return NEEDS_QUOTING.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 

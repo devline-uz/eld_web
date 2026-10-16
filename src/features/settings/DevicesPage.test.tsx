@@ -340,6 +340,27 @@ describe('DevicesPage — W-20', () => {
 /* ------------------------------------------------------------------ stage-2 row actions */
 
 describe('DevicesPage — stage-2 row actions', () => {
+  // F3-22 — one `GET /devices?q=` per keystroke, and no cap: the API refuses `q` over 200
+  // characters with a 422, which replaced the list with its error state.
+  it('F3-22: debounces the search and caps it at the API\'s 200 characters', async () => {
+    const terms: string[] = [];
+    server.use(
+      http.get(url(endpoints.devices.list), ({ request }) => {
+        terms.push(new URL(request.url).searchParams.get('q') ?? '');
+        return ok({ items: [DEVICE], page: 1, limit: 25, total: 1, totalPages: 1 });
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('PT30_A86E');
+    const box = screen.getByPlaceholderText('Search serial or unit…');
+    expect(box).toHaveAttribute('maxLength', '200');
+    await user.type(box, 'A86');
+    await waitFor(() => expect(terms).toContain('A86'));
+    expect(terms).not.toContain('A');
+    expect(terms).not.toContain('A8');
+  });
+
   it('gives the search box an accessible name', async () => {
     server.use(http.get(url(endpoints.devices.list), () => ok({ items: [DEVICE], total: 1, page: 1, limit: 25, totalPages: 1 })));
     renderPage();

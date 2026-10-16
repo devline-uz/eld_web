@@ -76,7 +76,19 @@ const GEOFENCE_FIELD_LABELS: Record<string, string> = {
 const SHAPE_NEEDS_MAP =
   'Drawing a circle, rectangle or polygon needs the map, which is not available here. Choose Address to place this geofence by street address.';
 
+/** F3-12 — the modal stays mounted (page-level), so each closed→open transition remounts the form
+ * under a new key: a saved or cancelled entry never prefills the next `New geofence`. */
 export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [generation, setGeneration] = useState(0);
+  const [wasOpen, setWasOpen] = useState(open);
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setGeneration((g) => g + 1);
+  }
+  return <CreateGeofenceForm key={generation} open={open} onClose={onClose} />;
+}
+
+function CreateGeofenceForm({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { toast } = useToast();
   const createGeofence = useCreateGeofence();
   // `Applies to` options — the real `GET /vehicle-groups` list (backend D-107). Loading disables

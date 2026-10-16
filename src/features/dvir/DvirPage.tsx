@@ -198,9 +198,10 @@ export default function DvirPage() {
   }, [overdue.rows]);
   const nowTick = useNowTick();
   const dvirsToday = useMemo(() => {
-    const todayKey = new Date(nowTick).toDateString();
-    return dvirs.rows.filter((d) => new Date(d.submittedAt).toDateString() === todayKey);
-  }, [dvirs.rows, nowTick]);
+    // F3-19 — "today" is the carrier's day, like the times the table shows (it was the browser's).
+    const todayKey = todayInTz(carrierTz, new Date(nowTick));
+    return dvirs.rows.filter((d) => todayInTz(carrierTz, new Date(d.submittedAt)) === todayKey);
+  }, [dvirs.rows, nowTick, carrierTz]);
   const noDefectToday = useMemo(
     () => dvirsToday.filter((d) => d.vehicleCondition === 'SATISFACTORY').length,
     [dvirsToday],

@@ -11,7 +11,7 @@ import { Badge } from '@/shared/ui/Badge';
 import { Card, SectionHeader } from '@/shared/ui/Card';
 import { ConfirmDelete } from '@/shared/ui/Modal';
 import { useToast } from '@/shared/ui/Toast';
-import { ErrorState, LoadingState } from '@/shared/ui/states';
+import { ErrorState, LoadingState, RefreshErrorNotice } from '@/shared/ui/states';
 import { formatCarrier, formatDateOnly } from '@/shared/format/datetime';
 import { useCarrierTimezone } from '@/shared/auth/useCarrierTimezone';
 import { formErrorMessage } from '@/shared/api/errors';
@@ -168,9 +168,10 @@ export function DriverDocumentsTab({ driverId }: { driverId: string }) {
             subtitle={docsQuery.data ? `${docsQuery.data.length} on file` : undefined}
           />
         </div>
+        {docsQuery.isError && docsQuery.data && <RefreshErrorNotice onRetry={() => void docsQuery.refetch()} />}
         {docsQuery.isLoading ? (
           <LoadingState className="p-4" />
-        ) : docsQuery.isError ? (
+        ) : docsQuery.isError && !docsQuery.data ? (
           <ErrorState onRetry={() => docsQuery.refetch()} />
         ) : (docsQuery.data?.length ?? 0) === 0 ? (
           <p className="p-4 text-body text-text-muted">No documents uploaded.</p>

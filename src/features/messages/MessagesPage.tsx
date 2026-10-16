@@ -32,6 +32,7 @@ import { useActiveTrips } from '@/shared/api/trips';
 import {
   useConversationsList,
   useMessages,
+  useEarlierMessages,
   useSendMessage,
   useSendAudioMessage,
   useCreateConversation,
@@ -145,7 +146,9 @@ export default function MessagesPage() {
   const [segment, setSegment] = useState<Segment>('ALL');
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [draft, setDraft] = useState('');
+  // F3-04 — one draft per conversation: a message typed for driver A never follows the
+  // dispatcher into driver B's thread, and A's draft is still there on the way back.
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [newOpen, setNewOpen] = useState(false);
   const composerRef = useRef<HTMLTextAreaElement>(null);
 
@@ -239,6 +242,12 @@ export default function MessagesPage() {
     () => conversations.items.find((c) => c.id === selectedId) ?? null,
     [conversations.items, selectedId],
   );
+  const draft = selected ? (drafts[selected.id] ?? '') : '';
+  function setDraft(text: string) {
+    const conversationId = selected?.id;
+    if (conversationId === undefined) return;
+    setDrafts((prev) => ({ ...prev, [conversationId]: text }));
+  }
 
   // Runs on every draft change — typing, quick-action chips and the clear after Send — and when
   // the composer remounts for another conversation, so it shrinks back to one line when empty.
@@ -247,6 +256,13 @@ export default function MessagesPage() {
   }, [draft, selected?.id]);
 
   const messagesQuery = useMessages(selected?.id);
+  // F3-20 — older pages on request; merged under page 1, de-duplicated (offset pages shift).
+  const earlier = useEarlierMessages(selected?.id, messagesQuery.data);
+  const threadMessages = useMemo(() => {
+    const byId = new Map<string, MessageRow>();
+    for (const message of [...earlier.items, ...(messagesQuery.data?.items ?? [])]) byId.set(message.id, message);
+    return [...byId.values()].sort((a, b) => new Date(a.sentAt).getTime() - new Date(b.sentAt).getTime());
+  }, [earlier.items, messagesQuery.data]);
   const sendMessage = useSendMessage(selected?.id ?? '');
   const sendAudio = useSendAudioMessage(selected?.id ?? '');
   const recorder = useVoiceRecorder((message) => toast({ kind: 'error', title: message }));
@@ -626,14 +642,21 @@ export default function MessagesPage() {
             <div className="flex-1 overflow-y-auto p-4">
               {messagesQuery.isLoading ? (
                 <LoadingState />
-              ) : messagesQuery.isError ? (
+              ) : messagesQuery.isError && !messagesQuery.data ? (
                 <ErrorState onRetry={() => messagesQuery.refetch()} />
               ) : (
                 <div className="flex flex-col gap-2">
-                  {(messagesQuery.data?.items ?? [])
-                    .slice()
-                    .sort((a, b) => new Date(a.sentAt).getTime() - new Date(b.sentAt).getTime())
-                    .map((message, index, sorted) => {
+                  {earlier.hasMore && (
+                    <Button variant="secondary" size="sm" className="self-center" loading={earlier.isLoading} onClick={earlier.loadMore}>
+                      Load earlier messages
+                    </Button>
+                  )}
+                  {earlier.isError && (
+                    <p role="alert" className="self-center text-caption text-danger">
+                      Could not load earlier messages.
+                    </p>
+                  )}
+                  {threadMessages.map((message, index, sorted) => {
                       const outgoing = Boolean(message.senderUserId);
                       const failed = message.status === 'failed';
                       const sending = message.status === 'sending';

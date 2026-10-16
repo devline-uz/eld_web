@@ -67,7 +67,7 @@ export function DriverActivityTab({ driverId }: { driverId: string }) {
     );
   }
   if (query.isLoading) return <LoadingState rows={4} />;
-  if (query.isError || !query.data) {
+  if (!query.data) {
     return (
       <ErrorState
         title="Could not load activity"

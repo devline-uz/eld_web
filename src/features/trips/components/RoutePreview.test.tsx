@@ -39,6 +39,15 @@ describe('RoutePreview', () => {
     wrap(<RoutePreview pickup={stop({ latitude: 41.8, longitude: -87.6 })} delivery={stop({ type: 'DELIVERY', latitude: 39.1, longitude: -94.5 })} />);
     expect(await screen.findByTestId('route-map')).toBeInTheDocument();
   });
+  // L3-05 — the map's attribution control sits along the bottom edge; the straight-line caption
+  // there was covered by it. The caption now heads the card.
+  it('L3-05: puts the straight-line caption at the top, clear of the bottom attribution', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    wrap(<RoutePreview pickup={stop({ latitude: 41.8, longitude: -87.6 })} delivery={stop({ type: 'DELIVERY', latitude: 39.1, longitude: -94.5 })} />);
+    const caption = await screen.findByText(/straight line/i);
+    expect(caption).toHaveClass('top-1');
+    expect(caption).not.toHaveClass('bottom-1');
+  });
   it('passes the placeable intermediate stops to the map and the router in route order', async () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error('offline'));
     vi.stubGlobal('fetch', fetchMock);

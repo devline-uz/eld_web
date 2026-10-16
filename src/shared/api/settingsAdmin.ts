@@ -366,8 +366,10 @@ export interface AlertRuleCondition {
 }
 
 export interface AlertRuleRecipients {
+  /** Role keys (`FLEET_MANAGER`, …) — the alert worker matches `role.key` (F3-01). */
   roles?: string[];
   userIds?: string[];
+  driverIds?: string[];
   subjectDriver?: boolean;
 }
 

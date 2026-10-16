@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatDuration, formatDurationShort, formatMinutes } from './duration';
+import { formatDuration, formatDurationShort, formatMediaTime, formatMinutes } from './duration';
 
 describe('§8.2 durations', () => {
   it('formats a segment and a KPI', () => {
@@ -22,5 +22,15 @@ describe('§8.2 durations', () => {
       expect(format(undefined)).toBe('—');
       expect(format(Number.POSITIVE_INFINITY)).toBe('—');
     }
+  });
+});
+
+describe('formatMediaTime', () => {
+  it('formats a clip position as m:ss', () => {
+    expect(formatMediaTime(65)).toBe('1:05');
+  });
+  // F3-T1 — a missing / non-numeric length renders `0:00`, never `NaN:NaN`.
+  it('renders 0:00 for a missing length', () => {
+    expect(formatMediaTime(null)).toBe('0:00');
   });
 });

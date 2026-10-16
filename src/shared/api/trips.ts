@@ -267,8 +267,9 @@ export interface TripsBoardInput {
   segment: TripSegment;
   page: number;
   limit: number;
-  /** Free text — sent as `q` (number / shipping document) in server mode; matched against
-   * number, driver name and pickup/delivery names in memory for the active set and the window. */
+  /** Free text — sent as `q` in server mode (the API matches number, shipping document, driver
+   * name and stop city — F3-10); the same fields are matched in memory for the active set and the
+   * window. */
   search: string;
   /** True while a client-only 11.23 group is active (B-59). */
   useWindow: boolean;
@@ -300,12 +301,17 @@ export function useTripsBoard({ segment, page, limit, search, useWindow, filter,
     (t: TripTableRow) => {
       if (!needle) return true;
       const driverName = t.driver ? `${t.driver.firstName} ${t.driver.lastName}` : '';
-      return (
-        t.number.toLowerCase().includes(needle) ||
-        driverName.toLowerCase().includes(needle) ||
-        (t.pickup?.name ?? '').toLowerCase().includes(needle) ||
-        (t.delivery?.name ?? '').toLowerCase().includes(needle)
-      );
+      // F3-10 — the same fields the server `q` matches (number, shipping document, driver name,
+      // stop city/address), so a search finds the same trips on every tab.
+      return [
+        t.number,
+        t.shippingDocument,
+        driverName,
+        t.pickup?.name,
+        t.pickup?.address,
+        t.delivery?.name,
+        t.delivery?.address,
+      ].some((field) => (field ?? '').toLowerCase().includes(needle));
     },
     [needle],
   );

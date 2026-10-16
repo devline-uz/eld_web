@@ -308,8 +308,12 @@ describe('AssignLoadModal — 11.4 load variant', () => {
 
       const search = screen.getByRole('textbox', { name: 'Search driver by name, username or licence' });
       await user.type(search, 'ann');
-      const ann = await screen.findByRole('radio', { name: 'Ann Doe' });
-      await waitFor(() => expect(screen.queryByRole('radio', { name: 'John Smith' })).not.toBeInTheDocument());
+      // The search is debounced (F3-18): wait for the filtered list, not the one still on screen.
+      await waitFor(() => {
+        expect(screen.queryByRole('radio', { name: 'John Smith' })).not.toBeInTheDocument();
+        expect(screen.getByRole('radio', { name: 'Ann Doe' })).toBeInTheDocument();
+      });
+      const ann = screen.getByRole('radio', { name: 'Ann Doe' });
 
       await user.keyboard('{Enter}');
       expect(ann).toBeChecked();
@@ -332,6 +336,43 @@ describe('AssignLoadModal — 11.4 load variant', () => {
       expect(search).toHaveFocus();
       expect(screen.queryByRole('radio')).not.toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Assign driver' })).toBeDisabled();
+      expect(posts).toEqual([]);
+    });
+
+    // F3-18 — one `GET /drivers` (plus its HOS roster) per keystroke; only the settled term now.
+    it('F3-18: debounces the driver search', async () => {
+      const terms: string[] = [];
+      server.use(
+        http.get(url(endpoints.drivers.list), ({ request }) => {
+          const q = new URL(request.url).searchParams.get('q') ?? '';
+          terms.push(q);
+          const items = DRIVERS.filter((d) => `${d.firstName} ${d.lastName} ${d.username}`.toLowerCase().includes(q.toLowerCase()));
+          return ok({ items, page: 1, limit: 25, total: items.length, totalPages: 1 });
+        }),
+      );
+      const user = userEvent.setup();
+      renderModal();
+      await screen.findByRole('radio', { name: 'John Smith' });
+      await user.type(screen.getByRole('textbox', { name: 'Search driver by name, username or licence' }), 'ann');
+      await screen.findByRole('radio', { name: 'Ann Doe' });
+      expect(terms).not.toContain('a');
+      expect(terms).not.toContain('an');
+    });
+
+    // F3-18 — a picked driver the new search hides was still submitted (and skipped the e-mail block).
+    it('F3-18: a picked driver the search no longer lists is not submitted', async () => {
+      const user = userEvent.setup();
+      renderModal();
+      await user.click(await screen.findByRole('radio', { name: 'John Smith' }));
+      expect(screen.getByRole('button', { name: 'Assign driver' })).toBeEnabled();
+
+      await user.type(screen.getByRole('textbox', { name: 'Search driver by name, username or licence' }), 'ann');
+      await waitFor(() => {
+        expect(screen.queryByRole('radio', { name: 'John Smith' })).not.toBeInTheDocument();
+        expect(screen.getByRole('radio', { name: 'Ann Doe' })).toBeInTheDocument();
+      });
+      expect(screen.getByRole('button', { name: 'Assign driver' })).toBeDisabled();
+      expect(screen.getByRole('radio', { name: 'Ann Doe' })).not.toBeChecked();
       expect(posts).toEqual([]);
     });
   });

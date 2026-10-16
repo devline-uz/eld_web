@@ -56,7 +56,10 @@ export default function CommandPalette({
   const searchable = canSearchDrivers || canSearchVehicles;
   const entitySearchOn = searchable && term.length >= SEARCH_MIN_CHARS;
   const search = useGlobalSearch(debounced, scope);
-  const result = entitySearchOn && debounced.length >= SEARCH_MIN_CHARS ? search.data : undefined;
+  // F3-21 — only hits for the term in the box: while the debounce or the request catches up,
+  // `keepPreviousData` still holds the previous term's hits, and Enter used to open one of them.
+  const caughtUp = debounced === term && !search.isPlaceholderData;
+  const result = entitySearchOn && debounced.length >= SEARCH_MIN_CHARS && caughtUp ? search.data : undefined;
 
   const lower = term.toLowerCase();
   const entries: Entry[] = [];
@@ -128,6 +131,8 @@ export default function CommandPalette({
       setActive((activeIndex - 1 + count) % count);
     } else if (event.key === 'Enter') {
       event.preventDefault();
+      // F3-21 — the entity hits are still loading: what is listed is not what the term will find.
+      if (searching) return;
       run(entries[activeIndex]);
     }
   }

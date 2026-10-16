@@ -325,8 +325,8 @@ export default function DriverProfilePage() {
     return <NotFoundState title="Driver not found" backLabel="Back to drivers" onBack={() => navigate('/drivers')} />;
   }
   if (driverQuery.isLoading) return <LoadingState rows={8} />;
-  if (driverQuery.isError || !driverQuery.data)
-    return <ErrorState onRetry={() => driverQuery.refetch()} />;
+  // F3-03 — a failed background refetch keeps the loaded driver on screen.
+  if (!driverQuery.data) return <ErrorState onRetry={() => driverQuery.refetch()} />;
 
   const driver = driverQuery.data;
   const name = `${driver.firstName} ${driver.lastName}`;

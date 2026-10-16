@@ -97,7 +97,7 @@ function subdivisionOptions(country: CountryCode, current: string | null | undef
 
 export default function CompanyProfilePage() {
   usePageHeader({ title: 'Settings', subtitle: 'Company profile, compliance ruleset and preferences' });
-  const { data: carrier, isLoading, isError, refetch } = useCarrier();
+  const { data: carrier, isLoading, refetch } = useCarrier();
 
   if (isLoading) {
     return (
@@ -107,7 +107,7 @@ export default function CompanyProfilePage() {
     );
   }
 
-  if (isError || !carrier) {
+  if (!carrier) {
     return (
       <Card>
         <ErrorState onRetry={() => refetch()} />
