@@ -245,6 +245,40 @@ describe('FleetMap — GeoJSON source + symbol layer (style configured)', () => 
     expect(center[1]).toBeCloseTo(40.1, 3);
   });
 
+  it('D-149: a DRIVING unit glides onto its new fix, lands exactly on it ([lon, lat]) and the frame loop stops', () => {
+    let clock = 1_000_000;
+    const frames: FrameRequestCallback[] = [];
+    const nowSpy = vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    const rafSpy = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
+      frames.push(cb);
+      return frames.length;
+    });
+    try {
+      const driving = { id: 'v1', lat: 40, lon: -83, dutyStatus: 'DRIVING' as const, headingDeg: 90 };
+      const { rerender } = render(<FleetMap units={[driving]} selectedId="v1" />);
+      const map = FakeMap.instances[0]!;
+      act(() => map.fire('load'));
+      const setData = map.sources.get('fleet-units')!.setData;
+      const drawnAt = () => {
+        const fc = setData.mock.lastCall![0] as { features: { properties: { id: string }; geometry: { coordinates: number[] } }[] };
+        return fc.features.find((f) => f.properties.id === 'v1')!.geometry.coordinates;
+      };
+      expect(drawnAt()).toEqual([-83, 40]);
+
+      const fix = { lat: 40.0123456, lon: -82.9876543 };
+      rerender(<FleetMap units={[{ ...driving, ...fix }]} selectedId="v1" />);
+      // Long after the glide: run whatever frames are queued until the loop stops asking for more.
+      clock += 60_000;
+      for (let i = 0; i < 10 && frames.length > 0; i++) act(() => frames.shift()!(clock));
+      expect(frames.length).toBe(0);
+      expect(drawnAt()).toEqual([fix.lon, fix.lat]);
+      expect((map.jumpTo.mock.lastCall![0] as { center: [number, number] }).center).toEqual([fix.lon, fix.lat]);
+    } finally {
+      nowSpy.mockRestore();
+      rafSpy.mockRestore();
+    }
+  });
+
   it('flashes the unit after a geofence.transition and clears the filter when it ends', () => {
     const { rerender } = render(<FleetMap units={UNITS} flashUnitId={null} />);
     const map = FakeMap.instances[0]!;

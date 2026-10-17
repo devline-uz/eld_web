@@ -95,10 +95,11 @@ export async function fetchLiveFleet(signal?: AbortSignal): Promise<LiveFleetRes
 }
 
 /**
- * FE-06 — browser clock minus server clock, learnt from each `GET /live/fleet` `generatedAt`. Marker
- * motion ages a fix against "now"; a browser clock 2 min fast made every fix look too old to glide
- * from (and a slow one made old fixes look fresh). `generatedAt` is stamped before the response
- * is sent, so the estimate errs by at most the response's own latency.
+ * FE-06 — server clock minus browser clock, learnt from each `GET /live/fleet` `generatedAt`. The
+ * Live Fleet socket clamps a unit's newest applied frame time to the server's "now"
+ * (`appliedFrameAt`), so a future-dated frame can't mark later frames stale (`isStaleFrame`); a
+ * skewed browser clock would set that clamp too early or too late. `generatedAt` is stamped before
+ * the response is sent, so the estimate errs by at most the response's own latency.
  */
 let serverClockOffsetMs = 0;
 

@@ -44,12 +44,8 @@ export interface MapUnitFeature {
   lon: number;
   dutyStatus: DutyStatus;
   headingDeg?: number | null;
-  /** Reported speed — a DRIVING marker keeps gliding at it between fixes (`motion.ts`). */
-  speedMph?: number | null;
   /** UI-003 — the duty status is not live (`isStale`); the marker is drawn dimmed. */
   stale?: boolean;
-  /** ISO time of the unit's last fix — ages the fix for dead reckoning and sizes the glide. */
-  lastSeenAt?: string | null;
 }
 
 export interface FleetMapProps {
@@ -72,8 +68,6 @@ export interface FleetMapProps {
   trail?: ReadonlyArray<readonly [number, number]>;
   /** Small embedded preview (Dashboard card): the wheel scrolls the page, never zooms the map. */
   preview?: boolean;
-  /** FE-06 — "now" on the server's clock, to age each fix; a skewed browser clock froze markers. */
-  now?: () => number;
 }
 
 const SOURCE_ID = 'fleet-units';
@@ -248,7 +242,7 @@ function validUnits(units: MapUnitFeature[]): MapUnitFeature[] {
  * same signature draw the same markers, so the source is not re-uploaded (WB-256). Headings the
  * tracker derives from movement only change when a position does, which this already covers. */
 function unitsSignature(units: MapUnitFeature[]): string {
-  return units.map((u) => `${u.id}|${u.lat}|${u.lon}|${u.dutyStatus}|${u.headingDeg ?? ''}|${u.stale ? 1 : 0}|${u.speedMph ?? ''}|${u.lastSeenAt ?? ''}`).join(';');
+  return units.map((u) => `${u.id}|${u.lat}|${u.lon}|${u.dutyStatus}|${u.headingDeg ?? ''}|${u.stale ? 1 : 0}`).join(';');
 }
 
 /** `headings` is the tracker's resolved heading per unit id (reported `headingDeg`, else derived
@@ -562,7 +556,6 @@ export default function FleetMap({
   onFollowChange,
   trail,
   preview = false,
-  now = Date.now,
 }: FleetMapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -582,7 +575,7 @@ export default function FleetMap({
   // still turns with its movement and keeps its heading when it stops.
   const headingTrackerRef = useRef<ReturnType<typeof createHeadingTracker> | null>(null);
   headingTrackerRef.current ??= createHeadingTracker();
-  // Navigation-app motion between fixes (backend D-149); off under `prefers-reduced-motion`.
+  // A ~1 s glide onto each new fix, never past it (backend D-149); off under `prefers-reduced-motion`.
   const motionRef = useRef<ReturnType<typeof createMotionTracker> | null>(null);
   motionRef.current ??= createMotionTracker();
   const frameRef = useRef<number | null>(null);
@@ -723,8 +716,8 @@ export default function FleetMap({
   }, []);
 
   /** Point updates patch the existing GeoJSON source instead of remounting the map (§16.3 rule 6).
-   * While units move, a frame loop (~20 fps, paused with the tab) redraws them at their glided
-   * positions; it stops by itself once every marker has settled. */
+   * When a fix moves, a frame loop (~20 fps, paused with the tab) redraws the markers along their
+   * short glide (`motion.ts`, ~1 s); it stops by itself once every marker sits exactly on its fix. */
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
@@ -737,17 +730,12 @@ export default function FleetMap({
     const animate = canAnimate();
     if (animate) {
       const headings = overlayRef.current.headings;
-      const wallNow = now();
       motionRef.current!.update(
         valid.map((u) => ({
           id: u.id,
           lat: u.lat,
           lon: u.lon,
-          speedMph: u.speedMph,
           heading: normalizeHeading(headings.get(u.id) ?? u.headingDeg),
-          moving: u.dutyStatus === 'DRIVING' && !u.stale,
-          fixAtMs: u.lastSeenAt ? Date.parse(u.lastSeenAt) || null : null,
-          wallNowMs: wallNow,
         })),
         performance.now(),
       );
@@ -796,7 +784,7 @@ export default function FleetMap({
       if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
       frameRef.current = null;
     };
-  }, [units, ready, now]);
+  }, [units, ready]);
 
   /** The W-02 layer chips — `visibility` only, so hiding a layer never drops its source data. */
   useEffect(() => {
