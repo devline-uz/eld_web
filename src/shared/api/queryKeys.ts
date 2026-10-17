@@ -83,7 +83,13 @@ export const qk = {
   scorecard: (params?: QueryParams) => ['safety', 'scorecard', p(params)] as const,
   safetySummary: () => ['safety', 'summary'] as const,
   geofences: (params?: QueryParams) => ['geofences', p(params)] as const,
+  /** `GET /live/fleet?view=list` — the slim fleet list the web polls. */
   liveFleet: (params?: QueryParams) => ['live', 'fleet', p(params)] as const,
+  /** `GET /live/fleet/:vehicleId` — W-02 selected-unit card. Deliberately under `liveFleet()`'s
+   * prefix (`{}` matches any object), so every `invalidateQueries({ queryKey: qk.liveFleet() })`
+   * (unit edits, DVIR, work orders) refreshes the open card too; exact reads of the list
+   * (`getQueryData`/`setQueryData`) never see it. */
+  liveFleetUnit: (vehicleId: string) => ['live', 'fleet', { vehicleId }] as const,
 
   // reports and transfers
   reports: (params?: QueryParams) => ['reports', p(params)] as const,

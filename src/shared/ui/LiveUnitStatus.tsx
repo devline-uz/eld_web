@@ -2,14 +2,14 @@
 // unit is listed (W-01 Dashboard, W-02 Live Fleet): the record status wins the badge (an
 // OUT_OF_SERVICE truck is "Out of service", not "Inactive"), and a one-line note says what the
 // ELD link is doing — "No device" or, for a stale duty status, "Last update 4 d ago".
-import type { LiveFleetUnit } from '@/shared/api/liveFleet';
+import type { LiveFleetListUnit } from '@/shared/api/liveFleet';
 import { formatAgo } from '@/shared/format/relative';
 import { useNowTick } from '@/shared/format/useRelativeTime';
 import { Badge, DutyBadge } from './Badge';
 import { cn } from './cn';
 
-type BadgeUnit = Pick<LiveFleetUnit, 'dutyStatus' | 'recordStatus'>;
-type NoteUnit = Pick<LiveFleetUnit, 'connectivity' | 'isStale' | 'staleSince' | 'lastSeenAt'>;
+type BadgeUnit = Pick<LiveFleetListUnit, 'dutyStatus' | 'recordStatus'>;
+type NoteUnit = Pick<LiveFleetListUnit, 'connectivity' | 'isStale' | 'staleSince' | 'lastSeenAt'>;
 
 /** The headline badge: `Out of service` from the record, else the (server-resolved) duty status. */
 export function LiveUnitBadge({ unit, className }: { unit: BadgeUnit; className?: string }) {

@@ -13,7 +13,7 @@ import { EMPTY_STATE_COPY } from '@/shared/ui/copy';
 import { setAccessToken, setAuthBridge, resetAuthBridge } from '@/shared/api/client';
 import { ToastProvider } from '@/shared/ui/Toast';
 import { qk } from '@/shared/api/queryKeys';
-import type { LiveFleetResponse } from '@/shared/api/liveFleet';
+import type { LiveFleetResponse, LiveFleetUnit } from '@/shared/api/liveFleet';
 import LiveFleetPage from './LiveFleetPage';
 
 vi.mock('@/shared/auth/usePermission', () => ({ usePermission: () => ({ can: () => true }) }));
@@ -60,6 +60,14 @@ function renderPage(initialEntry = '/live-fleet', queryClient = new QueryClient(
     </QueryClientProvider>,
   );
 }
+
+/** `GET /live/fleet/:vehicleId` (the selected-unit card) served from the same rows a test's list
+ * returns, so the card and the list describe the same fixture unit. */
+const detailFrom = (items: Array<{ vehicleId: string }>) =>
+  http.get(url(endpoints.live.unit(':vehicleId')), ({ params }) => {
+    const unit = items.find((u) => u.vehicleId === params.vehicleId);
+    return unit ? ok(unit) : fail(404, 'VEHICLE_NOT_FOUND', 'Vehicle not found.');
+  });
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'bypass' }));
 afterEach(() => {
@@ -359,13 +367,10 @@ describe('W-02 Live Fleet — stage 3', () => {
   });
 
   beforeEach(() => {
+    const items = [unitRow('veh_1', '#101', 'drv_1'), unitRow('veh_2', '#104', null)];
     server.use(
-      http.get(url(endpoints.live.fleet), () =>
-        ok({
-          items: [unitRow('veh_1', '#101', 'drv_1'), unitRow('veh_2', '#104', null)],
-          generatedAt: new Date().toISOString(),
-        }),
-      ),
+      http.get(url(endpoints.live.fleet), () => ok({ items, generatedAt: new Date().toISOString() })),
+      detailFrom(items),
     );
   });
 
@@ -456,21 +461,18 @@ describe('W-02 Live Fleet — stage 3', () => {
   });
 
   it('F3-24: the detail card shows no live speed or countdowns for a stale or ELD-offline unit', async () => {
+    const full = { ...unitRow('veh_9', '#109', 'drv_9'), speedMph: 61, odometerMi: 1200, driveRemainingSec: 3600,
+      shiftEndsAt: new Date(Date.now() + 3 * 3_600_000).toISOString(), isStale: true, connectivity: 'ELD_OFFLINE' };
+    const { odometerMi: _o, driveRemainingSec: _d, shiftEndsAt: _s, eldSerial: _e, ...slim } = full;
     server.use(
-      http.get(url(endpoints.live.fleet), () =>
-        ok({
-          items: [
-            { ...unitRow('veh_9', '#109', 'drv_9'), speedMph: 61, odometerMi: 1200, driveRemainingSec: 3600,
-              shiftEndsAt: new Date(Date.now() + 3 * 3_600_000).toISOString(), isStale: true, connectivity: 'ELD_OFFLINE' },
-          ],
-          generatedAt: new Date().toISOString(),
-        }),
-      ),
+      http.get(url(endpoints.live.fleet), () => ok({ items: [slim], generatedAt: new Date().toISOString() })),
+      detailFrom([full]),
     );
     renderPage('/live-fleet?unit=veh_9');
     await screen.findByRole('heading', { name: 'Unit #109' }, { timeout: 8000 });
     const speed = screen.getByText('Speed / Odometer').nextElementSibling!;
-    expect(speed).toHaveTextContent('— · 1,200 mi');
+    // The odometer is detail-only: it arrives with `GET /live/fleet/veh_9`.
+    await vi.waitFor(() => expect(speed).toHaveTextContent('— · 1,200 mi'));
     expect(screen.getByText('Drive time left').nextElementSibling).toHaveTextContent('—');
     expect(screen.getByText('Shift ends in').nextElementSibling).toHaveTextContent('—');
   });
@@ -512,6 +514,7 @@ describe('W-02 Live Fleet — performance', () => {
         fleetRequests += 1;
         return ok({ items: [row(1), row(2)], generatedAt: new Date().toISOString() });
       }),
+      detailFrom([row(1), row(2)]),
     );
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const invalidate = vi.spyOn(queryClient, 'invalidateQueries');
@@ -572,5 +575,112 @@ describe('W-02 Live Fleet — performance', () => {
     expect(screen.getByRole('button', { name: /Unit #1002/ })).toHaveFocus();
     await user.keyboard('{Home}');
     expect(screen.getByRole('button', { name: /Unit #1001/ })).toHaveFocus();
+  });
+});
+
+// The fleet poll carries only the list/map fields (`?view=list`); the selected-unit card reads its
+// full row from `GET /live/fleet/:vehicleId`, fetched only while a unit is selected.
+describe('W-02 Live Fleet — slim list + selected-unit detail', () => {
+  const full = (vehicleId: string, unitNumber: string): LiveFleetUnit => ({
+    vehicleId,
+    unitNumber,
+    driverId: `drv_${vehicleId}`,
+    driverName: 'John Smith',
+    driverPhone: '+1 614 555 0142',
+    dutyStatus: 'DRIVING',
+    driverDutyStatus: 'DRIVING',
+    speedMph: 55,
+    headingDeg: 90,
+    odometerMi: 741_220,
+    lat: 39.96,
+    lon: -82.99,
+    locationLabel: 'Columbus, OH',
+    lastSeenAt: new Date().toISOString(),
+    driveRemainingSec: 2 * 3600,
+    shiftEndsAt: new Date(Date.now() + 5 * 3_600_000).toISOString(),
+    eldSerial: 'PT30_11B2',
+    bleState: 'CONNECTED',
+    recordStatus: 'ACTIVE',
+    connectivity: 'ONLINE',
+    isStale: false,
+    staleSince: null,
+  });
+  const slim = (unit: LiveFleetUnit) => {
+    const { driverPhone: _p, odometerMi: _o, driveRemainingSec: _d, shiftEndsAt: _s, eldSerial: _e, ...rest } = unit;
+    return rest;
+  };
+
+  function serve(units: LiveFleetUnit[]) {
+    const listViews: Array<string | null> = [];
+    const detailRequests: string[] = [];
+    server.use(
+      http.get(url(endpoints.live.fleet), ({ request }) => {
+        listViews.push(new URL(request.url).searchParams.get('view'));
+        return ok({ items: units.map(slim), generatedAt: new Date().toISOString() });
+      }),
+      http.get(url(endpoints.live.unit(':vehicleId')), ({ params }) => {
+        detailRequests.push(String(params.vehicleId));
+        const unit = units.find((u) => u.vehicleId === params.vehicleId);
+        return unit ? ok(unit) : fail(404, 'VEHICLE_NOT_FOUND', 'Vehicle not found.');
+      }),
+    );
+    return { listViews, detailRequests };
+  }
+
+  it('polls the slim list and requests no unit detail while nothing is selected', async () => {
+    const { listViews, detailRequests } = serve([full('veh_1', '#101'), full('veh_2', '#102')]);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderPage('/live-fleet', queryClient);
+    expect(await screen.findByRole('button', { name: /Unit #101/ }, { timeout: 8000 })).toBeInTheDocument();
+    expect(listViews).toEqual(['list']);
+    expect(detailRequests).toEqual([]);
+    expect(queryClient.getQueryData(qk.liveFleetUnit('veh_1'))).toBeUndefined();
+  });
+
+  it('selecting a unit fetches its full row; the card shows the detail-only fields; closing stops it', async () => {
+    const { detailRequests } = serve([full('veh_1', '#101'), full('veh_2', '#102')]);
+    const user = userEvent.setup();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderPage('/live-fleet', queryClient);
+    await user.click(await screen.findByRole('button', { name: /Unit #102/ }, { timeout: 8000 }));
+
+    expect(await screen.findByRole('heading', { name: 'Unit #102' })).toBeInTheDocument();
+    await vi.waitFor(() => expect(detailRequests).toEqual(['veh_2']));
+    // Phone, odometer, HOS clocks and the ELD serial come only from `GET /live/fleet/veh_2`.
+    expect(await screen.findByText(/\+1 614 555 0142/)).toBeInTheDocument();
+    expect(screen.getByText('Speed / Odometer').nextElementSibling).toHaveTextContent('741,220 mi');
+    // The countdown hook re-targets on its next 1 s tick (useCountdown.ts).
+    await vi.waitFor(() => expect(screen.getByText('Drive time left').nextElementSibling).toHaveTextContent(/^0[12]:\d{2}:\d{2}$/), { timeout: 2500 });
+    expect(screen.getByText('ELD').nextElementSibling).toHaveTextContent('PT30_11B2 · Connected');
+
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.queryByRole('heading', { name: 'Unit #102' })).not.toBeInTheDocument();
+    const observed = queryClient.getQueryCache().find({ queryKey: qk.liveFleetUnit('veh_2'), exact: true });
+    expect(observed?.getObserversCount() ?? 0).toBe(0);
+    expect(detailRequests).toEqual(['veh_2']);
+  });
+
+  it('a telemetry.point frame for the selected unit patches both the list row and the detail row', async () => {
+    serve([full('veh_1', '#101'), full('veh_2', '#102')]);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderPage('/live-fleet?unit=veh_1', queryClient);
+    await screen.findByRole('heading', { name: 'Unit #101' }, { timeout: 8000 });
+    await vi.waitFor(() => expect(queryClient.getQueryData(qk.liveFleetUnit('veh_1'))).toBeDefined());
+    const telemetry = roomHandlers.get('fleet')!['telemetry.point']!;
+
+    const at = new Date().toISOString();
+    act(() => telemetry({ vehicleId: 'veh_1', count: 1, latitude: 41.5, longitude: -84, speedMph: 63, headingDeg: 180, time: at }));
+    const patched = { lat: 41.5, lon: -84, speedMph: 63, headingDeg: 180, lastSeenAt: at };
+    expect(queryClient.getQueryData<LiveFleetResponse>(qk.liveFleet())?.items.find((u) => u.vehicleId === 'veh_1')).toMatchObject(patched);
+    expect(queryClient.getQueryData<LiveFleetUnit>(qk.liveFleetUnit('veh_1'))).toMatchObject({ ...patched, driveRemainingSec: 7200 });
+
+    // An unselected unit only moves on the map: its frame never touches the open card's row.
+    act(() => telemetry({ vehicleId: 'veh_2', count: 1, latitude: 30, longitude: -90, speedMph: 10 }));
+    await vi.waitFor(() =>
+      expect(queryClient.getQueryData<LiveFleetResponse>(qk.liveFleet())?.items.find((u) => u.vehicleId === 'veh_2')).toMatchObject({ lat: 30 }),
+    );
+    expect(queryClient.getQueryData<LiveFleetUnit>(qk.liveFleetUnit('veh_1'))).toMatchObject(patched);
+    expect(queryClient.getQueryData(qk.liveFleetUnit('veh_2'))).toBeUndefined();
+    expect(screen.getByText('Speed / Odometer').nextElementSibling).toHaveTextContent('63 mph');
   });
 });

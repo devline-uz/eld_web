@@ -1,6 +1,6 @@
 // owner: web-dashboard-fleet — QA LIVE-002 / CODE-020: one definition of "on duty" for the
 // `Drivers on duty` KPI, the `Duty status · now` donut and its subtitle.
-import type { DriverDutyStatus, LiveFleetUnit } from '@/shared/api/liveFleet';
+import type { DriverDutyStatus, LiveFleetListUnit } from '@/shared/api/liveFleet';
 import type { DutyStatus } from '@/shared/ui/Badge';
 
 /** A donut slice: the driver's HOS duty status, or UNKNOWN when it could not be computed. */
@@ -29,7 +29,7 @@ const FROM_LIVE_STATUS: Record<DutyStatus, DonutDutyStatus> = {
   INACTIVE: 'UNKNOWN',
 };
 
-type DutyUnit = Pick<LiveFleetUnit, 'driverId' | 'dutyStatus' | 'driverDutyStatus'>;
+type DutyUnit = Pick<LiveFleetListUnit, 'driverId' | 'dutyStatus' | 'driverDutyStatus'>;
 
 /**
  * The assigned driver's duty status for the donut — their own HOS status (`driverDutyStatus`),
