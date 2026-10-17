@@ -167,6 +167,8 @@ export const GEOFENCES: { items: GeofenceRow[] } = {
       countAsYardMove: false,
       vehicleGroupId: null,
       vehicleGroupName: null,
+      vehicleIds: [],
+      vehicles: [],
     },
     {
       // Unit #101 is fuelling inside it.
@@ -191,6 +193,9 @@ export const GEOFENCES: { items: GeofenceRow[] } = {
       countAsYardMove: false,
       vehicleGroupId: null,
       vehicleGroupName: null,
+      // Unit-scoped (overlay 11.1 `Specific units…`) — only #101 raises its events.
+      vehicleIds: ['veh_1'],
+      vehicles: [{ id: 'veh_1', unitNumber: '#101' }],
     },
     {
       // trp_1002 delivery.
@@ -206,6 +211,8 @@ export const GEOFENCES: { items: GeofenceRow[] } = {
       countAsYardMove: false,
       vehicleGroupId: null,
       vehicleGroupName: null,
+      vehicleIds: [],
+      vehicles: [],
     },
     {
       // trp_1005 delivery.
@@ -231,6 +238,8 @@ export const GEOFENCES: { items: GeofenceRow[] } = {
       countAsYardMove: false,
       vehicleGroupId: null,
       vehicleGroupName: null,
+      vehicleIds: [],
+      vehicles: [],
     },
     {
       // Unit #103's yard and trp_1006 pickup.
@@ -246,6 +255,8 @@ export const GEOFENCES: { items: GeofenceRow[] } = {
       countAsYardMove: false,
       vehicleGroupId: null,
       vehicleGroupName: null,
+      vehicleIds: [],
+      vehicles: [],
     },
   ],
 };

@@ -19,10 +19,15 @@ export type GeofenceRow = GeofencesListResponse['items'][number] &
   GeofenceGeometrySource & {
     colour?: GeofenceColour;
     countAsYardMove?: boolean;
-    /** B-104 — the `Applies to` vehicle group; `null` = all groups (also after the group is deleted). */
+    /** B-104 — the `Applies to` vehicle group; `null` = all units or unit-scoped (`vehicleIds`), also
+     * after the group is deleted. */
     vehicleGroupId?: string | null;
     /** B-104 — the group's name, joined server-side on `GET /geofences` and `GET /geofences/:id`. */
     vehicleGroupName?: string | null;
+    /** The units the fence is limited to — `[]` when it is not unit-scoped (all units or a group). */
+    vehicleIds?: string[];
+    /** The same units with their unit numbers, joined server-side; `[]` when not unit-scoped. */
+    vehicles?: Array<{ id: string; unitNumber: string }>;
   };
 
 export interface GeofencesResponse {
@@ -71,6 +76,11 @@ export interface GeofencePayload {
   /** B-104 — overlay 11.1 `Applies to`. `null` = all vehicle groups (on PATCH: reset to all);
    * an unknown id is `404 VEHICLE_GROUP_NOT_FOUND`. */
   vehicleGroupId?: string | null;
+  /** Overlay 11.1 `Applies to` → `Specific units…` — non-empty limits the fence to these units
+   * (uuid, ≤ 500). Never combined with a non-null `vehicleGroupId` (422); on PATCH absent =
+   * unchanged, `[]` = clear, and setting either scope clears the other. An unknown or deleted
+   * unit is `404 VEHICLE_NOT_FOUND`. */
+  vehicleIds?: string[];
 }
 
 export function useCreateGeofence() {

@@ -9,6 +9,7 @@ import { server } from '@/mocks/server';
 import { fail, ok, url } from '@/mocks/envelope';
 import { endpoints } from '@/shared/api/endpoints';
 import { ToastProvider } from '@/shared/ui/Toast';
+import { GEOFENCE_APPLIES_TO_UNITS } from '@/shared/forms/schemas';
 import { CreateGeofenceModal } from './CreateGeofenceModal';
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'bypass' }));
@@ -205,6 +206,78 @@ describe('11.1 Create a geofence — shape segments and double-submit', () => {
     expect(posted).toBeNull();
   });
 
+  it('hides the Address and Radius / size inputs for a drawn Rectangle or Polygon', async () => {
+    const user = userEvent.setup();
+    renderModal();
+    const addressInput = () => screen.queryByPlaceholderText('4517 Washington Ave., Columbus, OH 43004');
+    const radiusInput = () => screen.queryByPlaceholderText('0.8');
+
+    // Rectangle is the default segment.
+    expect(addressInput()).not.toBeInTheDocument();
+    expect(radiusInput()).not.toBeInTheDocument();
+    expect(screen.queryByText('Radius / size')).not.toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Applies to' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Polygon' }));
+    expect(addressInput()).not.toBeInTheDocument();
+    expect(radiusInput()).not.toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Applies to' })).toBeInTheDocument();
+  });
+
+  it('shows Radius / size but no Address input for Circle', async () => {
+    const user = userEvent.setup();
+    renderModal();
+    await user.click(screen.getByRole('button', { name: 'Circle' }));
+    expect(screen.queryByPlaceholderText('4517 Washington Ave., Columbus, OH 43004')).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText('0.8')).toBeInTheDocument();
+    expect(screen.getByText('Radius / size')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Applies to' })).toBeInTheDocument();
+  });
+
+  it('shows both the Address and Radius / size inputs for Address', async () => {
+    const user = userEvent.setup();
+    renderModal();
+    await user.click(screen.getByRole('button', { name: 'Address' }));
+    expect(screen.getByPlaceholderText('4517 Washington Ave., Columbus, OH 43004')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('0.8')).toBeInTheDocument();
+    expect(screen.getByText('Radius / size')).toBeInTheDocument();
+  });
+
+  it('drops a stale address error when switching from Address to Circle', async () => {
+    const user = userEvent.setup();
+    renderModal();
+    await user.click(screen.getByRole('button', { name: 'Address' }));
+    await user.type(screen.getByPlaceholderText('Columbus terminal'), 'Yard A');
+    await user.click(screen.getByPlaceholderText('4517 Washington Ave., Columbus, OH 43004'));
+    await user.paste('x'.repeat(301));
+    await user.click(screen.getByRole('button', { name: 'Save geofence' }));
+    expect(await screen.findByText('Address must be 300 characters or fewer.')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Circle' }));
+    expect(screen.queryByPlaceholderText('4517 Washington Ave., Columbus, OH 43004')).not.toBeInTheDocument();
+    expect(screen.queryByText('Address must be 300 characters or fewer.')).not.toBeInTheDocument();
+    // The stale address no longer blocks validation — Save reaches the map check instead.
+    await user.click(screen.getByRole('button', { name: 'Save geofence' }));
+    expect(await screen.findByText(/needs the map, which is not available here/)).toBeInTheDocument();
+  });
+
+  it('drops a stale radius error when switching from Address to Polygon', async () => {
+    const user = userEvent.setup();
+    renderModal();
+    await user.click(screen.getByRole('button', { name: 'Address' }));
+    await user.type(screen.getByPlaceholderText('Columbus terminal'), 'Yard A');
+    await user.type(screen.getByPlaceholderText('0.8'), '600');
+    await user.click(screen.getByRole('button', { name: 'Save geofence' }));
+    expect(await screen.findByText('Radius must be 500 mi or less.')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Polygon' }));
+    expect(screen.queryByText('Radius must be 500 mi or less.')).not.toBeInTheDocument();
+    // The stale 600 mi no longer blocks validation — Save reaches the shape check instead.
+    await user.click(screen.getByRole('button', { name: 'Save geofence' }));
+    expect(await screen.findByText(/needs the map, which is not available here/)).toBeInTheDocument();
+    expect(screen.queryByText('Radius must be 500 mi or less.')).not.toBeInTheDocument();
+  });
+
   it('sends one POST while the request is in flight, however many times Save is clicked', async () => {
     let calls = 0;
     let release: () => void = () => undefined;
@@ -235,7 +308,7 @@ describe('11.1 Create a geofence — shape segments and double-submit', () => {
 });
 
 describe('11.1 Create a geofence — Applies to (vehicle groups)', () => {
-  it('lists the real vehicle groups after `All vehicle groups`, disabled while they load', async () => {
+  it('lists the real vehicle groups between `All units` and `Specific units…`, disabled while they load', async () => {
     renderModal();
     const select = screen.getByRole('combobox', { name: 'Applies to' });
     expect(select).toBeDisabled();
@@ -243,17 +316,18 @@ describe('11.1 Create a geofence — Applies to (vehicle groups)', () => {
 
     await vi.waitFor(() => expect(select).not.toBeDisabled());
     const options = within(select).getAllByRole('option');
-    expect(options.map((o) => o.textContent)).toEqual(['All vehicle groups', 'Midwest linehaul', 'Regional']);
-    expect(options.map((o) => (o as HTMLOptionElement).value)).toEqual(['', 'vg_1', 'vg_2']);
+    expect(options.map((o) => o.textContent)).toEqual(['All units', 'Midwest linehaul', 'Regional', 'Specific units…']);
+    expect(options.map((o) => (o as HTMLOptionElement).value)).toEqual(['', 'vg_1', 'vg_2', GEOFENCE_APPLIES_TO_UNITS]);
+    expect(within(select).getByRole('group', { name: 'Vehicle groups' })).toBeInTheDocument();
     expect(select).toHaveValue('');
   });
 
-  it('falls back to just `All vehicle groups` when the list fails', async () => {
+  it('falls back to `All units` and `Specific units…` when the group list fails', async () => {
     server.use(http.get(url(endpoints.vehicleGroups.list), () => fail(404, 'NOT_FOUND', 'Not found.')));
     renderModal();
     const select = screen.getByRole('combobox', { name: 'Applies to' });
     await vi.waitFor(() => expect(select).not.toBeDisabled());
-    expect(within(select).getAllByRole('option').map((o) => o.textContent)).toEqual(['All vehicle groups']);
+    expect(within(select).getAllByRole('option').map((o) => o.textContent)).toEqual(['All units', 'Specific units…']);
   });
 
   async function submitWithGroup(group: string): Promise<Record<string, unknown> | null> {
@@ -287,10 +361,112 @@ describe('11.1 Create a geofence — Applies to (vehicle groups)', () => {
     expect(posted).not.toHaveProperty('appliesTo');
   });
 
-  it('sends `vehicleGroupId: null` for `All vehicle groups`', async () => {
+  it('sends `vehicleGroupId: null` for `All units`', async () => {
     const posted = await submitWithGroup('');
     expect(posted).not.toBeNull();
     expect(posted).toHaveProperty('vehicleGroupId', null);
+    expect(posted).not.toHaveProperty('vehicleIds');
+  });
+});
+
+describe('11.1 Create a geofence — Applies to (specific units)', () => {
+  async function fillAndPickUnits(user: ReturnType<typeof userEvent.setup>) {
+    renderModal();
+    const select = screen.getByRole('combobox', { name: 'Applies to' });
+    await vi.waitFor(() => expect(select).not.toBeDisabled());
+    expect(screen.queryByRole('group', { name: 'Units' })).not.toBeInTheDocument();
+    await user.selectOptions(select, GEOFENCE_APPLIES_TO_UNITS);
+    await user.click(screen.getByRole('button', { name: 'Address' }));
+    await user.type(screen.getByPlaceholderText('Columbus terminal'), 'Yard A');
+    await user.type(screen.getByPlaceholderText('4517 Washington Ave., Columbus, OH 43004'), '123 Main St, Columbus, OH');
+    await user.type(screen.getByPlaceholderText('0.8'), '0.5');
+    return within(screen.getByRole('group', { name: 'Units' }));
+  }
+
+  it('sends the picked units as `vehicleIds` with `vehicleGroupId: null`', async () => {
+    let posted: Record<string, unknown> | null = null;
+    server.use(
+      http.post(url(endpoints.geofences.create), async ({ request }) => {
+        posted = (await request.json()) as Record<string, unknown>;
+        return ok({ id: 'geo_1' });
+      }),
+    );
+    const user = userEvent.setup();
+    const list = await fillAndPickUnits(user);
+    const units = await list.findAllByRole('checkbox');
+    // Numeric unit-number order, as in the vehicle-group picker.
+    expect(units[0]).toHaveAccessibleName('Unit #101');
+    await user.click(list.getByRole('checkbox', { name: 'Unit #102' }));
+    await user.click(list.getByRole('checkbox', { name: 'Unit #101' }));
+    expect(screen.getByText('2 selected')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Save geofence' }));
+
+    expect(await screen.findByText('Geofence created', {}, { timeout: 8000 })).toBeInTheDocument();
+    expect(posted).toMatchObject({ vehicleGroupId: null });
+    expect([...((posted!.vehicleIds as string[]) ?? [])].sort()).toEqual(['veh_1', 'veh_2']);
+    expect(posted).not.toHaveProperty('appliesTo');
+  });
+
+  it('filters the unit list by the search box', async () => {
+    const user = userEvent.setup();
+    const list = await fillAndPickUnits(user);
+    await list.findAllByRole('checkbox');
+    await user.type(screen.getByRole('textbox', { name: 'Search units' }), '#110');
+    expect(list.getAllByRole('checkbox').map((c) => c.getAttribute('aria-label'))).toEqual(['Unit #110']);
+  });
+
+  it('blocks Save with no unit picked and says why under Applies to', async () => {
+    const post = vi.fn();
+    server.use(http.post(url(endpoints.geofences.create), () => (post(), ok({ id: 'geo_1' }))));
+    const user = userEvent.setup();
+    const list = await fillAndPickUnits(user);
+    await list.findAllByRole('checkbox');
+    await user.click(screen.getByRole('button', { name: 'Save geofence' }));
+
+    expect(await screen.findByText('Select at least one unit.')).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Applies to' })).toHaveAttribute('aria-invalid', 'true');
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('shows a 404 VEHICLE_NOT_FOUND under Applies to', async () => {
+    server.use(
+      http.post(url(endpoints.geofences.create), () => fail(404, 'VEHICLE_NOT_FOUND', 'Vehicle not found.')),
+    );
+    const user = userEvent.setup();
+    const list = await fillAndPickUnits(user);
+    await user.click(await list.findByRole('checkbox', { name: 'Unit #101' }));
+    await user.click(screen.getByRole('button', { name: 'Save geofence' }));
+
+    expect(await screen.findByText(/One of the picked units was deleted/)).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Applies to' })).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('puts a server `vehicleIds` issue under Applies to, not in the banner', async () => {
+    server.use(
+      http.post(url(endpoints.geofences.create), () =>
+        fail(422, 'VALIDATION_FAILED', 'Request validation failed.', {
+          issues: [{ path: ['vehicleIds', 0], code: 'invalid_string', message: 'Invalid uuid' }],
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    const list = await fillAndPickUnits(user);
+    await user.click(await list.findByRole('checkbox', { name: 'Unit #101' }));
+    await user.click(screen.getByRole('button', { name: 'Save geofence' }));
+
+    expect(await screen.findByText('Invalid uuid')).toHaveAttribute('id', 'geofence-applies-error');
+    expect(screen.queryByText(/Applies to: Invalid uuid/)).not.toBeInTheDocument();
+  });
+
+  it('confirms on Cancel once a unit is picked', async () => {
+    const user = userEvent.setup();
+    renderModal();
+    const select = screen.getByRole('combobox', { name: 'Applies to' });
+    await vi.waitFor(() => expect(select).not.toBeDisabled());
+    await user.selectOptions(select, GEOFENCE_APPLIES_TO_UNITS);
+    await user.click(await screen.findByRole('checkbox', { name: 'Unit #101' }));
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(await screen.findByText('Discard changes?')).toBeInTheDocument();
   });
 });
 

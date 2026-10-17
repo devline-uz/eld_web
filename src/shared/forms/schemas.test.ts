@@ -7,6 +7,7 @@ import {
   alertRuleSchema,
   calibrateOdometerSchema,
   deviceSchema,
+  GEOFENCE_APPLIES_TO_UNITS,
   geofenceSchema,
   inviteUserSchema,
   roleSchema,
@@ -462,5 +463,15 @@ describe('backend DTO limits', () => {
     expect(firstError(geofenceSchema, { ...base, radiusMi: 501 })).toBe(M.geofenceRadiusMax);
     expect(firstError(geofenceSchema, { ...base, dwellMinutes: 0 })).toBe(M.geofenceDwellMin);
     expect(firstError(geofenceSchema, { ...base, dwellMinutes: 1441 })).toBe(M.geofenceDwellMax);
+  });
+
+  it('requires at least one unit (≤ 500) for `Specific units…` only', () => {
+    const units = { name: 'Yard', appliesTo: GEOFENCE_APPLIES_TO_UNITS };
+    expect(firstError(geofenceSchema, units)).toBe(M.geofenceUnitsRequired);
+    expect(firstError(geofenceSchema, { ...units, vehicleIds: Array.from({ length: 501 }, (_, i) => `v${i}`) })).toBe(
+      M.geofenceUnitsMax,
+    );
+    expect(geofenceSchema.safeParse({ ...units, vehicleIds: ['veh_1'] }).success).toBe(true);
+    expect(geofenceSchema.safeParse({ name: 'Yard', appliesTo: 'vg_1' }).success).toBe(true);
   });
 });
