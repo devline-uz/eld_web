@@ -1,6 +1,8 @@
-// B-3 `GET /live/fleet` (shipped 2026-09-14) — identical to backend `live-fleet.mapper.ts`
-// `LiveFleetResponse` (22 fields per unit + `generatedAt`), wrapped in the global `{ data }`
-// envelope that `client.ts` unwraps.
+// B-3 `GET /live/fleet` (shipped 2026-09-14) — identical to backend `live-fleet.mapper.ts`,
+// wrapped in the global `{ data }` envelope that `client.ts` unwraps. The web polls the slim
+// `?view=list` rows (`LiveFleetListUnit`: what the unit list, map markers, Vehicles and Messages
+// read); the W-02 selected-unit card reads the full 22-field `LiveFleetUnit` from
+// `GET /live/fleet/:vehicleId` (`useLiveFleetUnit`), only while a unit is selected.
 // Both W-01 Fleet Dashboard and W-02 Live Fleet import from here — never from each other
 // (features/* never imports another features/*).
 import { useQuery } from '@tanstack/react-query';
@@ -48,6 +50,13 @@ export interface LiveFleetUnit {
 
 export type LiveRecordStatus = 'ACTIVE' | 'INACTIVE' | 'OUT_OF_SERVICE';
 
+/** Backend `LIVE_FLEET_DETAIL_ONLY_FIELDS` — only the W-02 selected-unit card reads these. */
+export type LiveFleetDetailOnlyField = 'driverPhone' | 'odometerMi' | 'driveRemainingSec' | 'shiftEndsAt' | 'eldSerial';
+
+/** One `GET /live/fleet?view=list` row (backend `LiveFleetListUnit`): the full unit minus the
+ * detail-card-only fields. */
+export type LiveFleetListUnit = Omit<LiveFleetUnit, LiveFleetDetailOnlyField>;
+
 /**
  * FE-05 — the colour a map marker is drawn in. The grey "ELD offline" marker means exactly what the
  * dashboard KPI "units with ELD offline" and `/live/fleet` `connectivity: ELD_OFFLINE` mean: an
@@ -57,7 +66,7 @@ export type LiveRecordStatus = 'ACTIVE' | 'INACTIVE' | 'OUT_OF_SERVICE';
  * and is drawn dimmed through `stale: isStale`, never grey.
  */
 export function mapMarkerStatus(
-  unit: Pick<LiveFleetUnit, 'dutyStatus' | 'driverDutyStatus' | 'connectivity' | 'recordStatus'>,
+  unit: Pick<LiveFleetListUnit, 'dutyStatus' | 'driverDutyStatus' | 'connectivity' | 'recordStatus'>,
 ): DutyStatus {
   if (unit.connectivity === 'ELD_OFFLINE' && unit.recordStatus === 'ACTIVE') return 'ELD_OFFLINE';
   if (unit.dutyStatus === 'ELD_OFFLINE') return unit.driverDutyStatus ?? 'INACTIVE';
@@ -68,9 +77,21 @@ export function mapMarkerStatus(
 export type DriverDutyStatus = 'DRIVING' | 'ON_DUTY' | 'SLEEPER' | 'OFF_DUTY';
 export type LiveConnectivity = 'NO_DEVICE' | 'ELD_OFFLINE' | 'ONLINE';
 
+/** `GET /live/fleet?view=list` — the web's fleet poll (`useLiveFleet`). */
 export interface LiveFleetResponse {
-  items: LiveFleetUnit[];
+  items: LiveFleetListUnit[];
   generatedAt: string;
+}
+
+/** `?view=list` — sent by every web read of the fleet list (the hook and the route prefetch). */
+export const LIVE_FLEET_LIST_PARAMS = { view: 'list' } as const;
+
+/** The web's fleet list request — shared by `useLiveFleet` and the `/live-fleet` route prefetch,
+ * so both cache the same slim shape under `qk.liveFleet()`. */
+export async function fetchLiveFleet(signal?: AbortSignal): Promise<LiveFleetResponse> {
+  const fleet = await client.get<LiveFleetResponse>(endpoints.live.fleet, { params: LIVE_FLEET_LIST_PARAMS, signal });
+  noteServerClock(fleet.generatedAt);
+  return fleet;
 }
 
 /**
@@ -92,17 +113,27 @@ export function serverNowMs(): number {
   return Date.now() + serverClockOffsetMs;
 }
 
-/** `useLiveFleet()` — one query, shared by the Dashboard live-fleet card and the Live Fleet
- * screen. `cachePolicy('live')` is the §6.4 10s-stale/30s-poll pair, gated on tab visibility. */
+/** `useLiveFleet()` — one query (slim `?view=list` rows), shared by the Live Fleet screen, the
+ * Vehicles status column and the Messages driver panel. `cachePolicy('live')` is the §6.4
+ * 10s-stale/30s-poll pair, gated on tab visibility. */
 export function useLiveFleet() {
   return useQuery({
     queryKey: qk.liveFleet(),
-    queryFn: async ({ signal }) => {
-      const fleet = await client.get<LiveFleetResponse>(endpoints.live.fleet, { signal });
-      noteServerClock(fleet.generatedAt);
-      return fleet;
-    },
+    queryFn: ({ signal }) => fetchLiveFleet(signal),
     ...typedCachePolicy<LiveFleetResponse>('live'),
+  });
+}
+
+/** `useLiveFleetUnit(vehicleId)` — W-02's selected-unit card: the full row (HOS clocks, odometer,
+ * ELD serial, phone) from `GET /live/fleet/:vehicleId`. Enabled only while a unit is selected
+ * (`vehicleId` non-null) and polled on the same `live` policy; `telemetry.point` frames for the
+ * unit patch it in between (LiveFleetPage). */
+export function useLiveFleetUnit(vehicleId: string | null) {
+  return useQuery({
+    queryKey: qk.liveFleetUnit(vehicleId ?? ''),
+    queryFn: ({ signal }) => client.get<LiveFleetUnit>(endpoints.live.unit(vehicleId!), { signal }),
+    enabled: Boolean(vehicleId),
+    ...typedCachePolicy<LiveFleetUnit>('live'),
   });
 }
 
@@ -110,7 +141,7 @@ export function useLiveFleet() {
  * Rejects `NaN`, out-of-range values and the `(0, 0)` "null island" sentinel some upstream mock/
  * telemetry data uses in place of a missing fix — one such unit was enough to park the Live Fleet
  * map's camera in the middle of the ocean (web/bugs.md WB-049). */
-export function hasPosition(unit: LiveFleetUnit): unit is LiveFleetUnit & { lat: number; lon: number } {
+export function hasPosition<T extends Pick<LiveFleetListUnit, 'lat' | 'lon'>>(unit: T): unit is T & { lat: number; lon: number } {
   const { lat, lon } = unit;
   if (typeof lat !== 'number' || typeof lon !== 'number') return false;
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;

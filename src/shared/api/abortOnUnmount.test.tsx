@@ -13,7 +13,7 @@ import { useDashboardSummary } from './dashboardSummary';
 import { useDriver, useDriverHos, useDriversList } from './drivers';
 import { useDefectsList } from './dvir';
 import { useLogDay, useLogEvents } from './hosLogs';
-import { useLiveFleet } from './liveFleet';
+import { useLiveFleet, useLiveFleetUnit } from './liveFleet';
 import { useDriversLookup } from './lookups';
 import { useConversationsList, useMessages } from './messaging';
 import { useNotifications } from './notifications';
@@ -77,6 +77,7 @@ const CASES: Array<[string, string, () => unknown]> = [
   ['messaging · useMessages', '/conversations/cnv_1/messages', () => useMessages('cnv_1')],
   ['notifications · useNotifications', '/notifications', () => useNotifications({ page: 1, limit: 10 })],
   ['liveFleet · useLiveFleet', '/live/fleet', () => useLiveFleet()],
+  ['liveFleet · useLiveFleetUnit', '/live/fleet/veh_1', () => useLiveFleetUnit('veh_1')],
   ['dashboard · useDashboardSummary', '/dashboard/summary', () => useDashboardSummary()],
   ['settings · useCarrier', '/carrier', () => useCarrier()],
   ['settings · useUsersList', '/users', () => useUsersList()],

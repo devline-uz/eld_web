@@ -6,7 +6,7 @@
 // QA LIVE-002 — the slices are the ASSIGNED DRIVERS by their own HOS status (the Drivers list's
 // source), so an ELD-offline / out-of-service unit's driver is still counted, and the legend always
 // sums to the subtitle's "N assigned drivers"; a driver with no computable status is "Status unknown".
-import type { DriverDutyStatus, LiveFleetUnit } from '@/shared/api/liveFleet';
+import type { DriverDutyStatus, LiveFleetListUnit } from '@/shared/api/liveFleet';
 import { Badge, DutyBadge } from '@/shared/ui/Badge';
 import { formatPercent } from '@/shared/format/numbers';
 import { allocatePercents } from '../lib/allocatePercents';
@@ -26,7 +26,7 @@ export default function DutyDonut({
   units,
   onSegmentClick,
 }: {
-  units: LiveFleetUnit[];
+  units: LiveFleetListUnit[];
   onSegmentClick?: (status: DriverDutyStatus) => void;
 }) {
   const summary = summarizeDriverDuty(units);

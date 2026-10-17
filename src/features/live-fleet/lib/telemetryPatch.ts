@@ -5,11 +5,11 @@
 // (backend D-149), sent to `vehicle:{id}` and `fleet`; only that unit's row is patched in place.
 // A batch without a GPS fix has no coordinates — the page then falls back to one throttled
 // invalidate.
-import type { LiveFleetResponse, LiveFleetUnit } from '@/shared/api/liveFleet';
+import type { LiveFleetListUnit, LiveFleetResponse } from '@/shared/api/liveFleet';
 import type { RealtimeEventPayloads } from '@/shared/realtime/events';
 
 export type TelemetryPointPayload = RealtimeEventPayloads['telemetry.point'];
-export type UnitPatch = Partial<Pick<LiveFleetUnit, 'lat' | 'lon' | 'speedMph' | 'headingDeg' | 'lastSeenAt'>>;
+export type UnitPatch = Partial<Pick<LiveFleetListUnit, 'lat' | 'lon' | 'speedMph' | 'headingDeg' | 'lastSeenAt'>>;
 
 function finite(value: unknown): number | null {
   const n = typeof value === 'string' ? Number(value) : value;

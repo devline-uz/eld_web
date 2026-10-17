@@ -2,16 +2,17 @@
 import { http } from 'msw';
 import { endpoints } from '@/shared/api/endpoints';
 import { fixture } from '../fixtures.generated';
-import { ok, url, serverPage } from '../envelope';
+import { fail, ok, url, serverPage } from '../envelope';
 import type { GeofenceRow } from '@/shared/api/geofences';
-import type { LiveFleetResponse } from '@/shared/api/liveFleet';
+import type { LiveFleetListUnit, LiveFleetResponse, LiveFleetUnit } from '@/shared/api/liveFleet';
 
 /**
- * B-3 `GET /live/fleet` (shipped 2026-09-14) — same 21 fields + `generatedAt` as backend
- * `live-fleet.mapper.ts` (UI-003/UI-004 added recordStatus, connectivity, isStale, staleSince);
- * validated against openapi.json by the contract suite.
+ * B-3 `GET /live/fleet` (shipped 2026-09-14) — the full rows (`view=full`, also embedded in
+ * `/dashboard/summary`), same fields + `generatedAt` as backend `live-fleet.mapper.ts`
+ * (UI-003/UI-004 added recordStatus, connectivity, isStale, staleSince); validated against
+ * openapi.json by the contract suite. `?view=list` serves them through `toLiveFleetListUnit`.
  */
-export const LIVE_FLEET: LiveFleetResponse = {
+export const LIVE_FLEET: { items: LiveFleetUnit[]; generatedAt: string } = {
   items: [
     {
       vehicleId: 'veh_1',
@@ -146,6 +147,17 @@ export const LIVE_FLEET: LiveFleetResponse = {
  * documented field); a POLYGON is a GeoJSON `geometry` (`radiusMi: 0`, unused). Each sits on a
  * LIVE_FLEET unit or a trip stop in tripsMessagingGaps.ts so the layers overlap on the map.
  */
+/** Backend `toLiveFleetListUnit` — a `?view=list` row: the full row minus the detail-card-only fields. */
+export function toLiveFleetListUnit(unit: LiveFleetUnit): LiveFleetListUnit {
+  const { driverPhone: _phone, odometerMi: _odo, driveRemainingSec: _drive, shiftEndsAt: _shift, eldSerial: _serial, ...rest } = unit;
+  return rest;
+}
+
+/** `GET /live/fleet?view=list` — what the web polls. */
+export function liveFleetList(): LiveFleetResponse {
+  return { items: LIVE_FLEET.items.map(toLiveFleetListUnit), generatedAt: LIVE_FLEET.generatedAt };
+}
+
 export const GEOFENCES: { items: GeofenceRow[] } = {
   items: [
     {
@@ -277,5 +289,11 @@ export const fleetHandlers = [
   http.get(url(endpoints.dvir.list), ({ request }) => ok(serverPage(fixture('GET /api/dvir'), request))),
 
   // Gap stubs — served against the shape recorded in web/backend-gaps.md.
-  http.get(url(endpoints.live.fleet), () => ok(LIVE_FLEET)),
+  http.get(url(endpoints.live.fleet), ({ request }) =>
+    new URL(request.url).searchParams.get('view') === 'list' ? ok(liveFleetList()) : ok(LIVE_FLEET),
+  ),
+  http.get(url(endpoints.live.unit(':vehicleId')), ({ params }) => {
+    const unit = LIVE_FLEET.items.find((u) => u.vehicleId === params.vehicleId);
+    return unit ? ok(unit) : fail(404, 'VEHICLE_NOT_FOUND', 'Vehicle not found.');
+  }),
 ];

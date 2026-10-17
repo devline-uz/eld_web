@@ -16,7 +16,17 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Crosshair, MessageSquare, Plus, Search, X } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { qk } from '@/shared/api/queryKeys';
-import { useLiveFleet, hasPosition, mapMarkerStatus, serverNowMs, type LiveFleetResponse, type LiveFleetUnit } from '@/shared/api/liveFleet';
+import {
+  useLiveFleet,
+  useLiveFleetUnit,
+  hasPosition,
+  mapMarkerStatus,
+  serverNowMs,
+  type LiveFleetDetailOnlyField,
+  type LiveFleetListUnit,
+  type LiveFleetResponse,
+  type LiveFleetUnit,
+} from '@/shared/api/liveFleet';
 import { useGeofences } from '@/shared/api/geofences';
 import { useVehicleTelemetry } from '@/shared/api/vehicles';
 import { trailFromTelemetry } from '@/shared/map/trail';
@@ -109,7 +119,7 @@ export const UnitListRow = memo(function UnitListRow({
   selected,
   onSelect,
 }: {
-  unit: LiveFleetUnit;
+  unit: LiveFleetListUnit;
   selected: boolean;
   onSelect: (vehicleId: string) => void;
 }) {
@@ -158,7 +168,7 @@ function UnitList({
   selectedId,
   onSelect,
 }: {
-  units: LiveFleetUnit[];
+  units: LiveFleetListUnit[];
   selectedId: string | null;
   onSelect: (vehicleId: string) => void;
 }) {
@@ -244,21 +254,27 @@ function UnitList({
   );
 }
 
+/** The card's unit: the full `GET /live/fleet/:vehicleId` row once it has loaded, else the slim
+ * list row (its detail-only fields then read `—` until the detail lands). */
+type DetailCardUnit = LiveFleetListUnit & Partial<Pick<LiveFleetUnit, LiveFleetDetailOnlyField>>;
+
 function DetailCard({
   unit,
   onClose,
   canMessage,
 }: {
-  unit: LiveFleetUnit;
+  unit: DetailCardUnit;
   onClose: () => void;
   canMessage: boolean;
 }) {
   const navigate = useNavigate();
-  const driveLeft = useCountdownFromSeconds(unit.driveRemainingSec);
-  const shiftEnds = useCountdown(unit.shiftEndsAt);
+  const driveLeft = useCountdownFromSeconds(unit.driveRemainingSec ?? null);
+  const shiftEnds = useCountdown(unit.shiftEndsAt ?? null);
   // F3-24 — like the list row (UI-003): a stale or ELD-offline snapshot has no live speed, and its
   // HOS countdowns would keep ticking from a frozen clock.
   const offline = unit.dutyStatus === 'ELD_OFFLINE' || unit.isStale;
+  // The HOS clocks come only with the detail row; until it lands they read `—`, never `00:00:00`.
+  const noClocks = offline || unit.driveRemainingSec === undefined;
 
   return (
     <div className="absolute inset-x-2 bottom-2 z-10 max-h-[85%] overflow-y-auto rounded-lg bg-bg-surface p-4 shadow-pop sm:inset-x-auto sm:bottom-auto sm:right-4 sm:top-16 sm:max-h-none sm:w-detail-card sm:overflow-visible">
@@ -289,7 +305,7 @@ function DetailCard({
         <div className="flex justify-between">
           <dt className="text-text-muted">Speed / Odometer</dt>
           <dd className="tabular-nums font-semibold text-text">
-            {offline ? '—' : formatSpeed(unit.speedMph)} · {formatOdometer(unit.odometerMi)} mi
+            {offline ? '—' : formatSpeed(unit.speedMph)} · {formatOdometer(unit.odometerMi ?? null)} mi
           </dd>
         </div>
         <div className="flex justify-between">
@@ -298,7 +314,7 @@ function DetailCard({
         </div>
         <div className="flex justify-between">
           <dt className="text-text-muted">Drive time left</dt>
-          {offline ? (
+          {noClocks ? (
             <dd className="tabular-nums font-semibold text-text-muted">—</dd>
           ) : (
             <dd className={`tabular-nums font-semibold ${driveLeft === 0 ? 'text-danger' : 'text-text'}`}>
@@ -308,7 +324,7 @@ function DetailCard({
         </div>
         <div className="flex justify-between">
           <dt className="text-text-muted">Shift ends in</dt>
-          {offline ? (
+          {noClocks ? (
             <dd className="tabular-nums font-semibold text-text-muted">—</dd>
           ) : (
             <dd className={`tabular-nums font-semibold ${shiftEnds < 1200 ? 'text-danger' : 'text-warning'}`}>
@@ -407,6 +423,22 @@ export default function LiveFleetPage() {
   }, []);
   const patchFleet = useThrottledPatch<LiveFleetResponse | undefined, Map<string, UnitPatch>>(qk.liveFleet(), applyPending);
   const invalidateFleet = useThrottledInvalidate(qk.liveFleet());
+  // The selected unit's card (`GET /live/fleet/:vehicleId`) is patched by the same frames, so its
+  // position/speed/heading/last-seen stay live between its own 30 s polls.
+  const pendingDetailRef = useRef<{ vehicleId: string | null; patch: UnitPatch }>({ vehicleId: null, patch: {} });
+  const applyDetailPatch = useCallback(
+    (current: LiveFleetUnit | undefined, pending: { vehicleId: string | null; patch: UnitPatch }) => {
+      const { vehicleId, patch } = pending;
+      pending.vehicleId = null;
+      pending.patch = {};
+      return current && current.vehicleId === vehicleId ? { ...current, ...patch } : current;
+    },
+    [],
+  );
+  const patchDetail = useThrottledPatch<LiveFleetUnit | undefined, { vehicleId: string | null; patch: UnitPatch }>(
+    qk.liveFleetUnit(selectedId ?? ''),
+    applyDetailPatch,
+  );
   // CODE-023 — newest frame time applied per unit, so a replayed (older) fix never moves a marker back.
   const lastFrameAtRef = useRef(new Map<string, number>());
   const onTelemetry = (payload: TelemetryPointPayload) => {
@@ -424,6 +456,12 @@ export default function LiveFleetPage() {
     const pending = pendingPatchesRef.current;
     pending.set(payload.vehicleId, { ...pending.get(payload.vehicleId), ...patch });
     patchFleet(pending);
+    if (payload.vehicleId === selectedId) {
+      const detail = pendingDetailRef.current;
+      detail.patch = detail.vehicleId === payload.vehicleId ? { ...detail.patch, ...patch } : patch;
+      detail.vehicleId = payload.vehicleId;
+      patchDetail(detail);
+    }
   };
   // D-149 — the backend sends every unit's `telemetry.point` (with its latest fix) to `fleet` as
   // well, so one subscription moves every marker; no per-vehicle room is needed here.
@@ -512,6 +550,11 @@ export default function LiveFleetPage() {
   const selectFromMap = selectUnit;
 
   const selected = units.find((u) => u.vehicleId === selectedId) ?? null;
+  // The card's full row — fetched (and polled) only while a unit is selected; until it lands, or if
+  // it fails, the card shows the list row with the detail-only fields as `—`.
+  const detailQuery = useLiveFleetUnit(selectedId);
+  const detailUnit: DetailCardUnit | null =
+    selected && detailQuery.data?.vehicleId === selected.vehicleId ? detailQuery.data : selected;
   // Breadcrumb trail: the selected unit's last telemetry fixes (`GET /vehicles/:id/telemetry`, 30 s poll
   // while the tab is visible). A role without `vehicles` READ simply gets no trail.
   const trailQuery = useVehicleTelemetry(selectedId ?? undefined, { limit: TRAIL_POINTS });
@@ -691,7 +734,7 @@ export default function LiveFleetPage() {
 
         {selected && (
           <DetailCard
-            unit={selected}
+            unit={detailUnit ?? selected}
             onClose={() => updateParams('unit', null)}
             canMessage={can('messaging', 'FULL')}
           />

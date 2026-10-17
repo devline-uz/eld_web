@@ -3,11 +3,11 @@
 // Dashboard's `React.lazy()` call points at, so the map chunk only loads on screens that draw one.
 import FleetMap from '@/shared/map/FleetMap';
 import { Badge, DutyBadge } from '@/shared/ui/Badge';
-import { mapMarkerStatus, type LiveFleetUnit } from '@/shared/api/liveFleet';
+import { mapMarkerStatus, type LiveFleetListUnit } from '@/shared/api/liveFleet';
 
-const LEGEND: LiveFleetUnit['dutyStatus'][] = ['DRIVING', 'ON_DUTY', 'SLEEPER', 'OFF_DUTY'];
+const LEGEND: LiveFleetListUnit['dutyStatus'][] = ['DRIVING', 'ON_DUTY', 'SLEEPER', 'OFF_DUTY'];
 
-export default function DashboardMapPreview({ units }: { units: LiveFleetUnit[] }) {
+export default function DashboardMapPreview({ units }: { units: LiveFleetListUnit[] }) {
   return (
     // Desktop (≥1280px) fills the card: `h-map-preview` (260px) still drives every narrower
     // viewport, while at `xl:` the map grows to `--spacing-map-preview-xl` so the card matches

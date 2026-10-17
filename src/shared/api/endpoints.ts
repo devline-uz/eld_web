@@ -220,8 +220,9 @@ export const endpoints = {
     update: (id: string) => `/geofences/${id}`,
     remove: (id: string) => `/geofences/${id}`,
   },
-  /** B-3 (shipped 2026-09-14) — W-02 Live Fleet and the W-01 map preview. */
-  live: { fleet: '/live/fleet' },
+  /** B-3 (shipped 2026-09-14) — W-02 Live Fleet, Vehicles status and Messages (`?view=list` slim
+   * rows); `unit` is the W-02 selected-unit card's full row. */
+  live: { fleet: '/live/fleet', unit: (vehicleId: string) => `/live/fleet/${vehicleId}` },
 
   // --- messaging (W-16) ----------------------------------------------------------------------
   conversations: {

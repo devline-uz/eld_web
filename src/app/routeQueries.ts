@@ -7,6 +7,7 @@ import { qk } from '@/shared/api/queryKeys';
 import { client } from '@/shared/api/client';
 import { endpoints } from '@/shared/api/endpoints';
 import { cachePolicy } from '@/shared/api/cache';
+import { fetchLiveFleet } from '@/shared/api/liveFleet';
 import { driversLookupQuery, devicesLookupQuery, vehiclesLookupQuery } from '@/shared/api/lookups';
 import { vehiclesPageQuery, vehiclesCountQuery, VEHICLES_DEFAULT_PAGE } from '@/shared/api/vehicles';
 import { tripsActiveSliceQuery, tripsKpiQuery } from '@/shared/api/trips';
@@ -24,7 +25,7 @@ const staleOf = (name: 'list' | 'reference' | 'live') => {
 /** The primary list each screen fires on mount (page 1, default filters) — same keys as the page. */
 export const ROUTE_QUERIES: Partial<Record<string, (queryClient: QueryClient, can: CanRead) => void>> = {
   '/live-fleet': (qc) => {
-    void qc.prefetchQuery({ queryKey: qk.liveFleet(), queryFn: () => client.get(endpoints.live.fleet), staleTime: staleOf('live') });
+    void qc.prefetchQuery({ queryKey: qk.liveFleet(), queryFn: () => fetchLiveFleet(), staleTime: staleOf('live') });
   },
   '/vehicles': (qc, can) => {
     void qc.prefetchQuery(vehiclesPageQuery(VEHICLES_DEFAULT_PAGE));
