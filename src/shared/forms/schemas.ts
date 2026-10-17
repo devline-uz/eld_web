@@ -299,39 +299,51 @@ export type TicketFormValues = z.infer<typeof ticketSchema>;
 /** W-16 · Send a message */
 export const messageSchema = z.object({ body: f.messageBody() });
 
+/** `Applies to` value for the `Specific units…` option — never a vehicle-group id (those are uuids). */
+export const GEOFENCE_APPLIES_TO_UNITS = '__units__';
+
 /**
  * 11.1 · Create a geofence. `dwellMinutes` / `afterHoursOnly` are gap **B-15** — the backend
  * `Geofence` model has no such columns yet (only `alertOnEnter` / `alertOnExit`); the fields are
  * still collected here so the checkboxes are not silently dropped, and dropped from the payload
  * at submit time until B-15 ships (web/backend-gaps.md).
  */
-export const geofenceSchema = z.object({
-  /** `CreateGeofenceDto` (backend geofences.dto.ts) — `name` 1–120. */
-  name: f.requiredString().max(LIMITS.geofenceNameMax, M.geofenceNameMax),
-  category: z.enum(['TERMINAL', 'SHIPPER', 'CUSTOMER', 'REST_AREA', 'OTHER']).default('TERMINAL'),
-  colour: z.enum(['BLUE', 'GREEN', 'AMBER', 'RED', 'VIOLET']).default('BLUE'),
-  type: z.enum(['CIRCLE', 'POLYGON', 'ADDRESS']).default('POLYGON'),
-  address: z.string().trim().max(LIMITS.geofenceAddressMax, M.geofenceAddressMax).optional(),
-  /** Backend field name is `radiusMi` (miles) — B-93/D-098; `max(500)`. */
-  radiusMi: z
-    .number({ invalid_type_error: M.geofenceRadius })
-    .positive(M.geofenceRadiusPositive)
-    .max(LIMITS.geofenceRadiusMiMax, M.geofenceRadiusMax)
-    .optional(),
-  /** Overlay 11.1 `Applies to` — `''` = all vehicle groups, else a vehicle-group id. UI-only:
-   * `POST /geofences` has no vehicle-group field yet (backend-gaps.md B-104). */
-  appliesTo: z.string().trim().default(''),
-  alertOnEnter: z.boolean().default(true),
-  alertOnExit: z.boolean().default(true),
-  dwellMinutes: z
-    .number({ invalid_type_error: M.geofenceDwell })
-    .int(M.geofenceDwell)
-    .positive(M.geofenceDwellMin)
-    .max(LIMITS.geofenceDwellMinutesMax, M.geofenceDwellMax)
-    .optional(),
-  afterHoursOnly: z.boolean().default(false),
-  countAsYardMove: z.boolean().default(false),
-});
+export const geofenceSchema = z
+  .object({
+    /** `CreateGeofenceDto` (backend geofences.dto.ts) — `name` 1–120. */
+    name: f.requiredString().max(LIMITS.geofenceNameMax, M.geofenceNameMax),
+    category: z.enum(['TERMINAL', 'SHIPPER', 'CUSTOMER', 'REST_AREA', 'OTHER']).default('TERMINAL'),
+    colour: z.enum(['BLUE', 'GREEN', 'AMBER', 'RED', 'VIOLET']).default('BLUE'),
+    type: z.enum(['CIRCLE', 'POLYGON', 'ADDRESS']).default('POLYGON'),
+    address: z.string().trim().max(LIMITS.geofenceAddressMax, M.geofenceAddressMax).optional(),
+    /** Backend field name is `radiusMi` (miles) — B-93/D-098; `max(500)`. */
+    radiusMi: z
+      .number({ invalid_type_error: M.geofenceRadius })
+      .positive(M.geofenceRadiusPositive)
+      .max(LIMITS.geofenceRadiusMiMax, M.geofenceRadiusMax)
+      .optional(),
+    /** Overlay 11.1 `Applies to` — `''` = all units, a vehicle-group id (sent as `vehicleGroupId`,
+     * B-104), or `GEOFENCE_APPLIES_TO_UNITS` (the units in `vehicleIds`). UI-only, never sent. */
+    appliesTo: z.string().trim().default(''),
+    /** The picked units while `appliesTo` is `GEOFENCE_APPLIES_TO_UNITS` — `CreateGeofenceDto.vehicleIds`
+     * (uuid[], ≤ 500); ignored for the other `Applies to` choices. */
+    vehicleIds: z.array(z.string()).max(LIMITS.geofenceVehicleIdsMax, M.geofenceUnitsMax).default([]),
+    alertOnEnter: z.boolean().default(true),
+    alertOnExit: z.boolean().default(true),
+    dwellMinutes: z
+      .number({ invalid_type_error: M.geofenceDwell })
+      .int(M.geofenceDwell)
+      .positive(M.geofenceDwellMin)
+      .max(LIMITS.geofenceDwellMinutesMax, M.geofenceDwellMax)
+      .optional(),
+    afterHoursOnly: z.boolean().default(false),
+    countAsYardMove: z.boolean().default(false),
+  })
+  .superRefine((values, ctx) => {
+    if (values.appliesTo === GEOFENCE_APPLIES_TO_UNITS && values.vehicleIds.length === 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['vehicleIds'], message: M.geofenceUnitsRequired });
+    }
+  });
 export type GeofenceFormValues = z.infer<typeof geofenceSchema>;
 
 /** W-17 · Company profile */

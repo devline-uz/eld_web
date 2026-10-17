@@ -89,6 +89,8 @@ export const VALIDATION_MESSAGES = {
   geofenceDwell: 'Enter the dwell time in whole minutes.',
   geofenceDwellMin: 'Enter a dwell time of at least 1 minute.',
   geofenceDwellMax: 'Dwell time must be 1,440 minutes (24 h) or less.',
+  geofenceUnitsRequired: 'Select at least one unit.',
+  geofenceUnitsMax: 'Select up to 500 units.',
   placePick: 'Pick a place from the suggestions so it can be located.',
   webhookUrl: 'Enter a full URL starting with https:// (or http://).',
   webhookSecret: 'Enter a signing secret, or generate one.',
@@ -145,11 +147,13 @@ export const LIMITS = {
   vehicleMakeModelMax: 60,
   vehicleEldSerialMax: 60,
   vehicleNotesMax: 500,
-  /** CreateGeofenceDto — `name` 1–120, `address` ≤ 300, `radiusMi` ≤ 500, `dwellMinutes` 1–1440. */
+  /** CreateGeofenceDto — `name` 1–120, `address` ≤ 300, `radiusMi` ≤ 500, `dwellMinutes` 1–1440,
+   * `vehicleIds` ≤ 500. */
   geofenceNameMax: 120,
   geofenceAddressMax: 300,
   geofenceRadiusMiMax: 500,
   geofenceDwellMinutesMax: 1_440,
+  geofenceVehicleIdsMax: 500,
   /** Minutes / months — 3 digits is 999 at most. */
   smallCountDigits: 3,
   transferRangeDays: 8,

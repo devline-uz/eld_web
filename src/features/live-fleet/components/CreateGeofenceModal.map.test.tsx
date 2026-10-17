@@ -10,9 +10,19 @@ import { ok, url } from '@/mocks/envelope';
 import { endpoints } from '@/shared/api/endpoints';
 import { ToastProvider } from '@/shared/ui/Toast';
 import type { GeofencePickerMapProps } from '@/shared/map/GeofencePickerMap';
+import type * as GeocodeModule from '@/shared/map/geocode';
 import { CreateGeofenceModal } from './CreateGeofenceModal';
 
 vi.stubEnv('VITE_MAP_STYLE_URL', 'https://example.com/style.json');
+const { reverseGeocode } = vi.hoisted(() => ({
+  reverseGeocode: vi.fn((_lat: number, _lon: number, _signal?: AbortSignal) =>
+    Promise.resolve<string | null>('1 Picked Pl, Columbus, OH'),
+  ),
+}));
+vi.mock('@/shared/map/geocode', async (importOriginal) => ({
+  ...(await importOriginal<typeof GeocodeModule>()),
+  reverseGeocode,
+}));
 vi.mock('@/shared/map/GeofencePickerMap', () => ({
   default: ({ mode, points, onPointsChange, colour }: GeofencePickerMapProps) => (
     <div data-testid="picker-map" data-mode={mode} data-points={points.length} data-colour={colour}>
@@ -24,7 +34,10 @@ vi.mock('@/shared/map/GeofencePickerMap', () => ({
 }));
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'bypass' }));
-afterEach(() => server.resetHandlers());
+afterEach(() => {
+  server.resetHandlers();
+  reverseGeocode.mockClear();
+});
 afterAll(() => server.close());
 
 function renderModal() {
@@ -68,6 +81,56 @@ describe('11.1 Create a geofence — map picking', () => {
     );
     // Untouched colour / yard-move controls reach the wire with their defaults.
     expect(posted.body).toMatchObject({ colour: 'BLUE', countAsYardMove: false });
+  });
+
+  it('neither shows nor reverse-geocodes an address for a Circle, and never sends one', async () => {
+    const posted = capturePost();
+    const user = userEvent.setup();
+    renderModal();
+    // A stale address typed under Address must not reach a Circle's payload.
+    await user.click(screen.getByRole('button', { name: 'Address' }));
+    await user.type(screen.getByPlaceholderText('4517 Washington Ave., Columbus, OH 43004'), 'Old St');
+    await user.click(screen.getByRole('button', { name: 'Circle' }));
+    expect(screen.queryByPlaceholderText('4517 Washington Ave., Columbus, OH 43004')).not.toBeInTheDocument();
+
+    await user.type(screen.getByPlaceholderText('Columbus terminal'), 'Yard A');
+    await user.type(screen.getByPlaceholderText('0.8'), '0.5');
+    await user.click(await screen.findByRole('button', { name: 'map click' }));
+    expect(reverseGeocode).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Save geofence' }));
+
+    await vi.waitFor(() => expect(posted.body).toMatchObject({ type: 'CIRCLE', radiusMi: 0.5 }));
+    expect(posted.body).not.toHaveProperty('address');
+  });
+
+  it('fills Address from a map click under Address', async () => {
+    const user = userEvent.setup();
+    renderModal();
+    await user.click(screen.getByRole('button', { name: 'Address' }));
+    await user.click(await screen.findByRole('button', { name: 'map click' }));
+    expect(reverseGeocode).toHaveBeenCalledTimes(1);
+    expect(reverseGeocode.mock.calls[0]?.slice(0, 2)).toEqual([40, -83]);
+    await vi.waitFor(() =>
+      expect(screen.getByPlaceholderText('4517 Washington Ave., Columbus, OH 43004')).toHaveValue(
+        '1 Picked Pl, Columbus, OH',
+      ),
+    );
+  });
+
+  it('fills Address from a centre placed under Circle when switching to Address', async () => {
+    const user = userEvent.setup();
+    renderModal();
+    await user.click(screen.getByRole('button', { name: 'Circle' }));
+    await user.click(await screen.findByRole('button', { name: 'map click' }));
+    expect(reverseGeocode).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'Address' }));
+    expect(reverseGeocode).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() =>
+      expect(screen.getByPlaceholderText('4517 Washington Ave., Columbus, OH 43004')).toHaveValue(
+        '1 Picked Pl, Columbus, OH',
+      ),
+    );
   });
 
   it('draws the shape in the picked colour and posts it with count-as-yard-move', async () => {
@@ -124,5 +187,40 @@ describe('11.1 Create a geofence — map picking', () => {
         ],
       }),
     );
+  });
+
+  it('sends a Polygon without `radiusMi` / `address`, even with a stale radius from Circle', async () => {
+    const posted = capturePost();
+    const user = userEvent.setup();
+    renderModal();
+    await user.click(screen.getByRole('button', { name: 'Circle' }));
+    await user.type(screen.getByPlaceholderText('Columbus terminal'), 'Yard A');
+    // Out of range on purpose: a hidden field must not block the drawn shape.
+    await user.type(screen.getByPlaceholderText('0.8'), '600');
+    await user.click(await screen.findByRole('button', { name: 'map click' }));
+
+    await user.click(screen.getByRole('button', { name: 'Polygon' }));
+    expect(screen.getByTestId('picker-map')).toHaveAttribute('data-mode', 'polygon');
+    for (let i = 0; i < 3; i += 1) await user.click(screen.getByRole('button', { name: 'map click' }));
+    await user.click(screen.getByRole('button', { name: 'Save geofence' }));
+
+    await vi.waitFor(() => expect(posted.body).toMatchObject({ type: 'POLYGON' }));
+    expect((posted.body!.polygon as unknown[]).length).toBe(3);
+    expect(posted.body).not.toHaveProperty('radiusMi');
+    expect(posted.body).not.toHaveProperty('address');
+  });
+
+  it('sends a Rectangle without `radiusMi` / `address`', async () => {
+    const posted = capturePost();
+    const user = userEvent.setup();
+    renderModal();
+    await user.type(screen.getByPlaceholderText('Columbus terminal'), 'Yard A');
+    await user.click(await screen.findByRole('button', { name: 'map click' }));
+    await user.click(screen.getByRole('button', { name: 'map click' }));
+    await user.click(screen.getByRole('button', { name: 'Save geofence' }));
+
+    await vi.waitFor(() => expect(posted.body).toMatchObject({ type: 'POLYGON' }));
+    expect(posted.body).not.toHaveProperty('radiusMi');
+    expect(posted.body).not.toHaveProperty('address');
   });
 });

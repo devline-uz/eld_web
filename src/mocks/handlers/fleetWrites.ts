@@ -24,6 +24,34 @@ function geofenceGroup(id: unknown): { vehicleGroupId: string | null; vehicleGro
   return name === undefined ? null : { vehicleGroupId: id as string, vehicleGroupName: name };
 }
 
+/** Overlay 11.1 `Specific units…` — `{ vehicleIds, vehicles }` for a geofence row (each unit's
+ * `unitNumber` from the live mock units), or null when an id is unknown / soft-deleted. */
+function geofenceUnits(
+  ids: unknown,
+): { vehicleIds: string[]; vehicles: Array<{ id: string; unitNumber: string }> } | null {
+  const list = Array.isArray(ids) ? ids.map(String) : [];
+  const byId = new Map(liveVehicles().map((v) => [v.id, v]));
+  const vehicles: Array<{ id: string; unitNumber: string }> = [];
+  for (const id of new Set(list)) {
+    const unit = byId.get(id);
+    if (!unit) return null;
+    vehicles.push({ id, unitNumber: unit.unitNumber });
+  }
+  return { vehicleIds: vehicles.map((v) => v.id), vehicles };
+}
+
+/** The backend's 422 when a geofence is scoped to a group and to units at once. */
+const geofenceScopeConflict = () =>
+  fail(422, 'VALIDATION_FAILED', 'Request validation failed.', {
+    issues: [
+      {
+        path: 'vehicleIds',
+        code: 'custom',
+        message: 'Choose either a vehicle group or specific units, not both',
+      },
+    ],
+  });
+
 const VEHICLE_Q_FIELDS = ['unitNumber', 'vin', 'make', 'model', 'licensePlate'];
 const DRIVER_Q_FIELDS = ['firstName', 'lastName', 'username', 'cdlNumber', 'email'];
 
@@ -687,19 +715,45 @@ export const fleetWriteHandlers = [
     return ok({ imported, updated, failed }, 201);
   }),
 
-  // B-104 — `vehicleGroupId` (null = all groups) is echoed with its `vehicleGroupName`; an
-  // unknown group is the backend's 404 VEHICLE_GROUP_NOT_FOUND.
+  // B-104 — `vehicleGroupId` (null = all units) is echoed with its `vehicleGroupName`; an
+  // unknown group is the backend's 404 VEHICLE_GROUP_NOT_FOUND. `vehicleIds` (specific units) is
+  // echoed with `vehicles` ({ id, unitNumber }); an unknown unit is 404 VEHICLE_NOT_FOUND, and a
+  // group plus units at once is a 422. On PATCH, setting either scope clears the other.
   http.post(url(endpoints.geofences.create), async ({ request }) => {
     const dto = await body(request);
+    const hasUnits = Array.isArray(dto.vehicleIds) && dto.vehicleIds.length > 0;
+    if (hasUnits && dto.vehicleGroupId != null && dto.vehicleGroupId !== '') return geofenceScopeConflict();
     const group = geofenceGroup(dto.vehicleGroupId ?? null);
     if (!group) return fail(404, 'VEHICLE_GROUP_NOT_FOUND', 'Vehicle group not found.');
-    return ok({ ...(fixture('POST /api/geofences') as Record<string, unknown>), ...dto, ...group, id: mockId('gf') }, 201);
+    const units = geofenceUnits(dto.vehicleIds);
+    if (!units) return fail(404, 'VEHICLE_NOT_FOUND', 'Vehicle not found.');
+    return ok(
+      { ...(fixture('POST /api/geofences') as Record<string, unknown>), ...dto, ...group, ...units, id: mockId('gf') },
+      201,
+    );
   }),
   http.patch(url(endpoints.geofences.update(':id')), async ({ params, request }) => {
     const dto = await body(request);
+    const hasUnits = Array.isArray(dto.vehicleIds) && dto.vehicleIds.length > 0;
+    const hasGroup = dto.vehicleGroupId != null && dto.vehicleGroupId !== '';
+    if (hasUnits && hasGroup) return geofenceScopeConflict();
     const group = dto.vehicleGroupId === undefined ? {} : geofenceGroup(dto.vehicleGroupId);
     if (!group) return fail(404, 'VEHICLE_GROUP_NOT_FOUND', 'Vehicle group not found.');
-    return ok({ ...(fixture('PATCH /api/geofences/{id}') as Record<string, unknown>), ...dto, ...group, id: String(params.id) });
+    const units = dto.vehicleIds === undefined ? {} : geofenceUnits(dto.vehicleIds);
+    if (!units) return fail(404, 'VEHICLE_NOT_FOUND', 'Vehicle not found.');
+    const scope = hasUnits
+      ? { vehicleGroupId: null, vehicleGroupName: null }
+      : hasGroup
+        ? { vehicleIds: [], vehicles: [] }
+        : {};
+    return ok({
+      ...(fixture('PATCH /api/geofences/{id}') as Record<string, unknown>),
+      ...dto,
+      ...group,
+      ...units,
+      ...scope,
+      id: String(params.id),
+    });
   }),
   http.delete(url(endpoints.geofences.remove(':id')), () => ok(fixture('DELETE /api/geofences/{id}'))),
 

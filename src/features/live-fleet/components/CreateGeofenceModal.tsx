@@ -1,18 +1,32 @@
 // owner: web-dashboard-fleet — overlay 11.1 · Create a geofence (web/tz.md §11.1).
 // `liveFleet` FULL only; the trigger button is absent from the DOM otherwise (§12.2).
-import { lazy, Suspense, useEffect, useRef, useState, type BaseSyntheticEvent } from 'react';
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type BaseSyntheticEvent,
+} from 'react';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useForm } from 'react-hook-form';
-import { MapPin } from 'lucide-react';
+import { useForm, type Resolver } from 'react-hook-form';
+import { MapPin, Search } from 'lucide-react';
 import { Modal, ModalCancelButton } from '@/shared/ui/Modal';
 import { Button } from '@/shared/ui/Button';
 import { FilterCheckbox } from '@/shared/ui/FilterDrawer';
+import { ErrorState, LoadingState } from '@/shared/ui/states';
 // Direct file imports, not the `@/shared/ui` barrel (web/decisions.md WD-021).
 import { useToast } from '@/shared/ui/Toast';
 import { TOAST_COPY } from '@/shared/ui/copy';
 import { useCreateGeofence, type GeofencePayload } from '@/shared/api/geofences';
 import { useVehicleGroups } from '@/shared/api/vehicles';
-import { geofenceSchema, type GeofenceFormValues } from '@/shared/forms/schemas';
+import { useVehiclesLookup } from '@/shared/api/lookups';
+import {
+  GEOFENCE_APPLIES_TO_UNITS,
+  geofenceSchema,
+  type GeofenceFormValues,
+} from '@/shared/forms/schemas';
 import { ApiError, formErrorMessage } from '@/shared/api/errors';
 import { reverseGeocode } from '@/shared/map/geocode';
 import { rectangleCorners, type LatLon } from '@/shared/map/overlays';
@@ -40,9 +54,31 @@ const SEGMENT_MODE: Record<ShapeSegment, GeofenceDrawMode> = {
   Address: 'point',
 };
 
+/** Radius / size only means something for a point-built shape (Circle, Address); a
+ * Rectangle/Polygon is drawn on the map, so the input is hidden and never sent for it. */
+const showsRadius = (seg: ShapeSegment) => SEGMENT_MODE[seg] === 'point';
+/** Address is only an input for the Address segment — the server geocodes it. A Circle is
+ * placed on the map, so it neither shows nor sends an address. */
+const showsAddress = (seg: ShapeSegment) => seg === 'Address';
+
+/** Hidden fields left over from another segment must never block submit — they are dropped
+ * before validation (and kept in the form for a switch back): a drawn `POLYGON` ignores
+ * Address and Radius, a `CIRCLE` ignores Address (its radius still validates). */
+const baseGeofenceResolver = zodResolver(geofenceSchema);
+const geofenceResolver: Resolver<GeofenceFormValues> = (values, context, options) => {
+  const shown =
+    values.type === 'POLYGON'
+      ? { ...values, address: undefined, radiusMi: undefined }
+      : values.type === 'CIRCLE'
+        ? { ...values, address: undefined }
+        : values;
+  return baseGeofenceResolver(shown, context, options);
+};
+
 const MAP_HINT: Record<ShapeSegment, string> = {
   Circle: 'Click the map to place the centre, then drag the pin to adjust. Set the radius below.',
-  Rectangle: 'Click two opposite corners on the map. Drag a corner to adjust; a third click starts over.',
+  Rectangle:
+    'Click two opposite corners on the map. Drag a corner to adjust; a third click starts over.',
   Polygon: 'Click the map to add each corner (at least 3). Drag a corner to adjust.',
   Address: 'Type the address below, or click the map to fill it in from the picked point.',
 };
@@ -71,7 +107,15 @@ const GEOFENCE_FIELD_LABELS: Record<string, string> = {
   category: 'Type',
   colour: 'Colour',
   vehicleGroupId: 'Applies to',
+  vehicleIds: 'Applies to',
 };
+
+/** A server issue on `vehicleIds` or one of its items (`vehicleIds.3`) — shown under `Applies to`. */
+const isVehicleIdsPath = (field: string) =>
+  field === 'vehicleIds' || field.startsWith('vehicleIds.');
+
+const UNIT_NOT_FOUND =
+  'One of the picked units was deleted or no longer exists. Review the list and pick again.';
 
 const SHAPE_NEEDS_MAP =
   'Drawing a circle, rectangle or polygon needs the map, which is not available here. Choose Address to place this geofence by street address.';
@@ -91,8 +135,9 @@ export function CreateGeofenceModal({ open, onClose }: { open: boolean; onClose:
 function CreateGeofenceForm({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { toast } = useToast();
   const createGeofence = useCreateGeofence();
-  // `Applies to` options — the real `GET /vehicle-groups` list (backend D-107). Loading disables
-  // the select; an error leaves only `All vehicle groups`. Sent as `vehicleGroupId` (B-104).
+  // `Applies to` options — `All units`, the real `GET /vehicle-groups` list (backend D-107, sent as
+  // `vehicleGroupId`, B-104) and `Specific units…` (sent as `vehicleIds`). Loading disables the
+  // select; a group-list error leaves `All units` and `Specific units…`.
   const vehicleGroups = useVehicleGroups();
 
   // These fields drive their own visual state (segmented control / checkboxes) instead of
@@ -108,6 +153,25 @@ function CreateGeofenceForm({ open, onClose }: { open: boolean; onClose: () => v
   const [dwellEnabled, setDwellEnabled] = useState(false);
   const [dwellMinutesValue, setDwellMinutesValue] = useState(45);
   const [afterHoursOnly, setAfterHoursOnly] = useState(false);
+  /** Mirror of `appliesTo` (shows the unit checklist) and of `vehicleIds` — same no-`watch()` rule. */
+  const [appliesTo, setAppliesTo] = useState('');
+  const [selectedUnits, setSelectedUnits] = useState<ReadonlySet<string>>(() => new Set());
+  const [unitSearch, setUnitSearch] = useState('');
+  const unitsMode = appliesTo === GEOFENCE_APPLIES_TO_UNITS;
+  // Same unit picker as the vehicle-group modal; only fetched once `Specific units…` is picked.
+  const vehicles = useVehiclesLookup(unitsMode);
+  const unitRows = useMemo(() => {
+    const all = vehicles.data?.items ?? [];
+    const q = unitSearch.trim().toLowerCase();
+    const filtered = q
+      ? all.filter((v) =>
+          [v.unitNumber, v.vin, v.make, v.model].some((s) => s?.toLowerCase().includes(q)),
+        )
+      : all;
+    return [...filtered].sort((a, b) =>
+      a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true }),
+    );
+  }, [vehicles.data, unitSearch]);
   /** Points placed on the map for the current segment (see `SEGMENT_MODE`). */
   const [points, setPoints] = useState<LatLon[]>([]);
   /** Mirrors of `radiusMi` / `colour` for the map preview — same no-`watch()` rule as above. */
@@ -133,15 +197,17 @@ function CreateGeofenceForm({ open, onClose }: { open: boolean; onClose: () => v
     handleSubmit,
     setValue,
     setError,
+    clearErrors,
     formState: { errors, isDirty },
   } = useForm<GeofenceFormValues>({
-    resolver: zodResolver(geofenceSchema),
+    resolver: geofenceResolver,
     mode: 'onBlur',
     defaultValues: {
       category: 'TERMINAL',
       colour: 'BLUE',
       type: 'POLYGON',
       appliesTo: '',
+      vehicleIds: [],
       alertOnEnter: true,
       alertOnExit: true,
       afterHoursOnly: false,
@@ -149,12 +215,8 @@ function CreateGeofenceForm({ open, onClose }: { open: boolean; onClose: () => v
     },
   });
 
-  function onPointsChange(next: LatLon[]) {
-    setPoints(next);
-    setServerError(null);
-    const centre = SEGMENT_MODE[segment] === 'point' ? next[0] : undefined;
-    if (!centre) return;
-    // Fill the Address field from the picked point (shown for every shape, sent for Address).
+  /** Fill the Address field from a picked point — only while the Address segment shows it. */
+  function fillAddressFrom(centre: LatLon) {
     geocodeAbort.current?.abort();
     const controller = new AbortController();
     geocodeAbort.current = controller;
@@ -167,6 +229,12 @@ function CreateGeofenceForm({ open, onClose }: { open: boolean; onClose: () => v
       .catch(() => undefined);
   }
 
+  function onPointsChange(next: LatLon[]) {
+    setPoints(next);
+    setServerError(null);
+    if (showsAddress(segment) && next[0]) fillAddressFrom(next[0]);
+  }
+
   function onSegmentChange(seg: ShapeSegment) {
     // A centre carries over between Circle and Address; a corner set never fits another shape.
     const keep = SEGMENT_MODE[seg] === 'point' && SEGMENT_MODE[segment] === 'point';
@@ -174,6 +242,26 @@ function CreateGeofenceForm({ open, onClose }: { open: boolean; onClose: () => v
     setSegment(seg);
     setServerError(null);
     setValue('type', SEGMENT_TYPE[seg], { shouldDirty: true });
+    if (!showsAddress(seg)) {
+      // The Address input unmounts — a stale error must not linger, nor a pending fill.
+      geocodeAbort.current?.abort();
+      clearErrors('address');
+    } else if (!showsAddress(segment) && keep && points[0]) {
+      // Circle → Address with a centre already placed: fill Address from that centre.
+      fillAddressFrom(points[0]);
+    }
+    if (!showsRadius(seg)) clearErrors('radiusMi');
+  }
+
+  function toggleUnit(id: string) {
+    const next = new Set(selectedUnits);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedUnits(next);
+    setValue('vehicleIds', [...next], {
+      shouldDirty: true,
+      shouldValidate: Boolean(errors.vehicleIds),
+    });
   }
 
   // WB — a 422 used to be swallowed whole: the toast was suppressed for it but `details` was
@@ -182,16 +270,25 @@ function CreateGeofenceForm({ open, onClose }: { open: boolean; onClose: () => v
   // which target no field) goes to the in-modal banner (§6.1 rule 6).
   function onSaveError(error: unknown) {
     setServerError(null);
+    if (error instanceof ApiError && error.status === 404 && error.code === 'VEHICLE_NOT_FOUND') {
+      setError('vehicleIds', { message: UNIT_NOT_FOUND });
+      void vehicles.refetch();
+      return;
+    }
     if (error instanceof ApiError) {
       const fieldErrors = error.fieldErrors;
+      // A `vehicleIds` issue (the list or one of its items) goes under `Applies to`.
+      const unitIssues = Object.keys(fieldErrors).filter(isVehicleIdsPath);
+      if (unitIssues[0]) setError('vehicleIds', { message: fieldErrors[unitIssues[0]] as string });
       // Only fields that render an error line count as placed — `setError` on `category` or
       // `colour` used to be a no-op, and the banner then said "check the highlighted fields".
-      const placed = Object.keys(fieldErrors).filter((field) =>
+      const placedInputs = Object.keys(fieldErrors).filter((field) =>
         (PLACED_FIELDS as readonly string[]).includes(field),
       );
-      for (const field of placed) {
+      for (const field of placedInputs) {
         setError(field as keyof GeofenceFormValues, { message: fieldErrors[field] as string });
       }
+      const placed = [...placedInputs, ...unitIssues];
       if (error.status === 422 || error.status === 400) {
         if (placed.length === Object.keys(fieldErrors).length && placed.length > 0) return;
         setServerError(formErrorMessage(error, placed, GEOFENCE_FIELD_LABELS));
@@ -244,15 +341,19 @@ function CreateGeofenceForm({ open, onClose }: { open: boolean; onClose: () => v
         category: values.category,
         // `address` only carries meaning for the ADDRESS shape — the server geocodes it.
         address: values.type === 'ADDRESS' ? values.address : undefined,
-        radiusMi: values.radiusMi,
+        // A drawn Rectangle/Polygon has no radius — only Circle / Address send it.
+        radiusMi: showsRadius(segment) ? values.radiusMi : undefined,
         alertOnEnter: values.alertOnEnter,
         alertOnExit: values.alertOnExit,
         dwellMinutes: values.dwellMinutes,
         afterHoursOnly: values.afterHoursOnly,
         colour: values.colour,
         countAsYardMove: values.countAsYardMove,
-        // B-104 — `All vehicle groups` (`''`) is `null`: the fence applies to every group.
-        vehicleGroupId: values.appliesTo || null,
+        // B-104 — `All units` (`''`) is `null`: the fence applies to every unit. `Specific units…`
+        // is `null` too, plus the picked `vehicleIds` (the two scopes never combine — 422).
+        ...(values.appliesTo === GEOFENCE_APPLIES_TO_UNITS
+          ? { vehicleGroupId: null, vehicleIds: values.vehicleIds }
+          : { vehicleGroupId: values.appliesTo || null }),
       };
       createGeofence.mutate(payload, {
         onSuccess: () => {
@@ -274,7 +375,7 @@ function CreateGeofenceForm({ open, onClose }: { open: boolean; onClose: () => v
       title="Create a geofence"
       subtitle="Trigger arrival, departure and dwell-time events"
       size="lg"
-      isDirty={isDirty || points.length > 0}
+      isDirty={isDirty || points.length > 0 || selectedUnits.size > 0}
       footer={
         <>
           <FilterCheckbox
@@ -296,7 +397,11 @@ function CreateGeofenceForm({ open, onClose }: { open: boolean; onClose: () => v
     >
       <form className="flex flex-col gap-5" onSubmit={(event) => void onSave(event)}>
         {serverError && (
-          <p ref={serverErrorRef} role="alert" className="rounded-md bg-danger-soft p-3 text-body text-danger">
+          <p
+            ref={serverErrorRef}
+            role="alert"
+            className="rounded-md bg-danger-soft p-3 text-body text-danger"
+          >
             {serverError}
           </p>
         )}
@@ -336,7 +441,9 @@ function CreateGeofenceForm({ open, onClose }: { open: boolean; onClose: () => v
           <label className="flex flex-col gap-1">
             <span className="text-label text-text">Colour</span>
             <select
-              {...register('colour', { onChange: (event) => setColourPreview(String(event.target.value)) })}
+              {...register('colour', {
+                onChange: (event) => setColourPreview(String(event.target.value)),
+              })}
               disabled={isPending}
               className="h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text"
             >
@@ -384,7 +491,7 @@ function CreateGeofenceForm({ open, onClose }: { open: boolean; onClose: () => v
                     points={points}
                     onPointsChange={onPointsChange}
                     colour={colourPreview}
-                    radiusMi={segment === 'Circle' || segment === 'Address' ? radiusPreview : undefined}
+                    radiusMi={showsRadius(segment) ? radiusPreview : undefined}
                     disabled={isPending}
                     onUnavailable={setMapFailure}
                   />
@@ -395,7 +502,10 @@ function CreateGeofenceForm({ open, onClose }: { open: boolean; onClose: () => v
                 <span className="flex-1">
                   {MAP_HINT[segment]}
                   {points[0] && SEGMENT_MODE[segment] === 'point' && (
-                    <> · {points[0].lat.toFixed(5)}, {points[0].lon.toFixed(5)}</>
+                    <>
+                      {' '}
+                      · {points[0].lat.toFixed(5)}, {points[0].lon.toFixed(5)}
+                    </>
                   )}
                 </span>
                 {points.length > 0 && (
@@ -415,84 +525,183 @@ function CreateGeofenceForm({ open, onClose }: { open: boolean; onClose: () => v
               <div className="flex flex-col items-center gap-1 text-text-muted">
                 <MapPin size={20} strokeWidth={1.75} aria-hidden="true" />
                 <p className="text-card-sub">{MAP_FAILURE_COPY[mapFailure ?? 'no-style']}</p>
-                <p className="text-caption">Choose Address to place this geofence by street address.</p>
+                <p className="text-caption">
+                  Choose Address to place this geofence by street address.
+                </p>
               </div>
             </div>
           )}
         </div>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <label className="flex flex-col gap-1">
-            <span className="text-label text-text">
-              Address{segment === 'Address' && <span className="text-danger"> *</span>}
-            </span>
-            <input
-              {...register('address')}
-              placeholder="4517 Washington Ave., Columbus, OH 43004"
-              disabled={isPending}
-              aria-invalid={Boolean(errors.address)}
-              aria-describedby={errors.address ? 'geofence-address-error' : undefined}
-              className="h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text"
-            />
-            {errors.address && (
-              <span id="geofence-address-error" className="text-caption text-danger">
-                {errors.address.message}
+        <div
+          className={
+            showsAddress(segment)
+              ? 'grid grid-cols-1 gap-4 sm:grid-cols-3'
+              : 'grid grid-cols-1 gap-4 sm:grid-cols-2'
+          }
+        >
+          {showsAddress(segment) && (
+            <label className="flex flex-col gap-1">
+              <span className="text-label text-text">
+                Address<span className="text-danger"> *</span>
               </span>
-            )}
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-label text-text">Radius / size</span>
-            <div className="flex items-center gap-2">
               <input
-                type="number"
-                step="0.1"
-                {...register('radiusMi', {
-                  // `valueAsNumber` turns an empty field into `NaN`, which fails `z.number()`
-                  // even though the field is optional (WB-012) — coerce blank to `undefined`.
-                  setValueAs: (v: string) => (v === '' ? undefined : Number(v)),
+                {...register('address')}
+                placeholder="4517 Washington Ave., Columbus, OH 43004"
+                disabled={isPending}
+                aria-invalid={Boolean(errors.address)}
+                aria-describedby={errors.address ? 'geofence-address-error' : undefined}
+                className="h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text"
+              />
+              {errors.address && (
+                <span id="geofence-address-error" className="text-caption text-danger">
+                  {errors.address.message}
+                </span>
+              )}
+            </label>
+          )}
+          {showsRadius(segment) && (
+            <label className="flex flex-col gap-1">
+              <span className="text-label text-text">Radius / size</span>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  step="0.1"
+                  {...register('radiusMi', {
+                    // `valueAsNumber` turns an empty field into `NaN`, which fails `z.number()`
+                    // even though the field is optional (WB-012) — coerce blank to `undefined`.
+                    setValueAs: (v: string) => (v === '' ? undefined : Number(v)),
+                    onChange: (event) => {
+                      const n = Number(event.target.value);
+                      setRadiusPreview(event.target.value !== '' && n > 0 ? n : undefined);
+                    },
+                  })}
+                  placeholder="0.8"
+                  disabled={isPending}
+                  aria-invalid={Boolean(errors.radiusMi)}
+                  aria-describedby={errors.radiusMi ? 'geofence-radius-error' : undefined}
+                  className="h-input w-full rounded-md border border-border bg-bg-surface px-3 text-body text-text"
+                />
+                <span className="text-body text-text-muted">mi</span>
+              </div>
+              {/* Was never rendered: `Enter a radius for the circle.` and every radius 422 were
+                set on the form and shown nowhere — Save just did nothing. */}
+              {errors.radiusMi && (
+                <span id="geofence-radius-error" role="alert" className="text-caption text-danger">
+                  {errors.radiusMi.message}
+                </span>
+              )}
+            </label>
+          )}
+          {/* The error sits outside the <label> so it never becomes part of the select's name. */}
+          <div className="flex flex-col gap-1">
+            <label className="flex flex-col gap-1">
+              <span className="text-label text-text">Applies to</span>
+              <select
+                {...register('appliesTo', {
                   onChange: (event) => {
-                    const n = Number(event.target.value);
-                    setRadiusPreview(event.target.value !== '' && n > 0 ? n : undefined);
+                    setAppliesTo(String(event.target.value));
+                    clearErrors('vehicleIds');
                   },
                 })}
-                placeholder="0.8"
-                disabled={isPending}
-                aria-invalid={Boolean(errors.radiusMi)}
-                aria-describedby={errors.radiusMi ? 'geofence-radius-error' : undefined}
-                className="h-input w-full rounded-md border border-border bg-bg-surface px-3 text-body text-text"
-              />
-              <span className="text-body text-text-muted">mi</span>
-            </div>
-            {/* Was never rendered: `Enter a radius for the circle.` and every radius 422 were
-                set on the form and shown nowhere — Save just did nothing. */}
-            {errors.radiusMi && (
-              <span id="geofence-radius-error" role="alert" className="text-caption text-danger">
-                {errors.radiusMi.message}
+                disabled={isPending || vehicleGroups.isPending}
+                aria-busy={vehicleGroups.isPending}
+                aria-invalid={Boolean(errors.vehicleIds)}
+                aria-describedby={errors.vehicleIds ? 'geofence-applies-error' : undefined}
+                className="h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text"
+              >
+                <option value="">All units</option>
+                {(vehicleGroups.isPending || Boolean(vehicleGroups.data?.length)) && (
+                  <optgroup label="Vehicle groups">
+                    {vehicleGroups.isPending && (
+                      <option value="" disabled>
+                        Loading…
+                      </option>
+                    )}
+                    {vehicleGroups.data?.map((group) => (
+                      <option key={group.id} value={group.id}>
+                        {group.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                <option value={GEOFENCE_APPLIES_TO_UNITS}>Specific units…</option>
+              </select>
+            </label>
+            {errors.vehicleIds && (
+              <span id="geofence-applies-error" role="alert" className="text-caption text-danger">
+                {errors.vehicleIds.message}
               </span>
             )}
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-label text-text">Applies to</span>
-            <select
-              {...register('appliesTo')}
-              disabled={isPending || vehicleGroups.isPending}
-              aria-busy={vehicleGroups.isPending}
-              className="h-input rounded-md border border-border bg-bg-surface px-3 text-body text-text"
-            >
-              <option value="">All vehicle groups</option>
-              {vehicleGroups.isPending && (
-                <option value="" disabled>
-                  Loading…
-                </option>
-              )}
-              {vehicleGroups.data?.map((group) => (
-                <option key={group.id} value={group.id}>
-                  {group.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          </div>
         </div>
+
+        {unitsMode && (
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <span id="geofence-units-label" className="text-label text-text">
+                Units
+              </span>
+              <span className="text-caption tabular-nums text-text-muted" aria-live="polite">
+                {selectedUnits.size} selected
+              </span>
+            </div>
+            <div className="flex h-input w-full items-center gap-2 rounded-md border border-border bg-bg-surface px-3">
+              <Search size={16} strokeWidth={1.75} className="text-text-muted" />
+              <input
+                value={unitSearch}
+                onChange={(e) => setUnitSearch(e.target.value)}
+                placeholder="Search unit #, VIN, make…"
+                aria-label="Search units"
+                className="w-full bg-transparent text-body outline-none"
+              />
+            </div>
+            <div
+              role="group"
+              aria-labelledby="geofence-units-label"
+              className="max-h-64 overflow-y-auto rounded-md border border-border"
+            >
+              {vehicles.isPending ? (
+                <LoadingState className="p-3" />
+              ) : vehicles.isError ? (
+                <ErrorState
+                  title="Could not load units"
+                  description="The unit list did not load. Try again in a moment."
+                  onRetry={() => void vehicles.refetch()}
+                />
+              ) : unitRows.length === 0 ? (
+                <p className="p-3 text-body text-text-muted">
+                  {unitSearch.trim() ? `No units match "${unitSearch.trim()}".` : 'No units yet.'}
+                </p>
+              ) : (
+                <ul className="divide-y divide-border">
+                  {unitRows.map((v) => {
+                    const label = [v.make, v.model].filter(Boolean).join(' ');
+                    return (
+                      <li key={v.id}>
+                        <label className="flex cursor-pointer items-center gap-3 px-3 py-2 hover:bg-bg-subtle">
+                          <input
+                            type="checkbox"
+                            checked={selectedUnits.has(v.id)}
+                            onChange={() => toggleUnit(v.id)}
+                            disabled={isPending}
+                            aria-label={`Unit ${v.unitNumber}`}
+                          />
+                          <span className="w-20 shrink-0 text-body-strong tabular-nums text-text">
+                            {v.unitNumber}
+                          </span>
+                          <span className="min-w-0 flex-1 truncate text-body text-text-secondary">
+                            {label || '—'}
+                          </span>
+                        </label>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           <FilterCheckbox
@@ -519,7 +728,9 @@ function CreateGeofenceForm({ open, onClose }: { open: boolean; onClose: () => v
               onChange={(event) => {
                 const checked = event.target.checked;
                 setDwellEnabled(checked);
-                setValue('dwellMinutes', checked ? dwellMinutesValue : undefined, { shouldDirty: true });
+                setValue('dwellMinutes', checked ? dwellMinutesValue : undefined, {
+                  shouldDirty: true,
+                });
               }}
               aria-label="Dwell longer than"
             />
