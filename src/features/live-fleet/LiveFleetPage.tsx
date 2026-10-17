@@ -533,9 +533,7 @@ export default function LiveFleetPage() {
         // FE-05 — grey marker = ELD offline by `connectivity`, as the dashboard KPI counts it.
         dutyStatus: mapMarkerStatus(u),
         headingDeg: u.headingDeg,
-        speedMph: u.speedMph,
         stale: u.isStale,
-        lastSeenAt: u.lastSeenAt,
       })),
     [filtered],
   );
@@ -726,7 +724,6 @@ export default function LiveFleetPage() {
               layers={activeLayers}
               geofences={geofenceGeoJSON}
               trips={tripGeoJSON}
-              now={serverNowMs}
               className="h-full w-full"
             />
           </Suspense>
